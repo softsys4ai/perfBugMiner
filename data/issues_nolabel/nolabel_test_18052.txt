@@ -1,0 +1,32 @@
+Raise a nicer error message when trying to call gradients with while loop
+
+This PR is to fix #7404.
+When you import a graph with a "while" loop, you can't calculate gradients as you could on the original graph. e.g.
+
+import tensorflow as tf
+i=tf.constant(0, name="input")
+out=tf.while_loop(lambda i: tf.less(i,5), lambda i: [tf.add(i,1)], [i], name="output")
+graph_def = tf.get_default_graph().as_graph_def()
+g = tf.Graph()
+with g.as_default():
+tf.import_graph_def(graph_def)
+s = tf.Session(graph=g)
+i_imported = g.get_tensor_by_name("import/input:0")
+out_imported = g.get_tensor_by_name("import/output/Exit:0")
+tf.gradients(out_imported, i_imported)
+
+But if you save and restore the metagraph (via tf.train.export_meta_graph and tf.train.import_meta_graph, then you can take the gradient in the restored session. So it's just a problem if you try serializing and importing the GraphDef itself
+/Users/malmaud/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.pyc in AddWhileContext(self, op, between_op_list, between_ops)
+
+1102     if grad_state is None:
+1103       # This is a new while loop so create a grad state for it.
+-> 1104       outer_forward_ctxt = forward_ctxt.outer_context
+1105       if outer_forward_ctxt:
+1106         outer_forward_ctxt = outer_forward_ctxt.GetWhileContext()
+AttributeError: 'NoneType' object has no attribute 'outer_context'
+
+As said in above discussion, we needs to raise a nicer error message when trying to call gradients on a while loop, so that users don't have to guess the graph vs. metagraph issue.
+
+I believe that the forward_ctxt object here:
+forward_ctxt.outer_context
+should have a @property outer_context; and if no such internal object is set, it can raise a ValueError/InternalError that maybe you're trying to call gradients on a while loop without properly serializing your graph via MetaGraphDef.

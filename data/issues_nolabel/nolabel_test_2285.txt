@@ -1,0 +1,110 @@
+the bug of using multiple GPUs, related to tf.Variable pinned to CPU
+
+Environment info
+Operating System: Ubuntu 14.04
+Installed version of CUDA and cuDNN: 7.5 and 4.0.7
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+If installed from sources, provide the commit hash: 4a4f246
+Steps to reproduce
+Run the following code
+import tensorflow as tf
+
+def main():
+    a = tf.Variable(1)
+    init_a = tf.initialize_all_variables()
+    with tf.Session() as sess:
+        sess.run(init_a)
+
+    with tf.device("/gpu:0"):
+        b = tf.constant(2)
+        init_b = tf.initialize_all_variables()
+    with tf.Session() as sess:
+        sess.run(init_b)
+
+    with tf.device("/cpu:0"):
+        c = tf.Variable(2)
+        init_c = tf.initialize_all_variables()
+    with tf.Session() as sess:
+        sess.run(init_c)
+
+    with tf.device("/gpu:0"):
+        d = tf.Variable(2)
+        init_d = tf.initialize_all_variables()
+    with tf.Session() as sess:
+        sess.run(init_d)
+
+if __name__ == '__main__':
+    main()
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties: 
+name: GeForce GTX TITAN X
+major: 5 minor: 2 memoryClockRate (GHz) 1.266
+pciBusID 0000:05:00.0
+Total memory: 12.00GiB
+Free memory: 11.02GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 1 with properties: 
+name: GeForce GTX 980
+major: 5 minor: 2 memoryClockRate (GHz) 1.2785
+pciBusID 0000:09:00.0
+Total memory: 4.00GiB
+Free memory: 3.91GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:59] cannot enable peer access from device ordinal 0 to device ordinal 1
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:59] cannot enable peer access from device ordinal 1 to device ordinal 0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0 1 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y N 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 1:   N Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:756] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:05:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:756] Creating TensorFlow device (/gpu:1) -> (device: 1, name: GeForce GTX 980, pci bus id: 0000:09:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:756] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:05:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:756] Creating TensorFlow device (/gpu:1) -> (device: 1, name: GeForce GTX 980, pci bus id: 0000:09:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:756] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:05:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:756] Creating TensorFlow device (/gpu:1) -> (device: 1, name: GeForce GTX 980, pci bus id: 0000:09:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:756] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:05:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:756] Creating TensorFlow device (/gpu:1) -> (device: 1, name: GeForce GTX 980, pci bus id: 0000:09:00.0)
+Traceback (most recent call last):
+  File "test_multi_gpu.py", line 30, in <module>
+    main()
+  File "test_multi_gpu.py", line 26, in main
+    sess.run(init_d)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 332, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 572, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 652, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 672, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: Cannot assign a device to node 'Variable_2': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available
+     [[Node: Variable_2 = Variable[container="", dtype=DT_INT32, shape=[], shared_name="", _device="/device:GPU:0"]()]]
+Caused by op u'Variable_2', defined at:
+  File "test_multi_gpu.py", line 30, in <module>
+    main()
+  File "test_multi_gpu.py", line 23, in main
+    d = tf.Variable(2)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 211, in __init__
+    dtype=dtype)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 292, in _init_from_args
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/state_ops.py", line 139, in variable_op
+    container=container, shared_name=shared_name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_state_ops.py", line 351, in _variable
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 693, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2177, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1161, in __init__
+    self._traceback = _extract_stack()
+
+I also noticed that the documentation for Using GPUs doesn't mentioned about tf.Variable, it only involves the tf.constant and tf.matmul.
+OK, I found the documentation from [Convolutional Neural Networks](https://www.tensorflow.org/versions/r0.8/tutorials/deep_cnn/index.html),
+quotes:
+All variables are pinned to the CPU and accessed via tf.get_variable() in order to share them in a multi-GPU version. See how-to on Sharing Variables.
+
+I want ask that since tf.Variables is pinned to CPU by tensorflow, could we fix this error? Do we need to looking very carefully to exclude the tf.Variable declaration outside the with tf.device('/gpu:xx') scope, or use netsted with tf.device(None) to handle it?

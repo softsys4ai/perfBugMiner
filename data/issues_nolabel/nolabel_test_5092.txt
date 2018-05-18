@@ -1,0 +1,68 @@
+GPU sync failed when use mesos and nvidia-docker for distributed training
+
+Environment info
+host os: centos7
+host cuda: /usr/local/cuda -> cuda-7.5
+docker images: Dockerfile
+total 4 GPUs, output of curl -s slave-ip:3476/mesos/cli
+--attributes=gpus:eJzUlN9r2zAQx9_3V4x7tlL9sGTJb6mzldINwtbsZfThJEuLqWsXO00pIf_7zoEyAmFjEMaqJ0u6u-_39OG8g29xGJu-g3IHi6HZxgFKUFrOCgcZVKvFnPbFTMM-g0XcNiGOUH7fwWp1vaCbq-WK-UQrcMsMcscwFcikVYqZOmBSmCvjAtVa4mZNGRd13F5026ZukNPp576OLR3fxrHF9zeSH0L758mHlJosLFfzlJqu2bxAyemuup68Xj6NBwOcVsllyflsKnc5_yIoURv6xK5-bupJ1FIQ-a_aPtyPU3bVD1MfhbbkID70A9WW5hB02z_2bf_j5dDlsUr-qvKp6e6hVPu7DD7iQ9NSMNzEx5ZMZzAfwtSnojfLXoVk7swvpR18qCooN8NTzOCq7T3SC-SFcxl8XeMQa9rZKbcbN9htoDQ5acoKwzpCKaTlR91Jfuhvnx1RQY9ae2sYL0LOguOGuYSeKa2Tz9FH7sVJKuJsVPLfU8nPQ0W-JSo6cZnnKJg20TLpuWdJG8us1UIIZ4Wo_Ukq8q-piNNUrPoXs2Lf1Kwor40mWaYxchZ9on9ZEo5JlM4r5VQI-iQVdTYqf5iVM1FR_zeVu_27nwEAAP__G6_XAw --resources=gpus:{GPU-bffffc08-6a09-af7a-2833-6dcaf3a4369c,GPU-aba55b86-07c4-c906-9fab-355fb4abe0b1,GPU-5f0244a1-56e8-2b0b-f568-8851119811db,GPU-3b565496-5ae0-ebf8-6f19-2a29b3393cc5}
+
+tensorflow info
+In docker images:
+pip install from:
+https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.9.0-cp27-none-linux_x86_64.whl; python_version == '2.7'
+>>> import tensorflow; print(tensorflow.__version__)
+0.9.0
+
+details
+I try to use mesos and nvidia-docker for tensorflow distributed training.The main idea of my code (code fork from douban/tfmesos)is mapping host GPUs into nvidia-docker and run distributed training scrip in docker environment.Most of my code is in chenbiaolong/tfmesos/docker,you can see how I build my docker images in Dockerfile.
+However,when I try to start training(use nvidia_docker_run.sh), I got errors:
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job ps -> {node39.com:36921}
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job worker -> {localhost:42324, node39.com:36202, node39.com:58828}
+I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:202] Started server with target: grpc://localhost:42324
+INFO:tensorflow:SyncReplicas enabled: replicas_to_aggregate=3; total_num_replicas=3
+I1020 09:07:12.418039 10 sync_replicas_optimizer.py:175] SyncReplicas enabled: replicas_to_aggregate=3; total_num_replicas=3
+I1020 09:07:12.592327 10 mnist_replica.py:200] Chief Worker 0: Initializing session...
+Traceback (most recent call last):
+  File "/mnt/example/mnist/mnist_replica.py", line 247, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+    sys.exit(main(sys.argv))
+  File "/mnt/example/mnist/mnist_replica.py", line 211, in main
+    config=sess_config)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 684, in prepare_or_wait_for_session
+    init_feed_dict=self._init_feed_dict, init_fn=self._init_fn)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/session_manager.py", line 176, in prepare_session
+    sess.run(init_op, feed_dict=init_feed_dict)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 372, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 636, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 708, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 728, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.AbortedError: RecvTensor expects a different device incarnation: 7338322613985075898 vs. 11093212615818549611. Your worker job was probably restarted. Check your worker job for the reason why it was restarted.
+     [[Node: truncated_normal_S3 = _Recv[client_terminated=false, recv_device="/job:ps/replica:0/task:0/cpu:0", send_device="/job:worker/replica:0/task:0/gpu:0", send_device_incarnation=7338322613985075898, tensor_name="edge_42_truncated_normal", tensor_type=DT_FLOAT, _device="/job:ps/replica:0/task:0/cpu:0"]()]]
+E tensorflow/stream_executor/cuda/cuda_driver.cc:1140] could not synchronize on CUDA context: CUDA_ERROR_DEINITIALIZED :: No stack trace available
+F tensorflow/core/common_runtime/gpu/gpu_util.cc:370] GPU sync failed
+Aborted (core dumped)
+Traceback (most recent call last):
+  File "/usr/local/bin/tfrun", line 84, in <module>
+    subprocess.check_call(cmd, shell=True)
+  File "/usr/lib/python2.7/subprocess.py", line 540, in check_call
+    raise CalledProcessError(retcode, cmd)
+subprocess.CalledProcessError: Command 'python /mnt/example/mnist/mnist_replica.py --ps_hosts node39.com:36921 --worker_hosts node39.com:42324,node39.com:36202,node39.com:58828 --job_name worker --task_index 0' returned non-zero exit status 134
+
+
+Although nvidia_docker_run.sh throw errors, mesos tasks(both job:ps and job:worker) seems work well,util they are killed by the framework. Run nvidia-smi can see 3GPUs are used(since I ran 3 workers and each work cost 1 GPU ). My training scrip is mnist_replica.py
+logs
+Logs from tasks is available here
+mesos slave start
+mesos-slave  --master=$master_ip \
+            --containerizers=docker,mesos \
+            --hostname=slave-ip \
+            --ip=slave-ip \
+            --log_dir=/var/log/mesos/ \
+            --work_dir=/var/lib/mesos/ \
+            $(curl -s slave-ip:3476/mesos/cli)

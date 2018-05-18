@@ -1,0 +1,38 @@
+Bug: tf.contrib.learn.Experiment.continuous_train_and_eval does not release GPU memory switching between training and evaluation phases
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): windows 10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.6.0rc0
+Python version: 3.5
+Bazel version (if compiling from source): -
+GCC/Compiler version (if compiling from source): -
+CUDA/cuDNN version: 9.0/7.0.5
+GPU model and memory: 1080, 8GB
+Exact command to reproduce: -
+
+The documentation of continuous_train_and_eval says:
+
+the resources (e.g., memory) used by training will be released before evaluation (train_and_evaluate takes double resources)
+
+From the execution logs, however, this doesn't seem to be the case:
+Starting training:
+2018-02-15 11:06:37.745151: I C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\common_runtime\gpu\gpu_device.cc:1208] Found device 0 with properties:
+name: GeForce GTX 1080 major: 6 minor: 1 memoryClockRate(GHz): 1.835
+pciBusID: 0000:02:00.0
+totalMemory: 8.00GiB freeMemory: 6.60GiB
+2018-02-15 11:06:37.764258: I C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\common_runtime\gpu\gpu_device.cc:1308] Adding visible gpu devices: 0
+2018-02-15 11:06:39.084140: I C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\common_runtime\gpu\gpu_device.cc:989] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 6381 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1080, pci bus id: 0000:02:00.0, compute capability: 6.1)
+
+Switching from training to evaluation:
+2018-02-15 09:12:54.871561: I C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\common_runtime\gpu\gpu_device.cc:1308] Adding visible gpu devices: 0
+2018-02-15 09:12:54.871717: I C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\common_runtime\gpu\gpu_device.cc:989] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 175 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1080, pci bus id: 0000:02:00.0, compute capability: 6.1)
+
+Switching back from evaluation to training:
+2018-02-14 19:56:50.513663: I C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\common_runtime\gpu\gpu_device.cc:1308] Adding visible gpu devices: 0
+2018-02-14 19:56:50.513819: I C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\common_runtime\gpu\gpu_device.cc:989] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 175 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1080, pci bus id: 0000:02:00.0, compute capability: 6.1)
+
+It seems the function's loop fails to release memory after the first training phase is complete, so the subsequent devices only have 175MBs of memory available. Interestingly, training does experience a reduction in speed, but not as high as I would have expected (with 6GBs of memory available I have about 1.1 steps/second, with 175MBs it's 1.0 steps/second).
+I'm training the standard inception_resnet_v2 from slim's model zoo (batch size is 32, if that information is of any use).

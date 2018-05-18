@@ -1,0 +1,21 @@
+IndexedSlices problem on porting ptb_word_lm.py to multi-GPU-towers
+
+I try to port RNN model in ptb_word_lm.py to multi-GPU cards. I follow the multi-tower style in cifar10_multi_gpu_train.py
+However, I found the "grads" returned by tf.clip_by_global_norm(tf.gradients(cost, tvars), config.max_grad_norm) is not list of Tensor type. It is a list of type tensorflow.python.framework.ops.IndexedSlices.  Now I need to sum & average the lists of "grads" returned by multiple GPU towers into one list of IndexedSlices or Tensor, in order to pass it into self._train_op = optimizer.apply_gradients(zip(grads, tvars))
+I've tried the tf.convert_to_tensor to conver IndexedSlices to Tensor, but it failed with the following errors:
+File "ptb_word_lm.py", line 328, in 
+tf.app.run()
+File "/usr/lib/python2.7/site-packages/tensorflow/python/platform/app.py", line 30, in run
+sys.exit(main(sys.argv))
+File "ptb_word_lm.py", line 305, in main
+m = PTBModel(is_training=True, config=config)
+File "ptb_word_lm.py", line 152, in init
+grads_0_tensor = tf.convert_to_tensor(grads[0])
+File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 566, in convert_to_tensor
+ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+File "/usr/lib/python2.7/site-packages/tensorflow/python/ops/gradients.py", line 77, in _IndexedSlicesToTensor
+% str(value))
+ValueError: Tensor conversion requested for IndexedSlices without dense_shape: IndexedSlices(indices=Tensor("model/gradients/concat_1:0", shape=(400,), dtype=int32), values=Tensor("model/clip_by_global_norm/model/clip_by_global_norm/_0:0", shape=(?, 200), dtype=float32))
+Is it a bug?
+How could I reduce_mean these IndexedSlices(reduce_mean seems only accept "Tensor" as input)? Or is there any existing code that parallelize RNN in multi-GPU-towers style?
+Thanks a lot in advance!

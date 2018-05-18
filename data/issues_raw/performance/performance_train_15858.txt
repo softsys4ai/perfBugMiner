@@ -1,0 +1,55 @@
+Add unsortedsegment(prod/min/max/sqrt_n/mean).
+
+This pull request
+
+adds CPU/GPU implementations of
+
+tf.unsorted_segment_min,
+tf.unsorted_segment_prod and a
+GPU implementation for tf.unsorted_segment_max.
+
+
+adds python implementations of:
+
+tf.unsorted_segment_mean
+tf.unsorted_segment_sqrt_n
+
+
+fixes the gradient calculation for unsorted_segment_sum/max.
+#13055 introduced silent dropping of negative values on the cpu.
+However, the gradient of e.g. unsorted_segment_sum used tf.gather
+and therefore failed for negative indices on cpu.
+
+I tried to simplify the code and to remove code duplication,
+addressing this todo.
+(Also I once filed an  issue  to add these ops but only now had time to finish it ;).)
+Some notes on this pull request:
+
+
+tf.gather returns zero on GPU for negative indices and raises an exception on
+CPU. To overcome this, the current implementation masks negative indices and
+sets them to zero later. This is of course not as efficient as the original gather.
+Would it make sense to use something like if "gpu" in op.device.lower(): to run
+different functions, depending on the device?
+
+
+Instead of having a native op for mean/sqrt_n I added them in python.
+Making them native would require two additional template arguments
+(a functor to process the counter), resulting in more complicated code with
+probably only minor performance improvement, if at all. In my quick
+benchmarks, the python ops are nearly as fast as unsorted_segment_sum. However,
+they use more memory than a native op would, due to creating a tensor of ones.
+(bincount doesn't work here as it doesn't support negative indices)
+
+
+I simply copy-pasted some atomicOp code in cuda_kernel_helper.h instead of
+writing this more nicely as for a short period there was a completely different
+version of this file online and I wanted to check back with you before
+doing something more sophisticated. What's the status of this?
+Additionally, I guess the function AccumulateInto in segment_reduction_ops_gpu.cu.cc
+could be removed? CudaAtomicAdd has specializations for complex types in
+cuda_kernel_helper.h
+
+
+Cheers,
+Phil

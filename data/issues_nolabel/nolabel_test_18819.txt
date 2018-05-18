@@ -1,0 +1,59 @@
+[Error] Failed precondition: Table not initialized.
+
+Env:
+tf version 1.7.0
+macOS CPU
+I uses lookup_table in my model. I freeze the model in python after training and then load it and do prediction in c++. When predicting, an error occurs.
+Failed precondition: Table not initialized.
+	 [[Node: forward/string_to_index_4_Lookup/hash_table_Lookup = LookupTableFindV2[Tin=DT_INT64, Tout=DT_INT64, _device="/job:localhost/replica:0/task:0/device:CPU:0"](forward/string_to_index_4/hash_table, _arg_input/sparse_179/id/Placeholder_0_6, forward/string_to_index/hash_table/Const)]]
+
+However, I have found table_init op in the frozen model protobuf. The error indicates those op not executed in c++ code. How to execute sess.run(tf.tables_initializer()) in c++?
+  name: "init_all_tables"
+  name: "forward/string_to_index/hash_table/table_init"
+  name: "forward/string_to_index_1/hash_table/table_init"
+  name: "forward/string_to_index_2/hash_table/table_init"
+  name: "forward/string_to_index_3/hash_table/table_init"
+  name: "forward/string_to_index_4/hash_table/table_init"
+
+Main c++ code:
+  Session* session;
+  Status status = NewSession(SessionOptions(), &session);
+  if (!status.ok()) {
+    std::cerr << status.ToString() << "\n";
+    return 1;
+  } else {
+    std::cout << "Session created successfully" << std::endl;
+  }
+
+  // Load graph protobuf
+  GraphDef graph_def;
+  std::string graph_path = argv[2]; // the path to frozen model protobuf
+  status = ReadBinaryProto(Env::Default(), graph_path, &graph_def);
+  if (!status.ok()) {
+    std::cerr << status.ToString() << std::endl;
+  } else {
+    std::cout << "Load graph protobuf successfully" << std::endl;
+  }
+
+  // Add the graph to the session
+  status = session->Create(graph_def);
+  if (!status.ok()) {
+    std::cerr << status.ToString() << std::endl;
+    return 1;
+  } else {
+    std::cout << "Add graph to session successfully" << std::endl;
+  }
+
+  // prepare inputs
+  std::vector<std::pair<std::string, Tensor> > inputs;
+  .....
+
+  // Run the session, evaluating our "forward/predict/add" operation from the graph
+  std::vector<tensorflow::Tensor> outputs;
+  status = session->Run(inputs, {"forward/logit/add"}, {}, &outputs);
+  if (!status.ok()) {
+    std::cerr << status.ToString() << std::endl;
+    return 1;
+  } else {
+    std::cout << "Run session successfully" << std::endl;
+  }

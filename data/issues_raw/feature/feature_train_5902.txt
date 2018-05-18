@@ -1,0 +1,211 @@
+Input tensor on GPU in C++ API
+
+I am trying to feed a Tensor (using the C++ API) that has memory allocated on the GPU (using GPUBFCAllocator) into a network.
+Now, the placeholder in the network is on the GPU (I checked this in Tensorboard), and the memory allocated for the input tensor is on the GPU, but whenever I run the network, nvprof --print-gpu-trace shows me [CUDA memcpy HtoD] and [CUDA memcpy DtoH], before the computations (i.e. convolutions etc.) start.
+This suggests to me that the input tensor is being copied to CPU memory, and then back to GPU memory.
+While debugging this, I found multiple hints in the source that seem to suggest the CPU is always used as device to feed tensors from.
+See e.g.:
+
+  
+    
+      tensorflow/tensorflow/core/common_runtime/direct_session.cc
+    
+    
+         Line 264
+      in
+      eb56a8a
+    
+    
+    
+    
+
+        
+          
+           if (devices_added == 0) { 
+        
+    
+  
+
+
+
+  
+    
+      tensorflow/tensorflow/core/common_runtime/graph_runner.cc
+    
+    
+         Line 109
+      in
+      429905c
+    
+    
+    
+    
+
+        
+          
+           std::unique_ptr<Device> device = GetCPUDevice(env); 
+        
+    
+  
+
+
+
+Is this analysis correct?
+How can one feed in a tensor that has memory allocated on GPU memory, without copying back and forth to CPU memory? If this is currently not possible, then I think this would be a good feature to add.
+Especially when one wants to combine Tensorflow input/output with other algorithms (not in TF), one might want to keep data on the GPU, to avoid host to device and device to host transfers.
+
+Thanks in advance.
+Environment info
+Operating System: Ubuntu 16.04.1 LTS
+Installed version of CUDA and cuDNN: CUDA 8.0, cuDNN 5.1.5
+Output of ls -l /usr/local/cuda/lib64/libcud*:
+-rw-r--r-- 1 root root 558720 Sep 15 00:02 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Sep 15 00:05 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root     19 Sep 15 00:05 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rw-r--r-- 1 root root 415432 Sep 15 00:02 /usr/local/cuda/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root 775162 Sep 15 00:02 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 root root     43 Oct  3 17:03 /usr/local/cuda/lib64/libcudnn.so -> /usr/local/cudnn-8.0-v5.1/lib64/libcudnn.so
+lrwxrwxrwx 1 root root     45 Oct  3 17:03 /usr/local/cuda/lib64/libcudnn.so.5 -> /usr/local/cudnn-8.0-v5.1/lib64/libcudnn.so.5
+lrwxrwxrwx 1 root root     49 Oct  3 17:03 /usr/local/cuda/lib64/libcudnn.so.5.1.5 -> /usr/local/cudnn-8.0-v5.1/lib64/libcudnn.so.5.1.5
+lrwxrwxrwx 1 root root     49 Oct  3 17:03 /usr/local/cuda/lib64/libcudnn_static.a -> /usr/local/cudnn-8.0-v5.1/lib64/libcudnn_static.a
+
+Tensorflow installed from source:
+
+The commit hash (git rev-parse HEAD): a507438
+The output of bazel version:
+
+Build label: 0.4.0
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Nov 2 17:54:14 2016 (1478109254)
+Build timestamp: 1478109254
+Build timestamp as int: 1478109254
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+This should give the general idea.
+tensorflow::GPUBFCAllocator* allocator = new tensorflow::GPUBFCAllocator(0, sizeof(float) * height * width * 3);
+tensorflow::Tensor input_tensor = tensorflow::Tensor(allocator, tensorflow::DataType::DT_FLOAT, tensorflow::TensorShape( { 1, height, width, 3 }));
+std::vector<tensorflow::Tensor>* outputs = new std::vector<tensorflow::Tensor>;
+<copy some data into the allocated space>
+<create a new session, load graph etc.> // Note: the "input_layer" is on the GPU
+session->Run( { { "input_layer", input_tensor } }, { "output_layer" }, { }, outputs);
+Logs or other output that would be helpful
+Partial output of nvprof --print-gpu-trace:
+   Start  Duration            Grid Size      Block Size     Regs*    SSMem*    DSMem*      Size  Throughput           Device   Context    Stream  Name
+249.54ms  4.7360us                    -               -         -         -         -  1.0039KB  207.01MB/s  GeForce GTX 107         1         7  [CUDA memset]
+932.67ms  44.799us                    -               -         -         -         -  384.00KB  8.1745GB/s  GeForce GTX 107         1         7  [CUDA memcpy HtoD]
+933.22ms  15.584us            (12 32 1)        (32 8 1)        20        0B        0B         -           -  GeForce GTX 107         1         7  void cv::cudev::grid_transform_detail::transformSmart<int=4, unsigned char, float, cv::cudev::saturate_cast_func<unsigned char, float>, cv::cudev::WithOutMask>(cv::cudev::GlobPtr<unsigned char>, cv::cudev::grid_transform_detail::transformSmart<int=4, unsigned char, float, cv::cudev::saturate_cast_func<unsigned char, float, float>, cv::cudev::WithOutMask>, unsigned char, float, int, int) [158]
+933.29ms  121.12us                    -               -         -         -         -  1.5000MB  12.094GB/s  GeForce GTX 107         1         7  [CUDA memcpy DtoH]
+1.24468s  2.1120us                    -               -         -         -         -        4B  1.8062MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24492s     992ns                    -               -         -         -         -        4B  3.8455MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24522s     992ns                    -               -         -         -         -        4B  3.8455MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24553s     992ns                    -               -         -         -         -        4B  3.8455MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24594s  1.0880us                    -               -         -         -         -        4B  3.5062MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24632s     992ns                    -               -         -         -         -        4B  3.8455MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24800s     992ns                    -               -         -         -         -        8B  7.6909MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24816s  1.1200us                    -               -         -         -         -      512B  435.97MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24830s  38.879us                    -               -         -         -         -  288.00KB  7.0644GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24846s  1.0880us                    -               -         -         -         -      512B  448.79MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24858s  1.1200us                    -               -         -         -         -      512B  435.97MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24868s  1.1200us                    -               -         -         -         -      512B  435.97MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24874s  1.1200us                    -               -         -         -         -      512B  435.97MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24963s  106.62us                    -               -         -         -         -  1.1250MB  10.304GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24981s  1.4080us                    -               -         -         -         -  1.0000KB  693.58MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.24987s  1.1840us                    -               -         -         -         -  1.0000KB  824.80MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25153s  196.60us                    -               -         -         -         -  2.2500MB  11.176GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25189s  1.4080us                    -               -         -         -         -  1.0000KB  693.58MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25196s  1.2800us                    -               -         -         -         -  1.0000KB  762.94MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25250s  180.92us                    -               -         -         -         -  2.2500MB  12.145GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25276s  1.4080us                    -               -         -         -         -  1.0000KB  693.58MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25281s  1.1840us                    -               -         -         -         -  1.0000KB  824.80MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25332s  180.67us                    -               -         -         -         -  2.2500MB  12.162GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25355s  1.4400us                    -               -         -         -         -  1.0000KB  678.17MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25359s  1.1520us                    -               -         -         -         -  1.0000KB  847.71MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25406s  191.36us                    -               -         -         -         -  2.2500MB  11.483GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25431s  1.4400us                    -               -         -         -         -  1.0000KB  678.17MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25435s  1.1520us                    -               -         -         -         -  1.0000KB  847.71MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25461s  90.910us                    -               -         -         -         -  1.1250MB  12.085GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25477s  1.3120us                    -               -         -         -         -  1.0000KB  744.33MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25482s  1.1520us                    -               -         -         -         -  1.0000KB  847.71MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25486s  1.0560us                    -               -         -         -         -       68B  61.411MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25490s  4.1280us                    -               -         -         -         -  38.250KB  8.8367GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25500s  1.1840us                    -               -         -         -         -      256B  206.20MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25506s  1.0560us                    -               -         -         -         -      256B  231.19MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25511s  12.288us                    -               -         -         -         -  144.00KB  11.176GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25523s  1.0880us                    -               -         -         -         -      256B  224.39MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25526s  1.0560us                    -               -         -         -         -      256B  231.19MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25532s  12.320us                    -               -         -         -         -  144.00KB  11.147GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25542s  1.0880us                    -               -         -         -         -      256B  224.39MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25545s  1.0880us                    -               -         -         -         -      256B  224.39MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25549s  1.6640us                    -               -         -         -         -  6.7500KB  3.8686GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25552s  1.0880us                    -               -         -         -         -      256B  224.39MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25555s  1.1840us                    -               -         -         -         -      256B  206.20MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25559s  1.0880us                    -               -         -         -         -      256B  224.39MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25562s  1.0880us                    -               -         -         -         -      256B  224.39MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25570s  23.487us                    -               -         -         -         -  288.00KB  11.694GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25580s  1.1200us                    -               -         -         -         -      512B  435.97MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25584s  1.1200us                    -               -         -         -         -      512B  435.97MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25597s  45.919us                    -               -         -         -         -  576.00KB  11.963GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25607s  1.1200us                    -               -         -         -         -      512B  435.97MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25610s  1.0880us                    -               -         -         -         -      512B  448.79MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25624s  45.919us                    -               -         -         -         -  576.00KB  11.963GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25634s  1.0880us                    -               -         -         -         -      512B  448.79MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25638s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25641s  1.4720us                    -               -         -         -         -  2.0000KB  1.2958GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25645s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25649s  1.1520us                    -               -         -         -         -  1.0000KB  847.71MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25652s  1.1840us                    -               -         -         -         -  1.0000KB  824.80MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25656s  1.1520us                    -               -         -         -         -  1.0000KB  847.71MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25659s  1.0880us                    -               -         -         -         -      512B  448.79MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25662s  1.1200us                    -               -         -         -         -      512B  435.97MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25666s  1.0880us                    -               -         -         -         -      256B  224.39MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25669s  1.0560us                    -               -         -         -         -      256B  231.19MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25673s  1.1520us                    -               -         -         -         -  1.0000KB  847.71MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25676s  1.1840us                    -               -         -         -         -  1.0000KB  824.80MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25680s  1.1520us                    -               -         -         -         -  1.0000KB  847.71MB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.25965s  360.89us                    -               -         -         -         -  4.5000MB  12.177GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.26011s  1.5360us                    -               -         -         -         -  2.0000KB  1.2418GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.26015s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.26543s  719.60us                    -               -         -         -         -  9.0000MB  12.214GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.26626s  1.8240us                    -               -         -         -         -  2.0000KB  1.0457GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.26630s  1.2480us                    -               -         -         -         -  2.0000KB  1.5283GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.26788s  727.98us                    -               -         -         -         -  9.0000MB  12.073GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.26872s  1.5040us                    -               -         -         -         -  2.0000KB  1.2682GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.26876s  1.2480us                    -               -         -         -         -  2.0000KB  1.5283GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27030s  718.67us                    -               -         -         -         -  9.0000MB  12.230GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27109s  1.5680us                    -               -         -         -         -  2.0000KB  1.2164GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27112s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27268s  718.58us                    -               -         -         -         -  9.0000MB  12.231GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27349s  1.5040us                    -               -         -         -         -  2.0000KB  1.2682GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27359s  1.6000us                    -               -         -         -         -  2.0000KB  1.1921GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27437s  360.12us                    -               -         -         -         -  4.5000MB  12.203GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27479s  1.5360us                    -               -         -         -         -  2.0000KB  1.2418GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27484s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27487s  1.2480us                    -               -         -         -         -  2.0000KB  1.5283GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27491s  1.3120us                    -               -         -         -         -  2.0000KB  1.4538GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27495s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27651s  719.02us                    -               -         -         -         -  9.0000MB  12.224GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27732s  1.5040us                    -               -         -         -         -  2.0000KB  1.2682GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27736s  1.3440us                    -               -         -         -         -  2.0000KB  1.4192GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27890s  719.02us                    -               -         -         -         -  9.0000MB  12.224GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27970s  1.5350us                    -               -         -         -         -  2.0000KB  1.2426GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.27976s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28131s  719.09us                    -               -         -         -         -  9.0000MB  12.223GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28212s  1.5360us                    -               -         -         -         -  2.0000KB  1.2418GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28222s  1.2480us                    -               -         -         -         -  2.0000KB  1.5283GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28377s  718.06us                    -               -         -         -         -  9.0000MB  12.240GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28463s  1.6320us                    -               -         -         -         -  2.0000KB  1.1687GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28468s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28619s  719.86us                    -               -         -         -         -  9.0000MB  12.209GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28703s  1.5040us                    -               -         -         -         -  2.0000KB  1.2682GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28707s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28863s  719.28us                    -               -         -         -         -  9.0000MB  12.219GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28946s  1.5040us                    -               -         -         -         -  2.0000KB  1.2682GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28951s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28955s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28960s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.28964s  1.2800us                    -               -         -         -         -  2.0000KB  1.4901GB/s  GeForce GTX 107         1        14  [CUDA memcpy HtoD]
+1.29034s  20.768us                    -               -         -         -         -  1.5000MB  70.534GB/s  GeForce GTX 107         1        14  [CUDA memcpy DtoD]
+1.29047s  30.015us             (16 1 1)      (1024 1 1)        25        0B        0B         -           -  GeForce GTX 107         1        13  void tensorflow::functor::SwapDimension1And2InTensor3<float>(int, float const *, tensorflow::functor::Dimension<int=3>, tensorflow::functor::SwapDimension1And2InTensor3<float>*) [936]
+1.29050s  3.7120us              (2 1 1)      (1024 1 1)        27        0B        0B         -           -  GeForce GTX 107         1        13  void tensorflow::functor::SwapDimension0And2InTensor3<float>(int, float const *, tensorflow::functor::Dimension<int=3>, tensorflow::functor::SwapDimension0And2InTensor3<float>*) [942]
+1.59580s     864ns                    -               -         -         -         -      112B  123.62MB/s  GeForce GTX 107         1         7  [CUDA memcpy HtoD]
+<computations start>

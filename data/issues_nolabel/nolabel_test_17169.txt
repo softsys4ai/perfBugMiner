@@ -1,0 +1,24 @@
+tf.contrib.layers output_collections inconsistency
+
+Please correct me if I'm wrong, but there seems to be an inconsistency between the pooling and the convolution layers in tf.contrib.layers when it comes to adding variables to the outputs_collection, and using tf.get_variable_scope().reuse_variables().
+Here is the relevant part of the model definition.
+def build_network(input):
+    with tf.variable_scope('scope') as sc:
+        ...
+        net = slim.max_pool2d(net, [2, 2], scope='pool')
+        ...
+        end_points = slim.utils.convert_collection_to_dict(end_points_collection)
+        ...
+        skip = slim.conv2d(end_points[sc.name + '/pool'], out_channels, [1, 1], scope='skip')
+        ...
+        end_points = slim.utils.convert_collection_to_dict(end_points_collection)
+        return net, end_points
+
+And here is my test, which fails:
+network, end_points = build_network(input)
+tf.get_variable_scope().reuse_variables()
+network, end_points = build_network(input)
+
+The reason the test fails is that whereas my convolutions all end up with the same names in the end_points dictionary both times (e.g. scope/conv1/conv1_1), the max_pooling layers end up with different names (e.g. the first time the network is built we get scope/pool, and the second time we get scope_1/pool). This means that the end_points['scope/pool'] fails since the dictionary contains 'scope_1/pool' as a key.
+I've done some breakpoint digging and it turns out that the behavior here and here differs due to convolutions using variable scopes and pooling using name scopes.
+Now I can potentially fix my code by using sc.original_name_scope instead of sc.name, but then the end_points dictionary is still wrong. I could manually fix the dictionary, but this seems hacky. I feel like it could be made such that the behaviour is consistent across the different layers. What do you think?

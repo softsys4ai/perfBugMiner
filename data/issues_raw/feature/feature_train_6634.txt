@@ -1,0 +1,32 @@
+Nestable custom_getters
+
+In TF 0.12 (and probably in earlier versions too), only one custom_getter is active at a time:
+import tensorflow as tf
+
+def postfix_name(postfix):
+    def custom_getter(getter, name, *args, **kwargs):
+        return getter("{}{}".format(name, postfix), *args, **kwargs)
+    return custom_getter
+
+with tf.Graph().as_default():
+    with tf.variable_scope("A", custom_getter=postfix_name("_A")):
+        with tf.variable_scope("B"):
+            var1 = tf.get_variable("var1", [])
+        with tf.variable_scope("C", custom_getter=postfix_name("_C")):
+            var2 = tf.get_variable("var2", [])
+
+# Current functionality:
+assert tf.VERSION == '0.12.1'
+assert var1.name == 'A/B/var1_A:0'
+assert var2.name == 'A/C/var2_C:0'
+This is surprising to the user – at least to me it was – and limits the usefulness of custom_getters.
+I propose that nested custom_getters are applied recursively instead, like this:
+# Proposal:
+assert var1.name == 'A/B/var1_A:0'
+assert var2.name == 'A/C/var2_C_A:0'
+This would be useful since we often want to apply different transformations to weights before they are used. Here's a pseudo-code of a real-life use case:
+with tf.variable_scope("weight_normed", custom_getter=weight_normed):
+    with tf.variable_scope("model", custom_getter=track_variables):
+        real_out = model(x)
+    with tf.variable_scope("model", custom_getter=simulate_variables):
+        simulated_out = model(x)

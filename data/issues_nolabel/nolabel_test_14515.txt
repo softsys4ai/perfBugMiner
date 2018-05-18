@@ -1,0 +1,77 @@
+//tensorflow/python:session_clusterspec_prop_test is failing with GPU support
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04 (ppc64le)
+TensorFlow installed from (source or binary):
+Installed from source
+TensorFlow version (use command below):
+TF1.3.1
+Python version:
+Python 2.7.5
+Bazel version (if compiling from source):
+Bazel - 0.5.4
+GCC/Compiler version (if compiling from source):
+gcc - 4.8.5
+CUDA/cuDNN version:
+cuda-8.0  and cuDNN-6.0.21
+GPU model and memory:
+0 Tesla P100-SXM2   16276MiB
+1 Tesla P100-SXM2   16276MiB
+Exact command to reproduce:
+bazel test --config=opt --config=cuda -k //tensorflow/python:session_clusterspec_prop_test
+
+Describe the problem
+This test passed successfully with CPU only.
+However its failing with GPU support , getting assertion error 1 != 0.
+I was debugging this test failure and found following code fails for GPU -
+https://github.com/tensorflow/tensorflow/blob/v1.3.1/tensorflow/python/client/session_clusterspec_prop_test.py#L86-L92
+self.assertEqual(1,
+                  len([
+                      node_stats
+                      for dev_stats in run_metadata.step_stats.dev_stats
+                      for node_stats in dev_stats.node_stats
+                      if '/job:worker/replica:0/task:1/device:CPU:0' ==
+                      dev_stats.device and 'Const' == node_stats.node_name
+                  ]))
+
+Test expects output '1' , but len function returns '0', because of following  lines
+  if '/job:worker/replica:0/task:1/device:CPU:0' ==
+  dev_stats.device and 'Const' == node_stats.node_name
+
+
+I have printed/checked values of dev_stats.device using print statements, see below -
+
+With CPU only support - we are getting CPU:0 device for task0 and task1 :
+
+ dev_stats.device =  /job:worker/replica:0/task:0/device:CPU:0
+ dev_stats.device = /job:worker/replica:0/task:1/device:CPU:0
+
+
+But with GPU support - for task0 ---> device:CPU:0 and for task1 ---> device:GPU:0
+
+ dev_stats.device = /job:worker/replica:0/task:0/device:CPU:0
+ dev_stats.device = /job:worker/replica:0/task:1/device:GPU:0
+
+That's why this test is failing with GPU support , as if condition is not satisfied ( if '/job:worker/replica:0/task:1/device:CPU:0' ! = /job:worker/replica:0/task:1/device:GPU:0)
+I tried changing if condition from  if '/job:worker/replica:0/task:1/device:CPU:0' to if '/job:worker/replica:0/task:1/device:GPU:0' and test passed successfully (with GPU).
+This is my overall understanding.
+I want to fix this test, please provide your comments/suggestions.
+Source code / logs
+..
+$  bazel test  --config=opt --config=cuda -k  //tensorflow/python:session_clusterspec_prop_test
+...
+======================================================================
+FAIL: testClusterSpecPropagationWorker2Placement (__main__.SessionClusterSpecPropagationTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/sandip/.cache/bazel/_bazel_sandip/a43c7182abc6db034a12d4266337a49c/execroot/org_tensorflow/bazel-out/local_linux-opt/bin/tensorflow/python/session_clusterspec_prop_test.runfiles/org_tensorflow/tensorflow/python/client/session_clusterspec_prop_test.py", line 92, in testClusterSpecPropagationWorker2Placement
+    dev_stats.device and 'Const' == node_stats.node_name
+AssertionError: 1 != 0
+
+----------------------------------------------------------------------
+Ran 12 tests in 1.797s
+
+FAILED (failures=1)
+================================================================================

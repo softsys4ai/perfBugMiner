@@ -1,0 +1,52 @@
+Convolution of zero length input gives junk gradients
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.1
+Bazel version (if compiling from source): 0.4.5
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: python3 junk_gradients.py
+
+Describe the problem
+When you pass a zero length input to tf.conv1d and then calculate gradients, you will get junk values. I think it's reading from uninitialized memory because it's nondeterministic and can be very small or very large positive or negative values or NaNs.
+The expected behavior is that the gradients should all be 0 because the weights aren't making any contribution to the loss.
+In the application I am writing the input has a variable length (including 0) but for this minimal example I've set it to a constant (tf.ones([0,2])).
+If you force the convolution to always have an input with length > 0 then the bug goes away. I've included that in the reproduction code under the variable 'remove_bug'.
+For me, with this reduced example, the gradients are always junk but vary widely. You might see 0s if it happens to read from zeroed out memory. Hopefully the bug will show up if you just run it a few times.
+Source code / logs
+import tensorflow as tf
+
+remove_bug = False
+
+vals = tf.ones([0,2])
+
+if remove_bug: # hack it to not actually have zero length
+    vals = tf.concat([tf.ones([2, 2]), vals], 0)
+
+# At this point 'vals' will either have length 0 or 2 if the bug was removed
+
+filter = tf.Variable(tf.ones([2, 2, 2]))
+
+conv = tf.nn.conv1d(tf.expand_dims(vals, 0), filter, 2, 'SAME')[0]
+
+# At this point 'conv' will either have length 0 or 1 if the bug was removed
+
+if remove_bug:
+    conv = conv[1:] # slice off hack, make 'conv' zero length again
+
+# At this point 'conv' will have length 0 whether or not the bug was removed.
+
+optimizer = tf.train.GradientDescentOptimizer(0.01)
+
+grads = [g for g, _ in optimizer.compute_gradients(conv)]
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+
+    gs = sess.run(grads)
+
+print(gs)

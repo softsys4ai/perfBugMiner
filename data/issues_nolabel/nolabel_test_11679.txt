@@ -1,0 +1,194 @@
+Error when running imported/restored model that uses feedable iterator (tf.contrib.data)
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): Build #242 (Jul 17, 2017 2:25:00 AM)
+Python version: Python 3.6.2
+Bazel version (if compiling from source): na
+CUDA/cuDNN version: 8.0/6.0
+GPU model and memory: 670 gtx 2gb
+Exact command to reproduce: na
+
+Describe the problem
+I can't restore and run checkpoints of models that use feedable iterators, but I can restore and run checkpoints of models that directly use make_one_shot_iterator(). Below is code for the feedable iterator version, and below that code for the make_one_shot_iterator() version:
+import tensorflow as tf
+from tensorflow.contrib.data import Dataset
+
+BATCH_SIZE = 4
+ITERATION_COUNT = 2
+dataset = Dataset.from_tensor_slices(tf.constant([[0, 0],
+                                                  [0, 1],
+                                                  [1, 0],
+                                                  [1, 1]], dtype=tf.float32))
+batched_dataset = dataset.batch(BATCH_SIZE)
+iterator_handle_placeholder = tf.placeholder(tf.string, shape=[])
+tf.add_to_collection('placeholders', iterator_handle_placeholder)
+iterator = tf.contrib.data.Iterator.from_string_handle(iterator_handle_placeholder, batched_dataset.output_types, batched_dataset.output_shapes)
+
+# create some graph
+inputs = iterator.get_next()
+sum_placeholder = tf.placeholder_with_default(tf.reduce_sum(inputs), shape=[])
+tf.add_to_collection('placeholders', sum_placeholder)
+sum_variable = tf.get_variable('sum', initializer=tf.zeros(shape=[]))
+assign_sum = tf.assign_add(sum_variable, sum_placeholder)
+tf.add_to_collection('assigns', assign_sum)
+saver = tf.train.Saver()
+
+# run graph and save it at the end
+with tf.Session() as session:
+    session.run(tf.global_variables_initializer())
+    batched_dataset_iterator = batched_dataset.make_one_shot_iterator()
+    batched_dataset_iterator_handle = session.run(batched_dataset_iterator.string_handle())
+    tf.add_to_collection('handles', batched_dataset_iterator_handle)
+    inputs_feed_dict = {iterator_handle_placeholder: batched_dataset_iterator_handle}
+    for i in range(ITERATION_COUNT):
+        inputs_sum = session.run(assign_sum, feed_dict=inputs_feed_dict)
+        inputs_feed_dict[sum_placeholder] = inputs_sum
+        print(inputs_sum)
+    saver.save(session, 'checkpoints/haha')
+
+# restore saved graph and run it
+with tf.Session() as session:
+    saver = tf.train.import_meta_graph('checkpoints/haha.meta')
+    saver.restore(session, 'checkpoints/haha')
+    assign_sum = tf.get_collection('assigns')[0]
+    iterator_handle_placeholder = tf.get_collection('placeholders')[0]
+    batched_dataset_iterator_handle = tf.get_collection('handles')[0]
+    sum_placeholder = tf.get_collection('placeholders')[1]
+    inputs_feed_dict = {iterator_handle_placeholder: batched_dataset_iterator_handle}
+    for i in range(ITERATION_COUNT):
+        inputs_sum = session.run(assign_sum, feed_dict=inputs_feed_dict)
+        print(inputs_sum)
+        inputs_feed_dict[sum_placeholder] = inputs_sum
+gives me
+C:\Users\Jonathan\Miniconda3\envs\ai\python.exe "C:/Software Projects/ai/tensorflow/LayerTests.py"
+2017-07-21 20:18:54.013753: W C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\platform\cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-21 20:18:54.257354: I C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:955] Found device 0 with properties: 
+name: GeForce GTX 670
+major: 3 minor: 0 memoryClockRate (GHz) 0.98
+pciBusID 0000:02:00.0
+Total memory: 2.00GiB
+Free memory: 1.64GiB
+2017-07-21 20:18:54.257634: I C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:976] DMA: 0 
+2017-07-21 20:18:54.257773: I C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:986] 0:   Y 
+2017-07-21 20:18:54.257935: I C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1045] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 670, pci bus id: 0000:02:00.0)
+4.0
+8.0
+2017-07-21 20:18:54.705095: I C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1045] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 670, pci bus id: 0000:02:00.0)
+2017-07-21 20:18:54.774833: W C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Not found: Container localhost does not exist.
+Traceback (most recent call last):
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\client\session.py", line 1327, in _do_call
+    return fn(*args)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\client\session.py", line 1306, in _run_fn
+    status, run_metadata)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\contextlib.py", line 88, in __exit__
+    next(self.gen)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\framework\errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.NotFoundError: Container localhost does not exist.
+	 [[Node: IteratorFromStringHandle = IteratorFromStringHandle[_device="/job:localhost/replica:0/task:0/cpu:0"](_arg_Placeholder_0_0)]]
+	 [[Node: PlaceholderWithDefault/_7 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_7_PlaceholderWithDefault", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:/Software Projects/ai/tensorflow/LayerTests.py", line 47, in <module>
+    inputs_sum = session.run(assign_sum, feed_dict=inputs_feed_dict)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\client\session.py", line 895, in run
+    run_metadata_ptr)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\client\session.py", line 1124, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\client\session.py", line 1321, in _do_run
+    options, run_metadata)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\client\session.py", line 1340, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.NotFoundError: Container localhost does not exist.
+	 [[Node: IteratorFromStringHandle = IteratorFromStringHandle[_device="/job:localhost/replica:0/task:0/cpu:0"](_arg_Placeholder_0_0)]]
+	 [[Node: PlaceholderWithDefault/_7 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_7_PlaceholderWithDefault", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+Caused by op 'IteratorFromStringHandle', defined at:
+  File "C:/Software Projects/ai/tensorflow/LayerTests.py", line 13, in <module>
+    iterator = tf.contrib.data.Iterator.from_string_handle(iterator_handle_placeholder, batched_dataset.output_types, batched_dataset.output_shapes)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\contrib\data\python\ops\dataset_ops.py", line 238, in from_string_handle
+    string_handle)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\ops\gen_dataset_ops.py", line 362, in iterator_from_string_handle
+    string_handle=string_handle, name=name)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\framework\ops.py", line 2628, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "C:\Users\Jonathan\Miniconda3\envs\ai\lib\site-packages\tensorflow\python\framework\ops.py", line 1204, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+NotFoundError (see above for traceback): Container localhost does not exist.
+	 [[Node: IteratorFromStringHandle = IteratorFromStringHandle[_device="/job:localhost/replica:0/task:0/cpu:0"](_arg_Placeholder_0_0)]]
+	 [[Node: PlaceholderWithDefault/_7 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_7_PlaceholderWithDefault", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+
+Process finished with exit code 1
+
+Here's the version that uses just a make_one_shot_iterator():
+import tensorflow as tf
+from tensorflow.contrib.data import Dataset
+
+BATCH_SIZE = 4
+ITERATION_COUNT = 2
+dataset = Dataset.from_tensor_slices(tf.constant([[0, 0],
+                                                  [0, 1],
+                                                  [1, 0],
+                                                  [1, 1]], dtype=tf.float32))
+batched_dataset = dataset.batch(BATCH_SIZE)
+
+# create some graph
+batched_dataset_iterator = batched_dataset.make_one_shot_iterator()
+inputs = batched_dataset_iterator.get_next()
+sum_placeholder = tf.placeholder_with_default(tf.reduce_sum(inputs), shape=[])
+tf.add_to_collection('placeholders', sum_placeholder)
+sum_variable = tf.get_variable('sum', initializer=tf.zeros(shape=[]))
+assign_sum = tf.assign_add(sum_variable, sum_placeholder)
+tf.add_to_collection('assigns', assign_sum)
+saver = tf.train.Saver()
+
+# run graph and save it at the end
+with tf.Session() as session:
+    session.run(tf.global_variables_initializer())
+    inputs_feed_dict = {}
+    for i in range(ITERATION_COUNT):
+        inputs_sum = session.run(assign_sum, feed_dict=inputs_feed_dict)
+        inputs_feed_dict[sum_placeholder] = inputs_sum
+        print(inputs_sum)
+    saver.save(session, 'checkpoints/haha')
+
+# restore saved graph and run it
+with tf.Session() as session:
+    saver = tf.train.import_meta_graph('checkpoints/haha.meta')
+    saver.restore(session, 'checkpoints/haha')
+    assign_sum = tf.get_collection('assigns')[0]
+    sum_placeholder = tf.get_collection('placeholders')[1]
+    inputs_feed_dict = {}
+    for i in range(ITERATION_COUNT):
+        inputs_sum = session.run(assign_sum, feed_dict=inputs_feed_dict)
+        print(inputs_sum)
+        inputs_feed_dict[sum_placeholder] = inputs_sum
+Result:
+C:\Users\Jonathan\Miniconda3\envs\ai\python.exe "C:/Software Projects/ai/tensorflow/LayerTests.py"
+2017-07-21 20:12:26.273776: W C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\platform\cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-21 20:12:26.516570: I C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:955] Found device 0 with properties: 
+name: GeForce GTX 670
+major: 3 minor: 0 memoryClockRate (GHz) 0.98
+pciBusID 0000:02:00.0
+Total memory: 2.00GiB
+Free memory: 1.64GiB
+2017-07-21 20:12:26.516852: I C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:976] DMA: 0 
+2017-07-21 20:12:26.516992: I C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:986] 0:   Y 
+2017-07-21 20:12:26.517145: I C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1045] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 670, pci bus id: 0000:02:00.0)
+4.0
+8.0
+2017-07-21 20:12:26.926502: I C:\tf_jenkins\home\workspace\nightly-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1045] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 670, pci bus id: 0000:02:00.0)
+12.0
+24.0
+
+Process finished with exit code 0

@@ -1,0 +1,69 @@
+Load model in C++ API and get "from device: CUDA_ERROR_OUT_OF_MEMORY" error
+
+My model is about 2.4GB。In my inference step, I  want to load model by multi-processing method in each GPU. That means I try to make two process in one GPU and each load a model。
+After I make configuration of each session done, each session get about 5GB memory, But I still meet the "from device: CUDA_ERROR_OUT_OF_MEMORY"。I am wondering。。。 Asking for help
+GPU information:
+[search@qrwt01 /home/s/apps/qtfserverd/bin]$ nvidia-smi
+Thu Sep 14 21:42:48 2017
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 375.26                 Driver Version: 375.26                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  Tesla K80           Off  | 0000:08:00.0     Off |                    0 |
+| N/A   48C    P0    61W / 149W |  11366MiB / 11439MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   1  Tesla K80           Off  | 0000:09:00.0     Off |                    0 |
+| N/A   32C    P0    72W / 149W |  11359MiB / 11439MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0     33056    C   ...ome/s/apps/qtfserverd/etc/qtfserverd.conf  5823MiB |
+|    0     33057    C   ...ome/s/apps/qtfserverd/etc/qtfserverd.conf  5515MiB |
+|    1     33058    C   ...ome/s/apps/qtfserverd/etc/qtfserverd.conf  5823MiB |
+|    1     33059    C   ...ome/s/apps/qtfserverd/etc/qtfserverd.conf  5516MiB |
++-----------------------------------------------------------------------------+
+Session configuration:
+46 void* create_session(void* graph, std::string& checkpoint_path,
+47     int intra_op_threads, int inter_op_threads, std::string& device_list) {
+48     Session* session = NULL;
+49     SessionOptions sess_opts;
+50     //int NUM_THREADS = 8;
+51     if (intra_op_threads > 0) {
+52         sess_opts.config.set_intra_op_parallelism_threads(intra_op_threads);
+53     }
+54     if (inter_op_threads > 0) {
+55         sess_opts.config.set_inter_op_parallelism_threads(inter_op_threads);
+56     }
+57
+58     sess_opts.config.set_allow_soft_placement(true);
+59     sess_opts.config.mutable_gpu_options()->set_visible_device_list(device_list);
+60     sess_opts.config.mutable_gpu_options()->set_allocator_type("BFC");
+61     sess_opts.config.mutable_gpu_options()->set_per_process_gpu_memory_fraction(0.5);
+62     sess_opts.config.mutable_gpu_options()->set_allow_growth(true);
+63     Status status = NewSession(sess_opts, &session);
+64     if (!status.ok()) {
+65         fprintf(stderr, "Create Session Failed %s\n", status.ToString().c_str());
+66         return NULL;
+67     }
+Error information
+load /home/search/tensorflow/deploy_combine.model.meta graph to /gpu:1 success
+2017-09-14 21:42:31.188212: I tensorflow/core/common_runtime/gpu/gpu_device.cc:965] Found device 0 with properties:
+name: Tesla K80 major: 3 minor: 7 memoryClockRate(GHz): 0.8235
+pciBusID: 0000:09:00.0
+totalMemory: 11.17GiB freeMemory: 11.05GiB
+2017-09-14 21:42:31.188260: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1055] Creating TensorFlow device (/device:GPU:0) -> (device: 1, name: Tesla K80, pci bus id: 0000:09:00.0, compute capability: 3.7)
+qss_switch:1, lstm_switch:1
+qss_switch:1, lstm_switch:1
+2017-09-14 21:42:33.826598: E tensorflow/stream_executor/cuda/cuda_driver.cc:936] failed to allocate 1.58G (1701773312 bytes) from device: CUDA_ERROR_OUT_OF_MEMORY
+2017-09-14 21:42:33.838694: E tensorflow/stream_executor/cuda/cuda_driver.cc:936] failed to allocate 1.43G (1531596032 bytes) from device: CUDA_ERROR_OUT_OF_MEMORY
+2017-09-14 21:42:33.893832: E tensorflow/stream_executor/cuda/cuda_driver.cc:936] failed to allocate 439.82M (461180672 bytes) from device: CUDA_ERROR_OUT_OF_MEMORY
+2017-09-14 21:42:33.903917: E tensorflow/stream_executor/cuda/cuda_driver.cc:936] failed to allocate 439.82M (461180672 bytes) from device: CUDA_ERROR_OUT_OF_MEMORY
+2017-09-14 21:42:33.913843: E tensorflow/stream_executor/cuda/cuda_driver.cc:936] failed to allocate 439.82M (461180672 bytes) from device: CUDA_ERROR_OUT_OF_MEMORY
+2017-09-14 21:42:33.924008: E tensorflow/stream_executor/cuda/cuda_driver.cc:936] failed to allocate 439.82M (461180672 bytes) from device: CUDA_ERROR_OUT_OF_MEMORY
+2017-09-14 21:42:33.935385: E tensorflow/stream_executor/cuda/cuda_driver.cc:936] failed to allocate 439.82M (461180672 bytes) from device: CUDA_ERROR_OUT_OF_MEMORY
+2017-09-14 21:42:33.946556: E tensorflow/stream_executor/cuda/cuda_driver.cc:936] failed to allocate 439.82M (461180672 bytes) from device: CUDA_ERROR_OUT_OF_MEMORY
+2017-09-14 21:42:33.956340: E tensorflow/stream_executor/cuda/cuda_driver.

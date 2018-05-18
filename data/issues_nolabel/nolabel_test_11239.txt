@@ -1,0 +1,56 @@
+Variables in Dataset functions not (always) initialized
+
+System information
+
+OS: MacOS 10.12.4
+TensorFlow: stock cpu tensorflow 1.2 from pip
+Python: Python 2.7.13
+
+Describe the problem
+When using a Dataset function containing tf.Variables needing initialization it succeeds sometimes, but fails other times. I haven't managed to pin point it further using sleeps or tf.control_dependencies.
+Source code / logs
+import tensorflow as tf
+
+def fn(x):
+    v = tf.Variable(5, dtype=tf.int64)
+    return x + v
+
+dataset = (tf.contrib.data.Dataset.range(10)
+    .map(fn)
+)
+
+iterator = dataset.make_initializable_iterator()
+next = iterator.get_next()
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    sess.run(iterator.initializer)
+
+    for i in range(3):
+        res = sess.run(next)
+        print(res)
+
+Moving the v variable out of the fn scope seems to resolve the issue.
+Error log when variable fails to initialize:
+(tf) no00023794:distributed-cluster olanymoe$ python set_test.py 
+<MapDataset shapes: (), types: tf.int64>
+2017-07-03 10:33:55.377579: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-03 10:33:55.377593: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-03 10:33:55.377597: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-03 10:33:55.377601: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-03 10:34:05.404642: W tensorflow/core/framework/op_kernel.cc:1158] Failed precondition: Attempting to use uninitialized value Variable
+	 [[Node: Variable/read = Identity[T=DT_INT64, _class=["loc:@Variable"]](Variable)]]
+Traceback (most recent call last):
+  File "set_test.py", line 49, in <module>
+    res = sess.run(next)
+  File "/Users/olanymoe/anaconda2/envs/tf/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 789, in run
+    run_metadata_ptr)
+  File "/Users/olanymoe/anaconda2/envs/tf/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 997, in _run
+    feed_dict_string, options, run_metadata)
+  File "/Users/olanymoe/anaconda2/envs/tf/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1132, in _do_run
+    target_list, options, run_metadata)
+  File "/Users/olanymoe/anaconda2/envs/tf/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1152, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.FailedPreconditionError: Attempting to use uninitialized value Variable
+	 [[Node: Variable/read = Identity[T=DT_INT64, _class=["loc:@Variable"]](Variable)]]
+	 [[Node: IteratorGetNext = IteratorGetNext[output_shapes=[[]], output_types=[DT_INT64], _device="/job:localhost/replica:0/task:0/cpu:0"](Iterator)]]

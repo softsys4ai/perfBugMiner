@@ -1,0 +1,29 @@
+How to realize model parallelism
+
+I cannot find the model parallelism in the tensorflow, there are many examples about data parallelism. I write a programm to realize the model parallelism, but it cannot work.
+from future import print_function
+import tensorflow as tf
+import numpy as np
+tf.train.ClusterSpec({
+"worker": [
+"node1:2222"
+],
+"ps": [
+"node2:2222"
+]})
+with tf.device("/job:ps/task:0"):
+weights = tf.Variable(tf.random_normal([1]),dtype=tf.float32,name='weights')
+bias = tf.Variable(tf.ones([1])+0.5,dtype=tf.float32, name='bias')
+with tf.device("/job:worker/task:0"):
+X = np.random.normal(0, 100, 100000)
+y = X * 0.5 + 10 + np.random.normal(0, 0.1, len(X))
+results = weights * X + bias
+loss = tf.reduce_mean(tf.square(y-results))
+optimizer = tf.train.GradientDescentOptimizer(0.1)
+train_op = optimizer.minimize(loss)
+init = tf.global_variables_initializer()
+with tf.Session("grpc://node2:2222") as sess:
+sess.run(init)
+for _ in range(10000):
+Loss, T = sess.run([loss, train_op])
+print(Loss)

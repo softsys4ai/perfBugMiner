@@ -1,0 +1,123 @@
+Error with combination of 'numpy_input_fn' and 'tf.contrib.seq2seq.AttentionWrapper'
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4 and 1.6 both
+Python version: 2
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 8 for tensorflow 1.4 and 9.0 for tensorflow 1.6
+GPU model and memory: gtx 1080ti
+Exact command to reproduce: I would like to send my code via email.
+
+Problem description:
+I am now modeling an architecture that is related to encoder-decoder model. So, first of all, I wrote my own source code of encoder-decoder model with tensorflow api. the abstract structure of my source code(model_fn which is used for tf.contrib.learn.Experiment) is as follows:
+def model_fn(features, labels, mode, params):
+    
+    start_token = 1 
+    end_token = 2
+    # should pay attention to this batch_size from params
+    batch_size = params['batch_size']
+
+    input = features['input'] # [batch, length]
+    input_length = features['input_length']
+    
+    if mode != tf.estimator.ModeKeys.PREDICT:
+        target = features['target'] # label
+        target_length = features['target_length']
+    
+    # Embedding for sentence, question and rnn encoding of sentence
+    with tf.variable_scope('SharedScope'):
+        # Embedded inputs
+        # [batch, input_length] -> [batch, input_length, hidden_size]
+        embd_input = embed_op(input, params, name = 'embedded_input')
+        embd_target = embed_op(target, params, name = 'embedded_target')
+
+        # Build encoder cell
+        encoder_cell = tf.nn.rnn_cell.GRUCell(hidden_size)
+
+        # Run Dynamic RNN
+        #   encoder_outputs: [max_time, batch_size, num_units]
+        #   encoder_state: [batch_size, num_units]
+        encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
+            encoder_cell, embd_input,
+            sequence_length=input_length,
+            dtype = tf.float32    
+            )   
+        
+    with tf.variable_scope('SharedScope/EmbeddingScope', reuse = True):
+        embedding_target = tf.get_variable('embedding_target')
+    
+    # Rnn decoding of sentence with attention 
+    with tf.variable_scope('Decoder'):
+        # Memory for attention
+        attention_states = encoder_outputs
+
+        # Create an attention mechanism
+        attention_mechanism = tf.contrib.seq2seq.LuongAttention(
+                hidden_size, attention_states,
+                memory_sequence_length=input_length)
+
+        # Build decoder cell
+        decoder_cell = tf.nn.rnn_cell.GRUCell(hidden_size)
+
+        decoder_cell = tf.contrib.seq2seq.AttentionWrapper(
+                decoder_cell, attention_mechanism,
+                attention_layer_size= hidden_size)
+
+        # Helper for decoder cell
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            maxlen_target = params['maxlen_target'] * tf.ones(batch_size], dtype = tf.int32)
+            helper = tf.contrib.seq2seq.TrainingHelper(
+                    embd_target, maxlen_target
+                    )
+        else: # EVAL & TEST
+            start_tokens = start_token * tf.ones([batch_size], dtype = tf.int32)
+            helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(
+                    embedding_target, start_tokens, end_token
+                    )
+        # Decoder
+        initial_state = decoder_cell.zero_state(dtype = tf.float32, batch_size = batch_size)
+        projection_q = tf.layers.Dense(target_voca_size, use_bias = True)
+
+        decoder = tf.contrib.seq2seq.BasicDecoder(
+            decoder_cell, helper, initial_state,
+            output_layer=None)
+
+        # Dynamic decoding
+        max_iter = params['maxlen_target_dev'] 
+
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            outputs, _, _ = tf.contrib.seq2seq.dynamic_decode(decoder, impute_finished=True, maximum_iterations = None)
+        else: # Test
+            outputs, _, _ = tf.contrib.seq2seq.dynamic_decode(decoder, impute_finished=True, maximum_iterations = max_iter)
+
+        logits_q = projection_q(outputs.rnn_output)
+.
+.
+.
+
+and the data(features) are feeded through tf.estimator.inputs.numpy_input_fn:
+For evaluation data:
+    # Evaluation input function for estimator
+    eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x = {"input": eval_input, 'target': eval_target, 
+            'input_length': eval_input_length, 'len_q': eval_target_length},
+        y = None,
+        batch_size = model_params['batch_size'], # batch size that i specified
+        num_epochs=1,
+        shuffle=False)  
+
+When batch_size that I specified has lower value than 99(not including), it works fine, I mean, when I run neural_network_experiment.train_and_evaluate(), it trains well and also evaluate without an error. However, when I set batch_size bigger than 98, There is always an error only when evaluating(no matter with training period) :
+InvalidArgumentError (see above for traceback): assertion failed: [When applying AttentionWrapper attention_wrapper_1: Non-matching batch sizes between the memory (encoder output) and the query (decoder output). Are you using the BeamSearchDecoder? You may need to tile your memory input via the tf.contrib.seq2seq.tile_batch function with argument multiple=beam_width.] [Condition x == y did not hold element-wise:] [x (QuestionGeneration/decoder/while/BasicDecoderStep/decoder/attention_wrapper/assert_equal/x:0) = ] [99] [y (QuestionGeneration/LuongAttention/strided_slice_3:0) = ] [14] [[Node: QuestionGeneration/decoder/while/BasicDecoderStep/decoder/attention_wrapper/assert_equal/Assert/Assert = Assert[T=[DT_STRING, DT_STRING, DT_STRING, DT_INT32, DT_STRING, DT_INT32], summarize=3, _device="/job:localhost/replica:0/task:0/device:CPU:0"](QuestionGeneration/decoder/while/BasicDecoderStep/decoder/attention_wrapper/assert_equal/All/_389, QuestionGeneration/decoder/while/BasicDecoderStep/decoder/attention_wrapper/assert_equal/Assert/Assert/data_0, QuestionGeneration/decoder/while/BasicDecoderStep/decoder/attention_wrapper/assert_equal/Assert/Assert/data_1, QuestionGeneration/decoder/while/BasicDecoderStep/decoder/attention_wrapper/assert_equal/Assert/Assert/data_2, QuestionGeneration/decoder/while/BasicDecoderStep/decoder/attention_wrapper/assert_equal/x/_391, QuestionGeneration/decoder/while/BasicDecoderStep/decoder/attention_wrapper/assert_equal/Assert/Assert/data_4, QuestionGeneration/decoder/while/BasicDecoderStep/decoder/attention_wrapper/assert_equal/Equal/Enter/_393)]] [[Node: QuestionGeneration/AttentionWrapperZeroState/assert_equal/Assert/Assert/_384 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device_incarnation=1, tensor_name="edge_397_QuestionGeneration/AttentionWrapperZeroState/assert_equal/Assert/Assert", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+I solved this error by change the batch_size value in model_fn by attention_mechanism._batch_size.
+The problem may caused from the redundant data that can't be divided by batch_size( if i have 1004 lines of data and my batch_size is 10, than 4 lines data will be left). So when I change the batch_size value in model_fn to attention_mechanism._batch_size from specified value, the last iteration's batch size will be 4 and no error anymore. About the error message above, I used batch size of 99, and there will be 14 lines of data left. Then, I want to ask for 2 questions that may related to error:
+
+when I fixed the batch_size by specified value smaller than 99, why no error(both training and evaluate)
+when I fixed the 'batch_size' by specified value bigger than 98, why no error in training period and does have error in evaluation period.
+
+I think there may be some errors in tensorflow api related to this. Or maybe I was wrong in some part.
+Also, I hope to see the details of numpy_input_fn, such as: when used with tf.estimator, How will it treat the redundant data that can't be divided by batch_size

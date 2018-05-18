@@ -1,0 +1,110 @@
+Summary op crashes when run multiple times
+
+System information
+
+Windows 10 16299:
+pip install tensorflow-gpu:
+b'unknown' 1.4.0:
+3.5:
+CUDA: V9.1.85, cuDNN version: 6:
+Geforce 930 MX, 2GB:
+
+Describe the problem
+Opening a session for the second time and trying to run a summary op causes crash for some reason. The error message is misleading as a placeholder is provided.
+Source code / logs
+import tensorflow as tf
+
+class MyModel:
+    def __init__(self, sess, i):
+        self.x = tf.placeholder(tf.float32, [2, 2])
+        self.W = tf.Variable(tf.truncated_normal([2, 2]))
+        self.y = tf.matmul(self.W, self.x)
+
+        tf.summary.scalar('y',tf.reduce_sum(self.y))
+
+        sess.run(tf.global_variables_initializer())
+
+        self.summary = tf.summary.merge_all()
+        self.writer = tf.summary.FileWriter('./logs/test' + str(i),sess.graph)
+
+    def run(self, sess):        
+        feed_dict = {self.x:[[0,0],[0,0]]}
+        sess.run(self.y,feed_dict)
+        print('inside1')
+        s = sess.run(self.summary,feed_dict)
+        print('inside2')
+        self.writer.add_summary(s,0)
+
+    def close(self):
+        self.writer.close()        
+
+# Swapping order of line 1 and 2 still causes crash
+for i in range(3): # line 1
+    with tf.Session() as sess: # line 2
+        print('outside')
+        M = MyModel(sess, i)
+        M.run(sess)
+        M.close()
+    #sess.close() # No luck
+
+OUTPUT:
+outside
+inside1
+inside2
+outside
+inside1
+
+Traceback (most recent call last):
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1323, in _do_call
+    return fn(*args)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1302, in _run_fn
+    status, run_metadata)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\errors_impl.py", line 473, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: You must feed a value for placeholder tensor 'Placeholder' with dtype float and shape [2,2]
+	 [[Node: Placeholder = Placeholder[dtype=DT_FLOAT, shape=[2,2], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+	 [[Node: Sum_1/_7 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device_incarnation=1, tensor_name="edge_7_Sum_1", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\TensorFlow\tensorflow-experiments\ravens-matrix-autoencoder\minimum.py", line 31, in <module>
+    M.run(sess)
+  File "D:\TensorFlow\tensorflow-experiments\ravens-matrix-autoencoder\minimum.py", line 20, in run
+    s = sess.run(self.summary,feed_dict)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 889, in run
+    run_metadata_ptr)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1120, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1317, in _do_run
+    options, run_metadata)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1336, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: You must feed a value for placeholder tensor 'Placeholder' with dtype float and shape [2,2]
+	 [[Node: Placeholder = Placeholder[dtype=DT_FLOAT, shape=[2,2], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+	 [[Node: Sum_1/_7 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device_incarnation=1, tensor_name="edge_7_Sum_1", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"]()]]
+
+Caused by op 'Placeholder', defined at:
+  File "<string>", line 1, in <module>
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\idlelib\run.py", line 124, in main
+    ret = method(*args, **kwargs)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\idlelib\run.py", line 351, in runcode
+    exec(code, self.locals)
+  File "D:\TensorFlow\tensorflow-experiments\ravens-matrix-autoencoder\minimum.py", line 30, in <module>
+    M = MyModel(sess, i)
+  File "D:\TensorFlow\tensorflow-experiments\ravens-matrix-autoencoder\minimum.py", line 5, in __init__
+    self.x = tf.placeholder(tf.float32, [2, 2])
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\array_ops.py", line 1599, in placeholder
+    return gen_array_ops._placeholder(dtype=dtype, shape=shape, name=name)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\gen_array_ops.py", line 3090, in _placeholder
+    "Placeholder", dtype=dtype, shape=shape, name=name)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "C:\Users\windows\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'Placeholder' with dtype float and shape [2,2]
+	 [[Node: Placeholder = Placeholder[dtype=DT_FLOAT, shape=[2,2], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+	 [[Node: Sum_1/_7 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device_incarnation=1, tensor_name="edge_7_Sum_1", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"]()]]

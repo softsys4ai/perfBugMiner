@@ -1,0 +1,77 @@
+tf.stack eats memory over time
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4.1
+Python version:  3.5
+CUDA/cuDNN version: 8
+GPU model and memory: 1060 + 6GB
+
+Describe the problem
+I use tf.stack to stack 2 images. But the memory used by this program increase over time. I use memory_profiler check it. it is caused by tf.stack, here is the minimal re-produce code:
+import tensorflow as tf
+import glob
+import gc
+from memory_profiler import profile
+
+
+@profile
+def function_mark():
+  pass
+
+@profile
+def stack_images():
+  image_file_list = glob.glob("car_images/*.jpg")
+  sess = tf.Session()
+
+  for _ in range(300):
+    # read image
+    image1 = tf.gfile.FastGFile(image_file_list[0], 'rb').read()
+    image2 = tf.gfile.FastGFile(image_file_list[1], 'rb').read()
+    # decode image
+    image1_decode = tf.image.decode_image(image1, channels=3)
+    image2_decode = tf.image.decode_image(image2, channels=3)
+    # stack image
+    image_stack = tf.stack([image1_decode, image2_decode])
+    # run session
+    r_image_stack = sess.run(image_stack)
+    # mark function. so I can check the memory-usage of every loop.
+    function_mark()
+    # force garbage collection, so all the un-reference variable will be freed.
+    del r_image_stack
+    gc.collect()
+
+First, I profile it line by line, here is the result:
+you can see it very clearly that line 26 take a lot of memory. My image is 800*600 and I only stack 2 image each time, so 1.3G memory consumption is not normal.
+
+Line #    Mem usage    Increment   Line Contents
+11    190.0 MiB    190.0 MiB   @profile
+12                             def stack_images():
+13    190.0 MiB      0.0 MiB     image_file_list = glob.glob("car_images/*.jpg")
+14    421.6 MiB    231.7 MiB     sess = tf.Session()
+15
+16   1998.4 MiB      0.0 MiB     for _ in range(300):
+
+17                                 # read image
+18   1992.5 MiB      1.5 MiB       image1 = tf.gfile.FastGFile(image_file_list[0], 'rb').read()
+19   1992.5 MiB      0.0 MiB       image2 = tf.gfile.FastGFile(image_file_list[1], 'rb').read()
+20                                 # decode image
+21   1992.8 MiB     77.6 MiB       image1_decode = tf.image.decode_image(image1, channels=3)
+22   1993.3 MiB    108.6 MiB       image2_decode = tf.image.decode_image(image2, channels=3)
+23                                 # stack image
+24   1993.3 MiB      0.7 MiB       image_stack = tf.stack([image1_decode, image2_decode])
+25                                 # run session
+26   1998.4 MiB   1350.4 MiB       r_image_stack = sess.run(image_stack)
+27                                 # mark function. so I can check the memory-usage of every loop.
+28   1998.4 MiB     29.0 MiB       function_mark()
+29                                 # force garbage collection, so all the un-reference variable will be freed.
+30   1998.4 MiB      0.0 MiB       del r_image_stack
+31   1998.4 MiB      8.9 MiB       gc.collect()
+
+
+Then I profile it over time. I use function function_mark to distinguish each loop. So we can see it very clearly that the memory usage of this program is increase over time.
+
+My question is: How should I avoid this problem. because it cause a serious performance regression.

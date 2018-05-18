@@ -1,0 +1,24 @@
+Error when using TensorArray and variables in nested loops
+
+Hi, I use r0.9 version but still have an error when use nested map_fn and a variable involved in calculations of inner function.
+The error is
+tensorflow.python.framework.errors.InvalidArgumentError: Input 0 of node gradients/map/while/map/TensorArrayPack_grad/TensorArrayGrad/TensorArrayGrad was passed string from gradients/map/while/map/TensorArrayPack_grad/TensorArrayGrad/TensorArrayGrad/StackPop:0 incompatible with expected string_ref.
+The code is
+import tensorflow as tf
+
+def inner_loop(t):
+    def fn(n): return n + var # using var here leads to the error.
+    return tf.map_fn(fn=fn, elems=t, parallel_iterations=1)
+
+def outer_loop(input):
+    def fn(n): return inner_loop(n) #if I would return inner_loop(n)+var here no errors appear.
+    return tf.map_fn(fn=fn, elems=input, parallel_iterations=1)
+
+with tf.Session() as sess:
+    var = tf.Variable(tf.constant(1.0))
+    input = tf.to_float(tf.convert_to_tensor([[1,2],[3,4],[5,6]]))
+    res = outer_loop(input)
+    optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
+    trainOperation = optimizer.minimize(tf.reduce_mean(tf.square(res)))
+    sess.run(tf.initialize_all_variables())
+    sess.run(trainOperation)

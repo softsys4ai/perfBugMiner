@@ -1,0 +1,53 @@
+CUDA compilation on ArchLinux fails
+
+Overview
+Build fails with
+/usr/include/string.h: In function 'void* __mempcpy_inline(void*, const void*, size_t)':
+/usr/include/string.h:652:42: error: 'memcpy' was not declared in this scope
+     return (char *) memcpy (__dest, __src, __n) + __n;
+
+Specific information:
+
+ArchLinux system
+Compute Capability 3.0 necessary
+CuDNN 4, CUDA 7.5
+Bazel 0.2.0
+
+Followed the installation from source instructions:
+
+CuDNN 4, CUDA 7.5 are installed in /opt/cuda
+git clone -b v0.7.1 --recurse-submodules https://github.com/tensorflow/tensorflow
+cd tensorflow
+./configure Details as attached. Building with cuda support and compute capability 3.0
+~/bin/bazel build -c opt --config=cuda //tensorflow/cc:tutorials_example_trainer
+This results in the following error:
+
+
+/usr/lib/gcc/x86_64-unknown-linux-gnu/5.3.0/include/mwaitxintrin.h(36): error: identifier "__builtin_ia32_monitorx" is undefined
+
+/usr/lib/gcc/x86_64-unknown-linux-gnu/5.3.0/include/mwaitxintrin.h(42): error: identifier "__builtin_ia32_mwaitx" is undefined
+
+2 errors detected in the compilation of "/tmp/tmpxft_00006c12_00000000-7_avgpooling_op_gpu.cu.cpp1.ii".
+
+This is probably due to cuda requiring gcc 4.9, while I am using 5.3. I fixed this by editing crosstool_wrapper_driver_is_not_gcc in tensorflow/third_party/gpus/crosstool/clang/bin, changing line 49 to the explicit
+GCC_HOST_COMPILER_PATH = ('/usr/bin/gcc-4.9')
+This allows compilation to continue; however, it then fails with
+/usr/include/string.h: In function 'void* __mempcpy_inline(void*, const void*, size_t)':
+/usr/include/string.h:652:42: error: 'memcpy' was not declared in this scope
+   return (char *) memcpy (__dest, __src, __n) + __n;
+                                          ^
+ERROR: /home/RED/src/tensorflow/tensorflow/core/BUILD:334:1: output 'tensorflow/core/_objs/gpu_kernels/tensorflow/core/kernels/aggregate_ops_gpu.cu.o' was not created.
+ERROR: /home/RED/src/tensorflow/tensorflow/core/BUILD:334:1: not all outputs were created.
+Target //tensorflow/cc:tutorials_example_trainer failed to build
+
+Additional information:
+
+I had been able to compile 0.6.0 (though with CUDA 7.0 and CuDNN 2). This also necessitated switching GCC.
+CPU-Only compilation works.
+Wheel installation works, too, but is obviously unable to use my CC3.0 device.
+
+Thanks!
+Attachments:
+
+tensorflow_configure.txt
+tensorflow_output.txt

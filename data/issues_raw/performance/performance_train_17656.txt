@@ -1,0 +1,8 @@
+Support NUMA aware CPU device
+
+We noticed TensorFlow does not scale too much from single CPU socket to multiple CPU sockets. From the performance profiling, we found the memory traffic between NUMA nodes are very high. The latency from the remote memory access prevents TensorFlow from scaling to multiple NUMA nodes.
+To fix this performance issue, we did a prototype to use data parallelism to improve the performance. A NumaDevice class has been added, all threads in a NumaDevice are pinned to the cores in one NUMA node, each NumaDevice has its own memory allocator. With the NumaDevice, most of the tensor are created and accessed by the same Numa node, the memory access should be local.
+The input data are evenly distributed to all NUMA nodes, the loss value and the gradient are computed on each Numa node and then the gradients from all Numa nodes are averaged and the variables are updated by these gradients. The variable update is done on all CPU cores.
+This pull request contains a prototype to support NUMA aware CPU device. Some code are hacked to make it run. We want to send this pull request to get the comments about what we are doing.
+From our initial performance test, ResNet 50 inference got 1.4x speedup than the master branch on two socket Skylake. ResNet 50 training got 1.14x speedup, which is lower than what we expected, we will continue working on it.
+To make it compile, you need to copy NonBlockingThreadPool.h to compile cache directory/external/eigen_archive/unsupported/Eigen/CXX11/src/ThreadPool/. Also the benchmark script need be modified slightly. I can send you the instructions for changing the benchmark script.

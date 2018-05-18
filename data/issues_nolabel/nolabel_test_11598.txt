@@ -1,0 +1,79 @@
+Unclear about how to make BeamSearchDecoder work
+
+UPDATE: In the latest tensorflow 1.2.1, this is no longer a problem.
+Please ignore this problem and install the latest tensorflow.
+Hello, I am trying to understand the way to use BeamSearchDecoder in a seq2seq model by following the tutorial of nmt. However, both the documentation and error message seem to be very unclear for starters. I have wrote the minimal code for a common seq2seq purpose with beam search:
+import tensorflow as tf
+from tensorflow.python.layers.core import Dense
+
+# INPUTS
+X = tf.placeholder(tf.int32, [None, None])
+Y = tf.placeholder(tf.int32, [None, None])
+X_seq_len = tf.placeholder(tf.int32, [None])
+Y_seq_len = tf.placeholder(tf.int32, [None])
+
+# ENCODER         
+encoder_out, encoder_state = tf.nn.dynamic_rnn(
+    cell = tf.nn.rnn_cell.BasicLSTMCell(128), 
+    inputs = tf.contrib.layers.embed_sequence(X, 10000, 128),
+    sequence_length = X_seq_len,
+    dtype = tf.float32)
+
+# DECODER COMPONENTS
+Y_vocab_size = 10000
+decoder_embedding = tf.Variable(tf.random_uniform([Y_vocab_size, 128], -1.0, 1.0))
+projection_layer = Dense(Y_vocab_size)
+decoder_cell = tf.nn.rnn_cell.BasicLSTMCell(128)
+
+# TRAINING DECODER
+training_helper = tf.contrib.seq2seq.TrainingHelper(
+    inputs = tf.nn.embedding_lookup(decoder_embedding, Y),
+    sequence_length = Y_seq_len,
+    time_major = False)
+training_decoder = tf.contrib.seq2seq.BasicDecoder(
+    cell = decoder_cell,
+    helper = training_helper,
+    initial_state = encoder_state,
+    output_layer = projection_layer)
+training_decoder_output, _, _ = tf.contrib.seq2seq.dynamic_decode(
+    decoder = training_decoder,
+    impute_finished = True,
+    maximum_iterations = tf.reduce_max(Y_seq_len))
+training_logits = training_decoder_output.rnn_output
+
+# PREDICTING_DECODER
+predicting_decoder = tf.contrib.seq2seq.BeamSearchDecoder(
+    cell = decoder_cell,
+    embedding = decoder_embedding,
+    start_tokens = tf.tile(tf.constant([1], dtype=tf.int32), [128]),
+    end_token = 2,
+    initial_state = tf.contrib.seq2seq.tile_batch(encoder_state, multiplier=10),
+    beam_width = 10,
+    output_layer = projection_layer,
+    length_penalty_weight = 0.0)
+predicting_decoder_output, _, _ = tf.contrib.seq2seq.dynamic_decode(
+    decoder = predicting_decoder,
+    impute_finished = True,
+    maximum_iterations = 2 * tf.reduce_max(Y_seq_len))
+predicting_logits = predicting_decoder_output.sample_id
+
+# LOSS
+masks = tf.sequence_mask(Y_seq_len, tf.reduce_max(Y_seq_len), dtype=tf.float32)
+loss = tf.contrib.seq2seq.sequence_loss(logits = training_logits, targets = Y, weights = masks)
+
+# BACKWARD
+params = tf.trainable_variables()
+gradients = tf.gradients(loss, params)
+clipped_gradients, _ = tf.clip_by_global_norm(gradients, 5.0)
+train_op = tf.train.AdamOptimizer().apply_gradients(zip(clipped_gradients, params))
+The error occurs at BeamSearchDecoder:
+Traceback (most recent call last):
+  File "test.py", line 48, in <module>
+    length_penalty_weight = 0.0)
+  File "/Users/l2015005/anaconda2/lib/python2.7/site-packages/tensorflow/contrib/seq2seq/python/ops/beam_search_decoder.py", line 175, in __init__
+    initial_state, self._cell.state_size)
+  File "/Users/l2015005/anaconda2/lib/python2.7/site-packages/tensorflow/python/util/nest.py", line 319, in map_structure
+    assert_same_structure(structure[0], other, check_types=check_types)
+  File "/Users/l2015005/anaconda2/lib/python2.7/site-packages/tensorflow/python/util/nest.py", line 146, in assert_same_structure
+    % (nest1, nest2))
+ValueError: The two structures don't have the same number of elements. First structure: Tensor("tile_batch/Reshape:0", shape=(20, ?, 128), dtype=float32), second structure: LSTMStateTuple(c=128, h=128).

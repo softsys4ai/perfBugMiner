@@ -1,0 +1,159 @@
+Possible Bug - tf.nn.moments differing outputs
+
+Hello,
+I am observing differing outputs from tf.nn.moments when I run it multiple times on the same data, using GPU.  This makes it difficult for me to replicate my learning process!  See the logs at the bottom for what I mean.  I would expect the difference between moments across runs on the same data to be zero, but that is not the case in the logs I attached below (and most of the times I run it).
+If I run on CPU it is fine though.  Also, if I compute moments over smaller sets of data the problems seems to occur less often.
+Not sure what would be causing this, my guess would be some sort of numerical instability?  Help would be appreciated!
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+None found, I discovered this issue when trying to get replicable results using batch_norm in contrib.
+Environment info
+Operating System: Ubuntu 14.04.5 LTS (running in a singularity container on a CentOS 6.7 host).
+Installed version of CUDA and cuDNN:
+I am using CUDA 8.0 with NVIDIA driver 367.48, and cuDNN v5.1 .
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+libOpenCL.so
+libOpenCL.so.1
+libOpenCL.so.1.0
+libOpenCL.so.1.0.0
+libcublas.so
+libcublas.so.8.0
+libcublas.so.8.0.45
+libcublas_device.a
+libcublas_static.a
+libcudadevrt.a
+libcudart.so
+libcudart.so.8.0
+libcudart.so.8.0.44
+libcudart_static.a
+libcudnn.so
+libcudnn.so.5
+libcudnn.so.5.1.5
+libcudnn_static.a
+libcufft.so
+libcufft.so.8.0
+libcufft.so.8.0.44
+libcufft_static.a
+libcufftw.so
+libcufftw.so.8.0
+libcufftw.so.8.0.44
+libcufftw_static.a
+libcuinj64.so
+libcuinj64.so.8.0
+libcuinj64.so.8.0.44
+libculibos.a
+libcurand.so
+libcurand.so.8.0
+libcurand.so.8.0.44
+libcurand_static.a
+libcusolver.so
+libcusolver.so.8.0
+libcusolver.so.8.0.44
+libcusolver_static.a
+libcusparse.so
+libcusparse.so.8.0
+libcusparse.so.8.0.44
+libcusparse_static.a
+libnppc.so
+libnppc.so.8.0
+libnppc.so.8.0.44
+libnppc_static.a
+libnppi.so
+libnppi.so.8.0
+libnppi.so.8.0.44
+libnppi_static.a
+libnppial.so
+libnppial.so.8.0
+libnppial.so.8.0.44
+libnppicc.so
+libnppicc.so.8.0
+libnppicc.so.8.0.44
+libnppicom.so
+libnppicom.so.8.0
+libnppicom.so.8.0.44
+libnppidei.so
+libnppidei.so.8.0
+libnppidei.so.8.0.44
+libnppif.so
+libnppif.so.8.0
+libnppif.so.8.0.44
+libnppig.so
+libnppig.so.8.0
+libnppig.so.8.0.44
+libnppim.so
+libnppim.so.8.0
+libnppim.so.8.0.44
+libnppist.so
+libnppist.so.8.0
+libnppist.so.8.0.44
+libnppisu.so
+libnppisu.so.8.0
+libnppisu.so.8.0.44
+libnppitc.so
+libnppitc.so.8.0
+libnppitc.so.8.0.44
+libnpps.so
+libnpps.so.8.0
+libnpps.so.8.0.44
+libnpps_static.a
+libnvToolsExt.so
+libnvToolsExt.so.1
+libnvToolsExt.so.1.0.0
+libnvblas.so
+libnvblas.so.8.0
+libnvblas.so.8.0.44
+libnvgraph.so
+libnvgraph.so.8.0
+libnvgraph.so.8.0.44
+libnvgraph_static.a
+libnvrtc-builtins.so
+libnvrtc-builtins.so.8.0
+libnvrtc-builtins.so.8.0.44
+libnvrtc.so
+libnvrtc.so.8.0
+libnvrtc.so.8.0.44
+stubs
+
+I installed tensorflow using the 0.11.0rc2-gpu tag on docker hub.
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import numpy as np
+import tensorflow as tf
+
+batch_size = 2**10
+channel_size = 100
+
+if __name__ == "__main__":
+
+    with tf.device('/gpu:0'):
+        x = tf.placeholder(tf.float32, shape=[None, channel_size],
+                           name='input')
+        mom = tf.nn.moments(x, [0])
+
+    feed_dict = {}
+    feed_dict['input:0'] = np.random.rand(batch_size, channel_size)
+
+    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
+        tf.initialize_all_variables().run()
+        [mom_out1] = sess.run([mom], feed_dict=feed_dict)
+        [mom_out2] = sess.run([mom], feed_dict=feed_dict)
+    print "DIFFERENCE:", mom_out1[0][0] - mom_out2[0][0]
+
+What other attempted solutions have you tried?
+No other solutions tried.
+Logs or other output that would be helpful
+Output of running my the code once:
+WARNING: Not mounting current directory: user bind control is disabled by system administrator
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcurand.so locally
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 0 with properties: 
+name: GeForce GTX TITAN X
+major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:09:00.0
+Total memory: 11.92GiB
+Free memory: 11.81GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:972] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:982] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:09:00.0)
+DIFFERENCE: -5.96046e-08

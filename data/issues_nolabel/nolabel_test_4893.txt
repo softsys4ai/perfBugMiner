@@ -1,0 +1,36 @@
+How to create `input_fn` using `read_batch_examples` with `num_epochs` set?
+
+TF Version: 0.10.0rc
+Update
+Solved the issue, see StackOverflow post here for solution.
+Original non-Issue...
+I have a basic input_fn that can be used with Tensorflow Estimators below. It works flawlessly without setting the num_epochs parameter; the obtained tensor has a discrete shape. Pass in num_epochs as anything other than None results in an unknown shape. My issue lies with constructing sparse tensors whilst using num_epochs; I cannot figure out how to generically create said tensors without knowing the shape of the input tensor.
+Can anyone think of a solution to this problem? I'd like to be able to pass num_epochs=1 to be able to evaluate only 1 time over the data set, as well as to pass to predict to yield a set of predictions the size of the data set, no more no less.
+    def input_fn(batch_size):
+        examples_op = tf.contrib.learn.read_batch_examples(
+            FILE_NAMES,
+            batch_size=batch_size,
+            reader=tf.TextLineReader,
+            num_epochs=1,
+            parse_fn=lambda x: tf.decode_csv(x, [tf.constant([''], dtype=tf.string)] * len(HEADERS)))
+
+        examples_dict = {}
+        for i, header in enumerate(HEADERS):
+            examples_dict[header] = examples_op[:, i]
+
+        continuous_cols = {k: tf.string_to_number(examples_dict[k], out_type=tf.float32)
+                           for k in CONTINUOUS_FEATURES}
+
+        # Problems lay here while creating sparse categorical tensors
+        categorical_cols = {
+            k: tf.SparseTensor(
+                indices=[[i, 0] for i in range(examples_dict[k].get_shape()[0])],
+                values=examples_dict[k],
+                shape=[int(examples_dict[k].get_shape()[0]), 1])
+            for k in CATEGORICAL_FEATURES}
+
+        feature_cols = dict(continuous_cols)
+        feature_cols.update(categorical_cols)
+        label = tf.string_to_number(examples_dict[LABEL], out_type=tf.int32)
+
+        return feature_cols, label

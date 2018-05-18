@@ -1,0 +1,55 @@
+InvalidArgumentError even finished feeding the values, maybe hidden bug of variable dependency
+
+I have defined two classes of models, x and y.
+class x():
+    def __init__(self, x_inp1, x_inp2):
+        # do sth...
+
+    def step(self, session, encoder_inputs):
+        input_feed = {}
+        for l in range(encoder_size):
+             input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
+        ...
+        output_feed = [x_output]
+        return session.run(x_output)
+
+class y():
+    def __init__(self, y_inp1, y_inp2):
+        # do sth...
+
+    def step(self, encoder_inputs):
+        input_feed = {}
+        for l in range(encoder_size):
+             input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
+        ...
+
+They have quite similar functions. And then I define another class to group them up.
+class gp():
+    def __init__(self, x_inp1, x_inp2, y_inp1, y_inp2):
+        with tf.variable_scope('x'):
+              self.x_model = x(x_inp1, x_inp2)
+        with tf.variable_scope('y'):
+              self.y_model = y(y_inp1, y_inp2)
+    def step(self, session, encoder_inputs):
+        print('train x....')
+        x_output = self.x_model.step(session, encoder_inputs)
+        print('train y....')
+        y_output = self.y_model.step(session, x_output)
+        ...
+
+Please notice that the y_model takes the output of x_model as input. And I run the gp() in the main function:
+with tf.Session() as sess:
+     gp_m = gp(x_inp1, x_inp2, y_inp1, y_inp2)
+     gp_m.step(sess, x_inp1, x_inp2, y_inp1, y_inp2)
+
+And after running  x_output = self.x_model.step(encoder_inputs) and begin to do y_output = self.y_model.step(x_output), I got such an error:
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'x/encoder0' with dtype int32
+ [[Node: x/encoder0 = Placeholder[dtype=DT_INT32, shape=[], _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+Please notice this error points to the x_model even the step function of it has been finished, i.e., both train x... and train y... are shown. The x_output should be python list and numpy array, and it is not Tensorflow object anymore. So maybe there is any bug of the variable dependency? Or I have any wrong operation that cause such a kind of error?
+Here are the information maybe useful:
+operation system:  mac os 10.10
+python: 3.5
+tensorflow: r1.0
+install: from binary
+install using pip

@@ -1,0 +1,44 @@
+Feature request: unsafe_div op
+
+As discussed with @drpngx in #14667 , we found that several PRs are related to division by zero problem, for example, #15443, #14865.
+why
+In metrics, loss and math_ops modules, all create a _safe_div or _safe_scalar_div method with help of array_ops.where to resolve the problem. However, we think those implementations have three disadvantages:
+
+Lack of generality: most are designed for only scalar.
+Not efficient.
+Since where ops propagates NaNs in gradients (#2540), we have to use nested where trick which is a little counter-intuitive.
+
+what
+Above all, we propose to create new c++ op: safe_div:
+
+When denominator is zero, return 0 or numerator. The behavior can be selected by user themselves.
+Optional: Treat negative as zero, which is sometime useful for loss calculation.
+Create its own gradient op to avoid NaN problem for where.
+
+I think for metric, loss and gradient calculation, they could benefit from the op and get rid of NaN.
+And I'd like to contribute the op in contrib at first if the proposition is approved by tensorflowers.
+how
+By the way, since  the namesafe_div has been used in cwise_ops.h, whose behavior is opposite: raise an exception for integer when divide by zero.
+
+  
+    
+      tensorflow/tensorflow/core/kernels/cwise_ops.h
+    
+    
+         Line 703
+      in
+      3629fc4
+    
+    
+    
+    
+
+        
+          
+           struct safe_div : base<T, Eigen::internal::safe_div_or_mod_op< 
+        
+    
+  
+
+
+So perhaps we need to either rename it or create a new name for our op. Does anyone has a good idea?

@@ -1,0 +1,41 @@
+Momentum and Adagrad don't work with reshape and embeddings
+
+Momentum and Adagrad optimizers do not work when I use tf.reshape like this:
+embeddings = tf.Variable(                                                                                                  
+    tf.random_uniform([50000, 50], -1.0, 1.0))
+
+embed = tf.reshape(                                                                                                        
+        tf.nn.embedding_lookup(embeddings, input_op),                                                                          
+        [-1, em_layer_size])
+
+# a few dense layers and a softmax would follow here
+The code above works with SGD and AdamOptimizer. With Momentum or Adagrad it produces this error:
+    optimizer = tf.train.MomentumOptimizer(0.01, 0.9).minimize(loss)
+  File "/home/tom/tf-env/local/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 188, in minimize
+    name=name)
+  File "/home/tom/tf-env/local/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 289, in apply_gradients
+    update_ops.append(self._apply_sparse(grad, var))
+  File "/home/tom/tf-env/local/lib/python2.7/site-packages/tensorflow/python/training/momentum.py", line 70, in _apply_sparse
+    self._momentum_tensor, use_locking=self._use_locking).op
+  File "/home/tom/tf-env/local/lib/python2.7/site-packages/tensorflow/python/training/gen_training_ops.py", line 237, in sparse_apply_momentum
+    name=name)
+  File "/home/tom/tf-env/local/lib/python2.7/site-packages/tensorflow/python/ops/op_def_library.py", line 664, in apply_op
+    op_def=op_def)
+  File "/home/tom/tf-env/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1836, in create_op
+    set_shapes_for_outputs(ret)
+  File "/home/tom/tf-env/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1476, in set_shapes_for_outputs
+    shapes = shape_func(op)
+  File "/home/tom/tf-env/local/lib/python2.7/site-packages/tensorflow/python/training/training_ops.py", line 130, in _SparseApplyMomentumShape
+    tensor_shape.TensorShape([None]).concatenate(accum_shape[1:]))
+  File "/home/tom/tf-env/local/lib/python2.7/site-packages/tensorflow/python/framework/tensor_shape.py", line 527, in merge_with
+    self.assert_same_rank(other)
+  File "/home/tom/tf-env/local/lib/python2.7/site-packages/tensorflow/python/framework/tensor_shape.py", line 570, in assert_same_rank
+    "Shapes %s and %s must have the same rank" % (self, other))
+ValueError: Shapes TensorShape([Dimension(None), Dimension(None), Dimension(None)]) and TensorShape([Dimension(None), Dimension(50)]) must have the same rank
+
+This might be connected to #464, the error is similar and also appears with Momentum and Adagrad.
+When I replace the tf.reshape with following code, the error disappears:
+_emb = []                                                                                                                 
+for x in tf.split(1, 4, input_op):                                                                          
+    _emb.append(tf.nn.embedding_lookup(embeddings, tf.squeeze(x)))                                                        
+embed = tf.concat(1, _emb)

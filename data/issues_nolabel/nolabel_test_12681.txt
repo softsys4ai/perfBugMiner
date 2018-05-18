@@ -1,0 +1,116 @@
+Feature request: dilated pooling
+
+Hi,
+I posted initially in keras-users, but @fchollet suggested that this would need to be implemented first at TensorFlow level
+https://groups.google.com/forum/#!topic/keras-users/ZVtI8Ef6508
+Similarly to dilated convolution, dilated pooling uses a dilated kernel. For example, dilated kernel with pool_size=(3,2), dilation_rate=(2,4) (* = non-zero elements: this is where values are sampled to compute max pooling)
+    * 0 0 0 *
+    0 0 0 0 0
+    * 0 0 0 *
+    0 0 0 0 0
+    * 0 0 0 *
+
+This was proposed in
+Li H, Zhao R, Wang X. Highly efficient forward and backward propagation of convolutional neural networks for pixelwise classification. arXiv preprint arXiv:14124526. 2014.
+and it's used by DeepCell
+Van Valen et al. (2016), PLoS Comput Biol, "Deep Learning Automates the Quantitative Analysis of Individual Cells in Live-Cell Imaging Experiments"​ http://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1005177
+DeepCell is state of the art for cell segmentation, but it's implemented with Keras 1, and ad-hoc code based on a bit outdated Theano.
+https://github.com/CovertLab/DeepCell
+To the best of my knowledge, there's a lack of testing of whether dilation in pooling improves segmentation. I have written one in Keras, by shifting the kernel and slicing the image, then running regular 2D pooling on each slice, and reassembling the results (code at the end of post, but probably not very interesting). However, this approach is probably quite inefficient.
+The question would be whether any TF developer would be willing to extend the current tf.contrib.keras.backend.pool2d
+pool2d(
+    x,
+    pool_size,
+    strides=(1, 1),
+    padding='valid',
+    data_format=None,
+    pool_mode='max'
+)
+
+
+with a dilation_rate argument, and the functionality at that level. From there, @fchollet is happy to modify the Keras API to include this option.
+Code for Keras implementation of dilated 2D pooling
+    def _pooling_function(self, inputs, pool_size, strides,
+                          padding, data_format, dilation_rate):
+
+        # inputs for tests
+        inputs = K.variable(np.reshape(range(1,4*3*5*8+1), (4, 3, 5, 8)))########
+        inputs = K.variable(np.reshape(range(1,1*1*5*8+1), (1, 1, 5, 8)))########
+        
+        if data_format == 'channels_first': # (batch,chan,row,col)
+            nbatch = K.get_variable_shape(inputs)[0]
+            #nchan = K.get_variable_shape(inputs)[1]
+            nrows = K.get_variable_shape(inputs)[2]
+            ncols = K.get_variable_shape(inputs)[3]
+        elif data_format == 'channels_last': # (batch,row,col,chan)
+            nbatch = K.get_variable_shape(inputs)[0]
+            #nchan = K.get_variable_shape(inputs)[1]
+            nrows = K.get_variable_shape(inputs)[2]
+            ncols = K.get_variable_shape(inputs)[3]
+        else:
+            raise ValueError('Expected data format to be channels_first or channels_last')
+
+        # number of blocks to split the input into. Each dilation (row or 
+        # column) goes into a separate block
+        nblocks = dilation_rate
+        
+        # size of each block we are going to split the input images in
+        block_sz = (int(np.ceil(nrows / dilation_rate[0])), 
+                    int(np.ceil(ncols / dilation_rate[1])))
+
+        # pad inputs so that they can be split into equal blocks
+        padded_size = np.multiply(block_sz, nblocks)
+        padding_len = ((0, padded_size[0] - nrows), (0, padded_size[1] - ncols))
+        inputs = K.spatial_2d_padding(inputs, padding=padding_len, data_format=data_format)
+ 
+        # split the inputs into blocks
+        split_inputs = []
+        for row_offset in range(nblocks[0]):
+            for col_offset in range(nblocks[1]):
+                if data_format == 'channels_first': # (batch,chan,row,col)
+                    split_inputs = split_inputs + [inputs[:, :, row_offset::dilation_rate[0], col_offset::dilation_rate[1]]]
+                elif data_format == 'channels_last': # (batch,row,col,chan)
+                    split_inputs = split_inputs + [inputs[:, row_offset::dilation_rate[0], col_offset::dilation_rate[1], :]]
+        split_inputs = K.concatenate(split_inputs, axis=0)                        
+    
+        # pool each block without dilation
+        split_inputs = K.pool2d(split_inputs, pool_size, strides=(1,1),
+                                padding='same', data_format=data_format,
+                                pool_mode='max')
+
+        # reassemble blocks
+        output = np.zeros(shape=list(inputs.shape.eval()), dtype=inputs.dtype)
+        for idx in range(nbatch*nblocks[0]*nblocks[1]):
+            multi_index = np.unravel_index(idx, dims=(nblocks[0], nblocks[1], nbatch))
+            row_offset = multi_index[0]
+            col_offset = multi_index[1]
+            batch = multi_index[2]
+            if data_format == 'channels_first': # (batch,chan,row,col)
+                output[batch, :, row_offset::dilation_rate[0], col_offset::dilation_rate[1]] = split_inputs[idx, :, :, :].eval()
+            elif data_format == 'channels_last': # (batch,row,col,chan)
+                output[batch, row_offset::dilation_rate[0], col_offset::dilation_rate[1], :] = split_inputs[idx, :, :, :].eval()
+        output = K.variable(output)
+        
+        # remove padding
+        if padding == 'valid':
+            
+            if data_format == 'channels_first': # (batch,chan,row,col)
+                output = output[:, :, (pool_size[0]-1)*dilation_rate[0]:nrows, 
+                                (pool_size[1]-1)*dilation_rate[1]:ncols]
+            elif data_format == 'channels_last': # (batch,row,col,chan)
+                output = output[:, (pool_size[0]-1)*dilation_rate[0]:nrows, 
+                                (pool_size[1]-1)*dilation_rate[1]:ncols, :]
+                    
+        elif padding == 'same':
+        
+            if data_format == 'channels_first': # (batch,chan,row,col)
+                output = output[:, :, 0:nrows, 0:ncols]
+            elif data_format == 'channels_last': # (batch,row,col,chan)
+                output = output[:, 0:nrows, 0:ncols, :]
+                
+        else:
+            
+            raise NotImplementedError
+
+        # return tensor
+        return output

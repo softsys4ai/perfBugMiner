@@ -1,0 +1,174 @@
+On Network with Shared Weights, Optimizer.minimize has no effect
+
+I have a simple siamese network--a network with two branches that share weights--and a script to train it on some very simple data. The loss and gradients are both non-zero, but executing an optimizer.minimize(loss) operation has no effect on the weights. Executing it in two steps with compute_gradients and apply_gradients also has no effect.
+I have tried multiple optimizers and settings, and explored StackOverflow without finding relevant information.
+I have included both scripts (they are small) with the relevant debug statements so that you can easily inspect the weights and gradients as well. You will see that the accuracy/weights/gradients do not change (loss changes because new batches are being computed each iteration).
+
+System information
+
+Windows 10, up to date
+Tensorflow 1.2.0, CPU-only mode
+Python 3.5
+Executing from Windows terminal
+
+Network constructor:
+import tensorflow as tf
+
+class SameDiffNet:
+	# a siamese FC network for classifying vectors as same/different
+	
+	def __init__(self,inputLen):
+		# settings
+		self.NUM_BRANCHES = 2
+		self.LAYER_SIZES = [20,20]
+		self.DATA_TYPE = tf.float32
+		self.NORM_CONSTANT = 0.0001
+		
+		# input
+		self.inputs = []
+		for branch in range(self.NUM_BRANCHES):
+			self.inputs.append(tf.placeholder(self.DATA_TYPE,[None,inputLen]))
+
+		# network branches
+		self.branches = []
+		self.branchWeights = self.branch_weights(inputLen)
+		for branch in range(self.NUM_BRANCHES):
+			self.branches.append(self.network_branch(branch))
+				
+		# combination layer and loss
+		self.out = self.distance_layer_euclidean()
+		self.target = tf.placeholder(self.DATA_TYPE,[None, 1])
+		self.loss = self.contrastive_loss()
+		self.accuracy = self.my_accuracy()
+		
+	def branch_weights(self,inputLen):
+		# weights are shared, so they are computed once and re-used to make multiple graphs
+		# They are stored as a dictionary of arrays for flexible layer shapes and sizes
+		netWeights = {"weights": [], "bias": []}
+		netWeights["weights"].append(tf.Variable(tf.random_normal([inputLen,self.LAYER_SIZES[0]]), name="weights0"))
+		netWeights["bias"].append(tf.Variable(tf.zeros([self.LAYER_SIZES[0]]),name="bias0"))
+		
+		for layer in range(1,len(self.LAYER_SIZES)):
+			netWeights["weights"].append(tf.Variable(tf.random_normal([self.LAYER_SIZES[layer-1],self.LAYER_SIZES[layer]]), name="weights" + str(layer)))
+			netWeights["bias"].append(tf.Variable(tf.zeros([self.LAYER_SIZES[layer]]), name="bias" + str(layer)))
+		
+		return netWeights
+		
+	def network_branch(self,branch):
+		fc = self.inputs[branch]
+		for layer in range(len(self.LAYER_SIZES)):
+			fc = tf.nn.relu(tf.nn.bias_add(tf.matmul(fc,self.branchWeights["weights"][layer]), self.branchWeights["bias"][layer]))
+		return fc
+			
+	def distance_layer_euclidean(self):
+		assert self.NUM_BRANCHES == 2
+		dist = tf.subtract(1.0,tf.sigmoid(tf.sqrt(tf.reduce_sum(tf.pow(tf.subtract(self.branches[0],self.branches[1]),2),1)+self.NORM_CONSTANT)))
+		return dist
+		
+	def cross_entropy_loss(self):
+		loss = tf.reduce_sum(tf.multiply(-1.0,tf.add(tf.multiply(self.target,tf.log(self.out+self.NORM_CONSTANT)),tf.multiply(1-self.target,tf.log(1-self.out+self.NORM_CONSTANT)))))
+		return loss
+		
+	def contrastive_loss(self):
+		loss = tf.reduce_sum(tf.pow(tf.subtract(self.out,self.target),2))
+		return loss 
+		
+         #Does not work either, so I wrote a simple replacement
+	def tf_accuracy(self):
+		return tf.metrics.accuracy(tf.round(self.out),self.target)
+		
+	def my_accuracy(self):
+		return tf.reduce_mean(tf.cast(tf.equal(tf.round(self.out), self.target),tf.float32))
+
+Run script:
+''' A simple test where we train our siamese network on toy examples
+Our training data consists of a pair of 0's and 1's, and our truth output will
+simply be the XOR of these two values'''
+
+import time
+import numpy as np
+import tensorflow as tf
+from sameDiffNet import SameDiffNet
+
+numTraining = 1000
+numTest = 500
+numIter = 10000
+
+sess = tf.InteractiveSession()
+network = SameDiffNet(2)
+optimizer = tf.train.GradientDescentOptimizer(0.1)
+train = optimizer.minimize(network.loss)
+gradients = optimizer.compute_gradients(network.loss) #,tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
+applyGrad = optimizer.apply_gradients(gradients)
+
+data = np.random.randint(0,2,(numTraining+numTest,2))
+truth = data[:,0] == data[:,1]
+truth = [float(not truth[b]) for b in range(numTraining+numTest)]
+data = data.astype(float)
+
+trainData = data[:numTraining,:]
+testData = data[numTraining:,:]
+trainTruth = truth[:numTraining]
+testTruth = truth[numTraining:]
+
+#Create test data once
+testPermutationL = np.random.permutation(numTest)
+testPermutationR = np.random.permutation(numTest)
+testTarget = [[float(testTruth[testPermutationL[i]] == testTruth[testPermutationR[i]])] for i in range(numTest)]
+
+tf.global_variables_initializer().run()
+
+#debugging
+print("Trainable Variables:")
+print(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
+
+for iter in range(numIter):
+	permutationL = np.random.permutation(numTraining)
+	permutationR = np.random.permutation(numTraining)
+	target = [[float(trainTruth[permutationL[i]] == trainTruth[permutationR[i]])] for i in range(numTraining)]
+	
+	# all large debug output is included in triple-quotes
+	
+	'''
+	print(data[permutationL[1:5],:])
+	print(data[permutationR[1:5],:])
+	print(target[1:5])
+	'''
+	
+	# you can run the optimization in two steps or one
+	'''
+	grad = sess.run([gradients], feed_dict={
+					network.inputs[0]:trainData[permutationL,:],
+					network.inputs[1]:trainData[permutationR,:],
+					network.target: target})
+	
+	sess.run([applyGrad])
+	'''
+	
+	_, loss = sess.run([train,network.loss], feed_dict={
+					network.inputs[0]:trainData[permutationL,:],
+					network.inputs[1]:trainData[permutationR,:],
+					network.target: target})
+		
+	totalLoss = np.sum(loss)
+	if np.isnan(totalLoss):
+		print('Model diverged with loss = NaN')
+		quit()
+
+	if iter % 10 == 0:
+		print ('step %d: loss %.3f' % (iter, totalLoss/numTraining))
+		acc = sess.run([network.accuracy],feed_dict={
+					network.inputs[0]:testData[testPermutationL,:],
+					network.inputs[1]:testData[testPermutationR,:],
+					network.target: testTarget});
+		print ('step %d: accuracy %.3f' % (iter, np.sum(acc)))
+
+	#debugging
+	'''
+	print("Gradients:")
+	print(grad)
+	'''
+	'''
+	print("First-Layer Weights:")
+	print(sess.run(network.branchWeights["weights"][0]))
+	'''

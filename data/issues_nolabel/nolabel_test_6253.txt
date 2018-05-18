@@ -1,0 +1,82 @@
+reduce_mean operation gives inconsistent results on GPU
+
+After hyperparameter optimization, the program I wrote does some checks to see that the results are consistent. However even with the same seeds everywhere, I found that TF doesn't always give the same results. Furthermore: the results of numpy mean and tensorflow reduce_mean also differ.
+After quite some digging, I found it's because the reduce_mean operation on the GPU gives inconsistent results. I think it's because the last two bits of the mantissa of the float returned are sometimes 01 and sometimes 10. The differences are minimally, however after a lot of reduce_mean operations, the differences can become quite significant.
+Below I've included a short code to reproduce the error. When using the GPU the results of the mean operation are sometimes different. When using the CPU the results are consistent However with both CPU & GPU the results of Numpy and TensorFlow are still sometimes different.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+None
+Environment info
+Operating System:
+Debian 8.6
+Kernel: Linux 3.16.0-4-amd64
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+/usr/local/cuda/lib64/libcudadevrt.a /usr/local/cuda/lib64/libcudart.so.8.0.44 /usr/local/cuda/lib64/libcudnn.so.5
+/usr/local/cuda/lib64/libcudart.so /usr/local/cuda/lib64/libcudart_static.a /usr/local/cuda/lib64/libcudnn.so.5.1.5
+/usr/local/cuda/lib64/libcudart.so.8.0 /usr/local/cuda/lib64/libcudnn.so /usr/local/cuda/lib64/libcudnn_static.a
+If installed from binary pip package, provide:
+
+
+A link to the pip package you installed:
+pip install tensorflow-gpu
+
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.12.rc1
+
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+The output of bazel version
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import os
+# comment line below to use CPU instead of GPU
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
+
+import tensorflow as tf
+import numpy as np
+
+SIZE = 1000
+
+tf_x = tf.placeholder(tf.float32, (None))
+tf_var2 = tf.reduce_mean(tf_x)
+
+x = np.random.rand(SIZE).astype(np.float32)
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+
+tf_mean= np.empty(SIZE, dtype=np.float32)
+np_mean=np.empty(SIZE, dtype=np.float32)
+
+for j in range(SIZE):
+    x_evaled, mean_ = sess.run([tf_x, tf_var2], feed_dict={tf_x: x})
+    tf_mean[j] = mean_
+    np_mean[j] = x.mean()
+
+same_ = (tf_mean == np_mean).astype(np.float32).mean()
+consistency_ = (tf_mean == tf_mean[0]).astype(np.float32).mean()
+
+# print results
+print('\nMin, Max TF mean: {}, {} \nMin, Max NP mean: {}, {}'.format(tf_mean.min(), tf_mean.max(), np_mean.min(), np_mean.max()))
+print('TF & NP was the same: {:.2%}'.format(same_))
+print('TF consistency: {:.2%}'.format(consistency_))
+
+What other attempted solutions have you tried?
+Changing the float to 16, 32, or 64 bit made no difference
+Logs or other output that would be helpful
+Using CPU:
+'''
+Min, Max TF mean: 0.49667325615882874, 0.49667325615882874
+Min, Max NP mean: 0.4966733157634735, 0.4966733157634735
+TF & NP were the same: 0.00%
+TF consistency: 100.00%
+'''
+Using GPU:
+'''
+Min, Max TF mean: 0.49240124225616455, 0.4924013018608093
+Min, Max NP mean: 0.49240124225616455, 0.49240124225616455
+TF & NP were the same: 29.80%
+TF consistency: 47.90%
+'''

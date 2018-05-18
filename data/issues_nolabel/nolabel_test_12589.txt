@@ -1,0 +1,48 @@
+ValueError: graph_def is invalid at node u'a/Assign': Input tensor 'a:0' Cannot convert a tensor of type string to an input of type string_ref.
+
+I want to change the input directory for validation using input_map in tf.train.import_meta_graph. Here is the demo code
+For training:
+from tensorflow.core.framework import variable_pb2
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import variables
+from tensorflow.python.framework.ops import register_proto_function
+
+register_proto_function(
+    ops.GraphKeys.LOCAL_VARIABLES,
+    proto_type=variable_pb2.VariableDef,
+    to_proto=variables.Variable.to_proto,
+    from_proto=variables.Variable.from_proto)
+a = tf.train.match_filenames_once('data/wxtrain/*', name='a')
+with tf.Session() as ss:
+    ss.run(tf.group(tf.local_variables_initializer(),tf.global_variables_initializer()))
+    saver = tf.train.Saver(tf.local_variables())
+    saver.save(ss, 'log/model.ckpt')
+    print(ss.run(a, feed_dict={a:'1.'}))
+
+For testing:
+from tensorflow.core.framework import variable_pb2
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import variables
+from tensorflow.python.framework.ops import register_proto_function
+
+register_proto_function(
+    ops.GraphKeys.LOCAL_VARIABLES,
+    proto_type=variable_pb2.VariableDef,
+    to_proto=variables.Variable.to_proto,
+    from_proto=variables.Variable.from_proto)
+newa = tf.train.match_filenames_once('data/wxtest/*', name='newa')
+latest = tf.train.latest_checkpoint('log/')
+saver = tf.train.import_meta_graph(latest+'.meta', 
+                                   input_map={'a:0':newa},
+                                   import_scope='import')
+with tf.Session() as ss:
+    ss.run(tf.group(tf.local_variables_initializer(),tf.global_variables_initializer()))
+    saver.restore(ss, latest)
+    print("resume ", latest)
+    print(ss.run(newa, feed_dict={newa:'2.'}))
+
+However, I encounter the following errors:
+
+ValueError: graph_def is invalid at node u'a/Assign': Input tensor 'a:0' Cannot convert a tensor of type string to an input of type string_ref.
+
+I use tensorflow 1.2. It seems to be a bug.

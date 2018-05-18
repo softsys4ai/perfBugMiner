@@ -1,0 +1,52 @@
+Can't run new ops in new session after sess.run RuntimeError
+
+Scenario:
+
+runtime error during session.run
+create new session
+new session fails to evaluate any tensor, giving same runtime error as in step 1.
+
+The following example fails to evaluate tf.constant with error tensorflow.python.framework.errors_impl.InvalidArgumentError: Cannot assign a device for operation 'Diag
+Using 12-day old version from this commit: ea94bbe
+import tensorflow as tf
+def main():
+  
+  sess = tf.Session()
+  with tf.device("/gpu:0"):
+    bad_op = tf.diag([1, 1])
+    
+  print("About to run tensor ", bad_op)
+  try:
+    sess.run(bad_op)
+  except:
+    print("First run failed, trying something else")
+
+  sess = tf.Session()
+  good_op = tf.constant(1)
+  sess.run(good_op)
+
+main()
+
+I thought it's something to do with TF_ExtendGraph not being called, but manually adding ExtendGraph before second call results in segmentation fault
+import tensorflow as tf
+def main():
+  
+  sess = tf.Session()
+  with tf.device("/gpu:0"):
+    bad_op = tf.diag([1, 1])
+    
+  print("About to run tensor ", bad_op)
+  try:
+    sess.run(bad_op)
+  except:
+    print("First run failed, trying something else")
+
+  sess = tf.Session()
+  good_op = tf.constant(1)
+  from tensorflow.python import pywrap_tensorflow as tf_session
+  from tensorflow.python.framework import errors
+  with errors.raise_exception_on_not_ok_status() as status:
+    tf_session.TF_ExtendGraph(sess._session, sess.graph.as_graph_def().SerializeToString(), None)
+  sess.run(good_op)
+
+main()

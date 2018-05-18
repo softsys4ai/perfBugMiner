@@ -1,0 +1,13 @@
+Add name of C++ source file to generated Python files for ops.
+
+While tracing back through the Python logging APIs to find their implementation, I ran into a dead end at the generated file gen_logging_ops.py. This generated file contains no information about where it came from. It took a fair amount of time poking through Bazel build files to track down the rule that generates this file from the output of a program that is linked against an object file that is produced by compiling logging_ops.cc.
+Other developers don't seem to have gotten that far; for example the reporter #8953 , who gave up without finding logging_ops.cc.
+This PR adds the name of the original C++ source file to the generated Python files for built-in operators. I've modified python_op_gen_main.cc to check whether it is running from one of the special executables that the Bazel build creates for these internal operators. If the program is running from inside such a rule, it generates a header comment with the name of the original C++ source file:
+"""Python wrappers around TensorFlow ops.
+
+This file is MACHINE GENERATED! Do not edit.
+Original C++ source file: logging_ops.cc
+"""
+
+Note the last line, "Original C++ source file...". This should be enough information for someone new to the project to track down the implementation of a built-in operator.
+I would have preferred to modify the REGISTER_OP() macro to incorporate information about the original source file in the OpDef itself, but doing so would have required modifying op_def.proto. Hence this approach of checking the executable name in python_op_gen_main.cc.

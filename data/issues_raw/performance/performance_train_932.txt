@@ -1,0 +1,30 @@
+thread pool deadlocks on shutdown
+
+ThreadPool dtor does not pop waiters from waiters_ list. As the result dead waiters are left on the list. If remaining tasks submit new tasks, thread pool deadlocks because some notifications are consumed by the leftover dead waiters instead of alive threads that should receive the notifications.
+Here is a simple test that does classical parallel decomposition and reliably deadlocks:
+static void BM_ParallelDivide(int iters, const char* impl) {
+  THREAD_POOL_IMPL_NAME = impl;
+  for (int i = 0; i < iters; i++) {
+    const int kTasks = 10;
+    const int kLevels = 22;
+    std::atomic<unsigned> count(kTasks * (1 << kLevels));
+    mutex done_lock;
+    condition_variable done;
+    bool done_flag = false;
+    std::function<void(int)> work;
+    ThreadPool pool(Env::Default(), "test", kNumThreads);
+    work = [&pool, &work, &count, &done_lock, &done, &done_flag](int level) {
+      if (level-- > 0) {
+        pool.Schedule([&work, level]() { work(level); });
+        pool.Schedule([&work, level]() { work(level); });
+        return;
+      }
+      delay();
+    };
+    for (int t = 0; t < kTasks; ++t) {
+      pool.Schedule([&work]() {
+        work(kLevels);
+      });
+    }
+  }
+}

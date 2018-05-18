@@ -1,0 +1,178 @@
+tf.nn.conv3d ignoring first spacial dimension
+
+Im using tensorflow 1.0.0 (python 3.5) on OSX(10.11.6 El Capitan), but the same problem occurred with tf version 1.0.1. also got this error when I tried to run the module with the google ml-engine.
+Relevant code
+def conv3d(inputs,weights, biases,layer_name,act=tf.nn.relu,padding='VALID'):
+    with tf.name_scope(layer_name):
+        with tf.name_scope('weights'):
+            tf.add_to_collection(tf.GraphKeys.WEIGHTS, weights)
+            variable_summaries(weights)
+        with tf.name_scope('biases'):
+            variable_summaries(biases)
+        with tf.name_scope('convWx_plus_b'):
+            preactivate = tf.nn.conv3d(inputs,weights,strides=[1,1,1,1,1],padding=padding) + biases
+            #preactivate = tf.nn.convolution(inputs,weights,padding,data_format='NDHWC')
+            tf.summary.histogram('preactivate', preactivate)
+            activation = act(preactivate) 
+            tf.summary.histogram('activation', activation)
+    return activation
+
+def weight_variable(shape,dtype=np.float32,partition_info=None):
+    shape[shape==None] = 1
+    n = np.prod(shape)
+    w = (np.random.randn(n) * np.sqrt(2./n)).astype(np.float32)
+    return tf.Variable(w.reshape(shape),trainable=True)
+
+def bias_variable(shape):
+    initial = tf.constant(0.1, shape=shape)
+    return tf.Variable(initial,trainable=True)
+
+
+def maxpool(inputs,padding='VALID'):
+    return tf.nn.max_pool3d(inputs,ksize=[1,2,2,2,1],strides=[1,2,2,2,1],padding=padding)
+
+def ll_model(inputs):
+    
+    input_layer = tf.reshape(inputs,[-1,65,65,65,2])
+    
+    W_conv1 = weight_variable([3,3,3,2,16])
+    b_conv1 = bias_variable([16])
+    conv1 = conv3d(input_layer,W_conv1,b_conv1,'conv1')
+
+    print(conv1.get_shape().as_list())
+
+    pad = tf.pad(conv1,[[0,0],[1,0],[1,0],[1,0],[0,0]],mode='CONSTANT')
+    print(pad.get_shape().as_list())
+    maxpool1 = maxpool(pad)
+    print(maxpool1.get_shape().as_list())
+
+    W_conv2 = weight_variable([3,3,3,16,24])
+    b_conv2 = bias_variable([24])
+    conv2 = conv3d(maxpool1,W_conv2, b_conv2,'conv2',padding="SAME")
+    print(conv2.get_shape().as_list())
+    W_conv3 = weight_variable([3,3,3,24,28])
+    b_conv3 = bias_variable([28])
+    conv3 = conv3d(conv2,W_conv3,b_conv3,'conv3',padding="SAME")
+    print(conv3.get_shape().as_list())
+    W_conv4 = weight_variable([4,4,4,28,34])
+    b_conv4 = bias_variable([34])
+    conv4 = conv3d(conv3,W_conv4,b_conv4,'conv4')
+    print(conv4.get_shape().as_list())
+    W_conv5 = weight_variable([5,5,5,34,42])
+    b_conv5 = bias_variable([42])
+    conv5 = conv3d(conv4,W_conv5,b_conv5,'conv5')
+    print(conv5.get_shape().as_list())
+    W_conv6 = weight_variable([5,5,5,42,50])
+    b_conv6 = bias_variable([50])
+    conv6 = conv3d(conv5,W_conv6,b_conv6,'conv6')
+    print(conv6.get_shape().as_list())
+    W_conv7 = weight_variable([5,5,5,50,50])
+    b_conv7 = bias_variable([50])
+    conv7 = conv3d(conv6,W_conv7,b_conv7,'conv7')
+    print(conv7.get_shape().as_list())
+    W_conv8 = weight_variable([1,1,1,50,2])
+    b_conv8 = bias_variable([2])
+    conv8 = conv3d(conv7,W_conv8, b_conv8,'output',act=depth_softmax)
+    
+    return conv8
+
+the error happens when compiling the model. conv8 is supposed to have the shape [None,17,17,17,2].
+The Error:
+python task.py                                                                       
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 ins
+tructions, but these are available on your machine and could speed up CPU computations.                     
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 ins
+tructions, but these are available on your machine and could speed up CPU computations.                     
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instru
+ctions, but these are available on your machine and could speed up CPU computations.                        
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instr
+uctions, but these are available on your machine and could speed up CPU computations.                       
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instru
+ctions, but these are available on your machine and could speed up CPU computations.                        
+[None, 65, 63, 63, 16]                                                                                      
+[None, 66, 64, 64, 16]                                                                                      
+[None, 33, 32, 32, 16]                                                                                      
+[None, 33, 32, 32, 24]                                                                                      
+[None, 33, 32, 32, 28]                                                                                      
+[None, 33, 29, 29, 34]                                                                                      
+[None, 33, 25, 25, 42]                                                                                      
+[None, 33, 21, 21, 50]                                                                                      
+[None, 33, 17, 17, 50]                                                                                      
+Traceback (most recent call last):                                                                          
+  File "/Users/vhasfclanga/anaconda/envs/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/
+common_shapes.py", line 670, in _call_cpp_shape_fn_impl                                                     
+    status)                                                                                                 
+  File "/Users/vhasfclanga/anaconda/envs/tensorflow/lib/python3.5/contextlib.py", line 66, in __exit__      
+    next(self.gen)                                                                                          
+  File "/Users/vhasfclanga/anaconda/envs/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/
+errors_impl.py", line 469, in raise_exception_on_not_ok_status                                              
+    pywrap_tensorflow.TF_GetCode(status))                                                                   
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Dimensions must be equal, but are 17 and 33 fo
+r 'SquaredDifference' (op: 'SquaredDifference') with input shapes: [?,17,17,17,2], [?,33,17,17,2].          
+                                                                                                            
+During handling of the above exception, another exception occurred:                                         
+                                                                                                            
+Traceback (most recent call last):                                                                          
+  File "task.py", line 33, in <module>                                                                      
+    loss = mean_square_error(y,ll_model(x))                                                                 
+  File "/Users/vhasfclanga/tflow_trainer/trainer/functions.py", line 80, in mean_square_error               
+    return tf.reduce_sum(tf.squared_difference(a,b)) / N                                                    
+  File "/Users/vhasfclanga/anaconda/envs/tensorflow/lib/python3.5/site-packages/tensorflow/python/ops/gen_ma
+th_ops.py", line 2754, in squared_difference                                                                
+    result = _op_def_lib.apply_op("SquaredDifference", x=x, y=y, name=name)                                 
+  File "/Users/vhasfclanga/anaconda/envs/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/
+op_def_library.py", line 763, in apply_op                                                                   
+    op_def=op_def)                                                                                          
+  File "/Users/vhasfclanga/anaconda/envs/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/
+ops.py", line 2397, in create_op                                                                            
+    set_shapes_for_outputs(ret)                                                                             
+  File "/Users/vhasfclanga/anaconda/envs/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/
+ops.py", line 1757, in set_shapes_for_outputs                                                               
+    shapes = shape_func(op)                                                                                 
+  File "/Users/vhasfclanga/anaconda/envs/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/
+ops.py", line 1707, in call_with_requiring                                                                  
+    return call_cpp_shape_fn(op, require_shape_fn=True)                                                     
+  File "/Users/vhasfclanga/anaconda/envs/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/
+common_shapes.py", line 610, in call_cpp_shape_fn                                                           
+    debug_python_shape_fn, require_shape_fn)                                                                
+  File "/Users/vhasfclanga/anaconda/envs/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/
+common_shapes.py", line 675, in _call_cpp_shape_fn_impl                                                     
+    raise ValueError(err.message)                                                                           
+ValueError: Dimensions must be equal, but are 17 and 33 for 'SquaredDifference' (op: 'SquaredDifference') wi
+th input shapes: [?,17,17,17,2], [?,33,17,17,2].
+
+As you can see, these are the shapes of the tensors resulting from each convolutional layer.
+[None, 65, 63, 63, 16]
+[None, 66, 64, 64, 16]
+[None, 33, 32, 32, 16]
+[None, 33, 32, 32, 24]
+[None, 33, 32, 32, 28]
+[None, 33, 29, 29, 34]
+[None, 33, 25, 25, 42]
+[None, 33, 21, 21, 50]
+[None, 33, 17, 17, 50]
+Notice the first spacial dimension is only effected by pooling and padding layers, and is totally ignored by convolutional layers. It's strange to me because everything should be symmetric across spatial dimensions.
+I've tried using tf.nn.convolution as seen in my conv3d wrapper, that yielded the same result. I've tried switching up the padding, that also didn't work. I tried using the higher level functions in tf.layers to construct the model, that also didn't work. The fact that none of these methods worked makes me think this must be a programming error on my part, but the error is coming from a simple propagation of tensor shapes, starting with placeholders
+with tf.name_scope('inputs'):
+    x = tf.placeholder(tf.float32,shape=[None,65,65,65,2],name='features')
+    tf.summary.histogram('feature-hist', x)
+with tf.name_scope('ground_truth'):
+    y = tf.placeholder(tf.float32,shape=[None,17,17,17,2],name='targets')
+    tf.summary.histogram('target-hist', y)
+
+
+So I'm not sure where I could have possibly gone wrong.
+Also, this exact model structure resulted in the correct output shape when used with the Estimator + ModelFnOps API.
+the error can be reproduced by using one of the built in loss functions and running
+tf.some_loss_function(y,ll_model(x))
+the function I was using was
+def mean_square_error(a,b):
+    shape = a.get_shape().as_list()
+    shape[shape==None] = 1
+    N = np.prod(shape)
+    return tf.reduce_sum(tf.squared_difference(a,b)) / N
+
+
+Does anyone know if this is a bug or programming error on my part?
+Thanks in advance,
+Alex

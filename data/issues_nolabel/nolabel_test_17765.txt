@@ -1,0 +1,39 @@
+how to set sample weight  for binary classfication
+
+I Know tf.losses.sparse_softmax_cross_entropy could set weights for different samples, But I don not know how to use it in my_custom_model
+for example, in the ctr predicition, I want set 10 weights for the order samples, and the weight of click samples and the unclick sample is still 1.
+Here is my unweighted code
+`
+def my_custom_model(features, labels, mode, params):
+net = tf.feature_column.input_layer(features, params['feature_columns'])
+
+for units in params['hidden_units']:
+    net = tf.layers.dense(net, units=units, activation=params["activation"])  
+
+logits = tf.layers.dense(net, params['n_classes'], activation=None)
+
+if mode == tf.estimator.ModeKeys.PREDICT:
+    predictions = {
+        'probabilities': tf.nn.softmax(logits),
+        'logits': logits,
+   }
+   return tf.estimator.EstimatorSpec(mode, predictions=predictions)
+
+loss = tf.losses.sparse_softmax_cross_entropy(labels=labels, logits=logits)
+
+metrics = {'auc': tf.metrics.auc(labels=labels, predictions=tf.nn.softmax(logits)[:,1])}
+
+if mode == tf.estimator.ModeKeys.EVAL:
+    return tf.estimator.EstimatorSpec(mode, loss=loss, eval_metric_ops=metrics)
+
+assert mode == tf.estimator.ModeKeys.TRAIN
+optimizer = tf.train.AdagradOptimizer(learning_rate=0.1)
+train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step()) 
+return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=train_op)
+
+
+train_input_fn = tf.estimator.inputs.pandas_input_fn(x=data_train, y=data_train_click, batch_size = 1024, num_epochs=1, shuffle=False)
+classifier.train(input_fn=train_input_fn)`
+Here data_train_click is a Series, which the click samples are 1 and the unclicked samples are 0.
+And in the weight Series data_train_weight , the order samples are 10 and the others are 1.
+However, I don't known how to use data_train_weight in my model.

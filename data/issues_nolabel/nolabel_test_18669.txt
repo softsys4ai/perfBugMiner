@@ -1,0 +1,92 @@
+Unable to reuse opaque_kernel variable in CudnnLSTM for FP16
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Binary using GPUs
+TensorFlow version (use command below): 1.7.0
+Python version: 2.7
+Bazel version (if compiling from source): NA
+GCC/Compiler version (if compiling from source): NA
+CUDA/cuDNN version:  Cuda 9.0/ CuDNN 7.0.5
+GPU model and memory:  Volta(V100), 16 GB
+Exact command to reproduce: Please see the code below
+
+Describe the problem
+Unable to reuse opaque_kernel variables with FP16 data type. Works for FP32 data type. Here is the stack trace:
+File "cudnn_lstm_example.py", line 37, in 
+outputs_2, _ = lstm(inputs_2)
+File "/usr/local/anaconda2/envs/tensorflow_1.7/lib/python2.7/site-packages/tensorflow/python/layers/base.py", line 696, in call
+self.build(input_shapes)
+File "/usr/local/anaconda2/envs/tensorflow_1.7/lib/python2.7/site-packages/tensorflow/contrib/cudnn_rnn/python/layers/cudnn_rnn.py", line 358, in build
+"opaque_kernel", initializer=opaque_params_t, validate_shape=False)
+File "/usr/local/anaconda2/envs/tensorflow_1.7/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 1297, in get_variable
+constraint=constraint)
+File "/usr/local/anaconda2/envs/tensorflow_1.7/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 1093, in get_variable
+constraint=constraint)
+File "/usr/local/anaconda2/envs/tensorflow_1.7/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 431, in get_variable
+return custom_getter(**custom_getter_kwargs)
+File "/usr/local/anaconda2/envs/tensorflow_1.7/lib/python2.7/site-packages/tensorflow/contrib/cudnn_rnn/python/layers/cudnn_rnn.py", line 291, in _update_trainable_weights
+variable = getter(*args, **kwargs)
+File "/usr/local/anaconda2/envs/tensorflow_1.7/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 408, in _true_getter
+use_resource=use_resource, constraint=constraint)
+File "/usr/local/anaconda2/envs/tensorflow_1.7/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 758, in _get_single_variable
+found_type_str))
+ValueError: Trying to share variable cudnn_rnn/cudnn_bi_lstm/opaque_kernel, but specified dtype float32 and found dtype float16_ref.
+Source code / logs
+import tensorflow as tf
+
+num_layers = 1
+num_units = 40
+batch_size = 60
+dir_count = 2
+
+inputDType= tf.float16 # Does not work
+#inputDType = tf.float32 # Works
+
+inputs_1 = tf.random_uniform([
+    num_layers * dir_count, batch_size, num_units], dtype=inputDType)
+
+inputs_2 = tf.random_uniform([
+    num_layers * dir_count, batch_size, num_units], dtype=inputDType)
+
+with tf.variable_scope("cudnn_rnn", reuse=False):
+    lstm = tf.contrib.cudnn_rnn.CudnnLSTM(
+        num_layers=num_layers,
+        num_units=num_units,
+        direction="bidirectional",
+        dtype=inputDType,
+        name="cudnn_bi_lstm")
+                
+    outputs_1, _ = lstm(inputs_1)
+
+with tf.variable_scope("cudnn_rnn", reuse=True):
+    lstm = tf.contrib.cudnn_rnn.CudnnLSTM(
+        num_layers=num_layers,
+        num_units=num_units,
+        direction="bidirectional",
+        dtype=inputDType,
+        name="cudnn_bi_lstm")
+
+    outputs_2, _ = lstm(inputs_2)
+
+loss1 = tf.reduce_sum(outputs_1)
+loss2 = tf.reduce_sum(outputs_2)
+loss= loss1+loss2
+var = lstm.trainable_variables[0]
+
+grad = tf.gradients(loss, var)[0]
+print('grad.shape: %s' % grad.shape)
+print('var.shape: %s' % var.shape)
+
+opt = tf.train.AdamOptimizer()
+train_op = opt.apply_gradients([(grad, lstm.trainable_variables[0])])
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    print(sess.run(outputs_1))
+    print(sess.run(outputs_2))
+    sess.run(train_op)
+    print(sess.run(outputs_1))
+    print(sess.run(outputs_2))

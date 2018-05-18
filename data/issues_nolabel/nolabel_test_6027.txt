@@ -1,0 +1,31 @@
+tracing batch normalization: apparently unnecessary gpu-cpu-gpu transfer for gather op.
+
+I am running:
+CUDA 8.0. CUDNN 5.1. tensorflow 0.11. Ubuntu 12.04.
+I was experiencing low GPU utilization. As per #1824 I did a trace and found many instances of the following interaction, as shown by the screenshot in chrome:
+The op I have highlighted (with arrows going in and out in the screenshot) is a gather op. I provide a link to the context in which it is called.
+
+  
+    
+      tensorflow/tensorflow/python/ops/nn_impl.py
+    
+    
+         Line 472
+      in
+      eb56a8a
+    
+    
+    
+    
+
+        
+          
+           x_dims = array_ops.gather(array_ops.shape(x), axes) 
+        
+    
+  
+
+
+The call stack (at graph construction) time is:
+tf.contrib.layers.batch_norm, python.ops.nn_impl.moments, python.ops.nn_impl.sufficient_statics
+If I understand correctly, I am seeing that the GPU gets blocked as a result of shuffling a trivial gather op unnecessarily off to the CPU only to wait forever for it to come back.

@@ -1,0 +1,51 @@
+Build Android demo, ambiguous python reference
+
+Hi, while I was building the android demo with the command bazel build -c opt //tensorflow/examples/android:tensorflow_demo --verbose_failures,  it throw the error:
+ERROR: /home/damian/ai/tensorflow/tensorflow/examples/android/BUILD:63:1: Extracting Java resources from deploy jar for split Java resource apk failed: resource_extractor failed: error executing command 
+  (cd /home/damian/.cache/bazel/_bazel_damian/80fc8f2224411108cd5fffb32690db73/execroot/tensorflow && \
+  exec env - \
+  bazel-out/host/bin/external/bazel_tools/tools/android/resource_extractor bazel-out/local-opt/bin/tensorflow/examples/android/tensorflow_demo_deploy.jar bazel-out/local-opt/bin/tensorflow/examples/android/_dx/tensorflow_demo/extracted_tensorflow_demo_deploy.jar): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+  File "/home/damian/.cache/bazel/_bazel_damian/80fc8f2224411108cd5fffb32690db73/execroot/tensorflow/bazel-out/host/bin/external/bazel_tools/tools/android/resource_extractor.runfiles/org_tensorflow/../bazel_tools/tools/android/resource_extractor.py", line 98
+    print USAGE
+              ^
+SyntaxError: Missing parentheses in call to print
+
+
+I debuged the error and the cause is in the file bazel-out/host/bin/external/bazel_tools/tools/android/resource_extractor around the line 35:
+PYTHON_BINARY = 'python'
+if IsWindows() and not PYTHON_BINARY.endswith('.exe'):
+  PYTHON_BINARY = PYTHON_BINARY + '.exe'
+
+# Find a file in a given search path.
+def SearchPath(name):
+  search_path = os.getenv('PATH', os.defpath).split(os.pathsep)
+  for directory in search_path:
+    if directory == '': continue
+    path = os.path.join(directory, name)
+    if os.path.isfile(path) and os.access(path, os.X_OK):
+      return path
+  return None
+
+def IsRunningFromZip():
+  return False
+
+# Find the real Python binary if it's not a normal absolute path
+def FindPythonBinary():
+  if PYTHON_BINARY.startswith('//'):
+    # Case 1: Path is a label. Not supported yet.
+    raise AssertionError(
+      'Bazel does not support execution of Python interpreters via labels yet')
+  elif PYTHON_BINARY.startswith('/'):
+    # Case 2: Absolute path.
+    return PYTHON_BINARY
+  elif '/' in PYTHON_BINARY:
+    # Case 3: Path is relative to current working directory.
+    return os.path.join(os.getcwd(), PYTHON_BINARY)
+  else:
+    # Case 4: Path has to be looked up in the search path.
+    return SearchPath(PYTHON_BINARY)
+
+
+the script  need and assumes the default /usr/bin/python is linked to python 2.x wich in my case is not,
+My current work around is a simple ln -sf /usr/bin/python2 /usr/bin/python.
+I would like to patch but I dont have idea where is the file bazel-out/host/bin/external/bazel_tools/tools/android/resource_extractor because is an autogen script, I tried look for it in the bazel repo but I can't find it

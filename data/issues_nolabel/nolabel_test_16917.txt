@@ -1,0 +1,180 @@
+ValueError: No attr named '_XlaCompile' in name: "while/attention/cond/fw/CudnnRNN/Enter" and AttributeError: 'NoneType' object has no attribute 'back_prop'
+
+System information
+
+Have I written custom code: Yes
+OS Platform and Distribution: Ubuntu 16.04
+TensorFlow installed from: binary
+TensorFlow version: 1.4.1
+Python version: 3.5.2
+Bazel version: Not compiled from source
+GCC/Compiler version: Not compiled from source
+CUDA/cuDNN version: 8.0
+GPU model and memory: GeForce GTX 1080 (8GB x 4)
+Exact command to reproduce: N/A
+
+I have a similar issue faced in this thread since I've started using tf.while_loop and the error is causing on grads = self.opt.compute_gradients(self.loss)
+I'm initializing a class for gru layers outside the tf.while_loop since I can't initialize variables within the tf.while_loop without using tf.get_variable and then use the __call__ of the class variable multiple times to use it within the tf.while_loop fn body. The sample codes are provided as per below:
+Traceback (most recent call last):
+  File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/ops/gradients_impl.py",
+ line 348, in _MaybeCompile
+    xla_compile = op.get_attr("_XlaCompile")
+  File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line
+ 2003, in get_attr
+    raise ValueError("No attr named '" + name + "' in " + str(self._node_def))
+ValueError: No attr named '_XlaCompile' in name: "while/attention/cond/fw/CudnnRNN/Enter"
+op: "Enter"
+input: "Variable_14/read"
+attr {
+  key: "T"
+  value {
+    type: DT_FLOAT
+  }
+}
+attr {
+  key: "frame_name"
+  value {
+    s: "while/while_context"
+  }
+}
+attr {
+  key: "is_constant"
+  value {
+    b: true
+  }
+}
+attr {
+  key: "parallel_iterations"
+  value {
+    i: 10
+  }
+}
+
+# also, error in the same line while handling the above error:
+
+AttributeError: 'NoneType' object has no attribute 'back_prop'
+
+The Cudnn_gru custom class:
+class cudnn_gru:
+	def __init__(self, num_layers, num_units, batch_size, input_size, keep_prob=1.0, is_train=None, scope=None):
+		self.num_layers = num_layers
+		self.grus = []
+		self.params = []
+		self.inits = []
+		self.dropout_mask = []
+		for layer in range(num_layers):
+			input_size_ = input_size if layer == 0 else 2 * num_units
+			gru_fw = tf.contrib.cudnn_rnn.CudnnGRU(
+				num_layers=1, num_units=num_units, input_size=input_size_)
+			gru_bw = tf.contrib.cudnn_rnn.CudnnGRU(
+				num_layers=1, num_units=num_units, input_size=input_size_)
+>>>>>>>>>>>Error over the following 4 lines for initializing within the while_loop
+			param_fw = tf.Variable(tf.random_uniform(
+				[gru_fw.params_size()], -0.1, 0.1), validate_shape=False)
+			param_bw = tf.Variable(tf.random_uniform(
+				[gru_bw.params_size()], -0.1, 0.1), validate_shape=False)
+			init_fw = tf.Variable(tf.zeros([1, batch_size, num_units]))
+			init_bw = tf.Variable(tf.zeros([1, batch_size, num_units]))
+			mask_fw = dropout(tf.ones([1, batch_size, input_size_], dtype=tf.float32),
+							  keep_prob=keep_prob, is_train=is_train, mode=None)
+			mask_bw = dropout(tf.ones([1, batch_size, input_size_], dtype=tf.float32),
+							  keep_prob=keep_prob, is_train=is_train, mode=None)
+			self.grus.append((gru_fw, gru_bw, ))
+			self.params.append((param_fw, param_bw, ))
+			self.inits.append((init_fw, init_bw, ))
+			self.dropout_mask.append((mask_fw, mask_bw, ))
+
+	def __call__(self, inputs, seq_len, keep_prob=1.0, is_train=None, concat_layers=True):
+		outputs = [tf.transpose(inputs, [1, 0, 2])]
+		for layer in range(self.num_layers):
+			gru_fw, gru_bw = self.grus[layer]
+			param_fw, param_bw = self.params[layer]
+			init_fw, init_bw = self.inits[layer]
+			mask_fw, mask_bw = self.dropout_mask[layer]
+			with tf.variable_scope("fw"):
+				out_fw, _ = gru_fw(outputs[-1] * mask_fw, init_fw, param_fw)
+			with tf.variable_scope("bw"):
+				inputs_bw = tf.reverse_sequence(
+					outputs[-1] * mask_bw, seq_lengths=seq_len, seq_dim=0, batch_dim=1)
+				out_bw, _ = gru_bw(inputs_bw, init_bw, param_bw)
+				out_bw = tf.reverse_sequence(
+					out_bw, seq_lengths=seq_len, seq_dim=0, batch_dim=1)
+			outputs.append(tf.concat([out_fw, out_bw], axis=2))
+		if concat_layers:
+			res = tf.concat(outputs[1:], axis=2)
+		else:
+			res = outputs[-1]
+		res = tf.transpose(res, [1, 0, 2])
+		return res
+
+and the model:
+class Model(object):
+        def __init__(...):
+            ....
+            ....
+            self.ready()
+            if trainable:
+			self.lr = tf.get_variable(
+			"lr", shape=[], dtype=tf.float32, trainable=False)
+			self.opt = tf.train.AdadeltaOptimizer(
+				learning_rate=self.lr, epsilon=1e-6)
+>>>>>>>>>>>Compile time ERROR over this line:
+                	grads = self.opt.compute_gradients(self.loss)
+			gradients, variables = zip(*grads)
+			capped_grads, _ = tf.clip_by_global_norm(gradients, config.grad_clip)
+			self.train_op = self.opt.apply_gradients(zip(capped_grads, variables), global_step=self.global_step)
+
+	def get_vP(self,i):
+		....
+	        ....
+		with tf.variable_scope("encoding"):
+>>>>>>>>>>> def f1():
+                # used to initialize the cudnn_gru class over here,
+                # but shifted outside the tf.while_loop
+                # due to initializing errors in tf.Variable in cudnn_gru __init__
+                return self.rnn1(c_emb, seq_len=self.c_len)
+            def f2():
+                return self.rnn1(c_emb, seq_len=self.c_len)
+            c = tf.cond(tf.equal(i, zero), f1, f2)
+            q = self.rnn1(q_emb, seq_len=self.q_len)
+            self.q_enc = q
+        with tf.variable_scope("attention"):
+                qc_att = dot_attention(c, q, mask=self.q_mask, hidden=d,
+                    keep_prob=config.keep_prob, is_train=self.is_train,
+		name_scope="attention_layer")
+>>>>>>>>>>> def f3():
+                # same situation as f1()
+                return self.rnn2(qc_att, seq_len=self.c_len)
+            def f4():
+				return self.rnn2(qc_att, seq_len=self.c_len)
+            att = tf.cond(tf.equal(self.i, zero), f3, f4)
+            def f5():
+                return att
+            def f6():
+                return tf.concat([att, att], axis=1)
+            self.att_vP = tf.cond(tf.equal(i, zero), f5, f6)
+
+            return tf.add(i,tf.constant(1, dtype=tf.int64))
+	
+	def condition(self,i):
+		return tf.less(i, self.para_count[0])
+	
+	def ready(self):
+		config = self.config
+		N, PL, QL, CL, d, dc, dg = config.batch_size, self.c_maxlen, self.q_maxlen, \
+			config.char_limit, config.hidden, config.char_dim, config.char_hidden
+		gru = cudnn_gru if config.use_cudnn else native_gru
+
+		self.cell_fw = tf.contrib.rnn.GRUCell(dg)
+		self.cell_bw = tf.contrib.rnn.GRUCell(dg)
+
+>>>>>>>># initializing here instead of within tf.while_loop body
+		self.rnn1 = gru(num_layers=3, num_units=150, batch_size=N, input_size=500,\
+			keep_prob=config.keep_prob, is_train=self.is_train)
+		self.rnn2 = gru(num_layers=1, num_units=d, batch_size=N, input_size=1800,\
+			keep_prob=config.keep_prob, is_train=self.is_train)
+		
+		result = tf.while_loop(self.condition, self.get_vP, loop_vars=[self.i])
+
+                ....
+                ....

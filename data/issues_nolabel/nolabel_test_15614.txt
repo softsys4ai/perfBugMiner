@@ -1,0 +1,85 @@
+Support Negativo17 Fedora Packaging
+
+Support the Negativo17 Nvidia driver packaging for Fedora. libdevice libraries are under /usr/share/cuda, includes are under /usr/include/cuda and libraries are under /usr/lib64. This PR should help #8264 too.
+In addition, the gcc 5.3 in the Negativo17 repository (installed as /usr/bin/gcc53) only has a static non-PIC version of libgomp.a, so I have this local patch to force Tensorflow to link to the global (/usr/lib64) shared version:
+diff --git a/tensorflow/contrib/cmake/tf_stream_executor.cmake b/tensorflow/contrib/cmake/tf_stream_executor.cmake
+index 91ca33f4c4..7719ee096d 100644
+--- a/tensorflow/contrib/cmake/tf_stream_executor.cmake
++++ b/tensorflow/contrib/cmake/tf_stream_executor.cmake
+@@ -75,7 +75,7 @@ endif()
+ #list(REMOVE_ITEM tf_stream_executor_srcs ${tf_stream_executor_test_srcs})
+ 
+ if (NOT WIN32)
+-  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -lgomp")
++  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -l:libgomp.so.1")
+ endif (NOT WIN32)
+ add_library(tf_stream_executor OBJECT ${tf_stream_executor_srcs})
+ 
+diff --git a/third_party/gpus/cuda/BUILD.tpl b/third_party/gpus/cuda/BUILD.tpl
+index b752734a08..0ce972291e 100644
+--- a/third_party/gpus/cuda/BUILD.tpl
++++ b/third_party/gpus/cuda/BUILD.tpl
+@@ -109,7 +109,7 @@ cc_library(
+         ".",
+         "cuda/include",
+     ],
+-    linkopts = ["-lgomp"],
++    linkopts = ["-l:libgomp.so.1"],
+     linkstatic = 1,
+     visibility = ["//visibility:public"],
+ )
+diff --git a/third_party/toolchains/gpus/cuda/BUILD b/third_party/toolchains/gpus/cuda/BUILD
+index 39136de99c..6f697919fd 100644
+--- a/third_party/toolchains/gpus/cuda/BUILD
++++ b/third_party/toolchains/gpus/cuda/BUILD
+@@ -114,7 +114,7 @@ cc_library(
+         ".",
+         "cuda/include",
+     ],
+-    linkopts = ["-lgomp"],
++    linkopts = ["-l:libgomp.so.1"],
+     linkstatic = 1,
+     visibility = ["//visibility:public"],
+ )
+Building with clang is a lot more difficult, as it'd require making Tensorflow's CUDA symlink repo look enough like the unpacked tarball to pass this detection logic!
+My .tf_configure.bazelrc (for FC 26) looks like:
+build --action_env PYTHON_BIN_PATH="/home/nicholas/miniconda3/bin/python"
+build --action_env PYTHON_LIB_PATH="/home/nicholas/miniconda3/lib/python3.6/site-packages"
+build --force_python=py3
+build --host_force_python=py3
+build --python_path="/home/nicholas/miniconda3/bin/python"
+build --define with_jemalloc=true
+build:gcp --define with_gcp_support=true
+build:hdfs --define with_hdfs_support=true
+build:s3 --define with_s3_support=true
+build:xla --define with_xla_support=true
+build:gdr --define with_gdr_support=true
+build:verbs --define with_verbs_support=true
+build --action_env TF_NEED_OPENCL_SYCL="0"
+build --action_env TF_NEED_CUDA="1"
+build --action_env CUDA_TOOLKIT_PATH="/usr"
+build --action_env TF_CUDA_VERSION="8.0"
+build --action_env CUDNN_INSTALL_PATH="/usr"
+build --action_env TF_CUDNN_VERSION="7"
+build --action_env NVVMIR_LIBRARY_DIR="/usr/share/cuda"
+build --action_env TF_CUDA_COMPUTE_CAPABILITIES="6.1"
+build --action_env TF_CUDA_CLANG="0"
+build --action_env GCC_HOST_COMPILER_PATH="/usr/bin/gcc53"
+build --config=cuda
+test --config=cuda
+build --define grpc_no_ares=true
+build:opt --copt=-march=native
+build:opt --host_copt=-march=native
+build:opt --define with_default_optimizations=true
+build --copt=-DGEMMLOWP_ALLOW_SLOW_SCALAR_FALLBACK
+build --host_copt=-DGEMMLOWP_ALLOW_SLOW_SCALAR_FALLBACK
+build:mkl --define using_mkl=true
+build:mkl -c opt
+build:monolithic --define framework_shared_object=false
+build --define framework_shared_object=true
+build:android --crosstool_top=//external:android/crosstool
+build:android --host_crosstool_top=@bazel_tools//tools/cpp:toolchain
+build:android_arm --config=android
+build:android_arm --cpu=armeabi-v7a
+build:android_arm64 --config=android
+build:android_arm64 --cpu=arm64-v8a

@@ -1,0 +1,95 @@
+conv3d_transpose not freeing memory
+
+This issue might be the same as #3128 (which is still awaiting Googler), but it is occurring in a different way. The above issue was run on a CPU. I have since upgrade to a GTX 1070 with 8GB RAM.
+Instead of a Segmentation Fault, the program now runs until it runs out of memory -- in my case it runs for roughly 2000 iterations. Running on a CPU was spitting our a free() error, which leads me to believe this is the same underlying issue.
+The error log looks like this...
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (134217728):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (268435456):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:656] Bin for 14.36MiB was 8.00MiB, Chunk State: 
+I tensorflow/core/common_runtime/bfc_allocator.cc:674] Chunk at 0x10005a00000 of size 256
+I tensorflow/core/common_runtime/bfc_allocator.cc:674] Chunk at 0x10005a00100 of size 256
+I tensorflow/core/common_runtime/bfc_allocator.cc:674] Chunk at 0x10005a00200 of size 256
+
+
+... a ton of other chunks
+
+I tensorflow/core/common_runtime/bfc_allocator.cc:674] Chunk at 0x101a1686e00 of size 100362240
+I tensorflow/core/common_runtime/bfc_allocator.cc:674] Chunk at 0x101a763d600 of size 15054336
+I tensorflow/core/common_runtime/bfc_allocator.cc:674] Chunk at 0x101a8498c00 of size 199075840
+I tensorflow/core/common_runtime/bfc_allocator.cc:683] Free at 0x10005c7cd00 of size 64000
+I tensorflow/core/common_runtime/bfc_allocator.cc:683] Free at 0x10005d66600 of size 1638400
+I tensorflow/core/common_runtime/bfc_allocator.cc:683] Free at 0x100063fcc00 of size 196608
+I tensorflow/core/common_runtime/bfc_allocator.cc:683] Free at 0x10193467b00 of size 6272768
+I tensorflow/core/common_runtime/bfc_allocator.cc:689]      Summary of in-use Chunks by size: 
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 30 Chunks of size 256 totalling 7.5KiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 4 Chunks of size 512 totalling 2.0KiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 4 Chunks of size 3072 totalling 12.0KiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 4 Chunks of size 16128 totalling 63.0KiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 4 Chunks of size 65536 totalling 256.0KiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 4 Chunks of size 262144 totalling 1.00MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 5 Chunks of size 614400 totalling 2.93MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 4 Chunks of size 1638400 totalling 6.25MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 1 Chunks of size 3136512 totalling 2.99MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 1061 Chunks of size 6272768 totalling 6.20GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 3 Chunks of size 15054336 totalling 43.07MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 3 Chunks of size 100362240 totalling 287.14MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 1 Chunks of size 199075840 totalling 189.85MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] Sum Total of in-use chunks: 6.72GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:698] Stats: 
+Limit:                  7223063348
+InUse:                  7214891776
+MaxInUse:               7214891776
+NumAllocs:                  312188
+MaxAllocSize:            199075840
+
+W tensorflow/core/common_runtime/bfc_allocator.cc:270] ***************************************************************************************************x
+W tensorflow/core/common_runtime/bfc_allocator.cc:271] Ran out of memory trying to allocate 14.36MiB.  See logs for memory state.
+W tensorflow/core/framework/op_kernel.cc:940] Resource exhausted: OOM when allocating tensor with shape[1,32,3,198,198]
+Traceback (most recent call last):
+  File "CNN-seg-3D.py", line 208, in <module>
+    keep_prob: dropout})
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 710, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 908, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 958, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 978, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.ResourceExhaustedError: OOM when allocating tensor with shape[1,32,3,198,198]
+     [[Node: opt/gradients/conv1/MaxPool3D_grad/MaxPool3DGrad = MaxPool3DGrad[T=DT_FLOAT, ksize=[1, 2, 2, 2, 1], padding="SAME", strides=[1, 2, 2, 2, 1], _device="/job:localhost/replica:0/task:0/gpu:0"](conv1/Relu, conv1/MaxPool3D, opt/gradients/conv2/Conv3D_grad/tuple/control_dependency)]]
+Caused by op u'opt/gradients/conv1/MaxPool3D_grad/MaxPool3DGrad', defined at:
+  File "CNN-seg-3D.py", line 181, in <module>
+    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 196, in minimize
+    grad_loss=grad_loss)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 253, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients.py", line 476, in gradients
+    in_grads = _AsList(grad_fn(op, *out_grads))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/nn_grad.py", line 130, in _MaxPool3DGrad
+    padding=op.get_attr("padding"))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_nn_ops.py", line 1182, in max_pool3d_grad
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 703, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2317, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1239, in __init__
+    self._traceback = _extract_stack()
+
+...which was originally created as op u'conv1/MaxPool3D', defined at:
+  File "CNN-seg-3D.py", line 168, in <module>
+    pred = conv_net(x, weights, biases, keep_prob)
+  File "CNN-seg-3D.py", line 97, in conv_net
+    conv1 = maxpool3d(conv1, k=2)
+  File "CNN-seg-3D.py", line 78, in maxpool3d
+    padding='SAME')
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_nn_ops.py", line 1150, in max_pool3d
+    strides=strides, padding=padding, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 703, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2317, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1239, in __init__
+    self._traceback = _extract_stack()

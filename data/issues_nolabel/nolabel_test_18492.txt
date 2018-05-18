@@ -1,0 +1,231 @@
+Worker is failing with InvalidArgumentError>, "A session is not created yet"
+
+System information
+
+Have I written custom code - Yes
+OS Platform CentOS - 7.2.1511
+TensorFlow installed from - Binary
+TensorFlow version - 1.3.0
+Python version - 2.7
+Bazel version - N/A
+CUDA/cuDNN version - N/A
+GPU model and memory - N/A
+
+Source Code
+Sharing my code snippet below,
+cluster = tf.train.ClusterSpec({"ps": parameter_servers, "worker": workers})
+
+server = tf.train.Server(
+    cluster,
+    job_name=FLAGS.job_name,
+    task_index=FLAGS.task_index)
+   
+if FLAGS.pipeline_id is None:
+    raise ValueError('pipeline_id [%s] was not recognized', FLAGS.pipeline_id)
+
+#print('job name '+FLAGS.job_name)
+#print('task index name ' + FLAGS.task_index)
+if FLAGS.job_name == "ps":
+    server.join()
+elif FLAGS.job_name == "worker":
+    print('only for worker')
+    # if not os.path.exists(FLAGS.train_dir):
+    #    os.mkdir(FLAGS.train_dir)
+    train_logs_path = FLAGS.logs_dir + '/' + FLAGS.pipeline_id + '/training'
+    eval_logs_path = FLAGS.logs_dir + '/' + FLAGS.pipeline_id + '/eval'
+    print 'Train logs path -- ', train_logs_path
+    print 'Eval logs path -- ', eval_logs_path
+
+    tf.logging.set_verbosity(tf.logging.INFO)  # Set the verbosity to INFO level
+
+    # First create the dataset and load one batch
+
+    ##
+    ## replace flowers with FLAGS.pipeline_id in get_split()
+    ##
+    ##
+    labels_file = FLAGS.tf_records_dir + '/labels.txt'
+
+    dataset = get_split(FLAGS.dataset_split_name, FLAGS.tf_records_dir, 'flowers', FLAGS.num_classes, labels_file)
+    print 'num of classes ------------------->', dataset.num_classes
+    images, _, labels = load_batch(FLAGS, dataset, batch_size=FLAGS.training_batch_size, height=FLAGS.image_resize,
+                                   width=FLAGS.image_resize, is_training=True)
+
+    # Get number of steps to decay
+    num_batches_per_epoch = int(dataset.num_samples / FLAGS.training_batch_size)
+    num_steps_per_epoch = num_batches_per_epoch  # Because one step is one batch processed
+    decay_steps = int(FLAGS.num_epochs_before_decay * num_steps_per_epoch)
+
+    with tf.device(tf.train.replica_device_setter(
+            worker_device="/job:worker/task:%d" % FLAGS.task_index,
+            cluster=cluster)):
+   
+
+
+
+
+
+
+        #======================= INITIATE TRAINING  =========================
+
+
+
+
+
+        #Create the model inference
+        with slim.arg_scope(inception_v3_arg_scope()):
+            logits, end_points = inception_v3(images, num_classes = dataset.num_classes, is_training = True)
+
+
+
+        exclude = ['InceptionV3/Logits', 'InceptionV3/AuxLogits']
+        #exclude = get_variables_to_exclude()
+        for i in exclude:
+           print "var to exclude -> ",i
+        variables_to_restore = slim.get_variables_to_restore(exclude = exclude)
+
+        #Perform one-hot-encoding of the labels
+        one_hot_labels = slim.one_hot_encoding(labels, dataset.num_classes)
+
+        #Calculate loss
+        loss = tf.losses.softmax_cross_entropy(onehot_labels = one_hot_labels, logits = logits)
+        total_loss = tf.losses.get_total_loss()
+
+        #Create the global step
+        global_step = get_or_create_global_step()
+
+
+        #Define your exponentially decaying learning rate
+        lr = tf.train.exponential_decay(
+            learning_rate = FLAGS.initial_learning_rate,
+            global_step = global_step,
+            decay_steps = decay_steps,
+            decay_rate = FLAGS.learning_rate_decay_factor,
+            staircase = True)
+
+        #Get optimizer as configured by user
+        optimizer = tf.train.AdamOptimizer(learning_rate = lr)
+        #optimizer = getOptimizer(learning_rate = lr)
+
+        #Create the train_op.
+        variables_to_train = get_variables_to_train()
+        #for j in variables_to_train:
+          #print "var to train ",j
+        #vn = tf.trainable_variables()
+        train_op = slim.learning.create_train_op(total_loss, optimizer,variables_to_train=variables_to_train)
+
+
+        predictions = tf.argmax(end_points['Predictions'], 1)
+        probabilities = end_points['Predictions']
+        accuracy, accuracy_update = tf.contrib.metrics.streaming_accuracy(predictions, labels)
+        metrics_op = tf.group(accuracy_update, probabilities)
+
+
+        #create all the summaries you need to monitor
+        tf.summary.scalar('losses/Total_Loss', total_loss)
+        tf.summary.scalar('accuracy', accuracy)
+        tf.summary.scalar('learning_rate', lr)
+        my_summary_op = tf.summary.merge_all()
+
+        #Define train step to run training operation
+        def train_step(sess, train_op, global_step):
+
+            start_time = time.time()
+            total_loss, global_step_count, _ = sess.run([train_op, global_step, metrics_op])
+            time_elapsed = time.time() - start_time
+
+
+            logging.info('global step %s: loss: %.4f (%.2f sec/step)', global_step_count, total_loss, time_elapsed)
+
+            return total_loss, global_step_count
+
+    #Restore variables from checkpoint
+    saver = tf.train.Saver(variables_to_restore)
+    def restore_fn(sess):
+        return saver.restore(sess, FLAGS.checkpoint_path)
+
+    #Create supervisor
+    writer = tf.summary.FileWriter(train_logs_path, graph=tf.get_default_graph())
+    sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),global_step=global_step,logdir = train_logs_path,
+                             summary_writer=writer,
+                             summary_op = my_summary_op, init_fn = restore_fn)
+
+
+    #Run the managed session
+    with sv.prepare_or_wait_for_session(server.target) as sess:
+        #writer = tf.summary.FileWriter(train_logs_path, graph=tf.get_default_graph())
+        for step in xrange(num_steps_per_epoch * FLAGS.training_num_epochs):
+            #Log info at each epoch:
+            if step % num_batches_per_epoch == 0:
+                logging.info('Epoch %s/%s', step/num_batches_per_epoch + 1, FLAGS.training_num_epochs)
+                learning_rate_value, accuracy_value = sess.run([lr, accuracy])
+                logging.info('Current Learning Rate: %s', learning_rate_value)
+                logging.info('Current Streaming Training Accuracy: %s', accuracy_value)
+
+
+                logits_value, probabilities_value, predictions_value, labels_value = sess.run([logits, probabilities, predictions, labels])
+                print 'logits: \n', logits_value
+                print 'Probabilities: \n', probabilities_value
+                print 'predictions: \n', predictions_value
+                print 'Labels:\n:', labels_value
+
+            #Log the summaries every 10 step.
+            if step % FLAGS.steps_update_frequency == 0 and step != 0:
+                loss, gs = train_step(sess, train_op, sv.global_step)
+                summaries = sess.run(my_summary_op)
+                if FLAGS.task_index == 0:
+                    print('Compute Summaries--------------')
+                    sv.summary_computed(sess, summaries)
+                    #writer.add_summary(summaries, gs)
+                    print "**** SAVE THE MODEL ****"
+                    print 'Train logs path -- ', train_logs_path
+                    sv.saver.save(sess,sv.save_path,global_step=sv.global_step)
+                    #saver.save(sess, train_logs_path+'/model', global_step=gs)
+                    ##
+
+                checkpoint_path = tf.train.latest_checkpoint(train_logs_path)
+                training_json = '{"model_path":"'+ checkpoint_path +'","no_of_steps":' +str(gs)+',"loss":'+str(loss)+'}'
+                current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                print 'training_json -- ', training_json
+                print 'sv.save_path', sv.save_path
+                #dbClient.store_metrices([(FLAGS.pipeline_id,FLAGS.operation_type,training_json,current_time)])
+
+                ##
+                print('*************** Running eval at step = {0} *********************'.format(step))
+                #cmd = 'python ./eval_image_classifier.py --pipeline_id='+FLAGS.pipeline_id+'  --eval_recording_step='+str(gs) + '  --tf_records_dir='+FLAGS.tf_records_dir + '  --checkpoint_dir='+train_logs_path + '  --eval_log_dir='+eval_logs_path + '  --dataset_name='+FLAGS.pipeline_id + '  --num_classes='+str(FLAGS.num_classes)  + '  --eval_num_epochs='+str(FLAGS.eval_num_epochs) + '  --eval_batch_size='+str(FLAGS.eval_batch_size) + '  --image_resize_method='+FLAGS.image_resize_method + '  --color_ordering='+str(FLAGS.color_ordering) + '  --saturation_contrast_lower_bound='+str(FLAGS.saturation_contrast_lower_bound) + '  --saturation_contrast_upper_bound='+str(FLAGS.saturation_contrast_upper_bound) + '  --brightness_max_delta='+str(FLAGS.brightness_max_delta) + '  --hue_max_delta='+str(FLAGS.hue_max_delta)
+                #p = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+                #out, err = p.communicate()
+                print('***************Eval finished for step = {0}*********************'.format(step))
+
+
+            else:
+                loss, _ = train_step(sess, train_op, sv.global_step)
+
+        #We log the final training loss and accuracy
+        logging.info('Final Loss: %s', loss)
+        logging.info('Final Training Accuracy: %s', sess.run(accuracy))
+
+        #Save the model on completing the training
+        logging.info('Finished training! Saving model to disk now.')
+        if FLAGS.task_index == 0:
+          sv.saver.save(sess, sv.save_path, global_step = sv.global_step)
+
+Problem Description
+I am having three nodes Tensorflow cluster with one parameter server, two workers.
+On machine A, I am running a parameter server and chief worker.
+On machine B, I am running 2nd worker.
+My tensorflow script expects one of the input parameter as the path to the directory containing tfrecord file.
+Issue 1
+Parameter server and chief worker are running fine but 2nd worker fails with below error.
+I am running 2nd worker on machine B and input path to the tfrecords directory exists there.But I don't have any clue why it is looking for data under ps device="/job:ps/replica:0/task:0/cpu:0" which is actually running on machine A where this path doesn't exist.
+INFO:tensorflow:Error reported to Coordinator: <class 'tensorflow.python.framework.errors_impl.NotFoundError'>, /home/mapr/mano/slim_data/flowers/slim_data_dir/flowers_train_00002-of-00005.tfrecord
+         [[Node: parallel_read/ReaderReadV2 = ReaderReadV2[_device="/job:ps/replica:0/task:0/cpu:0"](parallel_read/TFRecordReaderV2, parallel_read/filenames)]]
+
+Issue 2
+Just for my curiosity, I copied input tfrecord directory to machine A with the same path as on machine B.
+Then the previous error gone but now I am facing different error.
+I also checked no code has run within sv.prepare_or_wait_for_session(server.target)  block.
+It seems to me 2nd worker waits for chief to initialize the session but somehow chief doesn't return session and thus worker fails.
+INFO:tensorflow:Error reported to Coordinator: <class 'tensorflow.python.framework.errors_impl.InvalidArgumentError'>, A session is not created yet....
+
+Plz help me here.

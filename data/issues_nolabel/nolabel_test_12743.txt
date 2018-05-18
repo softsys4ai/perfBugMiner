@@ -1,0 +1,36 @@
+Gradients with TensorArray fail after scatter of 0 size
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): ('v1.3.0-rc2-20-g0787eee', '1.3.0')
+Python version: 2.7.12
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: see below
+
+Describe the problem
+The following fails:
+import tensorflow as tf
+
+x_orig = tf.zeros([3], tf.float32)
+
+ta = tf.TensorArray(tf.float32, size=1, element_shape=[3])
+ta = ta.write(0, x_orig)
+ta = ta.scatter(tf.range(0, 0), ta.gather(tf.range(0, 0)))
+x = ta.read(0)
+g, = tf.gradients(tf.reduce_sum(x), [x_orig])
+
+sess = tf.Session()
+print sess.run(g)
+
+with this error:
+tensorflow.python.framework.errors_impl.UnimplementedError: TensorArray has size zero, but element shape <unknown> is not fully defined. Currently only static shapes are supported when packing zero-size TensorArrays.
+         [[Node: gradients/TensorArrayScatter/TensorArrayScatterV3_grad/TensorArrayGatherV3 = TensorArrayGatherV3[dtype=DT_FLOAT, element_shape=<unknown>, _device="/job:localhost/replica:0/task:0/cpu:0"](gradients/TensorArrayScatter/TensorArrayScatterV3_grad/TensorArrayGrad/TensorArrayGradV3, range, gradients/TensorArrayScatter/TensorArrayScatterV3_grad/TensorArrayGrad/gradient_flow)]]
+
+The above code works if ta = ta.scatter(tf.range(0, 0), ta.gather(tf.range(0, 0))), which gathers a 0x3 tensor and then scatters it into zero indices in ta, is removed.
+This seems to happen because _TensorArrayScatterGrad does not (and cannot?) copy over the element_size from the Python TensorArray object that .scatter was called on.
+I submitted #12742 as a fix, which works for the above snippet..

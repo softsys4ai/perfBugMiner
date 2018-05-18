@@ -1,0 +1,16 @@
+Jenkins test take dependencies from pip package instead of .runfiles directory
+
+TLDR; Jenkins looks for dependencies in python2.7/site-packages/tensorflow/.. but it should look for them in bazel-bin/.../test.runfiles/.... Possibly related to #2844
+I'm looking at a test failure in #2747, and it can't find a data dependency while running on Jenkins, meanwhile this test passes under bazel test in a fresh git clone.
+More specifically, bazel test tensorflow/contrib/immediate/mnist_inference_test copies all Python files and data dependencies to bazel-bin/tensorflow/contrib/immediate/mnist_inference_test.runfiles/
+However, from the path of the error, it seems it's looking for dependencies in python2.7/site-packages/tensorflow/ instead of .runfiles directory. The path to convolutional.py should look like this bazel-bin/tensorflow/contrib/immediate/mnist_inference_test.runfiles/org_tensorflow/tensorflow/models/image/mnist/convolutional.py, instead of site-packages. When dependencies are resolved to site-packages,  this case failure is be expected, because while Python files are included in the PIP package, but  data dependencies of tests will not be.
+Traceback (most recent call last):
+  File "/workspace/pip_test/tests/mnist_inference_test.py", line 23, in testMnistInference
+    test_data = convolutional.extract_data(test_data_filename, 10000)
+  File "/workspace/pip_test/venv/local/lib/python2.7/site-packages/tensorflow/models/image/mnist/convolutional.py", line 83, in extract_data
+    with gzip.open(filename) as bytestream:
+  File "/usr/lib/python2.7/gzip.py", line 34, in open
+    return GzipFile(filename, mode, compresslevel)
+  File "/usr/lib/python2.7/gzip.py", line 94, in __init__
+    fileobj = self.myfileobj = __builtin__.open(filename, mode or 'rb')
+IOError: [Errno 2] No such file or directory: 'tensorflow/contrib/immediate/python/immediate/testdata/t10k-images-idx3-ubyte.gz'

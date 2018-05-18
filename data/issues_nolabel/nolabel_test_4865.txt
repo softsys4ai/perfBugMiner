@@ -1,0 +1,40 @@
+GraphDef duplication in event log
+
+This is a little difficult to explain, and I'm guessing someone has to have run into it before, but it would be nice to at least get an explanation for what's going on here.
+The issue I'm finding is that when you specify a model_dir argument for any tflearn model, the first time you fit that model, the tensorboard warning like the following will always appear:
+WARNING:tensorflow:Found more than one graph event per run. Overwriting the graph with the newest event.
+If you clear the contents of that directory and rerun the same model, the warning no longer appears.
+For example, here is a piece of code to reproduce:
+import tensorflow as tf
+import random
+
+from tensorflow.contrib.learn.python import learn
+from tensorflow.contrib.learn.python.learn import datasets
+from tensorflow.contrib.learn.python.learn.estimators._sklearn import accuracy_score
+from tensorflow.contrib.learn.python.learn.estimators._sklearn import train_test_split
+random.seed(42)
+
+iris = datasets.load_iris()
+x_train, x_test, y_train, y_test = train_test_split(iris.data,
+                                                    iris.target,
+                                                    test_size=0.2,
+                                                    random_state=42)
+
+def custom_optimizer(learning_rate):
+    return tf.train.MomentumOptimizer(learning_rate, 0.9)
+
+classifier = learn.TensorFlowDNNClassifier(
+    hidden_units=[10, 20, 10],
+    n_classes=3,
+    steps=400,
+    learning_rate=0.01,
+    optimizer=custom_optimizer,
+    model_dir='/tmp/tf/bug_test_1')
+classifier.fit(x_train, y_train)
+
+If you run this in a jupyter notebook, wait until it is done, cd into /tmp/tf/bug_test_1, and run tensorboard --logdir=., the warning will appear.  If you clear the contents and run again, it will no longer appear.  If you, in the same notebook within the same kernel, change the directory to something else (e.g. /tmp/tf/bug_test_2) and run again, the warning will again appear.  And the warning will again go away if you clear the contents and run again with the same directory.
+I also tried pre-creating the directory but that appears to make no difference.
+I wouldn't imagine this indicates a major problem but I try to take those warnings seriously since they have indicated more problematic issues in the past with running multiple models in the same kernel, so it would be great to know what this means.
+Environment info
+Operating System: OS X Yosemite (10.10.5)
+Tensorflow Version: 0.10.0

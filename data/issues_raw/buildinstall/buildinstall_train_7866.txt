@@ -1,0 +1,66 @@
+Build errors in versioned_computation_handle.{h,cc}
+
+Issue summary
+I'm running on Ubuntu 16.04, working from Tensorflow commit 904510e. I ./configure'd it to use XLA, CUDA 8.0, cuDNN 5.1, and compute capability 6.1 for a Titan X (Pascal). NVIDIA drivers and CUDA are installed from the NVIDIA repos, while the cuDNN 5.1 deb files are downloaded from NVIDIA's website and installed using dpkg. I'm trying to build tensorflow via
+bazel build --config opt --config=cuda --verbose_failures //tensorflow/tools/pip_package:build_pip_package
+Everything goes fine until it gets to compiling ./tensorflow/compiler/xla/service/versioned_computation_handle.h
+and the associated cc file. The error seems to be that certain "#includes" aren't made in this file:
+In file included from tensorflow/compiler/xla/service/versioned_computation_handle.cc:16:0:
+./tensorflow/compiler/xla/service/versioned_computation_handle.h:33:19: error: 'int64' does not name a type
+   using Version = int64;
+                   ^
+./tensorflow/compiler/xla/service/versioned_computation_handle.h:36:3: error: 'Version' does not name a type
+   Version version;
+   ^
+./tensorflow/compiler/xla/service/versioned_computation_handle.h:38:3: error: 'string' does not name a type
+   string ToString() const;
+   ^
+./tensorflow/compiler/xla/service/versioned_computation_handle.h: In member function 'bool xla::VersionedComputationHandle::operator==(const xla::VersionedComputationHandle&) const':
+./tensorflow/compiler/xla/service/versioned_computation_handle.h:41:13: error: 'version' was not declared in this scope
+            (version == other.version);
+             ^
+./tensorflow/compiler/xla/service/versioned_computation_handle.h:41:30: error: 'const struct xla::VersionedComputationHandle' has no member named 'version'
+            (version == other.version);
+                              ^
+./tensorflow/compiler/xla/service/versioned_computation_handle.h: In member function 'bool xla::VersionedComputationHandle::operator<(const xla::VersionedComputationHandle&) const':
+./tensorflow/compiler/xla/service/versioned_computation_handle.h:46:15: error: 'version' was not declared in this scope
+              (version < other.version)));
+               ^
+./tensorflow/compiler/xla/service/versioned_computation_handle.h:46:31: error: 'const struct xla::VersionedComputationHandle' has no member named 'version'
+              (version < other.version)));
+                               ^
+tensorflow/compiler/xla/service/versioned_computation_handle.cc: At global scope:
+tensorflow/compiler/xla/service/versioned_computation_handle.cc:22:1: error: 'string' does not name a type
+ string VersionedComputationHandle::ToString() const {
+ ^
+tensorflow/compiler/xla/service/versioned_computation_handle.cc: In function 'std::ostream& xla::operator<<(std::ostream&, const xla::VersionedComputationHandle&)':
+tensorflow/compiler/xla/service/versioned_computation_handle.cc:28:27: error: 'const struct xla::VersionedComputationHandle' has no member named 'ToString'
+   out << versioned_handle.ToString();
+                           ^
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+
+Related GitHub issues
+Seems to be related to the following, except I'm not on MacOS:
+#7819
+Environment info
+gcc (Ubuntu 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609 (from gcc --version)
+Cuda compilation tools, release 8.0, V8.0.61 (from nvcc --version)
+CUDA 8.0 from NVIDIA repos (Linux, x86_64, Ubuntu, 16.04)
+cuDNN from nvidia downloads page (https://developer.nvidia.com/rdp/cudnn-download), runtime and developer debs for Ubuntu 14.04. Even though I'm running on 16.04 and the debs are for 14.04, this has worked for me in the past and seems unrelated to my issue. The cuDNN debs were installed with dpkg -i
+CUDA libs folder
+user@SYS-E300-8D-1:/usr/local/cuda-8.0/lib64$ ls -l libcud*
+-rw-r--r-- 1 root root 556000 Jan 26 18:48 libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Jan 26 18:51 libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root     19 Jan 26 18:51 libcudart.so.8.0 -> libcudart.so.8.0.61
+-rw-r--r-- 1 root root 415432 Jan 26 18:48 libcudart.so.8.0.61
+-rw-r--r-- 1 root root 775162 Jan 26 18:48 libcudart_static.a
+
+user@SYS-E300-8D-1:~/tensorflow$ bazel version
+Build label: 0.4.4
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Feb 1 18:54:21 2017 (1485975261)
+Build timestamp: 1485975261
+Build timestamp as int: 1485975261
+
+What I tried
+I'm playing around with including inttypes.h in the header in question, or possibly using an old school typedef instead of that fancy C++11 "using fancyName = literalType" syntax. Regardless, I wanted to file the bug before I get too deep into fixing it since it takes a while to recompile, even if I just change one line and run Bazel again.

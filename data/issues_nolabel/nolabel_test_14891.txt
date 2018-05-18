@@ -1,0 +1,78 @@
+`panic: runtime error: cgo argument has Go pointer to Go pointer` when using FIFOQueueV2 with non scalar shapes
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Arch Linux
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): 1.4.0
+Python version: NA, using go bindings
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory: NA, using CPU
+Exact command to reproduce:
+
+Describe the problem
+When using op.FIFOQueueV2() from the go bindings and passing it only scalar shapes in op.FIFOQueueV2Shapes, the OP works as expected. However when using multi dimensional shapes, it panics with panic: runtime error: cgo argument has Go pointer to Go pointer.
+Source code / logs
+For a working example with scalar shapes, replace the dataShapes and data lines with the commented versions below them.
+package main
+
+import (
+	"fmt"
+
+	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	"github.com/tensorflow/tensorflow/tensorflow/go/op"
+)
+
+func main() {
+	s := op.NewScope()
+	dataType := []tf.DataType{tf.Int32}
+
+	dataShapes := []tf.Shape{tf.MakeShape(2)} // Panics
+	//dataShapes := []tf.Shape{tf.ScalarShape()} // Works
+
+	data := op.Const(s, []int32{3, 4}) // Panics
+	//data := op.Const(s, int32(3)) // Works
+
+	queue := op.FIFOQueueV2(s, dataType, op.FIFOQueueV2Shapes(dataShapes))
+	enqueue := op.QueueEnqueueV2(s, queue, []tf.Output{data})
+	components := op.QueueDequeueV2(s, queue, dataType)
+	graph, err := s.Finalize()
+	if err != nil {
+		panic(err)
+	}
+	sess, err := tf.NewSession(graph, nil)
+	if err != nil {
+		panic(err)
+	}
+	_, err = sess.Run(nil, nil, []*tf.Operation{enqueue})
+	if err != nil {
+		panic(err)
+	}
+	results, err := sess.Run(nil, components, nil)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(results[0].Value())
+}
+
+[isaac@d6-arch tfes]$ go run queue_shape_error.go 
+2017-11-26 14:51:13.523481: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+panic: runtime error: cgo argument has Go pointer to Go pointer
+
+goroutine 1 [running]:
+github.com/tensorflow/tensorflow/tensorflow/go.setAttr.func21(0xc42000e040, 0x1, 0x1, 0xe4a9c0, 0xc714a0, 0xc42000e040, 0xc42001614c, 0x1)
+	/home/isaac/go/src/github.com/tensorflow/tensorflow/tensorflow/go/graph.go:308 +0x100
+github.com/tensorflow/tensorflow/tensorflow/go.setAttr(0xe4a9c0, 0xc42000e038, 0x4dc10a, 0x6, 0x4b6e00, 0xc42000c100, 0x0, 0x0)
+	/home/isaac/go/src/github.com/tensorflow/tensorflow/tensorflow/go/graph.go:309 +0x9b0
+github.com/tensorflow/tensorflow/tensorflow/go.(*Graph).AddOperation(0xc42000e028, 0x4dcaa4, 0xb, 0x4dcaa4, 0xb, 0x0, 0x0, 0x0, 0xc42007c1e0, 0xc42008e1b8, ...)
+	/home/isaac/go/src/github.com/tensorflow/tensorflow/tensorflow/go/graph.go:176 +0x4a0
+github.com/tensorflow/tensorflow/tensorflow/go/op.(*Scope).AddOperation(0xc42007c180, 0x4dcaa4, 0xb, 0x4dcaa4, 0xb, 0x0, 0x0, 0x0, 0xc42007c1e0, 0x7f05e202e000)
+	/home/isaac/go/src/github.com/tensorflow/tensorflow/tensorflow/go/op/scope.go:83 +0xa0
+github.com/tensorflow/tensorflow/tensorflow/go/op.FIFOQueueV2(0xc42007c180, 0xc4200160e8, 0x1, 0x1, 0xc420057f40, 0x1, 0x1, 0x0, 0x7f05e20322f8)
+	/home/isaac/go/src/github.com/tensorflow/tensorflow/tensorflow/go/op/wrappers.go:5136 +0x1ea
+main.main()
+	/home/isaac/go/src/github.com/is8ac/tfes/queue_shape_error.go:20 +0x238
+exit status 2

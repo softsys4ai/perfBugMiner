@@ -1,0 +1,61 @@
+Is tf.one_hot() w/ GPU not working under windows10?
+
+I'm trying to run tensorflow in Windows10 environment.
+When I use tf.one_hot function with GPU then it occur error.
+Below is test code, and it's working find in Ubuntu.
+Test code
+from sklearn.datasets.samples_generator import make_regression
+import tensorflow as tf
+
+X, y, coef = make_regression(n_samples=100, n_features=2, noise=0.1, coef=True)
+# To make all X values positive integer
+X = list(map(lambda xx: list(map(lambda x: abs(int(x*10)), xx)), X))
+
+tf.reset_default_graph()
+def build_model(x):
+    xs = tf.split(x, [1,1], 1)
+    h1s = []
+    for i in range(2):
+        with tf.variable_scope('h1_%d'%i):
+            # Seems below line is the problem..
+            xs_temp = tf.reshape(tf.one_hot(xs[i], depth=30, on_value=1.0, off_value=0.0), [-1, 30])
+            weights = tf.get_variable('weight', [30, 2], initializer=tf.contrib.layers.xavier_initializer())
+            biases = tf.get_variable('biases', [2], initializer=tf.constant_initializer(0.0))
+            xs_temp = tf.nn.relu(tf.matmul(xs_temp, weights) + biases)
+            h1s.append(xs_temp)
+    h1 = tf.concat(h1s, 1)
+    with tf.variable_scope('h2'):
+        weights = tf.get_variable('weight', [4, 1], initializer=tf.contrib.layers.xavier_initializer())
+        biases = tf.get_variable('biases', [1], initializer=tf.constant_initializer(0.0))
+        y = tf.matmul(h1, weights) + biases
+    return y
+
+with tf.device('/gpu:0'):
+    X_ph =  tf.placeholder(shape=[None,2],dtype=tf.int32)
+    y_ph =  tf.placeholder(shape=None,dtype=tf.float32)
+    output = build_model(X_ph)
+loss = tf.losses.mean_squared_error(y_ph, output)
+updateModel = tf.train.AdamOptimizer(1e-2).minimize(loss)
+
+init = tf.global_variables_initializer()
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+with tf.Session(config=config) as sess:
+    sess.run(init)
+    for _ in range(100):
+        sess.run(updateModel, feed_dict={X_ph: X, y_ph: y})
+Error
+InvalidArgumentError (see above for traceback): Cannot assign a device for operation 'h1_1/one_hot': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+	 [[Node: h1_1/one_hot = OneHot[T=DT_FLOAT, TI=DT_INT32, axis=-1, _device="/device:GPU:0"](split:1, h1_1/one_hot/depth, h1_1/one_hot/on_value, h1_1/one_hot/off_value)]]
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): pip install tensorflow-gpu
+TensorFlow version (use command below): 1.3.0
+Python version:  3.6
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 8.0/5.1
+GPU model and memory: Titan XP (12GB)
+Exact command to reproduce:

@@ -1,0 +1,98 @@
+cuda_configure.bzl makes bad symlink for: cuda/include/cudnn.h --> cuda/include/include/cudnn.h
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): NO
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): CentOS release 6.7 (Final) x86_64
+TensorFlow installed from (source or binary):  source
+TensorFlow version (use command below): master: git version 550df41 (checked out May 3rd 2017)
+Bazel version (if compiling from source): bazel-0.4.5
+CUDA/cuDNN version: 7.5/5.1.3
+GPU model and memory: Quadro K600 1GB DDR3
+Exact command to reproduce:
+
+setenv CC '/mnt/nfs/home/momeara/opt/bin/gcc'
+setenv CXX '/mnt/nfs/home/momeara/opt/bin/g++'
+setenv EXTRA_BAZEL_ARGS '--verbose_failures --jobs=1'
+setenv CPLUS_INCLUDE_PATH '/mnt/nfs/home/momeara/opt/include'
+setenv C_INCLUDE_PATH '/mnt/nfs/home/momeara/opt/include'
+setenv LIBRARY_PATH '/mnt/nfs/home/momeara/opt/lib:/mnt/nfs/home/momeara/opt/lib64'
+setenv LD_LIBRARY_PATH /mnt/nfs/work/momeara/sea/DeepSEA/cuda/lib64:/usr/local/cuda-7.5/lib64:/mnt/nfs/home/momeara/opt/lib:/mnt/nfs/home/momeara/opt/lib64:/usr/local/cuda-7.5/extras/CUPTI/lib64:$LD_LIBR\
+ARY_PATH
+setenv PATH /usr/local/cuda-7.5/bin:/mnt/nfs/work/momeara/sea/DeepSEA/tensorflow/bazel-0.4.5/output:$PATH
+
+./configure
+Please specify the location of python. [Default is /mnt/nfs/work/momeara/tools/anaconda2/envs/sea16/bin/python]:
+Found possible Python library paths:
+  /mnt/nfs/work/momeara/tools/anaconda2/envs/sea16/lib/python2.7/site-packages
+Please input the desired Python library path to use.  Default is [/mnt/nfs/work/momeara/tools/anaconda2/envs/sea16/lib/python2.7/site-packages]
+
+Using python library path: /mnt/nfs/work/momeara/tools/anaconda2/envs/sea16/lib/python2.7/site-packages
+Please specify optimization flags to use during compilation when bazel option "--config=opt" is specified [Default is -march=native]:
+Do you wish to use jemalloc as the malloc implementation? [Y/n] n
+jemalloc disabled
+Do you wish to build TensorFlow with Google Cloud Platform support? [y/N] n
+No Google Cloud Platform support will be enabled for TensorFlow
+Do you wish to build TensorFlow with Hadoop File System support? [y/N] n
+No Hadoop File System support will be enabled for TensorFlow
+Do you wish to build TensorFlow with the XLA just-in-time compiler (experimental)? [y/N] y
+XLA JIT support will be enabled for TensorFlow
+Do you wish to build TensorFlow with VERBS support? [y/N] y
+VERBS support will be enabled for TensorFlow
+Do you wish to build TensorFlow with OpenCL support? [y/N] n
+No OpenCL support will be enabled for TensorFlow
+Do you wish to build TensorFlow with CUDA support? [y/N] y
+CUDA support will be enabled for TensorFlow
+Do you want to use clang as CUDA compiler? [y/N] n
+nvcc will be used as CUDA compiler
+Please specify the CUDA SDK version you want to use, e.g. 7.0. [Leave empty to use system default]: 7.5
+Please specify the location where CUDA 7.5 toolkit is installed. Refer to README.md for more details. [Default is /usr/local/cuda]:
+Please specify which gcc should be used by nvcc as the host compiler. [Default is /mnt/nfs/home/momeara/opt/bin/gcc]:
+Please specify the cuDNN version you want to use. [Leave empty to use system default]: 5.1.3
+Please specify the location where cuDNN 5.1.3 library is installed. Refer to README.md for more details. [Default is /usr/local/cuda]: /mnt/nfs/work/momeara/sea/DeepSEA/cuda
+Please specify a list of comma-separated Cuda compute capabilities you want to build with.
+You can find the compute capability of your device at: https://developer.nvidia.com/cuda-gpus.
+Please note that each additional compute capability significantly increases your build time and binary size.
+[Default is: "3.5,5.2"]: 5.2
+WARNING: Output base '/mnt/nfs/home/momeara/.cache/bazel/_bazel_momeara/ef8339021629a8146b3e301bb7dc3099' is on NFS. This may lead to surprising failures and undetermined behavior.
+................................................................................
+____Starting clean (this may take a while). Consider using --async if the clean takes more than several minutes.
+Configuration finished
+
+bazel --output_user_root=/scratch/momeara/.cache/baze build -c opt --config=cuda //tensorflow/tools/pip_package:build_pip_package --verbose_failures --jobs=1
+
+Describe the problem
+During configure, it tries to make a symlink
+ln -s /mnt/nfs/work/momeara/sea/DeepSEA/cuda/include/cudnn.h /scratch/momeara/.cache/baze/ef8339021629a8146b3e301bb7dc3099/execroot/tensorflow/bazel-out/host/genfiles/external/local_config_cuda/cuda/include/include/cudnn.h
+
+but this fails because the directory /scratch/momeara/.cache/baze/ef8339021629a8146b3e301bb7dc3099/execroot/tensorflow/bazel-out/host/genfiles/external/local_config_cuda/cuda/include/include does not exist
+notice that it has include/include at the end.
+If I change this line: https://github.com/tensorflow/tensorflow/blob/master/third_party/gpus/cuda_configure.bzl#L877
+genrules.append(_symlink_genrule_for_dir(repository_ctx, None, "",
+        "cudnn-include", [cudnn_header_dir + "/cudnn.h"], ["include/cudnn.h"]))
+
+to
+genrules.append(_symlink_genrule_for_dir(repository_ctx, None, "",
+        "cudnn-include", [cudnn_header_dir + "/cudnn.h"], ["cudnn.h"]))
+
+the build proceeds without error
+Source code / logs
+____[107 / 393] Writing script external/local_config_cuda/cuda/cuda-include.genrule_script.sh [for host]
+ERROR: /scratch/momeara/.cache/baze/ef8339021629a8146b3e301bb7dc3099/external/local_config_cuda/cuda/BUILD:1309:1: Executing genrule @local_config_cuda//cuda:cudnn-include failed: bash failed: error exec
+uting command
+(cd /scratch/momeara/.cache/baze/ef8339021629a8146b3e301bb7dc3099/execroot/tensorflow && 
+exec env - 
+LD_LIBRARY_PATH=/mnt/nfs/work/momeara/sea/DeepSEA/cuda/lib64:/usr/local/cuda-7.5/lib64:/mnt/nfs/home/momeara/opt/lib:/mnt/nfs/home/momeara/opt/lib64:/usr/local/cuda-7.5/extras/CUPTI/lib64:/mnt/nfs/ho
+me/momeara/opt/lib:/mnt/nfs/home/momeara/opt/lib64 
+PATH=/usr/local/cuda-7.5/bin:/mnt/nfs/work/momeara/sea/DeepSEA/tensorflow/tensorflow/bazel-0.4.5/output:/mnt/nfs/work/momeara/tools/anaconda2/envs/sea16/bin:/mnt/nfs/work/momeara/tools/anaconda2/bin:
+/mnt/nfs/home/momeara/.local/bin:/mnt/nfs/home/momeara/opt/node-v4.5.0-linux-x64/bin:/mnt/nfs/home/momeara/opt/bin:/mnt/nfs/work/momeara/tools/anaconda2/envs/sea16/bin:/mnt/nfs/work/momeara/tools/anacond
+a2/bin:/mnt/nfs/home/momeara/.local/bin:/mnt/nfs/home/momeara/opt/node-v4.5.0-linux-x64/bin:/mnt/nfs/home/momeara/opt/bin:/mnt/nfs/work/momeara/tools/anaconda2/envs/sea16/bin:/mnt/nfs/work/momeara/tools/
+anaconda2/bin:/mnt/nfs/home/momeara/.local/bin:/mnt/nfs/home/momeara/opt/node-v4.5.0-linux-x64/bin:/mnt/nfs/home/momeara/opt/bin:/usr/lib64/qt-3.3/bin:/usr/kerberos/sbin:/usr/kerberos/bin:/usr/local/bin:
+/bin:/usr/bin 
+/bin/bash -c 'source external/bazel_tools/tools/genrule/genrule-setup.sh;
+ln -s /mnt/nfs/work/momeara/sea/DeepSEA/cuda/include/cudnn.h bazel-out/host/genfiles/external/local_config_cuda/cuda/include/include/cudnn.h    '): com.google.devtools.build.lib.shell.BadExitStatusExcept
+ion: Process exited with status 1.
+ln: creating symbolic link bazel-out/host/genfiles/external/local_config_cuda/cuda/include/include/cudnn.h': No such file or directory blaze: Leaving directory/scratch/momeara/.cache/baze/ef8339021629a8146b3e301bb7dc3099/execroot/tensorflow/'
+____Building complete.
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+____Elapsed time: 75.364s, Critical Path: 3.99s

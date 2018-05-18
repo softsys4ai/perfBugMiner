@@ -1,0 +1,32 @@
+Set `set +e` in generate.sh (`go generate`) to output correct information
+
+While playing with go in tensorflow, the go generate will not output correct
+information about missing protoc even though generate.sh contains the following:
+  PATH_PROTOC=$(which protoc)
+  if [ ! -x "${PATH_PROTOC}" ]
+  then
+    echo "Protocol buffer compiler protoc not found in PATH or in ${PROTOC}"
+    echo "Perhaps build it using:"
+    echo "bazel build --config opt @protobuf//:protoc"
+    exit 1
+  fi
+  PROTOC=$PATH_PROTOC
+
+Instread, a non-informative error is displayed:
+root@99829f070f46:/go/src/github.com/tensorflow/tensorflow# go generate github.com/tensorflow/tensorflow/tensorflow/go/op
+../genop/main.go:15: running "sh": exit status 1
+tensorflow/go/op/generate.go:15: running "go": exit status 1
+root@99829f070f46:/go/src/github.com/tensorflow/tensorflow#
+
+The reason is that set -e is at the beginning of the script and it exit
+immediately at PATH_PROTOC=$(which protoc).
+This fix sets set +e before PATH_PROTOC=$(which protoc) and restores set -e
+back, so that information about missing protoc outputed.
+Below is the new output which helps in finding out the reason for the build error:
+root@99829f070f46:/go/src/github.com/tensorflow/tensorflow# go generate github.com/tensorflow/tensorflow/tensorflow/go/op
+Protocol buffer compiler protoc not found in PATH or in /go/src/github.com/tensorflow/tensorflow/bazel-out/host/bin/external/protobuf/protoc
+Perhaps build it using:
+bazel build --config opt @protobuf//:protoc
+../genop/main.go:15: running "sh": exit status 1
+tensorflow/go/op/generate.go:15: running "go": exit status 1
+root@99829f070f46:/go/src/github.com/tensorflow/tensorflow#

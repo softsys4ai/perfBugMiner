@@ -1,0 +1,142 @@
+tf.decode_csv() seems to read the second field which actually doesn't exist.
+
+Environment info
+Operating System:
+$ lsb_release -a
+No LSB modules are available.
+Distributor ID:	Ubuntu
+Description:	Ubuntu 14.04.5 LTS
+Release:	14.04
+Codename:	trusty
+
+Installed version of CUDA and cuDNN:
+$ ls -l /usr/local/cuda-8.0/lib64/libcud*
+-rw-r--r-- 1 root root   558720 11월  4 05:18 /usr/local/cuda-8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 11월  4 05:18 /usr/local/cuda-8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root       19 11월  4 05:18 /usr/local/cuda-8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rwxr-xr-x 1 root root   415432 11월  4 05:18 /usr/local/cuda-8.0/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root   775162 11월  4 05:18 /usr/local/cuda-8.0/lib64/libcudart_static.a
+-rwxr-xr-x 1 root root 79337624 11월  4 05:20 /usr/local/cuda-8.0/lib64/libcudnn.so
+-rwxr-xr-x 1 root root 79337624 11월  4 05:20 /usr/local/cuda-8.0/lib64/libcudnn.so.5
+-rwxr-xr-x 1 root root 79337624 11월  4 05:20 /usr/local/cuda-8.0/lib64/libcudnn.so.5.1.5
+-rw-r--r-- 1 root root 69756172 11월  4 05:20 /usr/local/cuda-8.0/lib64/libcudnn_static.a
+
+Tensorflow version:
+$ python -c "import tensorflow; print(tensorflow.__version__)"
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+0.12.1
+
+I tried following 'A typical pipeline for reading records from' in 'Reading data'.
+I wanted to read just one csv file including file name of MS COCO dataset.
+The content of csv file is the following :
+$ head -n 5 train_file_list.csv 
+./train2014/COCO_train2014_000000322402.jpg,
+./train2014/COCO_train2014_000000441507.jpg,
+./train2014/COCO_train2014_000000555318.jpg,
+./train2014/COCO_train2014_000000380820.jpg,
+./train2014/COCO_train2014_000000496662.jpg,
+$ tail -n 5 train_file_list.csv 
+./val2014/COCO_val2014_000000283947.jpg,
+./val2014/COCO_val2014_000000027620.jpg,
+./val2014/COCO_val2014_000000067310.jpg,
+./val2014/COCO_val2014_000000044520.jpg,
+./val2014/COCO_val2014_000000027617.jpg,
+
+I have repeatedly confirmed that the field in csv is the only one containing the filename. I can attach pictures for the provement, but I will not. Of course, the 'train2014' and 'val2014' directories contain corresponding pictures, but that is not the case here.
+Trying to test for reproducing the above tutorial, I wrote code which is the following :
+import tensorflow as tf
+ 
+filename_queue = tf.train.string_input_producer(['/path/to/train_file_list.csv'])
+
+reader = tf.TextLineReader()
+key, value = reader.read(filename_queue)
+
+record_defaults = [['aa']]
+fname = tf.decode_csv(value, record_defaults=record_defaults)
+
+with tf.Session() as sess:
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
+
+    for i in range(5):
+        example = sess.run([fname])
+        print(example)
+    coord.request_stop()
+    coord.join(threads)
+but it raise the error which is the following :
+(tensorflow)mikigom@mikigom-desktop:~/github/HSP2P/Training$ python input_test.py 
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:937] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties: 
+name: GeForce GTX 1070
+major: 6 minor: 1 memoryClockRate (GHz) 1.797
+pciBusID 0000:01:00.0
+Total memory: 7.92GiB
+Free memory: 6.41GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1070, pci bus id: 0000:01:00.0)
+Traceback (most recent call last):
+  File "input_test.py", line 20, in <module>
+    example = sess.run([fname])
+  File "/path/to/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 766, in run
+    run_metadata_ptr)
+  File "/path/to/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 964, in _run
+    feed_dict_string, options, run_metadata)
+  File "/path/to/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+    target_list, options, run_metadata)
+  File "/path/to/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Expect 1 fields but have 2 in record 0
+	 [[Node: DecodeCSV = DecodeCSV[OUT_TYPE=[DT_STRING], field_delim=",", _device="/job:localhost/replica:0/task:0/cpu:0"](ReaderRead:1, DecodeCSV/record_defaults_0)]]
+
+Caused by op u'DecodeCSV', defined at:
+  File "input_test.py", line 11, in <module>
+    fname = tf.decode_csv(value, record_defaults=record_defaults)
+  File "/path/to/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/ops/gen_parsing_ops.py", line 45, in decode_csv
+    field_delim=field_delim, name=name)
+  File "/path/to/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 759, in apply_op
+    op_def=op_def)
+  File "/path/to/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2240, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/path/to/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1128, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Expect 1 fields but have 2 in record 0
+	 [[Node: DecodeCSV = DecodeCSV[OUT_TYPE=[DT_STRING], field_delim=",", _device="/job:localhost/replica:0/task:0/cpu:0"](ReaderRead:1, DecodeCSV/record_defaults_0)]]
+
+It seems that tf.decode_csv() reads the second field which actually doesn't exist.
+To temporarily solve this problem, I changed record_defaults in the above code to:
+record_defaults = [['aa'], ['aa']]
+And if you run the code again, it will return normally.
+$ python input_test.py 
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:937] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties: 
+name: GeForce GTX 1070
+major: 6 minor: 1 memoryClockRate (GHz) 1.797
+pciBusID 0000:01:00.0
+Total memory: 7.92GiB
+Free memory: 6.40GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1070, pci bus id: 0000:01:00.0)
+[['./train2014/COCO_train2014_000000322402.jpg', 'aa']]
+[['./train2014/COCO_train2014_000000441507.jpg', 'aa']]
+[['./train2014/COCO_train2014_000000555318.jpg', 'aa']]
+[['./train2014/COCO_train2014_000000380820.jpg', 'aa']]
+[['./train2014/COCO_train2014_000000496662.jpg', 'aa']]
+
+I think this is a bug in tf.decode_csv().

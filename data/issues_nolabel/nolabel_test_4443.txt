@@ -1,0 +1,135 @@
+Breaking change of `sparse_softmax_cross_entropy_with_logits` in v0.10: bug or feature
+
+When dealing with sequences of different lengths and RNNs, it is very common to pad "out-of-range" part of the input sequence. More than that, labels should also be padded. It is convenient to pad labels with bogus value -1 and not introducing any new valid label values.
+Prior to version 0.10, sparse_softmax_cross_entropy_with_logits returned 0.0 for logits that correspond to -1 labels. These cross-entropy values thus weren't influencing calculation of loss, effectively being ignored.
+Somewhere along the way between v0.9 and v0.10 this behavior has changed, and:
+
+nan is now being returned for logits that correspond to -1 labels
+gradient calculation results in nan
+
+New behavior silently breaks the code that rely on the assumption that zero cross-entropy will be returned and valid gradients will be calculated in case of labels -1 .
+The goal of this issue is to discuss the possibility and practicability of reverting to the old behavior, i.e.:
+
+returning 0.0 for logits that correspond to -1 labels
+fixing gradient computation
+
+I would also like to point out that it would be very good to document changes, that could potentially break user code, in the release notes (in the section "breaking changes").
+Sad story: in my case, it took some time to understand what's happening. Current version of documentation says that passing -1 labels is illegal and leads to incorrect gradient calculations. It was not the case when I've written my code. I couldn't know about this change, as I cannot possibly re-read all the documentation every time I update tensorflow. I spent about 2 weeks exploring NaN loss and thought it's a gradient explosion. I almost threw away a perfectly good model. Advice for future me: if stuck, read the docs AGAIN ;) 
+Related:  #1234
+Code snippet to reproduce the issue
+I tried hard to produce a minimum amount of code, but, well, ... it's still huge.
+(gist:  b98a33b2513aac8dca8f70a0a16bc592)
+Imagine x to be an output of RNN. Notice that  X_i = 0.0, Y_i = -1 and MASK_i = 0.0 for pading (indices greater then LENGTH)
+from __future__ import print_function, division
+import tensorflow as tf
+
+I = 1  # input size
+T = 6  # sequence length (num timesteps)
+B = 3  # batch size
+C = 7  # number of classes
+
+X = [
+    [[0.0], [1.0], [2.0], [3.0], [0.0], [0.0]],
+    [[0.0], [1.0], [2.0], [0.0], [0.0], [0.0]],
+    [[0.0], [1.0], [2.0], [3.0], [4.0], [5.0]],
+]
+
+Y = [
+    [0, 1, 2, 3, -1, -1],
+    [0, 1, 2, -1, -1, -1],
+    [0, 1, 2, 3, 4, 5],
+]
+
+MASK = [
+    [1, 1, 1, 1, 0, 0],
+    [1, 1, 1, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1],
+]
+
+LENGTHS = [4, 3, 6]
+
+x = tf.placeholder(shape=[B, T, I], dtype=tf.float32, name="x")
+y = tf.placeholder(shape=[B, T], dtype=tf.int32, name="y")
+mask = tf.placeholder(shape=[B, T], dtype=tf.bool, name="mask")
+lengths = tf.placeholder(shape=[B], dtype=tf.int32, name="lengths")
+
+x_flat = tf.reshape(x, shape=[B * T, I])
+y_flat = tf.reshape(y, shape=[B * T])
+mask_flat = tf.reshape(mask, shape=[B * T])
+
+w = tf.Variable(tf.random_normal(mean=0.0, stddev=1e-2, shape=[I, C]), name="w")
+b = tf.Variable(tf.random_normal(mean=0.0, stddev=1e-2, shape=[C]), name="b")
+
+z = tf.nn.xw_plus_b(x_flat, w, b, name="z")
+
+xentropy = tf.nn.sparse_softmax_cross_entropy_with_logits(z, y_flat)
+
+xentropy_masked = tf.select(
+    mask_flat,
+    xentropy,
+    tf.zeros_like(xentropy)
+)
+
+xentropy_masked = tf.reshape(xentropy_masked, [B, T])
+
+xentropy_sum = tf.reduce_sum(xentropy_masked, reduction_indices=1)
+
+xentropy_sum_norm = tf.div(
+    xentropy_sum, tf.cast(lengths, dtype=tf.float32)
+)
+
+loss = tf.reduce_mean(xentropy_sum_norm)
+
+opt = tf.train.GradientDescentOptimizer(learning_rate=1e-3)
+grads_and_vars_op = opt.compute_gradients(loss)
+
+with tf.Session() as sess:
+    sess.run(tf.initialize_all_variables())
+    grads_ops = [g for (g, v) in grads_and_vars_op]
+
+    fetches = [
+        xentropy, xentropy_masked
+    ]
+    fetches.extend(grads_ops)
+
+    xe, xe_masked, grads, _ = sess.run(fetches, feed_dict={
+        x: X,
+        y: Y,
+        mask: MASK,
+        lengths: LENGTHS
+    })
+
+    print("xe:\n", xe)
+    print("xe_masked:\n", xe_masked)
+    print("grads:\n", grads)
+
+print("tf.__version__: ", tf.__version__)
+
+Desired, old output
+with tensorflow-0.9.0-cp27-none-linux_x86_64.whl
+xe:
+ [ 1.94680917  1.95220029  1.97665489  1.90392613  0.          0.
+  1.94680917  1.95220029  1.97665489  0.          0.          0.
+  1.94680917  1.95220029  1.97665489  1.90392613  1.99289608  1.89933121]
+xe_masked:
+ [[ 1.94680917  1.95220029  1.97665489  1.90392613  0.          0.        ]
+ [ 1.94680917  1.95220029  1.97665489  0.          0.          0.        ]
+ [ 1.94680917  1.95220029  1.97665489  1.90392613  1.99289608  1.89933121]]
+grads:
+ [[ 0.23479398 -0.01371239 -0.27168125 -0.16881087  0.00719513 -0.03152646
+   0.24374181]]
+tf.__version__:  0.9.0
+
+New output
+with tensorflow-0.10.0-cp27-none-linux_x86_64.whl
+xe:
+ [ 1.96044326  1.94155979  1.98353648  1.90060949         nan         nan
+  1.96044326  1.94155979  1.98353648         nan         nan         nan
+  1.96044326  1.94155979  1.98353648  1.90060949  1.93305326  1.96117282]
+xe_masked:
+ [[ 1.96044326  1.94155979  1.98353648  1.90060949  0.          0.        ]
+ [ 1.96044326  1.94155979  1.98353648  0.          0.          0.        ]
+ [ 1.96044326  1.94155979  1.98353648  1.90060949  1.93305326  1.96117282]]
+grads:
+ [[ nan  nan  nan  nan  nan  nan  nan]]
+tf.__version__:  0.10.0

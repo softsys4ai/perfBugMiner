@@ -1,0 +1,157 @@
+Interesting phenomenon when running cifar10_train.py and cifar10_multi_gpu_train.py
+
+Environment info
+Operating System:
+ centos 7 
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+$ls -l /usr/local/cuda/lib64/libcud*
+here is the result
+  548 -rw-r--r-- 1 root root   558720 Dec  7 21:02 /usr/local/cuda/lib64/libcudadevrt.a
+    0 lrwxrwxrwx 1 root root       16 Dec  7 21:02 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+    0 lrwxrwxrwx 1 root root       19 Dec  7 21:02 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+  408 -rwxr-xr-x 1 root root   415432 Dec  7 21:02 /usr/local/cuda/lib64/libcudart.so.8.0.44
+  760 -rw-r--r-- 1 root root   775162 Dec  7 21:02 /usr/local/cuda/lib64/libcudart_static.a
+    0 lrwxrwxrwx 1 root root       13 Dec  7 21:02 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+    0 lrwxrwxrwx 1 root root       17 Dec  7 21:02 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+77480 -rwxr-xr-x 1 root root 79337624 Dec 20 13:45 /usr/local/cuda/lib64/libcudnn.so.5.1.5
+68124 -rw-r--r-- 1 root root 69756172 Dec 20 13:45 /usr/local/cuda/lib64/libcudnn_static.a
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+I install tensorflow using pip with command from pypi
+
+$ pip install tensorflow-gpu 
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+0.12.0
+Phenomenon
+Performance of cifar10 model on GPU
+When running cifar10_train.py, I tried 2000 steps with batch_size 128
+python cifar10_train.py --data_dir ../datasets/cifar10 --batch_size 128 --max_steps 2000
+Then elasped time on a Telsa M40 graphics card is
+Elasped Time: 167.51s
+Here is the speed running cifar10_multi_gpu_train.py with different number of GPUs on my machine (max_steps=2000, batch_size=128)
+
+
+
+System
+Examples per sec
+Step Time (sec/batch)
+Elasped Time (sec)
+
+
+
+
+1 Tesla M40
+1300 ~ 2400
+0.05 ~ 0.10
+157.96
+
+
+2 Tesla M40
+2700 ~ 3700
+0.03 ~ 0.04
+164.49
+
+
+4 Tesla M40
+3900 ~ 6300
+0,02 ~ 0.03
+231.98
+
+
+8 Tesla M40
+3700 ~ 6700
+0.02 ~ 0.04
+431.54
+
+The performance improves as the number of GPUs increases.
+Performance when moving distorted_inputs to cpu
+I made some changes on cifar10_train.py and cifar10_muti_gpu_train.py
+# cifar10_train.py
+def train():
+    with tf.Graph().as_default():
+        # Here is what I modified
+         with tf.device("/cpu:0"):
+            images, labels = cifar10.distorted_inputs()
+I put function distorted_inputs on cpu, and then the performace is much better than before
+Elasped Time: 42.92s
+I made the same change on cifar10_multi_gpu_train.py
+# cifar10_multi_gpu_train.py
+def tower_loss(scope, images, labels):
+  # Get images and labels for CIFAR-10.
+  # Commented
+  #images, labels = cifar10.distorted_inputs()
+
+  logits = cifar10.inference(images)
+
+  _ = cifar10.loss(logits, labels)
+  losses = tf.get_collection('losses', scope)
+  total_loss = tf.add_n(losses, name='total_loss')
+
+  for l in losses + [total_loss]:
+    loss_name = re.sub('%s_[0-9]*/' % cifar10.TOWER_NAME, '', l.op.name)
+    tf.scalar_summary(loss_name, l)
+
+  return total_loss
+
+def train():
+  """Train CIFAR-10 for a number of steps."""
+  with tf.Graph().as_default(), tf.device('/cpu:0'):
+    global_step = tf.get_variable(
+        'global_step', [],
+        initializer=tf.constant_initializer(0), trainable=False)
+
+    ...build optimizer...
+
+    # Calculate the gradients for each model tower.
+    tower_grads = []
+    for i in xrange(FLAGS.num_gpus):
+      # move distorted_inputs to here
+      images, labels = cifar10.distorted_inputs()
+      with tf.device('/gpu:%d' % i):
+          with tf.name_scope('%s_%d' % (cifar10.TOWER_NAME, i)) as scope:
+               loss = tower_loss(scope, images, labels)
+And then the performance is
+
+
+
+System
+Examples per sec
+Step Time (sec/batch)
+Elasped Time (sec)
+
+
+
+
+1 Tesla M40
+6700 ~ 7700
+0.016 ~ 0.019
+42.62
+
+
+2 Tesla M40
+6800 ~ 7600
+0.016 ~ 0.018
+78.18
+
+
+4 Tesla M40
+7000 ~ 7400
+0,017 ~ 0.018
+154.88
+
+
+8 Tesla M40
+6900 ~ 7200
+0,017 ~ 0.018
+309.95
+
+The performce is much better than the previous table but increaing number of GPUs does not acquire better result.

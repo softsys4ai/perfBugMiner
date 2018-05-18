@@ -1,0 +1,55 @@
+bidirectional_rnn not taking sequence_length [batch_size]
+
+Trying to do variable sequence length with brinn and not able to use placeholder of batch_size as sequence length, instead wants num_steps size even though function description says [batch_size].
+In the code below setting up the graph gives an dimension error. (I am using the latest tensorflow version 0.10.0.)
+import tensorflow as tf
+flags = tf.flags
+FLAGS = flags.FLAGS
+flags.DEFINE_bool("use_fp16", False,
+                  "Train using 16-bit floats instead of 32bit floats")
+
+def data_type():
+    return tf.float16 if FLAGS.use_fp16 else tf.float32
+
+batch_size = 20
+num_steps = 40
+hidden_size = 64
+num_layers = 2
+vocab_size = 1000000
+
+embedding_input = tf.placeholder(tf.int32, [batch_size, num_steps])
+sequence_length = tf.placeholder(tf.int32, [batch_size])
+embeddings = tf.get_variable("embedding",
+                             [vocab_size, 300],dtype=data_type(),trainable=False)
+
+embedding_input = tf.nn.embedding_lookup(embeddings, embedding_input)
+
+
+initializer = tf.random_uniform_initializer(-1,1)
+
+lstm_fw_cell = tf.nn.rnn_cell.LSTMCell(num_units=hidden_size,
+                                       initializer=initializer)
+lstm_bw_cell = tf.nn.rnn_cell.LSTMCell(num_units=hidden_size,
+                                       initializer=initializer)
+
+lstm_fw_cell = tf.nn.rnn_cell.MultiRNNCell([lstm_fw_cell] * num_layers)
+lstm_bw_cell = tf.nn.rnn_cell.MultiRNNCell([lstm_bw_cell] * num_layers)
+
+lstm_fw_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_fw_cell, output_keep_prob=0.9)
+lstm_bw_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_bw_cell, output_keep_prob=0.9)
+inputs = tf.nn.dropout(embedding_input, 0.9, noise_shape=None, seed=None)
+
+inputs = [tf.squeeze(x) for x in tf.split(0, batch_size, inputs)]
+output, _, _ = tf.nn.bidirectional_rnn(lstm_fw_cell,
+                                       lstm_bw_cell,inputs,
+                                       sequence_length=sequence_length,
+                                       dtype=tf.float32)
+
+Traceback (most recent call last):
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/framework/tensor_shape.py", line 566, in merge_with
+new_dims.append(dim.merge_with(other[i]))
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/framework/tensor_shape.py", line 133, in merge_with
+self.assert_is_compatible_with(other)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/framework/tensor_shape.py", line 108, in assert_is_compatible_with
+% (self, other))
+ValueError: Dimensions 20 and 40 are not compatible

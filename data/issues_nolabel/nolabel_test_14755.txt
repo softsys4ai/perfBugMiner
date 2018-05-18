@@ -1,0 +1,43 @@
+Problem with assigning values to matrix indices in tensorflow
+
+Hi,
+I am constructing a NN with tensorflow that uses a custom stddev function. I have for a batch and indices i and j a function AcrossBatchSD(batch, i, j). Of course, import tensorflow as tf.
+def AcrossBatchSD(batch, i, j):
+
+    _, varR = tf.nn.moments(batch[:, i, j, 0], axes=[0])
+    _, varG = tf.nn.moments(batch[:, i, j, 1], axes=[0])
+    _, varB = tf.nn.moments(batch[:, i, j, 2], axes=[0]) 
+ 
+    return tf.sqrt(varR), tf.sqrt(varG), tf.sqrt(varB)
+
+This function seems to work, but then I would like to do the following:
+def MinibatchStdDev(batch, window, mb_size):
+
+    n = batch[0].shape[0].value 
+    f1 = tf.Variable(tf.zeros([n, n]))
+    f2 = tf.Variable(tf.zeros([n, n]))
+    f3 = tf.Variable(tf.zeros([n, n]))
+
+    for i in range(n):
+        for j in range(n):
+
+            sqrtR, sqrtG, sqrtB = AcrossBatchSD(batch, i, j)          
+            f1[i, j].assign(sqrtR)
+            f2[i, j].assign(sqrtG)
+            f3[i, j].assign(sqrtB) 
+                
+    f = tf.divide(tf.add(tf.add(f1, f2), f3), 3)
+    F = tf.reduce_mean(f)
+
+    return tf.multiply(F, tf.ones(([mb_size, window, window]))))
+
+My problem is that the function assign in tensorflow is not differentiable, so tf.gradients will outout a NoneType. Therefore, my network cannot be trained.
+A test can be done with
+mb_size = 3
+window = 4
+batch = tf.Variable(tf.random_normal([mb_size, 1024, 1024, 3]), tf.float32)
+out = MinibatchStdDev(batch=batch, window=window, mb_size=mb_size)
+init = tf.global_variables_initializer()
+sess = tf.Session()
+sess.run(init)
+sess.run(out)

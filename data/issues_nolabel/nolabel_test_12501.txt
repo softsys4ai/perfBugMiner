@@ -1,0 +1,95 @@
+EditDistance crashes under C++ environment
+
+System information
+
+Windows 10:
+TensorFlow installed from source:
+TensorFlow version 1.3-rc2:
+Python version 3.5:
+VisualStudio 2017:
+
+Describe the problem
+I have created a C++ example with EditDistance and linked a debug version of tensorflow.dll which is created from tensorflow source.  The compiled EditDistance example crashed at session.Run( outputs, &output_tensor );. I have tried in this example also in the tensorflow environment it crashes also. It seems the EditDistance operator doesn't work under C++. I have searched another EditDistance examples but it seems nobody has tested it outside the python environment.
+Source code / logs
+#include <iostream>
+#include <vector>
+#include <string>
+#include <unordered_set>
+
+#include "tensorflow/cc/client/client_session.h"
+#include "tensorflow/cc/ops/standard_ops.h"
+#include "tensorflow/core/framework/tensor.h"
+#include "tensorflow/core/lib/gtl/edit_distance.h"
+#include "tensorflow/core/util/sparse/sparse_tensor.h"
+#include "tensorflow/core/protobuf/config.pb.h"
+
+using namespace std;
+
+int main( int argc, char *argv[] )
+
+{
+           using namespace tensorflow;
+           using namespace tensorflow::ops;
+           using namespace tensorflow::gtl;
+           Scope root = Scope::NewRootScope();
+
+       std::vector<Tensor> output_tensor;
+       ClientSession session( root );
+
+
+       Tensor hypho2_ix( DT_INT64, TensorShape( { static_cast<int64_t>( 4 ), 3 } ) );
+       Tensor hypho2_vals( DT_STRING, TensorShape( {static_cast<int64_t>( 4 )} ) );
+
+       makeIndex( {"bear"}, hypho2_ix );
+       makeChar ( {"bear"}, hypho2_vals );
+
+       Tensor truth2_ix( DT_INT64, TensorShape( { static_cast<int64_t>( 5 ), 3 } ) );
+       Tensor truth2_vals( DT_STRING, TensorShape( {static_cast<int64_t>( 5 )} ) );
+
+       makeIndex( { "beers" }, truth2_ix );
+       makeChar ( { "beers" }, truth2_vals );
+
+       // Declaration of edit distance
+       auto address_dist = EditDistance( root
+                               , hypho2_ix
+                               , hypho2_vals
+                               , {3,1,1}// {static_cast<int64_t>(1),3}//test_address_shape
+                               , truth2_ix
+                               , truth2_vals
+                               , {3,1,1} //ref_address_shape
+                               , EditDistance::Normalize(false) );
+
+                                  const std::vector<Output> outputs = {address_dist};
+       session.Run( outputs, &output_tensor );
+ }   
+    void makeIndex( const std::vector<string>& rsoStringVector, tensorflow::Tensor& roIndexTensor )
+    {
+       auto ix_t = roIndexTensor.matrix<int64_t>();
+       std::size_t stCounter = 0;
+       for( std::size_t stX = 0; stX < rsoStringVector.size() ; stX++ )
+       {
+          const std::string& rsString = rsoStringVector[ stX ];
+          for( std::size_t stY = 0; stY < rsString.size(); stY++ )
+          {
+             ix_t( stCounter, 0 ) = stX;
+             ix_t( stCounter, 1 ) = 0;
+             ix_t( stCounter, 2 ) = stY;
+             stCounter++;
+          }
+       }
+    }
+
+    void makeChar( const std::vector<std::string>& rsoStringVector, tensorflow::Tensor& roCharTensor )
+    {
+       auto vals_t = roCharTensor.vec<std::string>();
+
+       int64_t i64Index = 0;
+       for( std::size_t stX = 0; stX < rsoStringVector.size(); stX++ )
+       {
+          const std::string& rsString = rsoStringVector[ stX ];
+          for( std::size_t stY = 0; stY < rsString.size(); stY++ )
+          {
+             vals_t( i64Index++ ) = ( rsString[ stY ] );
+          }
+       }
+    }

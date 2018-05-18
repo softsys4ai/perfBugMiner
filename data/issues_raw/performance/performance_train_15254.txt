@@ -1,0 +1,74 @@
+CMake build on Windows (tensorflow.dll) does not include many GPU ops
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 10
+
+
+TensorFlow installed from (source or binary):
+from source
+
+
+TensorFlow version (use command below):
+1.4
+
+
+Python version:  3.5.2
+
+
+Bazel version (if compiling from source):
+using CMake (3.8.2)
+
+
+GCC/Compiler version (if compiling from source):
+MSVC 14 (C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\bin\amd64\CL.exe)
+
+
+CUDA/cuDNN version:
+CUDA 8.0, cuDNN: 6 (6.14)
+
+
+GPU model and memory:
+NVidia GTX 1070 (8GB)
+
+
+Exact command to reproduce:
+
+
+Describe the problem
+I build tensorflow from source following these instructions:
+https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/cmake
+and I use this CMake command:
+cmake .. -G "Visual Studio 14 2015 Win64" -T v140,host=x64 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSWIG_EXECUTABLE=e:/dev/swigwin-3.0.12/swig.exe -Dtensorflow_ENABLE_GPU=ON -DCUDNN_HOME="C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA" -Dtensorflow_BUILD_SHARED_LIB=ON -Dtensorflow_WIN_CPU_SIMD_OPTIONS=/arch:AVX2 -Dtensorflow_ENABLE_GRPC_SUPPORT=OFF
+and MSBuild /p:Configuration=RelWithDebInfo tensorflow.vcxproj
+(I also tried 'Release' as Configuration - same outcome).
+The result of the build process is  tensorflow.dll. I use a separate C++ program (using Qt) to link against the built DLL. In general, everything works fine: I can load a saved tensorflow graph and run it (=inference).
+The problem is now, that many GPU-ops are not linked into tensorflow.dll (for example, Softmax) - in my example most ops run on GPU but Softmax on CPU - with a huge performance impact (GPU use <10%). Why I think this is the case:
+
+tensorflow::LogAllRegisteredKernels() lists Softmax, but with CPU only
+looking at tensorflow.dll with DependecyWalker has the same result (Softmax CPU only)
+when I check tf_core_gpu_kernels.lib, then GPU code is there (e.g., tf_core_gpu_kernels_generated_softmax_op_gpu.cu.cc.lib).
+
+Workaround
+After quite some time trying to figure this out, I found a hackish workaround:
+Looking at the output of MSBuild (increased verbosity level), it looks as if the python script create_def_file.py is executed without using the tf_core_kernels.lib (C:\Python35\python.exe E:/dev/tensorflow/tensorflow/contrib/cmake/tools/create_def_file.py --input E:/dev/tensorflow/tensorflow/contrib/cmake/build/RelWithDebInfo/tensorflow_static.lib;E:/dev/tensorflow/tensorflow/contrib/cmake/build/RelWithDebInfo/tf_protos_cc.lib --output E:/dev/tensorflow/tensorflow/contrib/cmake/build/RelWithDebInfo/tensorflow.def --target tensorflow.dll).
+What I did is the following:
+
+
+create a def-file including the GPU kernels:
+C:\Python35\python.exe E:/dev/tensorflow/tensorflow/contrib/cmake/tools/create_def_file.py --input E:/dev/tensorflow/tensorflow/contrib/cmake/build/RelWithDebInfo/tensorflow_static.lib;E:/dev/tensorflow/tensorflow/contrib/cmake/build/RelWithDebInfo/tf_protos_cc.lib;E:/dev/tensorflow/tensorflow/contrib/cmake/build/RelWithDebInfo/tf_core_gpu_kernels.lib --output E:/dev/tensorflow/tensorflow/contrib/cmake/build/RelWithDebInfo/tensorflow_wr.def --target tensorflow.dll
+
+
+Link tensorflow.dll with the created def file (tensorflow_wr.def). This did not work, since I got a couple of missing-unresolved-externals errors. As they were all related to LSTM/RNN, I ended up re-creating tf_core_gpu_kernels.lib (issuing the Lib.exe omitting tf_core_gpu_kernels_generated_gru_ops_gpu.cu.cc.obj and tf_core_gpu_kernels_generated_lstm_ops_gpu.cu.cc.obj)
+
+
+Finally linking tensorflow.dll worked after I manually dropped a couple of symbols from 'tensorflow_wr.def) (unresolved external symbols).
+
+
+With this workaround it works fine - all ops (including Softmax) run on GPU, performance increased by a factor of 10. I submit as an issue, since I believe it should work out of the box!
+Some more details on StackOverflow

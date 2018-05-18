@@ -1,0 +1,96 @@
+Bug : creating variables from restored variables get reinitialized but not always
+
+I've been experiencing the bug on two configurations :
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10 / Ubuntu 16.04
+TensorFlow installed from (source or binary): conda tensorflow-GPU / conda tensorflow (CPU)
+TensorFlow version (use command below): 1.6 / 1.4
+Python version:  Python 3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: CUDA Toolkit 9.1 and cuDNN 7.1.2 / None
+GPU model and memory: 1080ti 11GB /
+Exact command to reproduce:
+
+x = {
+    '1' : tf.Variable(tf.random_normal([3, 3]), trainable=True, name='x1')
+    }
+saver = tf.train.Saver(var_list=x)
+
+with tf.Session() as sess:
+    
+    
+    
+    sess.run(tf.global_variables_initializer())
+
+    print(sess.run(x))
+    saver.save(sess, './savedModels/bug/x')
+
+
+{'1': array([[-2.80644059, -0.7185123 ,  0.70223355],
+[ 1.06445408, -0.72174907,  1.29832721],
+[ 1.52049255, -1.19468224, -1.02100158]], dtype=float32)}
+
+for i in range(0,10):
+    with tf.Session() as sess:
+
+        new_saver = tf.train.import_meta_graph('./savedModels/bug/x.meta')
+        new_saver.restore(sess, './savedModels/bug/x')
+
+        x = {
+            '1' : tf.Variable(tf.get_default_graph().get_tensor_by_name("x1:0"), trainable=False)
+            }
+        sess.run(tf.global_variables_initializer())
+        print(sess.run(x['1']))
+
+
+INFO:tensorflow:Restoring parameters from ./savedModels/bug/x
+[[ 0.49538991 -0.11817512 -0.10268462]
+[ 0.51088262  1.28533709  0.05063328]
+[-1.30132782  0.41913262  1.3775363 ]]
+> INFO:tensorflow:Restoring parameters from ./savedModels/bug/x
+[[-2.80644059 -0.7185123   0.70223355]
+[ 1.06445408 -0.72174907  1.29832721]
+[ 1.52049255 -1.19468224 -1.02100158]]
+INFO:tensorflow:Restoring parameters from ./savedModels/bug/x
+[[-2.29186296  0.36665305  0.28915456]
+[ 0.35180676  0.10379237  1.17195833]
+[-1.05604255  0.01500762  2.31890965]]
+INFO:tensorflow:Restoring parameters from ./savedModels/bug/x
+[[ 0.79247308  0.43540171 -1.15054667]
+[-1.51901126  0.4132176  -1.45383906]
+[-1.19301605 -0.21523039  1.42999935]]
+INFO:tensorflow:Restoring parameters from ./savedModels/bug/x
+[[-0.03097171 -1.22662902 -0.30857435]
+[-0.49384364 -0.98362756  0.12052365]
+[-0.78354359  0.58901048 -1.8879807 ]]
+INFO:tensorflow:Restoring parameters from ./savedModels/bug/x
+[[-0.91630346 -1.20698965 -0.10588568]
+[-2.06214571 -0.81664461  0.58493197]
+[ 0.40064785 -1.33241594  2.23627448]]
+> INFO:tensorflow:Restoring parameters from ./savedModels/bug/x
+[[-2.80644059 -0.7185123   0.70223355]
+[ 1.06445408 -0.72174907  1.29832721]
+[ 1.52049255 -1.19468224 -1.02100158]]
+INFO:tensorflow:Restoring parameters from ./savedModels/bug/x
+[[-1.16766882  0.48798651 -1.84950495]
+[-0.90750635  0.68074739 -0.86705917]
+[ 0.6242311  -0.75273407  0.95616102]]
+INFO:tensorflow:Restoring parameters from ./savedModels/bug/x
+[[ 0.02900926 -0.71752155  1.40167475]
+[-1.76051104 -0.38902128 -0.42455733]
+[ 0.61904657 -0.45060599  1.10379994]]
+INFO:tensorflow:Restoring parameters from ./savedModels/bug/x
+[[-1.51588821 -2.11397028  0.33227748]
+[ 0.34245569 -2.17953372  0.60712498]
+[ 1.37212336  0.4941766   0.47627288]]
+
+
+Restoring the variable without using a sess.run() to ensure the constance, and then running the initializer should either:
+-give the same result because variable are stored as numbers
+-give different numbers because it is stored as a variable and thus, get initialized too.
+In any case, we shouldn't find back the variables from time to time, it should be extremely unlikely to find back EXACTLY the same values when initialized, or, we should always find the same values.
+NOTA BENE:
+I only find the values back when I use tensorflow 1.4 ( I haven't been able to check this on 1.7 yet), has this bug been fixed in the way I described above since?

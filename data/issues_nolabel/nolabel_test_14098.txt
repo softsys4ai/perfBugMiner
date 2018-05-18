@@ -1,0 +1,34 @@
+Add KafkaReader for processing streaming data with Apache Kafka
+
+This is a proposal to add KafkaReader so that it is possible to read data from Kafka like TextLineReader and TFRecordReader.
+Apache Kafka is a widely used distributed streaming platform in open source community. The goal of this fix is to create a contrib Reader ops (inherits ReaderBase and is similiar to TextLineReader / TFRecordReader) so that it is possible to reader Kafka streaming data from TensorFlow in a similiar fashion.
+This fix uses a C/C++ Apache Kafka client library librdkafka which is released under the 2-clause BSD license, and is widely used in a number of Kafka bindings such as Go, Python, C#/.Net, etc.
+Below is a sample usage:
+import tensorflow as tf
+import tensorflow.contrib.kafka as kafka
+
+# The name of test:0:0:10
+# test: topic
+# 0: partition
+# 0: offset
+# 10: length (or -1 for unlimited)
+#
+# The parameters for KafkaReader
+# servers: bootstrap.servers
+# group: group.id
+# eof: If True then read will block until the length of the data
+#      has been read and ignore EOF error from Kafka
+
+filename_queue = tf.train.string_input_producer(["test:0:0:10"])
+
+reader = kafka.KafkaReader(servers="localhost", group="test", eof=True)
+key, value = reader.read(filename_queue)
+with tf.Session() as sess:
+  coord = tf.train.Coordinator()
+  threads = tf.train.start_queue_runners(coord=coord)
+  for i in range(10):
+    print(sess.run([key, value]))
+  coord.request_stop()
+  coord.join(threads)
+NOTE: Because of #1419, the clean_deps of tensorflow/core:framework and tensorflow/core:lib has been commented out temporarily so that it is possible to build with ReaderBase. Any suggestions to address this issue is welcomed.
+Signed-off-by: Yong Tang yong.tang.github@outlook.com

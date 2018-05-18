@@ -1,0 +1,73 @@
+XLA segfaults with large graphs
+
+TensorFlow allows graphs to be larger than 2GB, however those graphs can't be serialized.
+I suspect this is the cause of segfaults we've been seeing because of following line in dump_graph.cc
+65 TF_CHECK_OK(WriteTextProto(Env::Default(), path, graph_def));
+It would be useful to provide an informative error message because troubleshooting this requires looking at core file:
+ulimit -Sc unlimited
+gdb python
+core core
+bt
+
+Here's the backtrace
+#0  0x00007fc6dcdae428 in __GI_raise (sig=sig@entry=6) at ../sysdeps/unix/sysv/linux/raise.c:54
+#1  0x00007fc6dcdb002a in __GI_abort () at abort.c:89
+#2  0x00007fc6c04b8417 in tensorflow::internal::LogMessageFatal::~LogMessageFatal() () from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#3  0x00007fc6bd05cb1e in tensorflow::dump_graph::DumpGraphDefToFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, tensorflow::GraphDef const&) ()
+   from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#4  0x00007fc6bd05ce88 in tensorflow::dump_graph::DumpGraphToFile(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, tensorflow::Graph const&, tensorflow::FunctionLibraryDefinition const*) () from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#5  0x00007fc6bcffd6c2 in tensorflow::EncapsulateSubgraphsPass::Run(tensorflow::GraphOptimizationPassOptions const&) ()
+   from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#6  0x00007fc6bec68e00 in tensorflow::OptimizationPassRegistry::RunGrouping(tensorflow::OptimizationPassRegistry::Grouping, tensorflow::GraphOptimizationPassOptions const&) ()
+   from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#7  0x00007fc6bec768a3 in tensorflow::SimpleGraphExecutionState::BuildGraph(tensorflow::BuildGraphOptions const&, std::unique_ptr<tensorflow::SimpleClientGraph, std::default_delete<tensorflow::SimpleClientGraph> >*) () from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#8  0x00007fc6be43d293 in tensorflow::DirectSession::CreateGraphs(tensorflow::BuildGraphOptions const&, std::unordered_map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::unique_ptr<tensorflow::Graph, std::default_delete<tensorflow::Graph> >, std::hash<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::equal_to<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::unique_ptr<tensorflow::Graph, std::default_delete<tensorflow::Graph> > > > >*, std::unique_ptr<tensorflow::FunctionLibraryDefinition, std::default_delete<tensorflow::FunctionLibraryDefinition> >*, tensorflow::DirectSession::RunStateArgs*) () from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#9  0x00007fc6be43f4cf in tensorflow::DirectSession::GetOrCreateExecutors(tensorflow::thread::ThreadPool*, tensorflow::gtl::ArraySlice<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, tensorflow::gtl::ArraySlice<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, tensorflow::gtl::ArraySlice<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, tensorflow::DirectSession::ExecutorsAndKeys**, tensorflow::DirectSession::RunStateArgs*) ()
+   from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#10 0x00007fc6be44085e in tensorflow::DirectSession::Run(tensorflow::RunOptions const&, std::vector<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, tensorflow::Tensor>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, tensorflow::Tensor> > > const&, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&, std::vector<tensorflow::Tensor, std::allocator<tensorflow::Tensor> >*, tensorflow::RunMetadata*) () from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#11 0x00007fc6bcfd4641 in TF_Run_Helper(tensorflow::Session*, char const*, TF_Buffer const*, std::vector<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, tensorflow::Tensor>, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, tensorflow::Tensor> > > const&, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&, TF_Tensor**, std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&, TF_Buffer*, TF_Status*) [clone .constprop.498] ()
+   from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#12 0x00007fc6bcfd4e58 in TF_Run () from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#13 0x00007fc6bcf0b15d in tensorflow::TF_Run_wrapper_helper(TF_DeprecatedSession*, char const*, TF_Buffer const*, _object*, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, TF_Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) ()
+   from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#14 0x00007fc6bcf0b2a3 in tensorflow::TF_Run_wrapper(TF_DeprecatedSession*, TF_Buffer const*, _object*, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, TF_Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) () from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#15 0x00007fc6bceed225 in _wrap_TF_Run () from /my_code/tensorflow_ops/tensorflow/_python_build/tensorflow/python/_pywrap_tensorflow.so
+#16 0x00007fc6ddd335e9 in PyCFunction_Call (func=0x7fc6c5120828, args=0x7fc68c1765f8, kwds=<optimized out>) at Objects/methodobject.c:109
+#17 0x00007fc6dddbabd5 in call_function (oparg=<optimized out>, pp_stack=0x7ffc0d0dfa78) at Python/ceval.c:4705
+#18 PyEval_EvalFrameEx (f=<optimized out>, throwflag=<optimized out>) at Python/ceval.c:3236
+#19 0x00007fc6dddbbb49 in _PyEval_EvalCodeWithName (_co=<optimized out>, globals=<optimized out>, locals=<optimized out>, args=<optimized out>, argcount=6, kws=0x0, kwcount=0, defs=0x0, defcount=0, 
+    kwdefs=0x0, closure=0x7fc6d70ac780, name=0x0, qualname=0x0) at Python/ceval.c:4018
+#20 0x00007fc6dddbbcd8 in PyEval_EvalCodeEx (_co=<optimized out>, globals=<optimized out>, locals=<optimized out>, args=<optimized out>, argcount=<optimized out>, kws=<optimized out>, kwcount=0, defs=0x0, 
+    defcount=0, kwdefs=0x0, closure=0x7fc6d70ac780) at Python/ceval.c:4039
+#21 0x00007fc6ddd11542 in function_call (func=0x7fc68feb3268, arg=0x7fc68c3903a8, kw=0x0) at Objects/funcobject.c:627
+#22 0x00007fc6ddcde236 in PyObject_Call (func=0x7fc68feb3268, arg=<optimized out>, kw=<optimized out>) at Objects/abstract.c:2165
+#23 0x00007fc6dddb8234 in ext_do_call (nk=-1942420568, na=0, flags=<optimized out>, pp_stack=0x7ffc0d0dfdc8, func=0x7fc68feb3268) at Python/ceval.c:5034
+#24 PyEval_EvalFrameEx (f=<optimized out>, throwflag=<optimized out>) at Python/ceval.c:3275
+#25 0x00007fc6dddbbb49 in _PyEval_EvalCodeWithName (_co=<optimized out>, globals=<optimized out>, locals=<optimized out>, args=<optimized out>, argcount=8, kws=0x7fd5098, kwcount=0, defs=0x0, defcount=0, 
+    kwdefs=0x0, closure=0x0, name=0x7fc6d74eafb0, qualname=0x7fc6d74f07c8) at Python/ceval.c:4018
+#26 0x00007fc6dddbadf5 in fast_function (nk=<optimized out>, na=8, n=<optimized out>, pp_stack=0x7ffc0d0dffe8, func=0x7fc6d74add90) at Python/ceval.c:4813
+#27 call_function (oparg=<optimized out>, pp_stack=0x7ffc0d0dffe8) at Python/ceval.c:4730
+#28 PyEval_EvalFrameEx (f=<optimized out>, throwflag=<optimized out>) at Python/ceval.c:3236
+#29 0x00007fc6dddbbb49 in _PyEval_EvalCodeWithName (_co=<optimized out>, globals=<optimized out>, locals=<optimized out>, args=<optimized out>, argcount=7, kws=0x7fd7640, kwcount=0, defs=0x0, defcount=0, 
+    kwdefs=0x0, closure=0x0, name=0x7fc6d74f13e8, qualname=0x7fc6d74f0738) at Python/ceval.c:4018
+#30 0x00007fc6dddbadf5 in fast_function (nk=<optimized out>, na=7, n=<optimized out>, pp_stack=0x7ffc0d0e0208, func=0x7fc6d74add08) at Python/ceval.c:4813
+#31 call_function (oparg=<optimized out>, pp_stack=0x7ffc0d0e0208) at Python/ceval.c:4730
+#32 PyEval_EvalFrameEx (f=<optimized out>, throwflag=<optimized out>) at Python/ceval.c:3236
+#33 0x00007fc6dddbb166 in fast_function (nk=<optimized out>, na=6, n=<optimized out>, pp_stack=0x7ffc0d0e0388, func=0x7fc6d74adc80) at Python/ceval.c:4803
+#34 call_function (oparg=<optimized out>, pp_stack=0x7ffc0d0e0388) at Python/ceval.c:4730
+#35 PyEval_EvalFrameEx (f=<optimized out>, throwflag=<optimized out>) at Python/ceval.c:3236
+#36 0x00007fc6dddbbb49 in _PyEval_EvalCodeWithName (_co=<optimized out>, globals=<optimized out>, locals=<optimized out>, args=<optimized out>, argcount=3, kws=0x40e5488, kwcount=0, defs=0x7fc6d74a7060, 
+    defcount=3, kwdefs=0x0, closure=0x0, name=0x7fc6dc762458, qualname=0x7fc6d74ead30) at Python/ceval.c:4018
+#37 0x00007fc6dddbadf5 in fast_function (nk=<optimized out>, na=3, n=<optimized out>, pp_stack=0x7ffc0d0e05a8, func=0x7fc6d74adae8) at Python/ceval.c:4813
+#38 call_function (oparg=<optimized out>, pp_stack=0x7ffc0d0e05a8) at Python/ceval.c:4730
+#39 PyEval_EvalFrameEx (f=<optimized out>, throwflag=<optimized out>) at Python/ceval.c:3236
+#40 0x00007fc6dddbbb49 in _PyEval_EvalCodeWithName (_co=<optimized out>, globals=<optimized out>, locals=<optimized out>, args=<optimized out>, argcount=4, kws=0x41f8440, kwcount=0, defs=0x7fc6d7761df0, 
+    defcount=1, kwdefs=0x0, closure=0x0, name=0x7fc6d77a1ee0, qualname=0x7fc6d77a1ee0) at Python/ceval.c:4018
+#41 0x00007fc6dddbadf5 in fast_function (nk=<optimized out>, na=4, n=<optimized out>, pp_stack=0x7ffc0d0e07c8, func=0x7fc6d76ecd90) at Python/ceval.c:4813
+#42 call_function (oparg=<optimized out>, pp_stack=0x7ffc0d0e07c8) at Python/ceval.c:4730
+#43 PyEval_EvalFrameEx (f=<optimized out>, throwflag=<optimized out>) at Python/ceval.c:3236
+#44 0x00007fc6dddbbb49 in _PyEval_EvalCodeWithName (_co=<optimized out>, globals=<optimized out>, locals=<optimized out>, args=<optimized out>, argcount=1, kws=0x1c06428, kwcount=0, defs=0x7fc6d76f1320, 
+    defcount=2, kwdefs=0x0, closure=0x0, name=0x7fc6dc762458, qualname=0x7fc6d772a170) at Python/ceval.c:4018
+#45 0x00007fc6dddbadf5 in fast_function (nk=<optimized out>, na=1, n=<optimized out>, pp_stack=0x7ffc0d0e09e8, func=0x7fc6d76e7730) at Python/ceval.c:4813
+#46 call_function (oparg=<optimized out>, pp_stack=0x7ffc0d0e09e8) at Python/ceval.c:4730
+#47 PyEval_EvalFrameEx (f=<optimized out>, throwflag=<optimized out>) at Python/ceval.c:3236

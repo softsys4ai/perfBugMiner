@@ -1,0 +1,242 @@
+embedding_attention_seq2seq fails / embedding_rnn_seq2seq works
+
+Environment info
+Operating System: Ubuntu 14.04
+Installed version of CUDA and cuDNN: Cuda 7.0 and CUDNN 6.5 v4
+So when I use a simple Embedding RNN Sequence to Sequence Model like this
+# choose RNN/GRU/LSTM cell
+        with tf.variable_scope("train_test", reuse=True):
+            self.cell = rnn_cell.LSTMCell(self.memory_dim)
+
+        # embedding model
+        with tf.variable_scope("train_test"):
+            self.dec_outputs, self.dec_memory = seq2seq.embedding_rnn_seq2seq(\
+                            self.enc_inp, self.dec_inp, self.cell, \
+                            self.vocab_size, self.vocab_size, self.seq_length)
+        with tf.variable_scope("train_test", reuse = True):
+            self.dec_outputs_tst, _ = seq2seq.embedding_rnn_seq2seq(\
+                            self.enc_inp, self.dec_inp, self.cell, \
+                            self.vocab_size, self.vocab_size, self.seq_length, feed_previous=True)
+
+The above implementation works perfectly, but when I just change the model from simple embedding seq2seq to Embedding Attention Seq2Seq, like this,
+
+        # choose RNN/GRU/LSTM cell
+        with tf.variable_scope("train_test", reuse=True):
+            self.cell = rnn_cell.LSTMCell(self.memory_dim)
+
+        with tf.variable_scope("train_test"):
+            self.dec_outputs, self.dec_memory = seq2seq.embedding_attention_seq2seq(\
+                            self.enc_inp, self.dec_inp, self.cell, \
+                            self.vocab_size, self.vocab_size, self.seq_length)
+        with tf.variable_scope("train_test", reuse = True):
+            self.dec_outputs_tst, _ = seq2seq.embedding_attention_seq2seq(\
+                            self.enc_inp, self.dec_inp, self.cell, \
+                            self.vocab_size, self.vocab_size, self.seq_length, feed_previous=True)
+
+
+I get segmentation fault, with absolutely no information. My memory does not run out, neither my CPU, as I tried this with
+batch_size =1 
+see.memory_dim = 1
+
+and still got the same segmentation fault.
+I get the same error, and the above configuration can certainly not eat my RAM.
+This is a potential bug, if I am not getting something worng. The LSTM and GRU cell just takes the size of the hidden layer as parameter, which is a scaler.
+THE BUG REPORT
+The Debug result
+(gdb) run train_script_lstm_attn.py 
+Starting program: /lusr/bin/python train_script_lstm_attn.py
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so locally
+[New Thread 0x7fffd7a25700 (LWP 45650)]
+[New Thread 0x7fffd7224700 (LWP 45651)]
+[New Thread 0x7fffd4a23700 (LWP 45652)]
+[New Thread 0x7fffd2222700 (LWP 45653)]
+[New Thread 0x7fffcfa21700 (LWP 45654)]
+[New Thread 0x7fffcd220700 (LWP 45655)]
+[New Thread 0x7fffcaa1f700 (LWP 45656)]
+[Thread 0x7fffcaa1f700 (LWP 45656) exited]
+[Thread 0x7fffcfa21700 (LWP 45654) exited]
+[Thread 0x7fffd7a25700 (LWP 45650) exited]
+[Thread 0x7fffd2222700 (LWP 45653) exited]
+[Thread 0x7fffd7224700 (LWP 45651) exited]
+[Thread 0x7fffcd220700 (LWP 45655) exited]
+[Thread 0x7fffd4a23700 (LWP 45652) exited]
+[New Thread 0x7fffcaa1f700 (LWP 45661)]
+[New Thread 0x7fffcd220700 (LWP 46103)]
+[New Thread 0x7fffcfa21700 (LWP 46104)]
+[New Thread 0x7fffd2222700 (LWP 46105)]
+[New Thread 0x7ffed22bf700 (LWP 46106)]
+[New Thread 0x7ffed1abe700 (LWP 46107)]
+[New Thread 0x7ffed12bd700 (LWP 46108)]
+[New Thread 0x7ffed0abc700 (LWP 46109)]
+[New Thread 0x7ffec3fff700 (LWP 46110)]
+[New Thread 0x7ffec37fe700 (LWP 46111)]
+[New Thread 0x7ffec2ffd700 (LWP 46112)]
+[New Thread 0x7ffeb77ff700 (LWP 46114)]
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties: 
+name: GeForce GTX TITAN Black
+major: 3 minor: 5 memoryClockRate (GHz) 0.98
+pciBusID 0000:05:00.0
+Total memory: 6.00GiB
+Free memory: 5.91GiB
+[New Thread 0x7ffeb6ffe700 (LWP 46115)]
+[New Thread 0x7ffeb67fd700 (LWP 46116)]
+[New Thread 0x7ffea2bff700 (LWP 46117)]
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 1 with properties: 
+name: GeForce GTX TITAN Black
+major: 3 minor: 5 memoryClockRate (GHz) 0.98
+pciBusID 0000:42:00.0
+Total memory: 6.00GiB
+Free memory: 5.91GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:59] cannot enable peer access from device ordinal 0 to device ordinal 1
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:59] cannot enable peer access from device ordinal 1 to device ordinal 0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0 1 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y N 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 1:   N Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:755] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN Black, pci bus id: 0000:05:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:755] Creating TensorFlow device (/gpu:1) -> (device: 1, name: GeForce GTX TITAN Black, pci bus id: 0000:42:00.0)
+[New Thread 0x7ffea23fe700 (LWP 46118)]
+[New Thread 0x7ffea1bfd700 (LWP 46119)]
+[New Thread 0x7ffea13fc700 (LWP 46120)]
+[New Thread 0x7ffea0bfb700 (LWP 46121)]
+[New Thread 0x7ffe8bfff700 (LWP 46122)]
+[New Thread 0x7ffe8b7fe700 (LWP 46123)]
+[New Thread 0x7ffe8affd700 (LWP 46124)]
+[New Thread 0x7ffe8a7fc700 (LWP 46125)]
+[New Thread 0x7ffe89ffb700 (LWP 46126)]
+[New Thread 0x7ffe897fa700 (LWP 46127)]
+[New Thread 0x7ffe88ff9700 (LWP 46128)]
+[New Thread 0x7ffe7bfff700 (LWP 46129)]
+[New Thread 0x7ffe3d23c700 (LWP 46167)]
+
+Program received signal SIGSEGV, Segmentation fault.
+__memmove_ssse3_back () at ../sysdeps/x86_64/multiarch/memcpy-ssse3-back.S:2143
+2143    ../sysdeps/x86_64/multiarch/memcpy-ssse3-back.S: No such file or directory.
+
+The Backtrace is attached below
+(gdb) backtrace
+#0  __memmove_ssse3_back () at ../sysdeps/x86_64/multiarch/memcpy-ssse3-back.S:2143
+#1  0x00007fffedd56ae1 in tensorflow::Tensor::FromProto(tensorflow::Allocator*, tensorflow::TensorProto const&) ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#2  0x00007fffedc4577f in tensorflow::ThreadPoolDevice::MakeTensorFromProto(tensorflow::TensorProto const&, tensorflow::AllocatorAttributes, tensorflow::Tensor*) ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#3  0x00007fffecea4f76 in tensorflow::ConstantOp::ConstantOp(tensorflow::OpKernelConstruction*) ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#4  0x00007fffecea50f2 in tensorflow::{lambda(tensorflow::OpKernelConstruction*)#1}::_FUN ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#5  0x00007fffedd408bd in tensorflow::CreateOpKernel(tensorflow::DeviceType, tensorflow::DeviceBase*, tensorflow::Allocator*, tensorflow::FunctionLibraryRuntime*, tensorflow::NodeDef const&, int, tensorflow::OpKernel**) ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#6  0x00007fffedc1caf4 in tensorflow::CreateNonCachedKernel(tensorflow::Device*, tensorflow::FunctionLibraryRuntime*, tensorflow::NodeDef const&, int, tensorflow::OpKernel**) ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#7  0x00007fffedc10c97 in std::_Function_handler<tensorflow::Status (tensorflow::NodeDef const&, tensorflow::OpKernel**), tensorflow::DoConstantFolding(tensorflow::ConstantFoldingOptions const&, tensorflow::Device*, tensorflow::Graph*)::{lambda(tensorflow::NodeDef const&, tensorflow::OpKernel**)#2}>::_M_invoke(std::_Any_data const&, tensorflow::NodeDef const&, tensorflow::OpKernel**) () from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#8  0x00007fffedc287de in tensorflow::(anonymous namespace)::ExecutorImpl::Initialize() ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#9  0x00007fffedc292b3 in tensorflow::NewLocalExecutor(tensorflow::LocalExecutorParams const&, tensorflow::Graph const*, tensorflow::Executor**) () from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#10 0x00007fffedc1608d in tensorflow::DoConstantFolding(tensorflow::ConstantFoldingOptions const&, tensorflow::Device*, tensorflow::Graph*) () from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#11 0x00007fffedc36dda in tensorflow::GraphOptimizer::Optimize(tensorflow::FunctionLibraryRuntime*, tensorflow::Device*, tensorflow::Graph**) () from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#12 0x00007fffeda06d9d in tensorflow::DirectSession::GetOrCreateExecutors(tensorflow::gtl::ArraySlice<std::string>, tensorflow::gtl::ArraySlice<std::string>, tensorflow::gtl::ArraySlice<std::string>, tensorflow::DirectSession::ExecutorsAndKeys**, tensorflow::DirectSession::RunStateArgs*) ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#13 0x00007fffeda07e6a in tensorflow::DirectSession::Run(tensorflow::RunOptions const&, std::vector<std::pair<std::string, tensorflow::Tensor>, std::allocator<std::pair<std::string, tensorflow::Tensor> > > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<tensorflow::Tensor, std---Type <return> to continue, or q <return> to quit---
+::allocator<tensorflow::Tensor> >*, tensorflow::RunMetadata*) ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#14 0x00007fffeda0a992 in tensorflow::DirectSession::Run(std::vector<std::pair<std::string, tensorflow::Tensor>, std::allocator<std::pair<std::string, tensorflow::Tensor> > > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<tensorflow::Tensor, std::allocator<tensorflow::Tensor> >*) () from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#15 0x00007fffedc0b7c7 in TF_Run_Helper(TF_Session*, char const*, TF_Buffer const*, char const**, TF_Tensor**, int, char const**, TF_Tensor**, int, char const**, int, TF_Buffer*, TF_Status*) ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#16 0x00007fffedc0bc11 in TF_Run ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#17 0x00007fffece8dff5 in tensorflow::TF_Run_wrapper_helper(TF_Session*, char const*, TF_Buffer const*, tensorflow::gtl::InlinedVector<std::pair<char const*, tagPyArrayObject*>, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) () from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#18 0x00007fffece8e661 in tensorflow::TF_Run_wrapper(TF_Session*, TF_Buffer const*, tensorflow::gtl::InlinedVector<std::pair<char const*, tagPyArrayObject*>, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#19 0x00007fffece7a4d7 in _wrap_TF_Run ()
+   from /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#20 0x000000000049968d in call_function (oparg=<optimized out>, pp_stack=0x7fffffffdb20) at ../Python/ceval.c:4020
+#21 PyEval_EvalFrameEx (f=f@entry=
+    Frame 0xe341a40, for file /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py, line 628, in _run_fn (session=<SwigPyObject at remote 0x7fffb3547b70>, feed_dict={}, fetch_list=[], target_list=['init'], options=None, run_metadata=<TF_Buffer(this=<SwigPyObject at remote 0x7ffe3d2864e0>) at remote 0x7ffe496ff990>), 
+    throwflag=throwflag@entry=0) at ../Python/ceval.c:2666
+#22 0x00000000004a1c9a in PyEval_EvalCodeEx (closure=<optimized out>, defcount=<optimized out>, defs=0x0, 
+    kwcount=<optimized out>, kws=<optimized out>, argcount=238295616, args=<optimized out>, locals=0x0, 
+    globals=<optimized out>, co=<optimized out>) at ../Python/ceval.c:3252
+#23 function_call.15337 (func=<optimized out>, arg=<optimized out>, kw=<optimized out>) at ../Objects/funcobject.c:526
+#24 0x0000000000505f96 in PyObject_Call (func=<function at remote 0x7ffe3d39d938>, arg=<optimized out>, kw=<optimized out>)
+    at ../Objects/abstract.c:2529
+#25 0x000000000049b07a in ext_do_call (nk=<optimized out>, na=<optimized out>, flags=<optimized out>, 
+    pp_stack=0x7fffffffdd60, func=<function at remote 0x7ffe3d39d938>) at ../Python/ceval.c:4333
+---Type <return> to continue, or q <return> to quit---
+#26 PyEval_EvalFrameEx (
+    f=f@entry=Frame 0xe341820, for file /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py, line 644, in _do_call (self=<InteractiveSession(_graph=<Graph(_default_original_op=None, _handle_feeders={}, _collections={'variables': [<Variable(_variable=<Tensor(_consumers=[<Operation(_graph=<...>, _control_inputs=[], _outputs=[<Tensor(_consumers=[], _value_index=0, _shape=<TensorShape(_dims=[<Dimension(_value=130088) at remote 0x7ffea024e310>, <Dimension(_value=200) at remote 0x7ffea024e190>]) at remote 0x7ffea024e290>, _op=<...>, _dtype=<DType(_type_enum=101) at remote 0x7fffc463a810>) at remote 0x7ffea024e3d0>], _control_flow_context=None, _id_value=1022, _original_op=None, _traceback=[('train_script_lstm_attn.py', 11, '<module>', {'review_summary_file': 'extracted_data/review_summary.csv', 'gru': <module at remote 0x7fffb442f9b8>, 'out_file': 'result/test_results_lstm_with_attention.csv', '__builtins__': <module at remote 0x7ffff7f90b08>, '__file__': 'train_script_lstm_attn.py', 'lstm_net': <Ne...(truncated), throwflag=throwflag@entry=0) at ../Python/ceval.c:2705
+#27 0x00000000004a090c in PyEval_EvalCodeEx (co=0x7fffc3e25330, globals=<optimized out>, locals=<optimized out>, 
+    args=<optimized out>, argcount=<optimized out>, kws=<optimized out>, kwcount=0, defs=0x0, defcount=0, closure=0x0)
+    at ../Python/ceval.c:3252
+#28 0x000000000049ab45 in fast_function (nk=0, na=8, n=<optimized out>, pp_stack=0x7fffffffdf50, 
+    func=<function at remote 0x7fffc3e28de8>) at ../Python/ceval.c:4116
+#29 call_function (oparg=<optimized out>, pp_stack=0x7fffffffdf50) at ../Python/ceval.c:4041
+#30 PyEval_EvalFrameEx (
+    f=f@entry=Frame 0xe3415e0, for file /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py, line 637, in _do_run (self=<InteractiveSession(_graph=<Graph(_default_original_op=None, _handle_feeders={}, _collections={'variables': [<Variable(_variable=<Tensor(_consumers=[<Operation(_graph=<...>, _control_inputs=[], _outputs=[<Tensor(_consumers=[], _value_index=0, _shape=<TensorShape(_dims=[<Dimension(_value=130088) at remote 0x7ffea024e310>, <Dimension(_value=200) at remote 0x7ffea024e190>]) at remote 0x7ffea024e290>, _op=<...>, _dtype=<DType(_type_enum=101) at remote 0x7fffc463a810>) at remote 0x7ffea024e3d0>], _control_flow_context=None, _id_value=1022, _original_op=None, _traceback=[('train_script_lstm_attn.py', 11, '<module>', {'review_summary_file': 'extracted_data/review_summary.csv', 'gru': <module at remote 0x7fffb442f9b8>, 'out_file': 'result/test_results_lstm_with_attention.csv', '__builtins__': <module at remote 0x7ffff7f90b08>, '__file__': 'train_script_lstm_attn.py', 'lstm_net': <Neu...(truncated), throwflag=throwflag@entry=0) at ../Python/ceval.c:2666
+#31 0x00000000004a090c in PyEval_EvalCodeEx (co=0x7fffc3e25230, globals=<optimized out>, locals=<optimized out>, 
+    args=<optimized out>, argcount=<optimized out>, kws=<optimized out>, kwcount=0, defs=0x0, defcount=0, closure=0x0)
+    at ../Python/ceval.c:3252
+#32 0x000000000049ab45 in fast_function (nk=0, na=7, n=<optimized out>, pp_stack=0x7fffffffe140, 
+    func=<function at remote 0x7fffc3e28d70>) at ../Python/ceval.c:4116
+#33 call_function (oparg=<optimized out>, pp_stack=0x7fffffffe140) at ../Python/ceval.c:4041
+#34 PyEval_EvalFrameEx (
+    f=f@entry=Frame 0xe33d060, for file /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py, line 564, in _run (self=<InteractiveSession(_graph=<Graph(_default_original_op=None, _handle_feeders={}, _collections={'variabl---Type <return> to continue, or q <return> to quit---
+es': [<Variable(_variable=<Tensor(_consumers=[<Operation(_graph=<...>, _control_inputs=[], _outputs=[<Tensor(_consumers=[], _value_index=0, _shape=<TensorShape(_dims=[<Dimension(_value=130088) at remote 0x7ffea024e310>, <Dimension(_value=200) at remote 0x7ffea024e190>]) at remote 0x7ffea024e290>, _op=<...>, _dtype=<DType(_type_enum=101) at remote 0x7fffc463a810>) at remote 0x7ffea024e3d0>], _control_flow_context=None, _id_value=1022, _original_op=None, _traceback=[('train_script_lstm_attn.py', 11, '<module>', {'review_summary_file': 'extracted_data/review_summary.csv', 'gru': <module at remote 0x7fffb442f9b8>, 'out_file': 'result/test_results_lstm_with_attention.csv', '__builtins__': <module at remote 0x7ffff7f90b08>, '__file__': 'train_script_lstm_attn.py', 'lstm_net': <Neural...(truncated), throwflag=throwflag@entry=0) at ../Python/ceval.c:2666
+#35 0x00000000004a090c in PyEval_EvalCodeEx (co=0x7fffc3e25030, globals=<optimized out>, locals=<optimized out>, 
+    args=<optimized out>, argcount=<optimized out>, kws=<optimized out>, kwcount=0, defs=0x0, defcount=0, closure=0x0)
+    at ../Python/ceval.c:3252
+#36 0x000000000049ab45 in fast_function (nk=0, na=6, n=<optimized out>, pp_stack=0x7fffffffe330, 
+    func=<function at remote 0x7fffc3e28cf8>) at ../Python/ceval.c:4116
+#37 call_function (oparg=<optimized out>, pp_stack=0x7fffffffe330) at ../Python/ceval.c:4041
+#38 PyEval_EvalFrameEx (
+    f=f@entry=Frame 0x1648a420, for file /u/harshal/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py, line 340, in run (self=<InteractiveSession(_graph=<Graph(_default_original_op=None, _handle_feeders={}, _collections={'variables': [<Variable(_variable=<Tensor(_consumers=[<Operation(_graph=<...>, _control_inputs=[], _outputs=[<Tensor(_consumers=[], _value_index=0, _shape=<TensorShape(_dims=[<Dimension(_value=130088) at remote 0x7ffea024e310>, <Dimension(_value=200) at remote 0x7ffea024e190>]) at remote 0x7ffea024e290>, _op=<...>, _dtype=<DType(_type_enum=101) at remote 0x7fffc463a810>) at remote 0x7ffea024e3d0>], _control_flow_context=None, _id_value=1022, _original_op=None, _traceback=[('train_script_lstm_attn.py', 11, '<module>', {'review_summary_file': 'extracted_data/review_summary.csv', 'gru': <module at remote 0x7fffb442f9b8>, 'out_file': 'result/test_results_lstm_with_attention.csv', '__builtins__': <module at remote 0x7ffff7f90b08>, '__file__': 'train_script_lstm_attn.py', 'lstm_net': <Neural...(truncated), throwflag=throwflag@entry=0) at ../Python/ceval.c:2666
+#39 0x00000000004a090c in PyEval_EvalCodeEx (co=0x7fffc3e22a30, globals=<optimized out>, locals=<optimized out>, 
+    args=<optimized out>, argcount=<optimized out>, kws=<optimized out>, kwcount=0, defs=0x7fffc3e24608, defcount=3, 
+    closure=0x0) at ../Python/ceval.c:3252
+#40 0x0000000000499a52 in fast_function (nk=0, na=2, n=<optimized out>, pp_stack=0x7fffffffe520, 
+    func=<function at remote 0x7fffc3e28b18>) at ../Python/ceval.c:4116
+#41 call_function (oparg=<optimized out>, pp_stack=0x7fffffffe520) at ../Python/ceval.c:4041
+#42 PyEval_EvalFrameEx (
+    f=f@entry=Frame 0x7ffe3d280de0, for file /v/filer4b/v20q001/harshal/NLP/Final_Project/deep-summarization/algorithms/lstm.py, line 125, in __start_session (self=<NeuralNet(dec_memory=<Tensor(_consumers=[<Operation(_graph=<Graph(_default_original_op=None, _handle_feeders={}, _collections={'variables': [<Variable(_variable=<Tensor(_consumers=[<Operation(_graph=<...>, _control_inputs=[], _outputs=[<Tensor(_consumers=[], _value_index=0, _shape=<TensorShape(_dims=[<Dimension(_value=130088) at remote 0x7ffea024e310>, <Dimension(_value=200) at remote 0x7ffea024e190>]) at remote 0x7ffea024e290>, _op=<...>, _dtype=<DType(_t---Type <return> to continue, or q <return> to quit---
+ype_enum=101) at remote 0x7fffc463a810>) at remote 0x7ffea024e3d0>], _control_flow_context=None, _id_value=1022, _original_op=None, _traceback=[('train_script_lstm_attn.py', 11, '<module>', {'review_summary_file': 'extracted_data/review_summary.csv', 'gru': <module at remote 0x7fffb442f9b8>, 'out_file': 'result/test_results_lstm_with_attention.csv', '__builtins__': <module at remote 0x7ffff7f90b08>, '__file__'...(truncated), throwflag=throwflag@entry=0) at ../Python/ceval.c:2666
+#43 0x0000000000499ef2 in fast_function (nk=<optimized out>, na=<optimized out>, n=1, pp_stack=0x7fffffffe670, 
+    func=<function at remote 0x7fffb4449b18>) at ../Python/ceval.c:4106
+#44 call_function (oparg=<optimized out>, pp_stack=0x7fffffffe670) at ../Python/ceval.c:4041
+#45 PyEval_EvalFrameEx (
+    f=f@entry=Frame 0x7fffb3511050, for file /v/filer4b/v20q001/harshal/NLP/Final_Project/deep-summarization/algorithms/lstm.py, line 62, in form_model_graph (self=<NeuralNet(dec_memory=<Tensor(_consumers=[<Operation(_graph=<Graph(_default_original_op=None, _handle_feeders={}, _collections={'variables': [<Variable(_variable=<Tensor(_consumers=[<Operation(_graph=<...>, _control_inputs=[], _outputs=[<Tensor(_consumers=[], _value_index=0, _shape=<TensorShape(_dims=[<Dimension(_value=130088) at remote 0x7ffea024e310>, <Dimension(_value=200) at remote 0x7ffea024e190>]) at remote 0x7ffea024e290>, _op=<...>, _dtype=<DType(_type_enum=101) at remote 0x7fffc463a810>) at remote 0x7ffea024e3d0>], _control_flow_context=None, _id_value=1022, _original_op=None, _traceback=[('train_script_lstm_attn.py', 11, '<module>', {'review_summary_file': 'extracted_data/review_summary.csv', 'gru': <module at remote 0x7fffb442f9b8>, 'out_file': 'result/test_results_lstm_with_attention.csv', '__builtins__': <module at remote 0x7ffff7f90b08>, '__file__'...(truncated), throwflag=throwflag@entry=0) at ../Python/ceval.c:2666
+#46 0x0000000000499ef2 in fast_function (nk=<optimized out>, na=<optimized out>, n=1, pp_stack=0x7fffffffe7c0, 
+    func=<function at remote 0x7fffb4449938>) at ../Python/ceval.c:4106
+#47 call_function (oparg=<optimized out>, pp_stack=0x7fffffffe7c0) at ../Python/ceval.c:4041
+#48 PyEval_EvalFrameEx (f=f@entry=Frame 0x7ffff7ebf7b0, for file train_script_lstm_attn.py, line 11, in <module> (), 
+    throwflag=throwflag@entry=0) at ../Python/ceval.c:2666
+#49 0x00000000004a1634 in PyEval_EvalCodeEx (closure=0x0, defcount=0, defs=0x0, kwcount=0, kws=0x0, argcount=0, args=0x0, 
+Python Exception <class 'UnicodeDecodeError'> 'utf-8' codec can't decode byte 0x91 in position 1: invalid start byte: 
+    locals=<unknown at remote 0x7ffff7ebf928>, globals=, co=0x7ffff7ec9130) at ../Python/ceval.c:3252
+Python Exception <class 'UnicodeDecodeError'> 'utf-8' codec can't decode byte 0x91 in position 1: invalid start byte: 
+#50 PyEval_EvalCode (locals=<unknown at remote 0x7ffff7ebf928>, globals=, co=0x7ffff7ec9130) at ../Python/ceval.c:667
+#51 run_mod.42576 (mod=mod@entry=0x9c1f30, filename=filename@entry=0x7fffffffed54 "train_script_lstm_attn.py", 
+    globals=globals@entry={'review_summary_file': 'extracted_data/review_summary.csv', 'gru': <module at remote 0x7fffb442f9b8>, 'out_file': 'result/test_results_lstm_with_attention.csv', '__builtins__': <module at remote 0x7ffff7f90b08>, '__file__': 'train_script_lstm_attn.py', 'lstm_net': <NeuralNet(dec_memory=<Tensor(_consumers=[<Operation(_graph=<Graph(_default_original_op=None, _handle_feeders={}, _collections={'variables': [<Variable(_variable=<Tensor(_consumers=[<Operation(_graph=<...>, _control_inputs=[], _outputs=[<Tensor(_consumers=[], _value_index=0, _shape=<TensorShape(_dims=[<Dimension(_value=130088) at remote 0x7ffea024e310>, <Dimension(_value=200) at remote 0x7ffea024e190>]) at remote 0x7ffea024e290>, _op=<...>, _dtype=<DType(_type_enum=101) at remote 0x7fffc463a810>) at remote 0x7ffea024e3d0>], _control_flow_context=None, _id_value=1022, _original_op=None, _traceback=[('train_script_lstm_attn.py', 11, '<module>', {...}), ('/v/filer4b/v20q001/harshal/NLP/Final_Project/deep-summarization/algorithms/lstm.py', 60, 'form_mo...(truncated), 
+---Type <return> to continue, or q <return> to quit---
+    locals=locals@entry={'review_summary_file': 'extracted_data/review_summary.csv', 'gru': <module at remote 0x7fffb442f9b8>, 'out_file': 'result/test_results_lstm_with_attention.csv', '__builtins__': <module at remote 0x7ffff7f90b08>, '__file__': 'train_script_lstm_attn.py', 'lstm_net': <NeuralNet(dec_memory=<Tensor(_consumers=[<Operation(_graph=<Graph(_default_original_op=None, _handle_feeders={}, _collections={'variables': [<Variable(_variable=<Tensor(_consumers=[<Operation(_graph=<...>, _control_inputs=[], _outputs=[<Tensor(_consumers=[], _value_index=0, _shape=<TensorShape(_dims=[<Dimension(_value=130088) at remote 0x7ffea024e310>, <Dimension(_value=200) at remote 0x7ffea024e190>]) at remote 0x7ffea024e290>, _op=<...>, _dtype=<DType(_type_enum=101) at remote 0x7fffc463a810>) at remote 0x7ffea024e3d0>], _control_flow_context=None, _id_value=1022, _original_op=None, _traceback=[('train_script_lstm_attn.py', 11, '<module>', {...}), ('/v/filer4b/v20q001/harshal/NLP/Final_Project/deep-summarization/algorithms/lstm.py', 60, 'form_mo...(truncated), flags=flags@entry=0x7fffffffe970, 
+    arena=arena@entry=0x9aa9c0) at ../Python/pythonrun.c:1370
+#52 0x000000000044e4a5 in PyRun_FileExFlags (fp=fp@entry=0x976cd0, 
+    filename=filename@entry=0x7fffffffed54 "train_script_lstm_attn.py", start=start@entry=257, 
+    globals=globals@entry={'review_summary_file': 'extracted_data/review_summary.csv', 'gru': <module at remote 0x7fffb442f9b8>, 'out_file': 'result/test_results_lstm_with_attention.csv', '__builtins__': <module at remote 0x7ffff7f90b08>, '__file__': 'train_script_lstm_attn.py', 'lstm_net': <NeuralNet(dec_memory=<Tensor(_consumers=[<Operation(_graph=<Graph(_default_original_op=None, _handle_feeders={}, _collections={'variables': [<Variable(_variable=<Tensor(_consumers=[<Operation(_graph=<...>, _control_inputs=[], _outputs=[<Tensor(_consumers=[], _value_index=0, _shape=<TensorShape(_dims=[<Dimension(_value=130088) at remote 0x7ffea024e310>, <Dimension(_value=200) at remote 0x7ffea024e190>]) at remote 0x7ffea024e290>, _op=<...>, _dtype=<DType(_type_enum=101) at remote 0x7fffc463a810>) at remote 0x7ffea024e3d0>], _control_flow_context=None, _id_value=1022, _original_op=None, _traceback=[('train_script_lstm_attn.py', 11, '<module>', {...}), ('/v/filer4b/v20q001/harshal/NLP/Final_Project/deep-summarization/algorithms/lstm.py', 60, 'form_mo...(truncated), 
+    locals=locals@entry={'review_summary_file': 'extracted_data/review_summary.csv', 'gru': <module at remote 0x7fffb442f9b8>, 'out_file': 'result/test_results_lstm_with_attention.csv', '__builtins__': <module at remote 0x7ffff7f90b08>, '__file__': 'train_script_lstm_attn.py', 'lstm_net': <NeuralNet(dec_memory=<Tensor(_consumers=[<Operation(_graph=<Graph(_default_original_op=None, _handle_feeders={}, _collections={'variables': [<Variable(_variable=<Tensor(_consumers=[<Operation(_graph=<...>, _control_inputs=[], _outputs=[<Tensor(_consumers=[], _value_index=0, _shape=<TensorShape(_dims=[<Dimension(_value=130088) at remote 0x7ffea024e310>, <Dimension(_value=200) at remote 0x7ffea024e190>]) at remote 0x7ffea024e290>, _op=<...>, _dtype=<DType(_type_enum=101) at remote 0x7fffc463a810>) at remote 0x7ffea024e3d0>], _control_flow_context=None, _id_value=1022, _original_op=None, _traceback=[('train_script_lstm_attn.py', 11, '<module>', {...}), ('/v/filer4b/v20q001/harshal/NLP/Final_Project/deep-summarization/algorithms/lstm.py', 60, 'form_mo...(truncated), closeit=closeit@entry=1, flags=flags@entry=0x7fffffffe970)
+    at ../Python/pythonrun.c:1356
+#53 0x000000000044ec9f in PyRun_SimpleFileExFlags (fp=fp@entry=0x976cd0, filename=<optimized out>, 
+    filename@entry=0x7fffffffed54 "train_script_lstm_attn.py", closeit=closeit@entry=1, flags=flags@entry=0x7fffffffe970)
+    at ../Python/pythonrun.c:948
+#54 0x000000000044ed9b in PyRun_AnyFileExFlags (fp=fp@entry=0x976cd0, 
+---Type <return> to continue, or q <return> to quit---
+    filename=filename@entry=0x7fffffffed54 "train_script_lstm_attn.py", closeit=closeit@entry=1, 
+    flags=flags@entry=0x7fffffffe970) at ../Python/pythonrun.c:752
+#55 0x000000000044f904 in Py_Main (argc=<optimized out>, argv=0x7fffffffeb28) at ../Modules/main.c:640
+#56 0x00007ffff7818ec5 in __libc_start_main (main=0x44f9c2 <main>, argc=2, argv=0x7fffffffeb28, init=<optimized out>, 
+    fini=<optimized out>, rtld_fini=<optimized out>, stack_end=0x7fffffffeb18) at libc-start.c:287
+#57 0x0000000000578c4e in _start ()
+(gdb)

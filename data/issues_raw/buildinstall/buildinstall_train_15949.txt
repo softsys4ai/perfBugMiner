@@ -1,0 +1,41 @@
+Building TensorFlow on Windows: patch and rm
+
+System information
+
+Have I written custom code: Yes, provided below.
+OS Platform and Distribution: Windows 10 1709, Build 16299.192
+TensorFlow installed from (source or binary): Binary, Attempting source build of master
+TensorFlow version: 1.4.0
+Python version: 3.6
+Bazel version:  0.9.0
+GCC/Compiler version:  MSYS2 Shell, GCC unknown.
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A, CPU is i7-8550U, 8 GB memory
+Exact command to reproduce: Any bazel build on Windows. Please see Description.
+
+Describe the problem
+Building TensorFlow on Windows has been a struggle with compatibility due to the fact that for many, MSYS will not run patch when installed from the MSYS2 shell. I have found a reliable way to resolve the issue: using Choco to install patch, moving patch.exe to a folder FOLDERNAME within its default directory, and then running %FOLDERNAME%/patch.exe with the flag --binary (to use CR LF line breaks) with a custom batch script compiled into a executable.
+bazel build now completes patch commands without issue. But as it often is, another hurdle exists to the finish line. Bazel now attempts to recursively force remove a file using rm -rf, which obviously does not exist as a package in Choco as a bash command. MSYS will run it, but not from the command line.
+Is there any way to get around the use of rm, or make a compatible solution for Windows using del?
+I have ensured that #15829 has been installed. Still fails
+If this is better left to the Bazel developers, please close this issue.
+Source code
+patch.bat
+start C:\ProgramData\chocolatey\lib\patch\tools\bin\%FOLDERNAME%\patch.exe --binary
+exit
+Logs
+C:\tensorflow>bazel build --config=mkl --config=monolithic -c opt --copt=-march=native --copt=-mmmx --copt=-msse --copt=-msse2 --copt=-msse3 --copt=-mssse3 --copt=-msse4.1 --copt=-msse4.2 --copt=-mavx --copt=-mavx2 --copt=-maes --copt=-mfpmath=both //tensorflow/tools/pip_package:build_pip_package
+#ERROR: C:/tensorflow/tensorflow/python/BUILD:4646:1: no such package '@cython//': Traceback (most recent call last):
+        File "C:/tensorflow/third_party/repo.bzl", line 86
+                _apply_delete(ctx, ctx.attr.delete)
+        File "C:/tensorflow/third_party/repo.bzl", line 68, in _apply_delete
+                _execute_and_check_ret_code(ctx, cmd)
+        File "C:/tensorflow/third_party/repo.bzl", line 44, in _execute_and_check_ret_code
+                fail("Non-zero return code({1}) when ...))
+Non-zero return code(127) when executing 'C:\msys64\usr\bin\bash.exe -c rm -rf C:/users/eric/appdata/local/temp/_bazel_eric/x1e5egqw/external/cython/BUILD.bazel':
+Stdout:
+Stderr: /usr/bin/bash: rm: command not found
+ and referenced by '//tensorflow/python:framework/fast_tensor_util.pyx_cython_translation'
+ERROR: Analysis of target '//tensorflow/tools/pip_package:build_pip_package' failed; build aborted: Loading failed
+INFO: Elapsed time: 61.324s
+FAILED: Build did NOT complete successfully (92 packages loaded)

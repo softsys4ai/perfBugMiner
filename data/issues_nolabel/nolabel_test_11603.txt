@@ -1,0 +1,73 @@
+//tensorflow/python:nn_test is failing on ppc64le with AssertionError: False is not true
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04 (ppc64le)
+TensorFlow installed from (source or binary):
+Installed from source (v1.2.1)
+TensorFlow version (use command below):
+('v1.2.1-0-gb4957ff', '1.2.1')
+Python version:
+Python 2.7.5
+Bazel version (if compiling from source):
+0.4.5-2017-07-13 (@037b9b9)
+CUDA/cuDNN version:
+NA
+GPU model and memory:
+NA
+Exact command to reproduce:
+bazel test //tensorflow/python:nn_test
+
+Describe the problem
+Here  testNaNs is failing , see relevant code-
+https://github.com/tensorflow/tensorflow/blob/v1.2.1/tensorflow/python/ops/nn_test.py#L835-L841
+def testNaNs(self):
+    # Test that relu(nan) = nan for various sizes.
+    for i in range(18):
+      x = np.zeros(i) + np.nan
+      with self.test_session():
+        z = nn_ops.relu(constant_op.constant(x)).eval()
+        print("\n current i value is ", i)
+        print("\n z value is ", z)
+        self.assertTrue(np.isnan(z).all())
+
+This test is failing ,because nn_ops.relu function returning incorrect results on ppc64le (0 vs expected nan).......(for i = 2 to 18 )
+fori = 0  :   z value =   []    ............... (ok)
+for i = 1  :   z value =  [ nan]  ........... (ok)
+for i = 2  :   z value =  [ 0.  0.]  ...........(not ok on ppc64le, bcz 0. != nan)
+It looks like this is a bug in the nn_ops.relu function for ppc64le, currently I am trying to understand the reason. Please provide comments/suggestions if any. Thanks!
+Source code / logs
+$ bazel test --test_output=errors //tensorflow/python:nn_test
+
+......................../root/.cache/bazel/_bazel_root/725e77151072daec43bc353cb6fcb26c/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/nn_test.runfiles/org_tensorflow/tensorflow/python/ops/nn_test.py:108: RuntimeWarning: divide by zero encountered in log
+  stirling_approx = z * np.log(z) - z + 0.5 * np.log(2. * np.pi * z)
+/root/.cache/bazel/_bazel_root/725e77151072daec43bc353cb6fcb26c/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/nn_test.runfiles/org_tensorflow/tensorflow/python/ops/nn_test.py:108: RuntimeWarning: invalid value encountered in multiply
+  stirling_approx = z * np.log(z) - z + 0.5 * np.log(2. * np.pi * z)
+................F.......
+======================================================================
+FAIL: testNaNs (__main__.ReluTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.cache/bazel/_bazel_root/725e77151072daec43bc353cb6fcb26c/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/nn_test.runfiles/org_tensorflow/tensorflow/python/ops/nn_test.py", line 841, in testNaNs
+    self.assertTrue(np.isnan(z).all())
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 48 tests in 7.253s
+
+FAILED (failures=1)
+0.0208333333333
+0.00566666666667
+0.0075
+0.0208333333333
+0.00566666666667
+0.0075
+0.0208333333333
+0.00566666666667
+0.0075
+L2Loss gradient err = 9.6958e-12
+L2Normalize gradient err = 4.2424e-08
+L2Normalize gradient err = 5.45829e-07
+L2Normalize gradient err = 7.61142e-05
+================================================================================

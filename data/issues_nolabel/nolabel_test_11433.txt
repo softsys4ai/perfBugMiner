@@ -1,0 +1,165 @@
+My CNN is not learning , who can help me fix this porblem ?
+
+import tensorflow as tf
+import Transform_Data_New as td
+import numpy as np
+max_accuracy=0
+timer=0
+Epoch=300
+learning_rate=1e-3
+training_batch_size=100
+validation_batch_size=40
+test_batch_size=40
+len_training_data, validation, test = td.Initialization(validation_batch_size,test_batch_size)
+iteration_time=int(len_training_data/training_batch_size)+1
+sess=tf.InteractiveSession()
+def weight_variable(shape,Name):
+initial = tf.random_normal(shape,stddev=0.2,mean=0.5)
+return tf.Variable(initial,name=Name)
+def bias_variable(shape,Name):
+initial=tf.constant(0.1, shape=shape,)
+return tf.Variable(initial,name=Name)
+def conv2d(x,w):
+return tf.nn.conv2d(x, w, strides=[1, 1, 1, 1], padding='SAME')
+def max_pool_2x2(x):
+return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],strides=[1, 2, 2, 1],padding='SAME')
+with tf.name_scope('Input'):
+with tf.name_scope('Input_x'):
+x = tf.placeholder(tf.float32,shape=[None,1024])
+with tf.name_scope('Input_y'):
+y_ = tf.placeholder(tf.float32,shape=[None,7])
+with tf.name_scope('Conv_1'):
+with tf.name_scope('W_conv1'):
+w_conv1=weight_variable([3,3,1,8],'w_conv1')
+with tf.name_scope('B_conv1'):
+b_conv1=bias_variable([8],'b_conv1')
+with tf.name_scope('x_image'):
+x_image=tf.reshape(x,[-1,32,32,1])
+with tf.name_scope('H_conv1'):
+h_conv1=tf.nn.relu(tf.nn.bias_add(conv2d(x_image,w_conv1),b_conv1))
+with tf.name_scope('Conv_2'):
+with tf.name_scope('W_conv2'):
+w_conv2=weight_variable([3,3,8,16],'w_conv2')
+with tf.name_scope('B_conv2'):
+b_conv2=bias_variable([16],'b_conv2')
+with tf.name_scope('H_conv2'):
+h_conv2=tf.nn.relu(tf.nn.bias_add(conv2d(h_conv1,w_conv2),b_conv2))
+with tf.name_scope('H_pool2'):
+h_pool2=max_pool_2x2(h_conv2)
+with tf.name_scope('Conv_3'):
+with tf.name_scope('W_conv3'):
+w_conv3=weight_variable([3,3,16,32],'w_conv3')
+with tf.name_scope('B_conv3'):
+b_conv3=bias_variable([32],'b_conv3')
+with tf.name_scope('H_conv3'):
+h_conv3=tf.nn.relu(tf.nn.bias_add(conv2d(h_pool2,w_conv3),b_conv3))
+with tf.name_scope('Conv_4'):
+with tf.name_scope('W_conv4'):
+w_conv4=weight_variable([3,3,32,64],'w_conv4')
+with tf.name_scope('B_conv4'):
+b_conv4=bias_variable([64],'b_conv4')
+with tf.name_scope('H_conv4'):
+h_conv4=tf.nn.relu(tf.nn.bias_add(conv2d(h_conv3,w_conv4),b_conv4))
+with tf.name_scope('H_pool4'):
+h_pool4=max_pool_2x2(h_conv4)
+with tf.name_scope('Conv_5'):
+with tf.name_scope('W_conv5'):
+w_conv5=weight_variable([3,3,64,128],'w_conv5')
+with tf.name_scope('B_conv5'):
+b_conv5=bias_variable([128],'b_conv5')
+with tf.name_scope('H_conv5'):
+h_conv5=tf.nn.relu(tf.nn.bias_add(conv2d(h_pool4,w_conv5),b_conv5))
+with tf.name_scope('Conv_6'):
+with tf.name_scope('W_conv6'):
+w_conv6=weight_variable([3,3,128,256],'w_conv6')
+with tf.name_scope('B_conv6'):
+b_conv6=bias_variable([256],'b_conv6')
+with tf.name_scope('H_conv6'):
+h_conv6=tf.nn.relu(tf.nn.bias_add(conv2d(h_conv5,w_conv6),b_conv6))
+with tf.name_scope('H_pool6'):
+h_pool6=max_pool_2x2(h_conv6)
+with tf.name_scope('Full_Connected_Layer_1'):
+with tf.name_scope('W_fc1'):
+w_fc1=weight_variable([44256,1024],'w_fc1')
+with tf.name_scope('B_fc1'):
+b_fc1=bias_variable([1024],'b_fc1')
+with tf.name_scope('H_pool_flat'):
+h_pool_flat=tf.reshape(h_pool6,[-1,44256])
+with tf.name_scope('H_fc1'):
+h_fc1=tf.nn.relu(tf.matmul(h_pool_flat,w_fc1)+b_fc1)
+with tf.name_scope('Full_Connected_Layer_2'):
+with tf.name_scope('W_fc2'):
+w_fc2=weight_variable([1024,7],'w_fc2')
+with tf.name_scope('B_fc2'):
+b_fc2=bias_variable([7],'b_fc2')
+with tf.name_scope('Y_conv'):
+y_conv=tf.nn.softmax(tf.matmul(h_fc1,w_fc2)+b_fc2)
+with tf.name_scope('Cross_Entropy'):
+cross_entropy=-tf.reduce_sum(y_*tf.log(tf.clip_by_value(y_conv,1e-10,1.0)))
+tf.summary.scalar('Cross_Entropy',cross_entropy)
+with tf.name_scope('Train_Step'):
+train_step=tf.train.AdamOptimizer(learning_rate).minimize(cross_entropy)
+with tf.name_scope('Correct_prediction'):
+distribution=[tf.arg_max(y_,1),tf.arg_max(y_conv,1)]
+correct_prediction=tf.equal(distribution[0],distribution[1])
+with tf.name_scope('Accuracy'):
+accuracy=tf.reduce_mean(tf.cast(correct_prediction,"float"))
+tf.summary.scalar('Accuracy',accuracy)
+merged=tf.summary.merge_all()
+writer=tf.summary.FileWriter('D:/Log',sess.graph)
+epoch=0
+saver=tf.train.Saver()
+First_training=True
+checkpoint_dir='D:\Checkpoint\model.ckpt'
+if First_training==False:
+ckpt=tf.train.get_checkpoint_state(checkpoint_dir)
+if ckpt and ckpt.model_checkpoint_path:
+saver.restore(sess,checkpoint_dir)
+else:
+sess.run(tf.global_variables_initializer())
+for i in range(Epoch*iteration_time+1):
+#Batch Size
+batch = td.next_batch(training_batch_size)
+train_step.run(feed_dict={x: batch[0], y_: batch[1]})
+if i % (iteration_time) == 0 and i != 0:
+epoch += 1
+train_accuracy=accuracy.eval(feed_dict={x: batch[0], y_: batch[1]})
+validation_accuracy_resultSet = []
+for j in range(len(validation)):
+validation_accuracy = accuracy.eval(feed_dict={x: validation[j][0], y_: validation[j][1]})
+validation_accuracy_resultSet.append(validation_accuracy)
+validation_accuracy = int(np.sum(validation_accuracy_resultSet)) / len(validation_accuracy_resultSet)
+if validation_accuracy<=0.7:
+learning_rate=1e-3
+if validation_accuracy>0.7 and validation_accuracy<=0.8:
+learning_rate=5e-4
+if validation_accuracy>0.8 and validation_accuracy<=0.9:
+learning_rate=1e-4
+if validation_accuracy>0.9:
+learning_rate=5e-5
+print("Epoch %d , training accuracy %g,Validation Accuracy: %g" % (epoch, train_accuracy, validation_accuracy))
+    result = sess.run(merged, feed_dict={x: batch[0], y_: batch[1]})
+    writer.add_summary(result, epoch)
+    saver.save(sess,checkpoint_dir,global_step=epoch)
+    if validation_accuracy>max_accuracy:
+        max_accuracy=validation_accuracy
+        timer=0
+    else:
+        timer+=1
+        if timer>10:   #原来是10
+            break
+
+confusion_matrics=np.zeros([7,7],dtype="int")
+test_accuracy_resultSet=[]
+for j in range(len(test)):
+matrix_row, matrix_col = sess.run(distribution, feed_dict={x: test[j][0], y_: test[j][1]})
+for m, n in zip(matrix_row, matrix_col):
+confusion_matrics[m][n] += 1
+test_accuracy = accuracy.eval(feed_dict={x: test[j][0], y_: test[j][1]})
+test_accuracy_resultSet.append(test_accuracy)
+test_accuracy = np.sum(test_accuracy_resultSet) / len(test_accuracy_resultSet)
+print("Test Accuracy :",test_accuracy)
+print(np.array(confusion_matrics.tolist()))
+That's the whole code of my CNN, the data for training, validation, test are all organized myself, which is not the problem.
+While training this CNN, the result in Console showed that all weights and biases did not change. If I replace the RELU in six convolutional layers with Sigmoid, the CNN performed well.
+Who can help me fix this problem? Thanks anyway ~

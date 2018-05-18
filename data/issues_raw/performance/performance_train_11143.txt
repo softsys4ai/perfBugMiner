@@ -1,0 +1,27 @@
+Parameter server of distributed Tensorflow computes unexpected training operations when using Estimator
+
+Hi, I am trying to use multi GPUs for the Google's seq2seq training (https://github.com/google/seq2seq) through distributed Tensorflow (data parallelism).
+I launched a parameter server (PS) and three worker processes on a machine equipped with 4 GPUs.
+I have each process (including PS) to run on separate GPU through the CUDA_VISIBLE_DEVICES.
+I successfully trained the model faster than the single-node version; however, I noticed a weird behavior.
+The way of enabling data parallelism was to set the ClusterConfig like below:
+# ps_hosts, worker_hosts, job_name, and task_index are given as program arguments
+ps_hosts = FLAGS.ps_hosts.split(",")
+worker_hosts = FLAGS.worker_hosts.split(",")
+cluster = {"ps": ps_hosts, "worker": worker_hosts}
+os.environ['TF_CONFIG'] = json.dumps({
+'cluster': cluster,
+'task': {
+'type': FLAGS.job_name,
+'index': FLAGS.task_index
+}
+})
+config = run_config.RunConfig( ..... )
+estimator = tf.contrib.learn.Estimator(....., config=config)
+experiment = tf.contrib.learn.Experiment(estimator=estimator, .....) learn_runner.run(experiment=experiment, .....)
+I profiled the training of this machine using nvprof and noticed that the parameter server process also uses its GPU for training. I looked into the device placement log messages and there is no MatMul ops associated with the /job:ps but for some reason, GPU calls many gemm calls.
+I think this issue is not specific to GPU because I also ran the same experiment with PS mapped to CPU but the PS also computes training operations.
+Is there anybody else who has experienced this? Is this the Estimator's bug?
+_get_replica_device_setter seems to pass /job:ps/task:%d as worker_device and maybe this makes this problem?
+I also thought about the possibility that I did something wrong in deploying distributed Tensorflow but as mentioned earlier, the model is trained successfully with higher performance so I am confused if this is a bug or a feature.
+I would really appreciate any feedback/comments/help. Please let me know if I am misunderstanding anything.

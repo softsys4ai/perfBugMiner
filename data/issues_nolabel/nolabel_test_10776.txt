@@ -1,0 +1,60 @@
+Docker build issues -- libcuda.so.1 cannot be found
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No, I'm using baidu's warp-ctc which has custom code
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): N/A, using docker
+TensorFlow installed from (source or binary): provided docker image
+TensorFlow version (use command below): 1.2.0
+Bazel version (if compiling from source):
+CUDA/cuDNN version: Provided
+GPU model and memory: N/A
+Exact command to reproduce: See below
+
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+Unable to install warp-ctc with tensorflow in version 1.2, while it works in version 1.0.0
+This is screenshot of dockerfile for version 1.0: http://i.imgur.com/Zl9ikYT.png
+For newer tensorflow versions (e.g. 1.1 and 1.2 have the same issue) problems occur: http://i.imgur.com/UEcCkOm.png
+That is libcuda.so.1 cannot be found.
+I've opened similar issue on nvidia-docker NVIDIA/nvidia-docker#374 since I've used their images and installed tensorflow via pip with same exact issues. Only change is tensorflow verions while everything else remains the same.
+I'm unable to test this outside docker contained due to machine permissions (or lack thereof, no admin and cannot install newer CUDA/cuDNN/etc.)
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+Here is dockerfile used in the reproduction:
+FROM tensorflow/tensorflow:1.2.0-devel-gpu-py3
+ 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        python3-setuptools \
+        python3-dev \
+        python3-pip \
+        python3-numpy \
+        python3-scipy \
+        software-properties-common \
+        libhdf5-serial-dev \
+        cmake \
+        git \
+        && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+ 
+WORKDIR /opt
+ENV TENSORFLOW_SRC_PATH=/opt/tensorflow
+ENV WARP_CTC_PATH=/opt/warp-ctc/build
+ENV CUDA_HOME=/usr/local/cuda
+ 
+RUN git clone https://github.com/tensorflow/tensorflow.git tensorflow
+RUN git clone https://github.com/nmiculinic/warp-ctc.git warp-ctc
+ 
+WORKDIR $TENSORFLOW_SRC_PATH
+RUN git checkout tags/v1.2.0
+ 
+WORKDIR /opt/warp-ctc
+RUN git checkout 4875195a4444991b5c8c6027ffd4bd485e2aac3a
+ 
+RUN mkdir build
+WORKDIR /opt/warp-ctc/build
+RUN cmake .. && make
+WORKDIR /opt/warp-ctc/tensorflow_binding
+RUN python3 setup.py install

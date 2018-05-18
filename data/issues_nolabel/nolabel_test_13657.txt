@@ -1,0 +1,78 @@
+tf.train.import_meta_graph() works strangely compared to restored session with tf.train.Supervisor
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): v1.1.0-13-g8ddd727 1.1.0
+Python version: Python 3.4.3
+CUDA/cuDNN version: CUDA
+GPU model and memory: GeForce GTX TITAN X major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:02:00.0
+Total memory: 11.92GiB
+
+Describe the problem
+Working on GANs in tensorflow.
+I would like to load a generator from a different saved session and graph, in order to do some new ops on this part of the graph that has been trained. I use tf.train.import_meta_graph() but it works strangely compared to restored session with tf.train.Supervisor.
+It seems like the tf.train.Supervisor reassigns the tensors in a better way. I would have guessed that the generator would have been successfully loaded or not, but not in such a strange way.
+I don't know if it is a bug.
+Source code / logs
+When I use tf.train.import_meta_graph():
+train_dir = "./train_logs/mnist/0" 
+ckpt = tf.train.latest_checkpoint(train_dir)
+filename = ".".join([ckpt, 'meta'])
+saver = tf.train.import_meta_graph(filename)
+
+z_optim = tf.get_variable(name='z_optim', shape= [number_ini_z * batch_imgs_number, 100], initializer=tf.truncated_normal_initializer())
+gen_z = dcgan.generator(z_optim, is_training=False, reuse=False, name='generator_z')
+
+Then I create basic image summary:
+image_test = tf.cast(((gen_z / 2.0) + 0.5) * 255.0, tf.uint8)
+s_test = tf.summary.image('reconstructed_image', image_test, max_outputs=3)
+
+In order to reassign all the trained values to the new generator created from scratch, I collect all the variables that were in the scope of the "generator" and then create my own list of initializers:
+gen_variables_to_initialize = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='generator_z')
+
+gen_tensors_to_restore = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='generator')
+
+list_assign_op = []
+
+for variables, tensors in zip(gen_variables_to_initialize, gen_tensors_to_restore):
+    list_assign_op.append(tf.assign(variables, tensors))
+
+
+I have to explicitly create another list of variables that have to be initialized:
+variables_initializer_except_for_generator = []
+
+variables_to_initialize = gen_variables_to_initialize + dis_variables_to_initialize 
+
+for variable in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES):
+        if variable not in variables_to_initialize:
+            variables_initializer_except_for_generator.append(variable.initializer)
+
+so I run the session:
+with tf.Session() as sess:
+    logwriter = tf.summary.FileWriter('./logs', sess.graph)
+    saver.restore(sess, ckpt)
+    sess.run((list_assign_op, variables_initializer_except_for_generator))
+    s = sess.run(s_test)
+    logwriter.add_summary(s)
+
+This code gives me such digits on tensorboard:
+
+And then I remembered I used tf.train.Supervisor during the training, At the beginning I thought my GAN was not trained enough, but I instead ran:
+logdir = "./train_logs/mnist/0"
+sv = tf.train.Supervisor(logdir=logdir,
+                           save_summaries_secs=None, save_model_secs=120)
+
+with sv.managed_session() as sess:
+    logwriter = tf.summary.FileWriter('./logs2', sess.graph)
+    s = sess.run(s_test)
+    logwriter.add_summary(s)
+
+I had this on tensorboard:
+
+It seems like the tf.train.Supervisor reassigns the tensors in a better way. I would have guessed that the generator would have been successfully loaded or not, but not in such a strange way.
+The problem is that I can't use the second method if I want to do some new stuffs with the generator (such as inverting it through another training, but his time on z_optim) because it does not want to add new nodes to the graph when it has not found it in previous training checkpoint. (Btw I had to change z_optim in tf.random_normal([number_ini_z * batch_imgs_number, 100], mean=0.0, stddev=1.0,name='random_z') for that same reason.
+Do you have an any idea of why such a thing occurs? Or any other suggestion in loading the generator?

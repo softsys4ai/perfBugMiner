@@ -1,0 +1,111 @@
+Bug: ProtoBuf tokenizer crashes when loading single_image_random_dot_stereograms OP
+
+System information
+
+No custom code
+Ubuntu 17.04 (also confirmed on 16.04)
+TensorFlow installed from source
+TensorFlow version: v1.2.0-rc0-486-g95d90ab2e 1.2.0-rc1
+Bazel version: 0.5.0
+Python version: 3.5.3 (also confirmed on 2.7.12):
+Not tested with GPU support:
+
+Reproduction
+import tensorflow as tf
+regressor = tf.contrib.learn.LinearRegressor(feature_columns=[])
+
+Alternative:
+import keras
+
+Reference: Stackoverflow
+Manifestation of the error
+The first method to reproduce should cause an assert due to the empty feature_columns.
+Instead, the protobuf tokenizer crashes with:
+
+Traceback (most recent call last):
+File "", line 1, in 
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/util/lazy_loader.py", line 53, in getattr
+module = self._load()
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/util/lazy_loader.py", line 42, in _load
+module = importlib.import_module(self.name)
+File "/usr/lib/python3.5/importlib/init.py", line 126, in import_module
+return _bootstrap._gcd_import(name[level:], package, level)
+File "", line 986, in _gcd_import
+File "", line 969, in _find_and_load
+File "", line 958, in _find_and_load_unlocked
+File "", line 673, in _load_unlocked
+File "", line 673, in exec_module
+File "", line 222, in _call_with_frames_removed
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/contrib/init.py", line 35, in 
+from tensorflow.contrib import image
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/contrib/image/init.py", line 40, in 
+from tensorflow.contrib.image.python.ops.single_image_random_dot_stereograms import single_image_random_dot_stereograms
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/contrib/image/python/ops/single_image_random_dot_stereograms.py", line 26, in 
+"_single_image_random_dot_stereograms.so"))
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/contrib/util/loader.py", line 55, in load_op_library
+ret = load_library.load_op_library(path)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/load_library.py", line 84, in load_op_library
+exec(wrappers, module.dict)
+File "", line 248, in 
+File "", line 114, in _InitOpDefLibrary
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 481, in Merge
+descriptor_pool=descriptor_pool)
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 535, in MergeLines
+return parser.MergeLines(lines, message)
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 568, in MergeLines
+self._ParseOrMerge(lines, message)
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 583, in _ParseOrMerge
+self._MergeField(tokenizer, message)
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 684, in _MergeField
+merger(tokenizer, message, field)
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 773, in _MergeMessageField
+self._MergeField(tokenizer, sub_message)
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 684, in _MergeField
+merger(tokenizer, message, field)
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 773, in _MergeMessageField
+self._MergeField(tokenizer, sub_message)
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 684, in _MergeField
+merger(tokenizer, message, field)
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 773, in _MergeMessageField
+self._MergeField(tokenizer, sub_message)
+File "/usr/local/lib/python3.5/dist-packages/google/protobuf/text_format.py", line 652, in _MergeField
+(message_descriptor.full_name, name))
+google.protobuf.text_format.ParseError: 48:12 : Message type "tensorflow.AttrValue" has no field named "5".
+
+What causes this exception?
+The problem is the information extracted from the _single_image_random_dot_stereograms.so library file from /usr/local/lib/python3.5/dist-packages/tensorflow/contrib/image/python/ops/
+This file contains encoded information passed to protobuf.
+The problem occurs when a line with a float default is parsed.
+In this case, it is the sequence
+eye_separation: float = 2.5
+
+at offset 0xa3b4 in emphasized _single_image_random_dot_stereograms.so
+Somehow, the parser replaces decimal points with commas. In the end, this is created:
+attr {\n'
+  name: "eye_separation"\n'
+  type: "float"\n'
+  default_value {\n'
+    f: 2,5\n'
+  }\n'
+}\n'
+
+The tokenizer (at google/protobuf/text_format.py) gets confused by the , in the default value and thinks that 5 is a separate field.
+Root of the error
+The error occurs during the execution of load_library.py.
+op_list_str = py_tf.TF_GetOpList(lib_handle)
+op_list = op_def_pb2.OpList()
+op_list.ParseFromString(compat.as_bytes(op_list_str))
+wrappers = py_tf.GetPythonWrappers(op_list_str)
+
+op_list contains the correct default value of 2.5, whereas wrappers, the wrapped list returned from python_op_gen.cc contains a 2,5.
+This is what GetPythonWrappers does:
+string GetPythonWrappers(const char* op_list_buf, size_t op_list_len) {
+  string op_list_str(op_list_buf, op_list_len);
+  OpList ops;
+  ops.ParseFromString(op_list_str);
+  return GetPythonOps(ops, {}, false);
+}
+
+The appended files include the contents of the op_list and the wrappers variable:
+op_list.txt
+wrapper.txt

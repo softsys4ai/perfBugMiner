@@ -1,0 +1,70 @@
+failed call to cuInit: CUDA_ERROR_UNKNOWN after Docker build on Macbook Pro (Late 2013) with Linux
+
+This issue is similar to to #394. I believe i'm seeing it because tensorflow can't find libcuda.so.
+I know that my libcuda.so can be found in /usr/lib/x86_64-linux-gnu/, but is this accessible to the compiler and to python without further configuration?  I tried adding it to my docker user's $LD_LIBRARY_PATH, but that did not fix the problem.
+I'm running on:
+
+Macbook Pro (Late 2013) Hardware
+Mint 17
+3.0 Compute Capability
+CUDA 7.0 & cuDNN 2.0
+running docker service under a docker user & group.  no sudo access for docker user.
+
+on host os, values for $CUDA_SO and $DEVICES that are passed into ./docker_run_gpu.sh are:
+$ export CUDA_SO=$(\ls /usr/lib/x86_64-linux-gnu/libcuda* | xargs -I{} echo '-v {}:{}')
+$ export DEVICES=$(\ls /dev/nvidia* | xargs -I{} echo '--device {}:{}')
+
+$ echo $CUDA_SO
+-v /usr/lib/x86_64-linux-gnu/libcuda.so:/usr/lib/x86_64-linux-gnu/libcuda.so -v /usr/lib/x86_64-linux-gnu/libcuda.so.1:/usr/lib/x86_64-linux-gnu/libcuda.so.1 -v /usr/lib/x86_64-linux-gnu/libcuda.so.352.68:/usr/lib/x86_64-linux-gnu/libcuda.so.352.68
+
+$ echo $DEVICES
+--device /dev/nvidia0:/dev/nvidia0 --device /dev/nvidiactl:/dev/nvidiactl
+
+I customized Dockerfile.devel-gpu as below.  I prepended TF_CUDA_COMPUTE_CAPABILITIES=3.0 and  TF_UNOFFICIAL_SETTING=1 for the ./configure step.
+Should I add the libcuda.so path to ENV LD_LIBRARY_PATH?
+# ........
+
+RUN git clone --recursive https://github.com/tensorflow/tensorflow.git && \
+    cd tensorflow && \
+    git checkout 0.6.0
+WORKDIR /tensorflow
+
+# Configure the build for our CUDA configuration.
+ENV CUDA_TOOLKIT_PATH /usr/local/cuda
+ENV CUDNN_INSTALL_PATH /usr/local/cuda
+ENV TF_NEED_CUDA 1
+
+RUN TF_CUDA_COMPUTE_CAPABILITIES=3.0 TF_UNOFFICIAL_SETTING=1 ./configure && \
+    bazel build -c opt --config=cuda tensorflow/tools/pip_package:build_pip_package && \
+    bazel-bin/tensorflow/tools/pip_package/build_pip_package /tmp/pip && \
+    pip install --upgrade /tmp/pip/tensorflow-*.whl
+
+WORKDIR /root
+
+# Set up CUDA variables
+ENV CUDA_PATH /usr/local/cuda
+ENV LD_LIBRARY_PATH /usr/local/cuda/lib64
+
+# TensorBoard
+EXPOSE 6006
+# IPython
+EXPOSE 8888
+
+RUN ["/bin/bash"]
+Then I built the image and ran it with ./docker_run_gpu.sh tf/tf
+Started tensorflow with: python -m tensorflow.models.image.mnist.convolutional
+And I'm getting failed call to cuInit: CUDA_ERROR_UNKNOWN when tensorflow starts up. But this is after reporting that it successfully opened CUDA library libcuda.so locally.
+I tensorflow/stream_executor/dso_loader.cc:101] successfully opened CUDA library libcublas.so.7.0 locally
+I tensorflow/stream_executor/dso_loader.cc:101] successfully opened CUDA library libcudnn.so.6.5 locally
+I tensorflow/stream_executor/dso_loader.cc:101] successfully opened CUDA library libcufft.so.7.0 locally
+I tensorflow/stream_executor/dso_loader.cc:101] successfully opened CUDA library libcuda.so locally
+I tensorflow/stream_executor/dso_loader.cc:101] successfully opened CUDA library libcurand.so.7.0 locally
+
+I tensorflow/core/common_runtime/local_device.cc:40] Local device intra op parallelism threads: 8
+modprobe: ERROR: ../libkmod/libkmod.c:556 kmod_search_moddep() could not open moddep file '/lib/modules/3.19.0-32-generic/modules.dep.bin'
+E tensorflow/stream_executor/cuda/cuda_driver.cc:481] failed call to cuInit: CUDA_ERROR_UNKNOWN
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:114] retrieving CUDA diagnostic information for host: 24b008aee65f
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:121] hostname: 24b008aee65f
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:146] libcuda reported version is: Not found: was unable to find libcuda.so DSO loaded into this program
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:257] driver version file contents: """NVRM version: NVIDIA UNIX x86_64 Kernel Module  352.68  Tue Dec  1 17:24:11 PST 2015
+GCC version:  gcc version 4.8.4 (Ubuntu 4.8.4-2ubuntu1~14.04)

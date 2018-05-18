@@ -1,0 +1,60 @@
+Tensorflow Still Trying to use CUDA even when Session Created with device_count={'GPU': 0}
+
+System Information
+Using the tensorflow/tensorflow:1.0.1-devel-gpu Docker image.
+('v1.0.0-65-g4763edf-dirty', '1.0.1')
+Host: Driver Version: 367.57, 3.13.0-57-generic
+Issue
+If I Set compute mode to EXCLUSIVE_PROCESS on the Nvidia device (sudo nvidia-smi -c 1), then even though I tell the Session not to use GPUs (config=tf.ConfigProto(device_count={'GPU': 0})), Tensorflow attempts to use the GPU resulting in an inability to create session:
+InternalErrorTraceback (most recent call last)
+<ipython-input-1-cabf26c1451a> in <module>()
+      1 import tensorflow as tf
+      2 from tensorflow.python.framework import ops
+----> 3 with tf.Session(config=tf.ConfigProto(device_count={'GPU': 0})) as sess:
+      4     pass
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in __init__(self, target, graph, config)
+   1174 
+   1175     """
+-> 1176     super(Session, self).__init__(target, graph, config=config)
+   1177     # NOTE(mrry): Create these on first `__enter__` to avoid a reference cycle.
+   1178     self._default_graph_context_manager = None
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in __init__(self, target, graph, config)
+    550     try:
+    551       with errors.raise_exception_on_not_ok_status() as status:
+--> 552         self._session = tf_session.TF_NewDeprecatedSession(opts, status)
+    553     finally:
+    554       tf_session.TF_DeleteSessionOptions(opts)
+
+/usr/lib/python2.7/contextlib.pyc in __exit__(self, type, value, traceback)
+     22         if type is None:
+     23             try:
+---> 24                 self.gen.next()
+     25             except StopIteration:
+     26                 return
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/errors_impl.pyc in raise_exception_on_not_ok_status()
+    464           None, None,
+    465           compat.as_text(pywrap_tensorflow.TF_Message(status)),
+--> 466           pywrap_tensorflow.TF_GetCode(status))
+    467   finally:
+    468     pywrap_tensorflow.TF_DeleteStatus(status)
+
+InternalError: Failed to create session.
+
+This can be demonstrated by running:
+import tensorflow as tf
+from tensorflow.python.framework import ops
+with tf.Session(config=tf.ConfigProto(device_count={'GPU': 0})) as sess:
+    pass
+
+when another process is using CUDA and the exclusive process mode is set.
+If exclusive process mode is not set, then the session is created but using nvidia-smi, I see that the process is using GPU ram (and CUDA):
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0      2237    C   /usr/bin/python                                 61MiB |
+
+The issue seems limited to TF trying to lock the CUDA device (an allocate ~61MB memory). Subsequent computations do happen correctly on the CPU.

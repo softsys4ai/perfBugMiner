@@ -1,0 +1,47 @@
+feature request: make placeholder_with_default work in batch prediction
+
+cc @qimingj
+I ran into an issue with building a model that has missing values. During training, I can fill in missing values via the options to tf.decode_csv or tf.parse_example. I want to make my exported saved model also handle missing values. I know how to do this if the model reads from tf.example string or csv string, but this is impossible if the model takes each input tensor individually through placeholders.
+I looked at tf.placeholder_with_default(), but this function has useless behavior in batch prediction. As an example:
+import tensorflow as tf
+
+with tf.Session() as sess:
+	default = tf.placeholder_with_default([1], shape=[None])
+	regular = tf.placeholder(tf.int32, shape=[None])
+
+	id_default = tf.identity(default)
+	id_regular = tf.identity(regular)
+
+	print('1) normal 1 example', sess.run([id_default, id_regular], feed_dict={default: [2], regular: [5]}))
+	print('2) normal batch example', sess.run([id_default, id_regular], feed_dict={default: [2, 2], regular: [5, 5]}))
+	print('3) missing 1 column in batch', sess.run([id_default, id_regular], feed_dict={regular: [5, 5]}))
+	print('4) missing some data', sess.run([id_default, id_regular], feed_dict={default: [2, None], regular: [5, 5]}))	
+
+The output is
+('1) normal 1 example', [array([2], dtype=int32), array([5], dtype=int32)])
+('2) normal batch example', [array([2, 2], dtype=int32), array([5, 5], dtype=int32)])
+('3) missing 1 column in batch', [array([1], dtype=int32), array([5, 5], dtype=int32)])
+Traceback (most recent call last):
+  File "placeholders.py", line 13, in <module>
+    print('4) missing some data', sess.run([id_default, id_regular], feed_dict={default: [2, None], regular: [5, 5]}))
+  File "/usr/local/google/home/brandondutra/miniconda2/envs/cml/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File "/usr/local/google/home/brandondutra/miniconda2/envs/cml/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 938, in _run
+    np_val = np.asarray(subfeed_val, dtype=subfeed_dtype)
+  File "/usr/local/google/home/brandondutra/miniconda2/envs/cml/lib/python2.7/site-packages/numpy/core/numeric.py", line 531, in asarray
+    return array(a, dtype, copy=False, order=order)
+TypeError: long() argument must be a string or a number, not 'NoneType'
+
+Note how line 3 is incorrect: I expected a result of [1,1], [5,5]
+Also, placeholder_with_default does not allow some values to be missing in a batch as line 4 shows.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 14.04.1
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): ('v1.0.0-65-g4763edf-dirty', '1.0.1')
+Bazel version (if compiling from source): n/a
+CUDA/cuDNN version: n/a
+GPU model and memory: n/a
+Exact command to reproduce: n/a

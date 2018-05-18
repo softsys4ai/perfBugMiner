@@ -1,0 +1,46 @@
+tf.profiler reports 0B memory usage
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.5.0-dev20171103
+Python version: 3.5
+Exact command to reproduce:
+
+import tensorflow as tf
+import numpy as np
+
+graph = tf.Graph()
+with graph.as_default(), tf.device("/cpu:0"):
+    a = tf.constant(np.ones((1000, 1000)))
+    b = tf.constant(np.ones((1000, 1000)))
+    c = a * b
+
+with tf.Session(graph=graph) as sess:
+    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+    sess.run(c, options=run_options, run_metadata=run_metadata)
+
+    options = tf.profiler.ProfileOptionBuilder.time_and_memory()
+    options["min_bytes"] = 0
+    options["select"] = ("bytes", "peak_bytes", "output_bytes",
+                         "residual_bytes")
+    tf.profiler.profile(graph, run_meta=run_metadata, cmd="scope",
+                        options=options)
+Describe the problem
+The above script gives output
+==================Model Analysis Report======================
+node name | requested bytes | peak bytes | residual bytes | output bytes
+_TFProfRoot (--/0B, --/0B, --/0B, --/8.00MB)
+  mul (0B/0B, 0B/0B, 0B/0B, 8.00MB/8.00MB)
+  _retval_mul_0_0 (0B/0B, 0B/0B, 0B/0B, 0B/0B)
+
+requested bytes and peak bytes are both reported as 0, whereas I would have thought they would be 8MB (based on the description of these measures here).
+I think the memory is not being recorded in the RunMetadata the way the profiler expects.  For example, if we look at
+    mul_stats = run_metadata.step_stats.dev_stats[0].node_stats[1]
+
+    print("total_bytes", [x.total_bytes for x in mul_stats.memory])   # --> [0]
+    print("persistent_mem", mul_stats.memory_stats.host_persistent_memory_size)  # --> 8000000
+"total_bytes" is what the profiler reports as "requested bytes" above.  It seems like that data isn't being updated in the run_metadata.  The correct value is in memory_stats.host_persistent_memory_size, but that value isn't available in the profiler output.  And according to the profiler proto that value is supposed to represent the bytes allocated to persistent objects (like Variables), even though none of the values in the example are persistent.  So I'm not sure if this is an issue with tf.profiler, or with how memory information is stored in RunMetadata.

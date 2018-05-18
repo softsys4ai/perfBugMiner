@@ -1,0 +1,24 @@
+Bounds-check node ID before getting it's name
+
+When the edge is either a frame enter or exit edge then DescribeCycle() would segfault.
+Here's some code to reproduce this issue.
+import tensorflow as tf                                                                                                                                                                                                                       
+
+with tf.device('/cpu:0'):
+    xin = tf.placeholder(tf.float32, [None, 1, 1], name='input')
+    rnn_cell = tf.contrib.rnn.LSTMCell(1)
+    out, _ = tf.nn.dynamic_rnn(rnn_cell, xin, dtype=tf.float32)
+    out = tf.layers.batch_normalization(out, training=True)
+    out = tf.identity(out, name='output')
+
+    optimiser = tf.train.AdamOptimizer(.0001)
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        out = optimiser.minimize(out, global_step=tf.Variable(0, dtype=tf.float32), name='train_op')
+
+config = tf.ConfigProto(allow_soft_placement = False)
+sess = tf.Session(config=config)
+sess.run(tf.global_variables_initializer())
+
+sample_in = [[[0]]]
+sess.run(out, feed_dict={xin: sample_in})

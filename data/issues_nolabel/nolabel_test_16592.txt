@@ -1,0 +1,194 @@
+Freeze-graph not working, allocating too much memory for inference
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): ('v1.5.0-rc1-1783-g7d7dce1', '1.5.0-rc1')
+Python version: Python 2.7.12
+Bazel version (if compiling from source): Build label: 0.9.0
+GCC/Compiler version (if compiling from source): gcc (Ubuntu 5.4.0-6ubuntu1~16.04.5) 5.4.0
+CUDA/cuDNN version: N/A (CPU only)
+GPU model and memory: N/A
+Exact command to reproduce:
+
+save_alexnet_checkpoint.py
+import os
+
+import numpy as np
+import tensorflow as tf
+
+from alexnet import AlexNet
+from datagenerator import ImageDataGenerator
+from datetime import datetime
+from tensorflow.contrib.data import Iterator
+
+"""
+Configuration Part.
+"""
+
+num_classes = 1000
+checkpoint_path = "path/to/ckpt"
+
+
+# Create parent path if it doesn't exist
+if not os.path.isdir(checkpoint_path):
+    os.mkdir(checkpoint_path)
+
+# TF placeholder for graph input and output
+
+
+# Initialize model
+x = tf.placeholder(tf.float32, [1, 227, 227, 3],name="input")
+keep_prob=tf.placeholder(tf.float32,[],name="keepProbs")
+model = AlexNet(x, keep_prob, num_classes, [])
+softmax = tf.nn.softmax(model.fc8,name="softmax")
+
+# Initialize an saver for store model checkpoints
+saver = tf.train.Saver()
+
+# Start Tensorflow session
+with tf.Session() as sess:
+
+	# Validate the model on the entire validation set
+	sess.run(tf.global_variables_initializer())
+
+	# Load the pretrained weights into the non-trainable layer
+	model.load_initial_weights(sess)
+
+	# save checkpoint of the model
+	checkpoint_name = os.path.join(checkpoint_path,
+		                       'original_alexnet.ckpt')
+	save_path = saver.save(sess, checkpoint_name)
+
+	tf.train.write_graph(sess.graph_def, checkpoint_path, 'alexnet_def.pb',as_text=False)
+
+	names=[]
+	for n in tf.get_default_graph().as_graph_def().node:
+		names.append(str(n.name))
+
+    	names = sorted(names, key=str.lower)
+    	for n in names:
+		print n
+
+
+	print("Model checkpoint saved at {}".format(checkpoint_name))
+
+
+Freeze saved graph_def and weights:
+bazel build tensorflow/python/tools:freeze_graph
+bazel-bin/tensorflow/python/tools/freeze_graph --input_graph=/path/to/alexnet_def.pb -- input_checkpoint=path/to/ckpt/original_alexnet.ckpt --output_graph=/path/to/frozen_alexnet.pb --output_node_names='softmax' --input_binary=True
+
+
+Forward Inference:
+import os
+import cv2
+import numpy as np
+import tensorflow as tf
+import matplotlib.pyplot as plt
+from alexnet import AlexNet
+from tensorflow.python.client import timeline
+from caffe_classes import class_names
+
+frozen_graph='/path/to/frozen_alexnet.pb '
+
+def load_graph(frozen_graph_filename):
+    with tf.gfile.GFile(frozen_graph_filename, "rb") as f:
+        graph_def = tf.GraphDef()
+        graph_def.ParseFromString(f.read())
+
+    with tf.Graph().as_default() as graph:
+        tf.import_graph_def(graph_def, name="prefix")
+    return graph
+
+imagenet_mean = np.array([104., 117., 124.], dtype=np.float32)
+
+current_dir = os.getcwd()
+image_dir = os.path.join(current_dir, 'images')
+
+img_files = [os.path.join(image_dir, f) for f in os.listdir(image_dir) if f.endswith('.jpeg')]
+
+imgs = []
+for f in img_files:
+    imgs.append(cv2.imread(f))
+
+g=load_graph(frozen_graph)
+with tf.Session(graph=g) as sess:
+
+    softmax=g.get_tensor_by_name('prefix/softmax:0')
+    x = g.get_tensor_by_name("prefix/input:0")
+    keep_prob = g.get_tensor_by_name("prefix/keepProbs:0")
+
+    for i, image in enumerate(imgs):
+        
+        img = cv2.resize(image.astype(np.float32), (227,227))
+        img -= imagenet_mean
+        img = img.reshape((1,227,227,3))
+
+	options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+	run_metadata = tf.RunMetadata()
+        
+        print 'Begin session:'
+        probs = sess.run(softmax, feed_dict={x: img, keep_prob: 1}, \
+			options=options, run_metadata=run_metadata)
+        print 'Ended session'
+	print 'Class: ' + str(class_names[np.argmax(probs)]) \
+	+ ', Prob: ' + str(probs[0,np.argmax(probs)])
+	fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+	chrome_trace = fetched_timeline.generate_chrome_trace_format(show_memory=True)
+	with open('./forward_timeline.json', 'w') as f:
+		f.write(chrome_trace)
+
+
+log_alexnet.sh
+#!/bin/bash
+
+logpid() { while sleep 0.1; do ps -p $1 -o pcpu= -o pmem= ; done; }
+python frozen-infer.py &
+logpid $! | tee ./pid.log
+
+Describe the problem
+I ran my own Alexnet frozen model and the forward inference script I had required a large amount of RAM, around 2.466 GB rather than the memory required to load model size which was (243.9 MB).
+Essentially I took scripts from finetune_alexnet_with_tensorflow, including alexnet.py, datagenerator.py, caffe_classes.py, and heavily modifying validate_alexnet_on_imagenet.ipynb to save a checkpoint of the Alexnet-implementation for TensorFlow. The weights were taken from this link. I ran save_alexnet_checkpoint.py first to generate a binary proto graph definition of the AlexNet file and corresponding checkpoint files. Using the default freeze_graph tool from TensorFlow compiled by Bazel, I created a frozen graph. I then ran log_alexnet.sh to see how much of my RAM a forward inference uses on my laptop. The image I used was from the above mentioned github repo, llama. The script outputs the percentage of CPU and memory the python script frozen-infer.py  uses.
+My CPU: Intel(R) Core(TM) i5-8250U CPU @ 1.60GHz
+My RAM is 8 GB, but according to the free command, it is 7.909 GB, where htop reports it as 7.54 GB. The maximum RAM allocated by sess.run and the python script was thus, 0.327*7.54 = 2.466 GB (see below log). This is insanely larger than the 243.9 MB model I had. The chrome_trace I generated reports a maximum of around 235 MB, which is no where near what was actually happening.
+forward_timeline.json.tar.gz
+My question is why does the session run require such memory, and how am I able to reduce it down to only consume the required memory to load the model, which would be ~250 MB? I am concerned about this because I will to transferring this code to a Raspberry Pi 3 soon.
+It seems someone else had the same issue on stackoverflow here.
+Source code / logs
+The output I got is such from log_alexnet.sh:
+ 0.0  0.7
+ 0.0  1.0
+ 0.0  1.2
+/usr/local/lib/python2.7/dist-packages/h5py/__init__.py:36: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+ 0.0  1.4
+ 0.0  1.8
+ 0.0  2.0
+ 0.0  2.2
+ 0.0  7.7
+ 194  5.3
+Begin session:
+ 204 10.4
+ 215 16.8
+ 226 17.7
+ 236 22.1
+ 248 25.8
+ 259 30.7
+ 269 32.7
+ 280 27.7
+ 145 29.4
+ 151 27.3
+ 156 29.2
+ 162 24.6
+ 167 28.9
+ 172 27.0
+ 178 27.8
+ 183 17.1
+ 188 18.5 
+ 194 18.1
+Ended session
+Class: llama, Prob: 0.99927825
+ 134 21.3

@@ -1,0 +1,151 @@
+Misunderstood noise with moments of reused variables
+
+I'm getting small variations in the result of running the same op repeatedly on what should be the same data for every sess.run().
+The included script demonstrates the issue.  Similar to batch norm, the function normalizer() maintains moving averages of the mean and var of the input tensor, but only updates those values when 'update=True'.  Whether True of False, the function returns the input tensor scaled and centered by the current moving average statistics.
+In this example, I first normalize the input by its moments, and print out the new moments, only to validate that I get the same result every time, since the input is a constant.
+Next, I compute the moments of the output repeatedly when normalizer() is configured with update =True, so I can see the moments converging as expected towards their final state, but stop after only 20 steps.
+These first two steps behave as expected.
+Lastly, I compute the moments of the same output tensor repeatedly when normalizer() is configured with update=False. In this case, the moving averages shouldn't be updating so I expect to see the same moment values at every step. This is almost true, but there is a small amount noise that I wouldn't expect. Is this a tensorflow bug?
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+None
+Environment info
+Operating System: Ubuntu 16.04
+Installed version of CUDA and cuDNN:
+-rw-r--r-- 1 root   root    556000 Jan 26 18:48 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root   root        16 Jan 26 18:51 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root   root        19 Jan 26 18:51 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.61
+-rw-r--r-- 1 root   root    415432 Jan 26 18:48 /usr/local/cuda/lib64/libcudart.so.8.0.61
+-rw-r--r-- 1 root   root    775162 Jan 26 18:48 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 bmages users       13 Jul 27  2016 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 bmages users       17 Jul 27  2016 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+-rwxrwxr-x 1 bmages users 79337624 Jul 27  2016 /usr/local/cuda/lib64/libcudnn.so.5.1.5
+-rw-rw-r-- 1 bmages users 69756172 Jul 27  2016 /usr/local/cuda/lib64/libcudnn_static.a
+Tensorflow 1.0.0
+Code
+
+import numpy as np
+import tensorflow as tf
+def normalizer(tensor,shape,axis=[0],decay = .999,update=True,
+                          epsilon = 1e-10,scope='normalizer' ):
+
+    with tf.variable_scope(scope,reuse=not(update)):
+
+        ma_mean = tf.get_variable(
+                      'ma_mean',
+                      shape=shape,
+                      initializer=tf.zeros_initializer(),
+                      trainable=False)
+        ma_var = tf.get_variable(
+              'ma_variance',
+              shape=shape,
+              initializer=tf.ones_initializer(),
+              trainable=False)
+
+        if update:
+
+            tensor_mean,tensor_var = tf.nn.moments(tensor,axis)
+            mean = tf.assign(ma_mean,ma_mean*decay + (1-decay)*tensor_mean)
+            var = tf.assign(ma_var,ma_var*decay + (1-decay)*tensor_var)
+
+            with tf.control_dependencies([mean, var]):
+                return tf.rsqrt(var+epsilon)*(tensor-mean)
+        else:
+
+            return tf.rsqrt(ma_var+epsilon)*(tensor-ma_mean)
+
+# random frame with scale and bias
+xdata = np.random.randn(16394,2)*np.array([10,20]) + np.array([-5,5])
+batch = tf.constant(xdata,dtype=tf.float32)
+
+# normalize the input batch with its moments,
+xmean,xvar = tf.nn.moments(batch,axes=[0])
+xnorm = tf.rsqrt(xvar)*(batch-xmean)
+moments_x = tf.nn.moments(xnorm,axes=[0])
+
+# create normalizer in update mode
+y = normalizer(batch,shape=[2],axis=[0],decay = .99,update=True)
+moments_y = tf.nn.moments(y,axes=[0])
+# create in test mode
+y_test = normalizer(batch,shape=[2],axis=[0],decay = .99,update=False)
+moments_test = tf.nn.moments(y_test,axes=[0])
+
+with tf.Session() as sess:
+    sess.run(tf.group(tf.global_variables_initializer(),tf.local_variables_initializer()))
+
+    print('\nRun input moments for 10 steps for sanity check,every step should be identical...\n')
+    for _ in range(10):
+        mean,var = sess.run(moments_x)
+        print(mean,var)
+    print('\nRun update for 20 steps...\n')
+    for _ in range(20):
+        mean,var = sess.run(moments_y)
+        print(mean,var)
+    print('\nRun test for 20 steps, every step should be identical...\n')
+    for _ in range(20):
+        mean,var = sess.run(moments_test)
+        print(mean,var)
+
+Here is a print out that I get from running this script:
+Run input moments for 10 steps for sanity check,every step should be identical...
+
+[ -8.81308182e-09  -2.29443700e-08] [ 1.00000048  1.00000143]
+[ -8.81308182e-09  -2.29443700e-08] [ 1.00000048  1.00000143]
+[ -8.81308182e-09  -2.29443700e-08] [ 1.00000048  1.00000143]
+[ -8.81308182e-09  -2.29443700e-08] [ 1.00000048  1.00000143]
+[ -8.81308182e-09  -2.29443700e-08] [ 1.00000048  1.00000143]
+[ -8.81308182e-09  -2.29443700e-08] [ 1.00000048  1.00000143]
+[ -8.81308182e-09  -2.29443700e-08] [ 1.00000048  1.00000143]
+[ -8.81308182e-09  -2.29443700e-08] [ 1.00000048  1.00000143]
+[ -8.81308182e-09  -2.29443700e-08] [ 1.00000048  1.00000143]
+[ -8.81308182e-09  -2.29443700e-08] [ 1.00000048  1.00000143]
+
+Run update for 20 steps...
+
+[-3.51247048  2.21043849] [ 50.22803497  80.21085358]
+[-2.84657669  1.6346755 ] [ 33.65858841  44.75781631]
+[-2.44675541  1.34974301] [ 25.37238884  31.13418961]
+[-2.17202067  1.17136073] [ 20.40036011  23.92469788]
+[-1.96787024  1.04593885] [ 17.08568954  19.46290207]
+[-1.80818331  0.95137215] [ 14.71818542  16.4295311 ]
+[-1.67866027  0.876652  ] [ 12.94268036  14.2333889 ]
+[-1.57072532  0.81559616] [ 11.56188488  12.56995583]
+[-1.47887969  0.76442826] [ 10.45738792  11.26643467]
+[-1.3994118   0.72069311] [  9.55385685  10.21746349]
+[-1.32971382  0.68271512] [ 8.80101871  9.35515976]
+[-1.26789105  0.64930677] [ 8.16414165  8.63379192]
+[-1.21253002  0.6195991 ] [ 7.61835909  8.02145481]
+[-1.16255021  0.59293979] [ 7.14544487  7.4951849 ]
+[-1.11711097  0.56882787] [ 6.73175192  7.03804827]
+[-1.07554555  0.5468713 ] [ 6.3668232   6.63729095]
+[-1.03731847  0.52675873] [ 6.04253292  6.2830925 ]
+[-1.00199318  0.50823855] [ 5.75246429  5.96780682]
+[-0.96920985  0.49110541] [ 5.49148464  5.68536663]
+[-0.93866938  0.47518966] [ 5.25543642  5.43090725]
+
+Run test for 20 steps, every step should be identical...
+
+[-0.93866932  0.47518966] [ 5.25543785  5.43090677]
+[-0.93866938  0.47518966] [ 5.2554369   5.43090773]
+[-0.93866938  0.47518966] [ 5.25543928  5.43090773]
+[-0.93866938  0.47518963] [ 5.25543547  5.43090773]
+[-0.93866938  0.47518966] [ 5.25543976  5.43090773]
+[-0.93866938  0.47518963] [ 5.25543642  5.43090725]
+[-0.93866938  0.47518966] [ 5.25543976  5.43090582]
+[-0.93866938  0.47518966] [ 5.2554388   5.43090677]
+[-0.93866932  0.47518966] [ 5.25543737  5.43090725]
+[-0.93866938  0.47518966] [ 5.25543642  5.43090677]
+[-0.93866938  0.47518963] [ 5.2554388   5.43090725]
+[-0.93866932  0.47518963] [ 5.25543642  5.43090773]
+[-0.93866938  0.47518966] [ 5.25543928  5.43090677]
+[-0.93866932  0.47518966] [ 5.25543737  5.43090725]
+[-0.93866932  0.47518966] [ 5.2554388   5.43090582]
+[-0.93866938  0.47518963] [ 5.25543642  5.4309082 ]
+[-0.93866932  0.47518966] [ 5.25543737  5.43090582]
+[-0.93866938  0.47518966] [ 5.25543594  5.43090725]
+[-0.93866932  0.47518966] [ 5.2554369   5.43090677]
+[-0.93866938  0.47518963] [ 5.25543547  5.43090677]
+
+What other attempted solutions have you tried?
+I've tried many variants of this but without any difference.  This is a stripped down example.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).

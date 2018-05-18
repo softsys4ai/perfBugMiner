@@ -1,0 +1,56 @@
+Error converting to .tflite Using Toco
+
+System information
+
+Have I written custom code: Yes. See network definition code here. For complete project, see here
+OS Platform and Distribution: Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Yes
+TensorFlow version (use command below): tensorflow (1.4.0)
+Python version:  Python 2.7.12
+Bazel version (if compiling from source): Bazel 0.9.0
+GCC/Compiler version (if compiling from source): gcc 5.4.1 20160904
+CUDA/cuDNN version: Null
+GPU model and memory: Null
+Exact command to reproduce: bazel-bin/tensorflow/contrib/lite/toco/toco --input_format=TENSORFLOW_GRAPHDEF --input_file=$1 --output_format=TFLITE --output_file=$2 --inference_type=$3 --#input_type=$4 --input_arrays=$5 --output_arrays=$6 --inference_input_type=$7 --input_shapes=1,227,227,3
+
+Problem Description, Source Code and Logs
+When I try to use Toco to convert my Custom AlexNet Model from TensorFlow to TensorFlowLite, I repeatedly get a dimensions error as shown below
+F tensorflow/contrib/lite/toco/graph_transformations/propagate_fixed_sizes.cc:982] Check failed: input_dims.size() == 4 (2 vs. 4)
+
+Here is how I call toco:
+bazel-bin/tensorflow/contrib/lite/toco/toco \
+--input_format=TENSORFLOW_GRAPHDEF \
+--input_file=/tmp/output_graph.pb \
+--output_format=TFLITE \
+--output_file=/tmp/my_model.lite \
+--inference_type=FLOAT \
+--inference_input_type=FLOAT \
+--input_arrays=input_layer \
+--output_arrays=classes_tensor\
+--input_shapes=1,227,227,3
+
+Here is my terminal print out during the operation:
+INFO: Analysed 0 targets (4 packages loaded).
+INFO: Found 0 targets...
+INFO: Elapsed time: 5.267s, Critical Path: 0.03s
+INFO: Build completed successfully, 1 total action
+2018-01-05 10:24:23.011483: W tensorflow/contrib/lite/toco/toco_cmdline_flags.cc:178] --input_type is deprecated. It was an ambiguous flag that set both --input_data_types and --inference_input_type. If you are trying to complement the input file with information about the type of input arrays, use --input_data_type. If you are trying to control the quantization/dequantization of real-numbers input arrays in the output file, use --inference_input_type.
+2018-01-05 10:24:25.853112: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1122] Converting unsupported operation: IsVariableInitialized
+2018-01-05 10:24:25.853197: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1122] Converting unsupported operation: RefSwitch
+2018-01-05 10:24:25.853241: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1122] Converting unsupported operation: RandomShuffleQueueV2
+2018-01-05 10:24:25.853268: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1122] Converting unsupported operation: QueueDequeueUpToV2
+2018-01-05 10:24:26.207160: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before general graph transformations: 64 operators, 90 arrays (0 quantized)
+2018-01-05 10:24:27.327055: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] After general graph transformations pass 1: 15 operators, 33 arrays (0 quantized)
+2018-01-05 10:24:27.327262: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] After general graph transformations pass 2: 15 operators, 34 arrays (0 quantized)
+2018-01-05 10:24:27.327356: F tensorflow/contrib/lite/toco/graph_transformations/propagate_fixed_sizes.cc:982] Check failed: input_dims.size() == 4 (2 vs. 4)
+/home/olu/Dev/scratch_train_sign/freeze_graph_tf.sh: line 28:  8881 Aborted 
+
+I went into the propagate_fixed_sizes.cc file, and around line line 982 I found this comment below
+// The current ArgMax implementation only supports 4-dimensional inputs with
+// the last dimension as the axis to perform ArgMax for.
+
+The only place in my training code where I used ArgMax is as below:
+ predictions = { "classes": tf.argmax(input=logits, axis=1, name="classes_tensor"), "probabilities": tf.nn.softmax(logits, name="softmax_tensor") }
+
+The failure messaged printed out seem not to be sufficient enough for me to understand what exactly the problem is. My trained TensorFow Model is fine and I have been able to run inferences on it, however, converting these saved model to TFLite doesn't work. Could this mean the current TFLite version does not support the conversion of some custom TF models yet?. Please I will be glad to know what exactly I may be doing wrong.
+Thank you

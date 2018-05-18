@@ -1,0 +1,59 @@
+Incorrect tf.truncated_normal results on gpu
+
+I've narrowed the behavior I'm seeing to this small example
+with tf.Session() as s : 
+    with tf.device(DEVICE):
+      v = tf.Variable(tf.truncated_normal([2, 2], stddev=1.0, dtype=tf.float32))
+    with tf.device('/gpu:0'):
+      p = tf.placeholder( tf.float32, shape=(2,2))
+      product = tf.matmul(p,v)
+      s.run(tf.initialize_all_variables())
+      feed = {p: np.eye(2,2)}
+      product_res,v_res = s.run([product,v], feed_dict=feed)
+      print(v_res)
+      print(product_res)
+
+When DEVICE is '/cpu:0' all is as expected.  With DEVICE as '/gpu:0', the output will be as expected for one execution, but output two identity matrices for all subsequent executions.  Running again with DEVICE='/cpu:0' resets the gpu behavior.
+Environment info
+Operating System: Fedora 23
+Installed version of CUDA and cuDNN:
+I'm using CUDA 7.5 and cuDNN v5 with Driver Version: 367.27 on a gtx780
+-rw-r--r--. 1 root    root      322936 Aug 15  2015 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx. 1 root    root          16 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx. 1 root    root          19 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x. 1 root    root      383336 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r--. 1 root    root      720192 Aug 15  2015 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx. 1 jlovitt jlovitt       13 Apr 22 20:52 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx. 1 jlovitt jlovitt       17 Apr 22 20:52 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.0.5
+-rwxrwxr-x. 1 jlovitt jlovitt 59909104 Apr 22 18:15 /usr/local/cuda/lib64/libcudnn.so.5.0.5
+-rw-rw-r--. 1 jlovitt jlovitt 58775484 Apr 22 18:15 /usr/local/cuda/lib64/libcudnn_static.a
+If installed from sources, provide the commit hash: 84225a2
+I've added the following lines to third_party/gpus/crosstool/CROSSTOOL to compile with gcc 4.9.3
+cxx_builtin_include_directory: "/home/jlovitt/opt/gcc-4.9.3/include"
+cxx_builtin_include_directory: "/home/jlovitt/opt/gcc-4.9.3/lib/gcc/x86_64-unknown-linux-gnu/4.9.3/include"
+cxx_builtin_include_directory: "/home/jlovitt/opt/gcc-4.9.3/lib/gcc/x86_64-unknown-linux-gnu/4.9.3/include-fixed"
+
+Output from execution producing incorrect results
+$ipython3 util/tensorflowtest.py 
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties: 
+name: GeForce GTX 780
+major: 3 minor: 5 memoryClockRate (GHz) 1.0195
+pciBusID 0000:01:00.0
+Total memory: 2.95GiB
+Free memory: 2.60GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:844] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 780, pci bus id: 0000:01:00.0)
+[[ 1.  0.]
+ [ 0.  1.]]
+[[ 1.  0.]
+ [ 0.  1.]]
+
+Update:
+Recompiling with CUDA 7.0 and cuDNN v4 fixes the problem.

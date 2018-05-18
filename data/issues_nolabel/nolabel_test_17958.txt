@@ -1,0 +1,147 @@
+Shuffling slows down iterator at consumption
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 17.10
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.4.1 (v1.4.1-9-gc646af1957)
+Python version: 3.6.3
+Bazel version (if compiling from source): 0.11.1
+GCC/Compiler version (if compiling from source): 6.4.0
+CUDA/cuDNN version: 9.0
+GPU model and memory: NVidia GeForce GTX 1060 6GB
+Exact command to reproduce: python3 minimal_shuffle_bug.py
+
+Describe the problem
+Adding shuffling during the definition of a tf.data.Dataset Graph results in a progressive slowdown during the iterations that consume the data, up to the start of a new epoch (when restarting an iteration over the full dataset). I believe this is a bug, or if it's a normal state of things given internal memory usage in the dataset pipeline, then I'd like to request this to be documented in the documentation, e.g., in the Input Pipeline Performance Guide.
+Source code / logs
+A minimal working code example follows at the end of this post. The code does the same experiment twice, once with and once without dataset shuffling. Each experiment consumes 3 epochs of a dataset, within which one can notice slower and slower iterations (when shuffling is enabled), with a speed increase at each new start of epoch.
+My command-line output is the following:
+
+$ python3 minimal_shuffle_bug.py
+
+
+=== START TEST WITH SHUFFLING DISABLED ===
+2018-03-23 18:15:47.136029: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Found device 0 with properties:
+name: GeForce GTX 1060 6GB major: 6 minor: 1 memoryClockRate(GHz): 1.7715
+pciBusID: 0000:01:00.0
+totalMemory: 5.93GiB freeMemory: 4.91GiB
+2018-03-23 18:15:47.136056: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+iteration 99: last 100 iterations took 2.96ms
+iteration 199: last 100 iterations took 2.49ms
+iteration 299: last 100 iterations took 2.47ms
+iteration 399: last 100 iterations took 2.47ms
+iteration 499: last 100 iterations took 2.33ms
+iteration 599: last 100 iterations took 2.32ms
+iteration 699: last 100 iterations took 2.06ms
+iteration 799: last 100 iterations took 2.06ms
+iteration 899: last 100 iterations took 2.06ms
+iteration 999: last 100 iterations took 2.01ms
+Start new epoch
+iteration 1099: last 100 iterations took 2.08ms
+iteration 1199: last 100 iterations took 2.07ms
+iteration 1299: last 100 iterations took 2.07ms
+iteration 1399: last 100 iterations took 2.07ms
+iteration 1499: last 100 iterations took 2.07ms
+iteration 1599: last 100 iterations took 2.08ms
+iteration 1699: last 100 iterations took 2.04ms
+iteration 1799: last 100 iterations took 2.08ms
+iteration 1899: last 100 iterations took 2.07ms
+iteration 1999: last 100 iterations took 2.07ms
+Start new epoch
+iteration 2099: last 100 iterations took 2.06ms
+iteration 2199: last 100 iterations took 2.07ms
+iteration 2299: last 100 iterations took 2.07ms
+iteration 2399: last 100 iterations took 2.01ms
+iteration 2499: last 100 iterations took 2.01ms
+iteration 2599: last 100 iterations took 2.01ms
+iteration 2699: last 100 iterations took 2.05ms
+iteration 2799: last 100 iterations took 2.01ms
+iteration 2899: last 100 iterations took 2.01ms
+iteration 2999: last 100 iterations took 2.01ms
+
+
+=== START TEST WITH SHUFFLING ENABLED ===
+2018-03-23 18:15:53.605928: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+iteration 99: last 100 iterations took 12.77ms
+iteration 199: last 100 iterations took 15.31ms
+iteration 299: last 100 iterations took 17.66ms
+iteration 399: last 100 iterations took 19.23ms
+iteration 499: last 100 iterations took 20.99ms
+iteration 599: last 100 iterations took 24.01ms
+iteration 699: last 100 iterations took 25.48ms
+iteration 799: last 100 iterations took 27.70ms
+iteration 899: last 100 iterations took 28.04ms
+iteration 999: last 100 iterations took 16.38ms
+Start new epoch
+iteration 1099: last 100 iterations took 13.95ms
+iteration 1199: last 100 iterations took 16.74ms
+iteration 1299: last 100 iterations took 16.82ms
+iteration 1399: last 100 iterations took 20.15ms
+iteration 1499: last 100 iterations took 22.53ms
+iteration 1599: last 100 iterations took 23.19ms
+iteration 1699: last 100 iterations took 25.38ms
+iteration 1799: last 100 iterations took 25.96ms
+iteration 1899: last 100 iterations took 26.20ms
+iteration 1999: last 100 iterations took 18.47ms
+Start new epoch
+iteration 2099: last 100 iterations took 12.99ms
+iteration 2199: last 100 iterations took 14.26ms
+iteration 2299: last 100 iterations took 17.93ms
+iteration 2399: last 100 iterations took 18.95ms
+iteration 2499: last 100 iterations took 20.89ms
+iteration 2599: last 100 iterations took 23.01ms
+iteration 2699: last 100 iterations took 25.17ms
+iteration 2799: last 100 iterations took 27.40ms
+iteration 2899: last 100 iterations took 26.44ms
+iteration 2999: last 100 iterations took 15.94ms
+
+And the code to reproduce this experiment:
+import time
+
+num_data = 5000000
+num_epoch = 3
+batch_size = 5000
+num_iters = num_data*num_epoch/batch_size
+
+def test_shuffle(enable_shuffling):
+    # Define dataset
+    dataset = tf.data.Dataset.range(num_data)
+    if (enable_shuffling):
+        dataset = dataset.shuffle(num_data)
+    dataset = dataset.batch(batch_size)
+    iterator = dataset.make_initializable_iterator()
+    # Define next element op
+    x = iterator.get_next()
+
+    # Launch session
+    sess = tf.InteractiveSession()
+    sess.run(iterator.initializer)
+
+    # Consume iterator and time
+    for i in range(int(num_iters)):
+        try:
+            t1 = time.time()
+            res = sess.run(x)
+
+            if i%100 == 99:
+                t2 = time.time()
+                print ('iteration {0:d}: last 100 iterations took {1:0.2f}ms'.format(i,1000*(t2-t1)))
+        except tf.errors.OutOfRangeError:
+            sess.run(iterator.initializer)
+            print('Start new epoch')
+
+print ('   === START TEST WITH SHUFFLING DISABLED === ')
+test_shuffle(False)
+print()
+
+print ('   === START TEST WITH SHUFFLING ENABLED === ')
+test_shuffle(True)
+print()
+
+Note: this bug report follows comments and discussion on bug report #11591
+I initially experienced this issue with the MNIST dataset (smaller dataset than the example attached, i.e., 60K iterations ;  but with more operations for dataset loading).
+Final note: I also tried the variant in which I do not capture the OutOfRangeError followed by initializing the iterator, but rather include a line dataset = dataset.repeat(num_epoch) in the dataset creation Graph. The results are similar.
+Thanks a lot.
+Kenneth

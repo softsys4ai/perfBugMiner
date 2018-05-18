@@ -1,0 +1,116 @@
+Results are corrupted when running multiple sessions on one GPU
+
+Tensorflow generates corrupted results when running two sessions concurrently on gpu. Each session has a separate graph.
+Code (thx to @bnoodle):
+import tensorflow as tf
+import numpy as np
+from threading import Thread, Event
+
+size = 10240
+def myfunc(sess, name):
+  values = set()
+  count = 0
+  while True:
+    count += 1
+    v = sess.run(name + "/matmul4:0", feed_dict={name + "/input:0": np.ones((1,1))})
+    v = float(np.squeeze(v))
+    old = len(values)
+    values.add(v)
+    if len(values) != old:
+      print(values, name, count)
+
+def create_graph(sess, name):
+  with sess.graph.as_default():
+    with tf.variable_scope(name):
+      input = tf.placeholder(tf.float32, shape=[1,1], name = "input")
+      tf.set_random_seed(1)
+
+      matrix1 = tf.Variable(tf.truncated_normal([1, size]), name = 'matrix1')
+      matrix2 = tf.Variable(tf.truncated_normal([size, size]), name = 'matrix2')
+      matrix4 = tf.Variable(tf.truncated_normal([size, 1]), name = 'matrix4')
+
+      matmul1 = tf.matmul(input, matrix1, name = 'matmul1')
+      matmul2 = tf.matmul(matmul1, matrix2, name = 'matmul2')
+      matmul4 = tf.matmul(matmul2, matrix4, name = "matmul4")
+      sess.run(tf.global_variables_initializer())
+
+sess1 = tf.Session()
+with tf.device("/gpu:0"):
+  create_graph(sess1, "s1")
+
+sess2 = tf.Session()
+with tf.device("/gpu:0"):
+  create_graph(sess2, "s2")
+
+t1 = Thread(target=myfunc, args=(sess1, 's1'))
+t1.start()
+
+t2 = Thread(target=myfunc, args=(sess2, 's2'))
+t2.start()
+
+sess1 should output -17430.388671875, sess2 should output -968.17529296875. But the output sets are nondeterministically growing:
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE3 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:910] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties:
+name: GRID K520
+major: 3 minor: 0 memoryClockRate (GHz) 0.797
+pciBusID 0000:00:03.0
+Total memory: 3.94GiB
+Free memory: 3.91GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GRID K520, pci bus id: 0000:00:03.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GRID K520, pci bus id: 0000:00:03.0)
+((set([set([-968.17529296875]), 's2', 1-17430.388671875]))
+, 's1', 1)
+(set([-968.17529296875, -903.794921875]), 's2', 2)
+(set([-17430.388671875, -17302.84375]), 's1', 2)
+(set([-968.17529296875, -903.794921875, 2173.232177734375]), 's2', 511)
+(set([-968.17529296875, -903.794921875, 2173.232177734375, 841.5855712890625]), 's2', 1723)
+(set([-17430.388671875, -17302.84375, -211.60272216796875]), 's1', 1961)
+(set([-968.17529296875, -903.794921875, 2173.232177734375, 841.5855712890625, -30.6038818359375]), 's2', 2180)
+(set([-17430.388671875, -17302.84375, -1592.9022216796875, -211.60272216796875]), 's1', 2722)
+(set([-968.17529296875, -903.794921875, 2173.232177734375, -287.991455078125, -30.6038818359375, 841.5855712890625]), 's2', 3337)
+...
+
+Tensorflow serving has a similar corrupted results issue tensorflow/serving#335, but this seems to be a tensorflow gpu memory problem. With @yaroslavvb memory_util.py, it seems when sess1 and sess2 interleaving in memory allocation/deallocation and gpu memory address (the second to last column in the log) is reused, results will be corrupted. The shortest trace I found is
+(set([-968.17529296875]), 's2', 1)
+('**************', 's2', 2)
+(set([-17430.388671875]), 's1', 1)
+('**************', 's1', 2)
+(set([-968.17529296875, -875.1435546875]), 's2', 2)
+       11                     s2/matmul1(44-gpu_bfc)       40960       40960 gpu_bfc 30103334400 MemoryLogTensorAllocation
+       23                     s1/matmul1(46-gpu_bfc)       40960       81920 gpu_bfc 30103375360 MemoryLogTensorAllocation
+       26                     s2/matmul2(47-gpu_bfc)       40960      122880 gpu_bfc 30103416320 MemoryLogTensorAllocation
+       28                     s2/matmul1(44-gpu_bfc)      -40960       81920 gpu_bfc -1 MemoryLogTensorDeallocation
+       31                     s2/matmul2(47-gpu_bfc)      -40960       40960 gpu_bfc -1 MemoryLogTensorDeallocation
+       35                     s1/matmul2(49-gpu_bfc)       40960       81920 gpu_bfc 30103334400 MemoryLogTensorAllocation
+       37                     s1/matmul1(46-gpu_bfc)      -40960       40960 gpu_bfc -1 MemoryLogTensorDeallocation
+       40                     s1/matmul2(49-gpu_bfc)      -40960           0 gpu_bfc -1 MemoryLogTensorDeallocation
+       61                     s2/matmul1(52-gpu_bfc)       40960       40960 gpu_bfc 30103334400 MemoryLogTensorAllocation
+       66                     s2/matmul2(53-gpu_bfc)       40960       81920 gpu_bfc 30103170560 MemoryLogTensorAllocation
+       71                     s2/matmul1(52-gpu_bfc)      -40960       40960 gpu_bfc -1 MemoryLogTensorDeallocation
+       80                     s2/matmul2(53-gpu_bfc)      -40960           0 gpu_bfc -1 MemoryLogTensorDeallocation
+       81                     s1/matmul1(56-gpu_bfc)       40960       40960 gpu_bfc 30103334912 MemoryLogTensorAllocation
+       85                     s1/matmul2(57-gpu_bfc)       40960       81920 gpu_bfc 30103170560 MemoryLogTensorAllocation
+       87                     s1/matmul1(56-gpu_bfc)      -40960       40960 gpu_bfc -1 MemoryLogTensorDeallocation
+       90                     s1/matmul2(57-gpu_bfc)      -40960           0 gpu_bfc -1 MemoryLogTensorDeallocation
+
+System Information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow)?: Yes
+OS Platform and Distribution (i.e. Linux Ubuntu 16.0): Ubuntu 14.04
+TensorFlow installed from (source or binary)?: binary
+TensorFlow version (use command below): 1.0.1
+Bazel version (if compiling from source):
+CUDA/cuDNN version: cuda 8.0/cudnn5.1.5
+GPU Model and Memory: GRID K520, 4GB
+Exact command to reproduce: python multi_session.py

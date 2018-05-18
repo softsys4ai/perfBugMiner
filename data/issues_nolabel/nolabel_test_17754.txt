@@ -1,0 +1,122 @@
+[bug] segmentation fault happens with nested higher order function
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): OSX 10.11.6
+TensorFlow installed from (source or binary): VirtualEnv
+TensorFlow version (use command below): 1.6
+Python version: 3.6
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A (CPU only)
+GPU model and memory: N/A (CPU only)
+Exact command to reproduce: see the following
+
+Describe the problem
+segmentation fault happens when the computation graph contains scan with bidirectional_rnn embedded.
+Source code / logs
+import tensorflow as tf
+import numpy as np
+
+embed_dim = 10
+hidden_dim = 10
+num_class=10
+
+words = tf.placeholder(tf.int32, [None, None], name='words')
+length = tf.placeholder(tf.int32, [None], name='length')
+labels = tf.placeholder(tf.int32, (), name='labels')
+init_state = tf.placeholder(tf.float32, [None, hidden_dim * 2], name='initial_state')
+
+def make_rnn_cell(): return tf.nn.rnn_cell.GRUCell(num_units=hidden_dim)
+
+with tf.variable_scope('embeddings'):
+    embedding = \
+        tf.get_variable('parameter', shape=(100, embed_dim), dtype=tf.float32, trainable=True)
+    embedded  = tf.nn.embedding_lookup(embedding, words, name='lookup')
+with tf.variable_scope('words_lstm'):
+    cell_fw = make_rnn_cell()
+    cell_bw = make_rnn_cell()
+    def step(state, inp):
+        data = tf.expand_dims(inp[0], axis=0)
+        length = tf.expand_dims(inp[1], axis=0)
+        fw_state = tf.split(state[inp[1], :], 2)[0]
+        bw_state = tf.split(state[0, :], 2)[1]
+online training (feeding one training example at a time)
+        fw_state = tf.expand_dims(fw_state, axis=0)
+        bw_state = tf.expand_dims(bw_state, axis=0)
+        (outputs_fw, outputs_bw), _ = \
+            tf.nn.bidirectional_dynamic_rnn(
+                cell_fw, cell_bw, embedded, sequence_length=length,
+                initial_state_fw=fw_state, initial_state_bw=bw_state, dtype=tf.float32
+            )
+        outputs = tf.squeeze(tf.concat([outputs_fw, outputs_bw], axis=2), axis=[0])
+        return outputs
+    outputs = tf.scan(step, (embedded, length), initializer=init_state)
+with tf.variable_scope('words_attention'):
+    hidden = \
+        tf.layers.dense(outputs, units=hidden_dim * 2, activation=tf.nn.tanh)
+    attention = \
+        tf.layers.dense(outputs, units=1, activation=None)
+    attention = tf.transpose(tf.nn.softmax(tf.transpose(attention, perm=[0, 2, 1])), perm=[0, 2, 1])
+sentence_embedding = tf.reduce_sum(outputs * attention, axis=1)
+sentence_embedding = tf.expand_dims(sentence_embedding, axis=0)
+
+with tf.variable_scope('sentence_lstm'):
+    cell_fw = make_rnn_cell()
+    cell_bw = make_rnn_cell()
+    (outputs_fw, outputs_bw), _ = \
+        tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, sentence_embedding, dtype=tf.float32)
+outputs = tf.squeeze(tf.concat([outputs_fw, outputs_bw], axis=2), axis=[0])
+with tf.variable_scope('sentence_attention'):
+    hidden = \
+        tf.layers.dense(outputs, units=hidden_dim * 2, activation=tf.nn.tanh)
+    attention = \
+        tf.layers.dense(hidden, units=1, activation=None)
+    attention = tf.transpose(tf.nn.softmax(tf.transpose(attention)))
+outputs = tf.reduce_sum(outputs * attention, axis=0)
+outputs = tf.expand_dims(outputs, axis=0)
+logits = tf.layers.dense(outputs, units=num_class, activation=None)
+loss = -tf.log(tf.nn.softmax(logits)[:, labels], name='loss')
+training_op = tf.train.AdamOptimizer(learning_rate=0.01).minimize(loss)
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    words_val = np.random.randint(0, 100, size=(10, 100))
+    length_val = np.random.randint(0, 100, size=(10))
+    labels_val = np.random.randint(0, num_class, size=())
+    init_state_val = np.random.randn(10, hidden_dim * 2)
+
+    fd = { words : words_val, length : length_val, labels : labels_val, init_state : init_state_val}
+    sess.run(training_op, feed_dict=fd)
+Running with TF 1.6, the above code ended up with the following error:
+Segmentation fault: 11
+Additional information,
+I ran the program with dtruss, the last few lines printed on console before it crashed are as follows,
+psynch_cvsignal(0x7FDED4BC4A68, 0x90000000A00, 0x900)		 = 257 0
+psynch_cvwait(0x7FDED4BC4A68, 0x90100000A00, 0x900)		 = 0 0
+psynch_cvsignal(0x7FDED4BC4E68, 0x1F0000002000, 0x1F00)		 = 257 0
+psynch_cvwait(0x7FDED4BC4E68, 0x1F0100002000, 0x1F00)		 = 0 0
+psynch_cvsignal(0x7FDED4BC4E68, 0x200000002100, 0x2000)		 = 257 0
+psynch_cvwait(0x7FDED4BC4E68, 0x200100002100, 0x2000)		 = 0 0
+psynch_cvsignal(0x7FDED4BC4E68, 0x210000002200, 0x2100)		 = 257 0
+psynch_cvwait(0x7FDED4BC4E68, 0x210100002200, 0x2100)		 = 0 0
+psynch_cvsignal(0x7FDED4BC4C68, 0x1C0000001D00, 0x1C00)		 = 257 0
+psynch_cvwait(0x7FDED4BC4C68, 0x1C0100001D00, 0x1C00)		 = 0 0
+psynch_cvsignal(0x7FDED4BC4A68, 0xA0000000B00, 0xA00)		 = 257 0
+psynch_cvwait(0x7FDED4BC4A68, 0xA0100000B00, 0xA00)		 = 0 0
+psynch_cvsignal(0x7FDED4BC4D68, 0xD0000000E00, 0xD00)		 = 257 0
+psynch_cvwait(0x7FDED4BC4D68, 0xD0100000E00, 0xD00)		 = 0 0
+psynch_cvwait(0x0, 0x0, 0x0)		 = 0 0
+psynch_cvwait(0x7FDED4BC4F68, 0x1B0100001C00, 0x1B00)		 = 0 0
+psynch_cvwait(0x7FDED4BC5068, 0x30100000400, 0x300)		 = 0 0
+psynch_cvwait(0x7FDED4BC5168, 0x20100000300, 0x200)		 = 0 0
+psynch_cvwait(0x7FDEDCAEFE28, 0x10100000200, 0x100)		 = -1 Err#260
+psynch_cvwait(0x7FDED4BC4068, 0x100000100, 0x0)		 = -1 Err#260
+psynch_cvwait(0x7FDED4BC4168, 0x100000100, 0x0)		 = -1 Err#260
+psynch_cvwait(0x7FDED4BC4268, 0x100000100, 0x0)		 = -1 Err#260
+psynch_cvwait(0x7FDED4BC4368, 0x100000100, 0x0)		 = -1 Err#260
+psynch_cvwait(0x7FDED4BC4568, 0x100000100, 0x0)		 = -1 Err#260
+psynch_cvwait(0x7FDED4BC4468, 0x100000100, 0x0)		 = -1 Err#260
+psynch_cvwait(0x7FDED4BC4668, 0x100000100, 0x0)		 = -1 Err#260
+psynch_cvwait(0x7FDED4BC4768, 0x100000100, 0x0)		 = -1 Err#260

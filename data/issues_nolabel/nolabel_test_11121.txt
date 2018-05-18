@@ -1,0 +1,44 @@
+reset_default_graph awkwardly breaks graph nesting.
+
+System information
+
+Linux Ubuntu 16.04:
+TF version 1.1.0, though it should still be present in master:
+
+Bug
+Running this:
+import tensorflow as tf
+
+g = tf.Graph()
+with g.as_default():
+  tf.reset_default_graph()
+  # Build something...
+  a = tf.constant(1.0)
+  b = tf.constant(1.0)
+  c = a + b
+  # Bug happens on exit of the with statement
+Causes this
+---------------------------------------------------------------------------
+IndexError                                Traceback (most recent call last)
+<ipython-input-1-af7c5ed96704> in <module>()
+      7   a = tf.constant(1.0)
+      8   b = tf.constant(1.0)
+----> 9   c = a + b
+
+/usr/lib/python3.5/contextlib.py in __exit__(self, type, value, traceback)
+     64         if type is None:
+     65             try:
+---> 66                 next(self.gen)
+     67             except StopIteration:
+     68                 return
+
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py in get_controller(self, default)
+   3626     finally:
+   3627       if self._enforce_nesting:
+-> 3628         if self.stack[-1] is not default:
+   3629           raise AssertionError(
+   3630               "Nesting violated for default stack of %s objects"
+
+IndexError: list index out of range
+
+This bug causes a confusing error message. The stack should either include the new default graph created by reset_default_graph or a warning/error message should happen when you reset the default within nested graphs.

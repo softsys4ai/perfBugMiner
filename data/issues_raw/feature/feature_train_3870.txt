@@ -1,0 +1,48 @@
+DNNLinearCombinedClassifier in distributed system on cpu. Worker1 costs 1000% of CPU and other workers cost 30%~50%.
+
+Installed from source, r0.10 branch.
+Steps to reproduce
+I use multi-ps & multi-worker to train. Model is DNNLinearCombinedClassifier under contrib.learn.
+Distributed code:
+ps & worker entrance:
+  server = tf.train.Server(
+    {'ps': ps_hosts,
+     'worker': worker_hosts},
+    job_name=FLAGS.job_name,
+    task_index=task_id)
+
+  if FLAGS.job_name == 'ps':
+    # `ps` jobs wait for incoming connections from the workers.
+    server.join()
+  else:      
+      # `worker` jobs will actually do the work.
+      self.worker_do(server.targer, cluster_spec, task_id)
+
+self.worker_do:
+num_workers = len(cluster_spec.as_dict()['worker'])
+num_parameter_servers = len(cluster_spec.as_dict()['ps']) 
+run_config = RunConfig(master=target, task=task_id, num_ps_replicas=num_parameter_servers,
+                     num_cores=8)
+classifier = DNNLinearCombinedClassifier(dnn_hidden_units=[1024, 512, 256], config=run_config, dnn_feature_columns=deep, model_dir=FLAGS.train_dir)
+classifier.fit(input_fn=_input, steps=FLAGS.max_steps)
+
+Start ps1...N, then worker1...N
+When training begin, I found worker1 cost 1000% CPU and other workers cost less on 100%.
+What have you tried?
+code in BaseEstimator when __init__:
+ # Set device function depending if there are replicas or not.
+if self._config.num_ps_replicas > 0:
+  ps_ops = ['Variable', 'AutoReloadVariable']
+  self._device_fn = device_setter.replica_device_setter(
+      ps_tasks=self._config.num_ps_replicas,
+      merge_devices=False, ps_ops=ps_ops)
+else:
+  self._device_fn = None
+
+I tried to add a param to device_setter.replica_device_setter
+worker_device='/job:worker/task:%d' % self._config.task 
+
+And it works. Cpu balances.
+Suggesting
+Could you consider adding an API to place _device_fn to BaseEstimator. Then, tf users can customize their own _device_fn.
+Thanks.

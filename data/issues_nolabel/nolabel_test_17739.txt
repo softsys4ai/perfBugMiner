@@ -1,0 +1,81 @@
+Tensorflow does not close backgroud threads on shutdown
+
+System information
+
+Have I written custom code
+OS Linux Ubuntu 17.10)
+TensorFlow installed using this doc https://www.tensorflow.org/install/install_c:
+
+Describe the problem
+I see the bug that Tensorflow does not shutdown threads created by TF_NewSession. I do not see any functions in C API, except TF_DeleteSession, which should shutdown threads. But as the example shows TF_DeleteSession does not really close any threads.
+You may say that it happens only on shutdown so it is not an issue, but for the project with leak check, it is important to have clear Valgrind result.
+Source code
+int main() {
+	TF_Status * status = TF_NewStatus();
+	TF_SessionOptions *opt = TF_NewSessionOptions();
+
+	TF_Graph *graph = TF_NewGraph();
+	TF_Session *session = TF_NewSession(graph, opt, status);
+
+	TF_CloseSession(session, status);
+        TF_DeleteSession(session, status);
+        TF_DeleteGraph(graph);
+   	TF_DeleteStatus(status);
+   	TF_DeleteSessionOptions(opt);
+}
+
+Steps to reproduce
+
+gcc -g -I/usr/local/include -L/usr/local/lib hello_tf.c -ltensorflow -o memtest
+valgrind --leak-check=full ./memtest
+As result valgrind report an error that threads started by tensorflow still running at the end of main.
+
+Logs
+==17499== Memcheck, a memory error detector
+==17499== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
+==17499== Using Valgrind-3.13.0 and LibVEX; rerun with -h for copyright info
+==17499== Command: ./memtest
+==17499== 
+2018-03-15 16:37:49.446989: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX
+==17499== 
+==17499== HEAP SUMMARY:
+==17499==     in use at exit: 5,933,322 bytes in 91,227 blocks
+==17499==   total heap usage: 330,638 allocs, 239,411 frees, 23,865,452 bytes allocated
+==17499== 
+==17499== 1,280 bytes in 4 blocks are possibly lost in loss record 53,082 of 53,144
+==17499==    at 0x4C31B25: calloc (in /usr/lib/valgrind/vgpreload_memcheck-amd64-linux.so)
+==17499==    by 0x4013C86: allocate_dtv (dl-tls.c:290)
+==17499==    by 0x4013C86: _dl_allocate_tls (dl-tls.c:538)
+==17499==    by 0x9099421: allocate_stack (allocatestack.c:597)
+==17499==    by 0x9099421: pthread_create@@GLIBC_2.2.5 (pthread_create.c:669)
+==17499==    by 0x98CA5E2: std::thread::_M_start_thread(std::shared_ptr<std::thread::_Impl_base>, void (*)()) (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.24)
+==17499==    by 0x8779F45: tensorflow::(anonymous namespace)::PosixEnv::StartThread(tensorflow::ThreadOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::function<void ()>) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x875008F: tensorflow::thread::ThreadPool::ThreadPool(tensorflow::Env*, tensorflow::ThreadOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, bool) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x875024F: tensorflow::thread::ThreadPool::ThreadPool(tensorflow::Env*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x8AF9317: tensorflow::LocalDevice::EigenThreadPoolInfo::EigenThreadPoolInfo(tensorflow::SessionOptions const&) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x8AF9487: tensorflow::LocalDevice::LocalDevice(tensorflow::SessionOptions const&, tensorflow::DeviceAttributes const&) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x8B18E11: tensorflow::ThreadPoolDevice::ThreadPoolDevice(tensorflow::SessionOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, tensorflow::gtl::IntType<tensorflow::Bytes_tag_, long long>, tensorflow::DeviceLocality const&, tensorflow::Allocator*) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x8B19289: tensorflow::ThreadPoolDeviceFactory::CreateDevices(tensorflow::SessionOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::vector<tensorflow::Device*, std::allocator<tensorflow::Device*> >*) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x8AF7979: tensorflow::(anonymous namespace)::GetCPUDevice(tensorflow::Env*) [clone .constprop.149] (in /usr/local/lib/libtensorflow_framework.so)
+==17499== 
+==17499== 1,280 bytes in 4 blocks are possibly lost in loss record 53,083 of 53,144
+==17499==    at 0x4C31B25: calloc (in /usr/lib/valgrind/vgpreload_memcheck-amd64-linux.so)
+==17499==    by 0x4013C86: allocate_dtv (dl-tls.c:290)
+==17499==    by 0x4013C86: _dl_allocate_tls (dl-tls.c:538)
+==17499==    by 0x9099421: allocate_stack (allocatestack.c:597)
+==17499==    by 0x9099421: pthread_create@@GLIBC_2.2.5 (pthread_create.c:669)
+==17499==    by 0x98CA5E2: std::thread::_M_start_thread(std::shared_ptr<std::thread::_Impl_base>, void (*)()) (in /usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.24)
+==17499==    by 0x8779F45: tensorflow::(anonymous namespace)::PosixEnv::StartThread(tensorflow::ThreadOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::function<void ()>) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x875008F: tensorflow::thread::ThreadPool::ThreadPool(tensorflow::Env*, tensorflow::ThreadOptions const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int, bool) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x875024F: tensorflow::thread::ThreadPool::ThreadPool(tensorflow::Env*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, int) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x70BE592: ??? (in /usr/local/lib/libtensorflow.so)
+==17499==    by 0x70BFD89: ??? (in /usr/local/lib/libtensorflow.so)
+==17499==    by 0x70BFF09: ??? (in /usr/local/lib/libtensorflow.so)
+==17499==    by 0x8B107DE: tensorflow::NewSession(tensorflow::SessionOptions const&, tensorflow::Session**) (in /usr/local/lib/libtensorflow_framework.so)
+==17499==    by 0x51E1EB3: TF_NewSession (in /usr/local/lib/libtensorflow.so)
+==17499== 
+==17499== LEAK SUMMARY:
+==17499==    definitely lost: 0 bytes in 0 blocks
+==17499==    indirectly lost: 0 bytes in 0 blocks
+==17499==      possibly lost: 2,560 bytes in 8 blocks
+==17499==    still reachable: 5,930,762 bytes in 91,219 blocks

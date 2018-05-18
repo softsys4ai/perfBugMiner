@@ -1,0 +1,22 @@
+Android "TF Stylize" demo crash with "input_max_range must be larger than input_min_range"
+
+I have compiled and installed the demo app according to the instruction in the README.  The "TF Detect" and "TF Classify" apps are working as expected.  However, starting the "TF Stylize" app, it always crashes in about 3 seconds.  The prebuilt apk crashes in the same way.  Here is the android logcat recorded:
+
+$ adb -s b80360c7 logcat  | grep Tensor
+I/TensorFlowInferenceInterface( 6801): Checking to see if TensorFlow native methods are already loaded
+I/TensorFlowInferenceInterface( 6801): TensorFlow native methods not found, attempting to load via tensorflow_inference
+I/TensorFlowInferenceInterface( 6801): Successfully loaded TensorFlow native methods (RunStats error may be ignored)
+I/TensorFlowInferenceInterface( 6801): Model load took 540ms, TensorFlow version: 1.0.1
+I/TensorFlowInferenceInterface( 6801): Successfully loaded model from 'file:///android_asset/stylize_quantized.pb'
+E/TensorFlowInferenceInterface( 6801): Failed to run TensorFlow inference with inputs:[input, style_num], outputs:[transformer/expand/conv3/conv/Sigmoid]
+E/TensorFlowInferenceInterface( 6801): Inference exception: java.lang.IllegalArgumentException: input_max_range must be larger than input_min_range.
+E/TensorFlowInferenceInterface( 6801):   [[Node: transformer/contract/conv1/Relu_eightbit_quantize_transformer/contract/conv1/InstanceNorm/batchnorm/add_1 = QuantizeV2[T=DT_QUINT8, mode="MIN_FIRST", _device="/job:localhost/replica:0/task:0/cpu:0"](transformer/contract/conv1/InstanceNorm/batchnorm/add_1, transformer/contract/conv1/Relu_eightbit_min_transformer/contract/conv1/InstanceNorm/batchnorm/add_1, transformer/contract/conv1/Relu_eightbit_max_transformer/contract/conv1/InstanceNorm/batchnorm/add_1)]]
+E/AndroidRuntime( 6801):        at org.tensorflow.contrib.android.TensorFlowInferenceInterface.getTensor(TensorFlowInferenceInterface.java:486)
+E/AndroidRuntime( 6801):        at org.tensorflow.contrib.android.TensorFlowInferenceInterface.readNodeIntoFloatBuffer(TensorFlowInferenceInterface.java:332)
+E/AndroidRuntime( 6801):        at org.tensorflow.contrib.android.TensorFlowInferenceInterface.readNodeFloat(TensorFlowInferenceInterface.java:287)
+
+As can be inferred from the logcat, the problem happens in tensorflow/core/kernels/quantize_op.cc line 71.  The app is using a quantized model.  I found that input_min_range is set to be inf, and input_max_range is -inf, which is obviously wrong.
+What should be done to fix it?
+The crash appears on Samsung Galaxy S4, but does not appears on emulator with Intel CPU.
+[Edit]
+With more experiment I found that sometimes the apps works without crashing, about 1 out of 10 trials.

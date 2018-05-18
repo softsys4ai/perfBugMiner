@@ -1,0 +1,97 @@
+tf.contrib.boosted_trees still cannot be used in official 1.4.0
+
+Hi, i have raised an issue before, however after i upgrade to official 1.4.0, the problem is still the same.
+I am sorry about raising this again, but GBDT in TF seems so appealing to users.
+TF version: 1.4.0
+Py version: 2.7.10
+OS: Mac OS
+The testing script i am using is:
+import argparse
+import numpy as np
+import tensorflow as tf
+from tensorflow.contrib.boosted_trees.estimator_batch.estimator import GradientBoostedDecisionTreeClassifier
+from tensorflow.contrib.boosted_trees.proto import learner_pb2
+from tensorflow.contrib.learn import learn_runner
+
+tf.logging.set_verbosity(tf.logging.INFO)
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--batch_size",type=int,default=1000)
+parser.add_argument("--depth", type=int, default=4, help="Maximum depth of weak learners.")
+parser.add_argument("--l2", type=float, default=1.0, help="l2 regularization per batch.")
+parser.add_argument("--learning_rate",type=float,default=0.1)
+parser.add_argument("--examples_per_layer", type=int, default=1000)
+parser.add_argument("--num_trees", type=int, default=10)
+args = parser.parse_args()
+
+learner_config = learner_pb2.LearnerConfig()
+num_classes = 10
+learner_config.learning_rate_tuner.fixed.learning_rate = args.learning_rate
+learner_config.num_classes = num_classes
+learner_config.regularization.l1 = 0.0
+learner_config.regularization.l2 = args.l2 / args.examples_per_layer
+learner_config.constraints.max_tree_depth = args.depth
+
+growing_mode = learner_pb2.LearnerConfig.LAYER_BY_LAYER
+learner_config.growing_mode = growing_mode
+learner_config.multi_class_strategy = (
+    learner_pb2.LearnerConfig.DIAGONAL_HESSIAN)
+
+estimator = GradientBoostedDecisionTreeClassifier(
+    learner_config=learner_config,
+    n_classes=num_classes,
+    examples_per_layer=args.examples_per_layer,
+    num_trees=args.num_trees,
+    center_bias=False)
+
+(X_train, y_train), (X_test, y_test) = tf.keras.datasets.mnist.load_data()
+X_train = (X_train / 255.).reshape(-1, 28*28).astype(np.float32)
+y_train = y_train.astype(np.int32)
+
+estimator.fit(input_fn=tf.estimator.inputs.numpy_input_fn(
+    x={'_':X_train}, y=y_train, batch_size=args.batch_size, num_epochs=1, shuffle=True))
+The full error i am getting is:
+(tf_1.4) Zhedongs-MacBook-Pro:desktop zhedongzheng$ python tf_boost_test.py
+INFO:tensorflow:Using default config.
+WARNING:tensorflow:Using temporary folder as model directory: /var/folders/sx/fv0r97j96fz8njp14dt5g7940000gn/T/tmpCFdPSc
+INFO:tensorflow:Using config: {'_save_checkpoints_secs': 600, '_num_ps_replicas': 0, '_keep_checkpoint_max': 5, '_task_type': None, '_is_chief': True, '_cluster_spec': <tensorflow.python.training.server_lib.ClusterSpec object at 0x110dac810>, '_model_dir': '/var/folders/sx/fv0r97j96fz8njp14dt5g7940000gn/T/tmpCFdPSc', '_save_checkpoints_steps': None, '_keep_checkpoint_every_n_hours': 10000, '_session_config': None, '_tf_random_seed': None, '_save_summary_steps': 100, '_environment': 'local', '_num_worker_replicas': 0, '_task_id': 0, '_log_step_count_steps': 100, '_tf_config': gpu_options {
+  per_process_gpu_memory_fraction: 1
+}
+, '_evaluation_master': '', '_master': ''}
+INFO:tensorflow:Active Feature Columns: ['__0', '__1', '__2', '__3', '__4', '__5', '__6', '__7', '__8', '__9', '__10', '__11', '__12', '__13', '__14', '__15', '__16', '__17', '__18', '__19', '__20', '__21', '__22', '__23', '__24', '__25', '__26', '__27', '__28', '__29', '__30', '__31', '__32', '__33', '__34', '__35', '__36', '__37', '__38', '__39', '__40', '__41', '__42', '__43', '__44', '__45', '__46', '__47', '__48', '__49', '__50', '__51', '__52', '__53', '__54', '__55', '__56', '__57', '__58', '__59', '__60', '__61', '__62', '__63', '__64', '__65', '__66', '__67', '__68', '__69', '__70', '__71', '__72', '__73', '__74', '__75', '__76', '__77', '__78', '__79', '__80', '__81', '__82', '__83', '__84', '__85', '__86', '__87', '__88', '__89', '__90', '__91', '__92', '__93', '__94', '__95', '__96', '__97', '__98', '__99', '__100', '__101', '__102', '__103', '__104', '__105', '__106', '__107', '__108', '__109', '__110', '__111', '__112', '__113', '__114', '__115', '__116', '__117', '__118', '__119', '__120', '__121', '__122', '__123', '__124', '__125', '__126', '__127', '__128', '__129', '__130', '__131', '__132', '__133', '__134', '__135', '__136', '__137', '__138', '__139', '__140', '__141', '__142', '__143', '__144', '__145', '__146', '__147', '__148', '__149', '__150', '__151', '__152', '__153', '__154', '__155', '__156', '__157', '__158', '__159', '__160', '__161', '__162', '__163', '__164', '__165', '__166', '__167', '__168', '__169', '__170', '__171', '__172', '__173', '__174', '__175', '__176', '__177', '__178', '__179', '__180', '__181', '__182', '__183', '__184', '__185', '__186', '__187', '__188', '__189', '__190', '__191', '__192', '__193', '__194', '__195', '__196', '__197', '__198', '__199', '__200', '__201', '__202', '__203', '__204', '__205', '__206', '__207', '__208', '__209', '__210', '__211', '__212', '__213', '__214', '__215', '__216', '__217', '__218', '__219', '__220', '__221', '__222', '__223', '__224', '__225', '__226', '__227', '__228', '__229', '__230', '__231', '__232', '__233', '__234', '__235', '__236', '__237', '__238', '__239', '__240', '__241', '__242', '__243', '__244', '__245', '__246', '__247', '__248', '__249', '__250', '__251', '__252', '__253', '__254', '__255', '__256', '__257', '__258', '__259', '__260', '__261', '__262', '__263', '__264', '__265', '__266', '__267', '__268', '__269', '__270', '__271', '__272', '__273', '__274', '__275', '__276', '__277', '__278', '__279', '__280', '__281', '__282', '__283', '__284', '__285', '__286', '__287', '__288', '__289', '__290', '__291', '__292', '__293', '__294', '__295', '__296', '__297', '__298', '__299', '__300', '__301', '__302', '__303', '__304', '__305', '__306', '__307', '__308', '__309', '__310', '__311', '__312', '__313', '__314', '__315', '__316', '__317', '__318', '__319', '__320', '__321', '__322', '__323', '__324', '__325', '__326', '__327', '__328', '__329', '__330', '__331', '__332', '__333', '__334', '__335', '__336', '__337', '__338', '__339', '__340', '__341', '__342', '__343', '__344', '__345', '__346', '__347', '__348', '__349', '__350', '__351', '__352', '__353', '__354', '__355', '__356', '__357', '__358', '__359', '__360', '__361', '__362', '__363', '__364', '__365', '__366', '__367', '__368', '__369', '__370', '__371', '__372', '__373', '__374', '__375', '__376', '__377', '__378', '__379', '__380', '__381', '__382', '__383', '__384', '__385', '__386', '__387', '__388', '__389', '__390', '__391', '__392', '__393', '__394', '__395', '__396', '__397', '__398', '__399', '__400', '__401', '__402', '__403', '__404', '__405', '__406', '__407', '__408', '__409', '__410', '__411', '__412', '__413', '__414', '__415', '__416', '__417', '__418', '__419', '__420', '__421', '__422', '__423', '__424', '__425', '__426', '__427', '__428', '__429', '__430', '__431', '__432', '__433', '__434', '__435', '__436', '__437', '__438', '__439', '__440', '__441', '__442', '__443', '__444', '__445', '__446', '__447', '__448', '__449', '__450', '__451', '__452', '__453', '__454', '__455', '__456', '__457', '__458', '__459', '__460', '__461', '__462', '__463', '__464', '__465', '__466', '__467', '__468', '__469', '__470', '__471', '__472', '__473', '__474', '__475', '__476', '__477', '__478', '__479', '__480', '__481', '__482', '__483', '__484', '__485', '__486', '__487', '__488', '__489', '__490', '__491', '__492', '__493', '__494', '__495', '__496', '__497', '__498', '__499', '__500', '__501', '__502', '__503', '__504', '__505', '__506', '__507', '__508', '__509', '__510', '__511', '__512', '__513', '__514', '__515', '__516', '__517', '__518', '__519', '__520', '__521', '__522', '__523', '__524', '__525', '__526', '__527', '__528', '__529', '__530', '__531', '__532', '__533', '__534', '__535', '__536', '__537', '__538', '__539', '__540', '__541', '__542', '__543', '__544', '__545', '__546', '__547', '__548', '__549', '__550', '__551', '__552', '__553', '__554', '__555', '__556', '__557', '__558', '__559', '__560', '__561', '__562', '__563', '__564', '__565', '__566', '__567', '__568', '__569', '__570', '__571', '__572', '__573', '__574', '__575', '__576', '__577', '__578', '__579', '__580', '__581', '__582', '__583', '__584', '__585', '__586', '__587', '__588', '__589', '__590', '__591', '__592', '__593', '__594', '__595', '__596', '__597', '__598', '__599', '__600', '__601', '__602', '__603', '__604', '__605', '__606', '__607', '__608', '__609', '__610', '__611', '__612', '__613', '__614', '__615', '__616', '__617', '__618', '__619', '__620', '__621', '__622', '__623', '__624', '__625', '__626', '__627', '__628', '__629', '__630', '__631', '__632', '__633', '__634', '__635', '__636', '__637', '__638', '__639', '__640', '__641', '__642', '__643', '__644', '__645', '__646', '__647', '__648', '__649', '__650', '__651', '__652', '__653', '__654', '__655', '__656', '__657', '__658', '__659', '__660', '__661', '__662', '__663', '__664', '__665', '__666', '__667', '__668', '__669', '__670', '__671', '__672', '__673', '__674', '__675', '__676', '__677', '__678', '__679', '__680', '__681', '__682', '__683', '__684', '__685', '__686', '__687', '__688', '__689', '__690', '__691', '__692', '__693', '__694', '__695', '__696', '__697', '__698', '__699', '__700', '__701', '__702', '__703', '__704', '__705', '__706', '__707', '__708', '__709', '__710', '__711', '__712', '__713', '__714', '__715', '__716', '__717', '__718', '__719', '__720', '__721', '__722', '__723', '__724', '__725', '__726', '__727', '__728', '__729', '__730', '__731', '__732', '__733', '__734', '__735', '__736', '__737', '__738', '__739', '__740', '__741', '__742', '__743', '__744', '__745', '__746', '__747', '__748', '__749', '__750', '__751', '__752', '__753', '__754', '__755', '__756', '__757', '__758', '__759', '__760', '__761', '__762', '__763', '__764', '__765', '__766', '__767', '__768', '__769', '__770', '__771', '__772', '__773', '__774', '__775', '__776', '__777', '__778', '__779', '__780', '__781', '__782', '__783']
+Traceback (most recent call last):
+  File "tf_boost_test.py", line 52, in <module>
+    x={'_':X_train}, y=y_train, batch_size=args.batch_size, num_epochs=1, shuffle=True))
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/python/util/deprecation.py", line 316, in new_func
+    return func(*args, **kwargs)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 480, in fit
+    loss = self._train_model(input_fn=input_fn, hooks=hooks)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 986, in _train_model
+    model_fn_ops = self._get_train_ops(features, labels)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1202, in _get_train_ops
+    return self._call_model_fn(features, labels, model_fn_lib.ModeKeys.TRAIN)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1166, in _call_model_fn
+    model_fn_results = self._model_fn(features, labels, **kwargs)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/boosted_trees/estimator_batch/model.py", line 116, in model_builder
+    logits=logits)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/head.py", line 1064, in create_model_fn_ops
+    enable_centered_bias=self._enable_centered_bias)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/head.py", line 648, in _create_model_fn_ops
+    batch_size, loss_fn, weight_tensor)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/head.py", line 1923, in _train_op
+    train_op = train_op_fn(loss)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/boosted_trees/estimator_batch/model.py", line 105, in _train_op_fn
+    update_op = gbdt_model.train(loss, predictions_dict, labels)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/boosted_trees/python/training/functions/gbdt_batch.py", line 543, in train
+    hessian_list = self._diagonal_hessian(gradients, predictions)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/contrib/boosted_trees/python/training/functions/gbdt_batch.py", line 845, in _diagonal_hessian
+    aggregation_method=None)
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/python/ops/gradients_impl.py", line 581, in gradients
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/python/ops/gradients_impl.py", line 353, in _MaybeCompile
+    return grad_fn()  # Exit early
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/python/ops/gradients_impl.py", line 581, in <lambda>
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "/Users/zhedongzheng/pyenv/py2.7/tf_1.4/tf_1.4/lib/python2.7/site-packages/tensorflow/python/ops/array_grad.py", line 352, in _PreventGradientGrad
+    "Gradient explicitly disabled. Reason: %s" % op.get_attr("message"))
+LookupError: Gradient explicitly disabled. Reason: Currently there is no way to take the second derivative of sparse_softmax_cross_entropy_with_logits due to the fused implementation's interaction with tf.gradients()

@@ -1,0 +1,157 @@
+`tf.case` is not allowing the computation of the `default` tensor when it falls in the default case
+
+== cat /etc/issue ===============================================
+Linux tf-service 4.9.31-moby #1 SMP Sat Jun 24 06:29:23 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="16.04.3 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+
+== are we in docker =============================================
+Yes
+
+== compiler =====================================================
+c++ (Ubuntu 5.4.0-6ubuntu1~16.04.6) 5.4.0 20160609
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+== uname -a =====================================================
+Linux tf-service 4.9.31-moby #1 SMP Sat Jun 24 06:29:23 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+
+== check pips ===================================================
+numpy (1.14.0)
+protobuf (3.5.1)
+tensorflow (1.6.0rc1)
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.6.0-rc1
+tf.GIT_VERSION = v1.6.0-rc0-19-gecec1d8
+tf.COMPILER_VERSION = v1.6.0-rc0-19-gecec1d8
+Sanity check: array([1], dtype=int32)
+/usr/local/lib/python2.7/dist-packages/h5py/__init__.py:36: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+
+== env ==========================================================
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+./tf_env_collect.sh: line 105: nvidia-smi: command not found
+
+== cuda libs  ===================================================
+
+Describe the problem
+tf.case does not seem to be computing the graph tensor related with the default parameter when it should fall in it. It seems to be computing all the case tensors correctly in all the other cases
+Source code / logs
+The script optimizes a piecewise rectilinear function defined with tf.case to match the square of the argument as closely as possible in the interval (-10, 10). If the argument is greater or equal than 10, the case should be handled by the default argument tensor, which in the example below is O1, which is also the case tensor when the argument is between [-5, -1). After the function has been optimized, the script outputs the value of the piecewise function in the range (-100, 100), and we see that in the interval [10, 100), O1 seems to have the constant value -1.0 that does not depend on the input, while in the range [-5, -1) it correctly depends on it
+import sys
+import tensorflow as tf
+from tensorflow.python import debug as tf_debug
+import numpy as np
+
+initia = tf.random_normal_initializer(5e-3, 1e-4)
+bias_init = tf.random_normal_initializer(-1e-3, 5*1e-4)
+cdtype = tf.float32
+DEPTH_1 = 1
+OUT_DEPTH = 1
+
+def act(inp, **kwargs):
+  return tf.nn.elu(inp, name = kwargs['name'])
+
+I = tf.placeholder(cdtype, shape=[None,1], name='I') # input
+
+W = tf.get_variable('W', shape=[1,DEPTH_1], initializer=initia, dtype=cdtype, trainable=True) # weights
+b = tf.get_variable('b', shape=[DEPTH_1], initializer=bias_init, dtype=cdtype, trainable=True) # biases
+O = act(tf.matmul(I, W) + b, name='O') # activation / output
+
+W1 = tf.get_variable('W1', shape=[1,DEPTH_1], initializer=initia, dtype=cdtype, trainable=True) # weights
+b1 = tf.get_variable('b1', shape=[DEPTH_1], initializer=bias_init, dtype=cdtype, trainable=True) # biases
+O1 = act(tf.matmul(I, W1) + b1, name='O1')
+
+W2 = tf.get_variable('W2', shape=[1,DEPTH_1], initializer=initia, dtype=cdtype, trainable=True) # weights
+b2 = tf.get_variable('b2', shape=[DEPTH_1], initializer=bias_init, dtype=cdtype, trainable=True) # biases
+O2 = act(tf.matmul(I, W2) + b2, name='O2')
+
+W3 = tf.get_variable('W3', shape=[1,DEPTH_1], initializer=initia, dtype=cdtype, trainable=True) # weights
+b3 = tf.get_variable('b3', shape=[DEPTH_1], initializer=bias_init, dtype=cdtype, trainable=True) # biases
+O3 = act(tf.matmul(I, W3) + b3, name='O3')
+
+W4 = tf.get_variable('W4', shape=[1,DEPTH_1], initializer=initia, dtype=cdtype, trainable=True) # weights
+b4 = tf.get_variable('b4', shape=[DEPTH_1], initializer=bias_init, dtype=cdtype, trainable=True) # biases
+O4 = act(tf.matmul(I, W4) + b4, name='O4')
+
+W5 = tf.get_variable('W5', shape=[1,DEPTH_1], initializer=initia, dtype=cdtype, trainable=True) # weights
+b5 = tf.get_variable('b5', shape=[DEPTH_1], initializer=bias_init, dtype=cdtype, trainable=True) # biases
+O5 = act(tf.matmul(I, W5) + b5, name='O5')
+
+eval_inp = tf.gather_nd(I,[[0,0]])
+
+c1 = tf.gather_nd(tf.less(I , [[-5.0]]), [[0,0]])[0]
+c2 = tf.gather_nd(tf.less(I , [[-1.0]]), [[0,0]])[0]
+c3 = tf.gather_nd(tf.less(I , [[0.0]]), [[0,0]])[0]
+c4 = tf.gather_nd(tf.less(I , [[1.0]]), [[0,0]])[0]
+c5 = tf.gather_nd(tf.less(I , [[5.0]]), [[0,0]])[0]
+c6 = tf.gather_nd(tf.less(I , [[10.0]]), [[0,0]])[0]
+
+f1 = lambda: O
+f2 = lambda: O1
+f3 = lambda: O2
+f4 = lambda: O3
+f5 = lambda: O4
+f6 = lambda: O5
+fdef = lambda: O1
+
+caseFun = tf.case([(c1 , f1), (c2 , f2), (c3 , f3), (c4, f4), (c5, f5), (c6,f6)], default=fdef)
+
+distance = tf.reduce_mean( tf.square( caseFun - tf.square(eval_inp) ) )
+
+train_op = tf.train.AdamOptimizer(1e-3).minimize(distance)
+init_op = tf.global_variables_initializer()
+
+
+with tf.Session() as sess:
+  sess.run(init_op)
+
+  for i in range(10000):
+    s = sess.run([
+      train_op,
+      I, caseFun, distance
+      ], feed_dict={ I: 20.0*np.random.rand(1,1) - 10.0})
+    if i % 1000 == 0:
+      print s
+
+  print "W, b, W1, b1, W2, b2, W3, b3, W4, b4, W5, b5"
+  print sess.run([W, b, W1, b1, W2, b2, W3, b3, W4, b4, W5, b5], feed_dict={})
+  for i in np.arange(-100.0, 100.0):
+    print sess.run([I, caseFun, distance , O1
+      ], feed_dict={ I: [[i]]})
+
+The output looks like this:
+....
+[array([[-10.]], dtype=float32), array([[43.378143]], dtype=float32), 3206.0347, array([[27.115139]], dtype=float32)]
+[array([[-9.]], dtype=float32), array([[39.456512]], dtype=float32), 1725.8613, array([[24.640066]], dtype=float32)]
+[array([[-8.]], dtype=float32), array([[35.53488]], dtype=float32), 810.26294, array([[22.164993]], dtype=float32)]
+[array([[-7.]], dtype=float32), array([[31.613249]], dtype=float32), 302.2991, array([[19.68992]], dtype=float32)]
+[array([[-6.]], dtype=float32), array([[27.691616]], dtype=float32), 69.02924, array([[17.214848]], dtype=float32)]
+[array([[-5.]], dtype=float32), array([[14.739774]], dtype=float32), 105.27224, array([[14.739774]], dtype=float32)]
+[array([[-4.]], dtype=float32), array([[12.264701]], dtype=float32), 13.952459, array([[12.264701]], dtype=float32)]
+[array([[-3.]], dtype=float32), array([[9.789628]], dtype=float32), 0.62351245, array([[9.789628]], dtype=float32)]
+[array([[-2.]], dtype=float32), array([[7.314555]], dtype=float32), 10.986276, array([[7.314555]], dtype=float32)]
+[array([[-1.]], dtype=float32), array([[0.6768117]], dtype=float32), 0.10445068, array([[4.8394823]], dtype=float32)]
+[array([[0.]], dtype=float32), array([[0.02995399]], dtype=float32), 0.00089724176, array([[2.3644097]], dtype=float32)]
+[array([[1.]], dtype=float32), array([[4.860016]], dtype=float32), 14.899722, array([[-0.10475975]], dtype=float32)]
+[array([[2.]], dtype=float32), array([[7.3534083]], dtype=float32), 11.245347, array([[-0.9246594]], dtype=float32)]
+[array([[3.]], dtype=float32), array([[9.846801]], dtype=float32), 0.7170716, array([[-0.99365956]], dtype=float32)]
+[array([[4.]], dtype=float32), array([[12.340193]], dtype=float32), 13.394189, array([[-0.9994664]], dtype=float32)]
+[array([[5.]], dtype=float32), array([[24.035427]], dtype=float32), 0.9304009, array([[-0.9999551]], dtype=float32)]
+[array([[6.]], dtype=float32), array([[28.001446]], dtype=float32), 63.97687, array([[-0.99999624]], dtype=float32)]
+[array([[7.]], dtype=float32), array([[31.96746]], dtype=float32), 290.1074, array([[-0.9999997]], dtype=float32)]
+[array([[8.]], dtype=float32), array([[35.93348]], dtype=float32), 787.72955, array([[-1.]], dtype=float32)]
+[array([[9.]], dtype=float32), array([[39.899498]], dtype=float32), 1689.2512, array([[-1.]], dtype=float32)]
+[array([[10.]], dtype=float32), array([[-1.]], dtype=float32), 10201.0, array([[-1.]], dtype=float32)]
+[array([[11.]], dtype=float32), array([[-1.]], dtype=float32), 14884.0, array([[-1.]], dtype=float32)]
+.....

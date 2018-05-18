@@ -1,0 +1,50 @@
+Could anybody help check this problem? I've been stuck in two days and didn't find the solution.
+
+I'm using the tf.Dataset API as follows: Suppose I have 10 *.tfrecords files (named trn-001.tfrecords,trn-002.tfrecords,etc.). There are 128 samples in each of these tfrecords. Suppose the samples in the first 5 tfrecords belong to class 0 and the remaining 5 tfrecords belong to class 1. In my case, the data provider should first random select 2 tfrecords for each class from those 5 tfrecords, then select fixed number of samples from each of the selected tfrecords and combine them to generate one balanced batch data to feed into the network for training. For example, for class 0, select trn-000.tfrecords and trn-001.tfrecords; for class 1, select trn-006.tfrecords and trn-009.tfrecords; then for each of the four selected tfrecords, randomly select 1 sample from each of them and combine the 1+1+1+1 samples to generate one batch data. My script to initialize the dataset operations is like this:
+trn0_filenames = ['trn-000.tfrecords','trn-001.tfrecords','trn-002.tfrecords','trn-003.tfrecords','trn-004.tfrecords']
+trn1_filenames = ['trn-005.tfrecords','trn-006.tfrecords','trn-007.tfrecords','trn-008.tfrecords','trn-009.tfrecords']
+
+half_batch_size = int(BATCH_SIZE / 2)
+trn0_count = len(trn0_filenames)
+trn1_count = len(trn1_filenames)
+features0_ops = []
+labels0_ops = []
+for trn0_filename in trn0_filenames:
+    feature_op, label_op, = dataset_input_from_tfrecords([trn0_filename], batch_size=1, num_epochs=50000, shuffle=True, image_mean=None)
+    features0_ops.append(feature_op)
+    labels0_ops.append(label_op)
+
+features1_ops = []
+labels1_ops = []
+for trn1_filename in trn1_filenames:
+    feature_op, label_op = dataset_input_from_tfrecords([trn1_filename], batch_size=1, num_epochs=50000, shuffle=True, image_mean=None)
+    features1_ops.append(feature_op)
+    label_ops.append(label_op)
+
+Then during training, the script to generate the batch data is like this:
+features = np.zeros((BATCH_SIZE, HEIGHT, WIDTH, 3), dtype=np.float32)
+labels = np.zeros((BATCH_SIZE,), dtype=np.int64)
+
+while not coord.should_stop():
+    ind0 = np.random.choice(trn0_count, half_batch_size)
+    ind1 = np.random.choice(trn1_count, half_batch_size)
+    batch_idx = 0
+    for idx in ind0:
+        temp1,temp2 = sess.run([features0_ops[idx],
+                                            labels0_ops[idx]])
+        features[batch_idx] = temp1[0]
+        labels[batch_idx] = temp2[0]
+        batch_idx+=1
+    for idx in ind1:
+        temp1,temp2 = sess.run([features1_ops[idx],
+                                labels1_ops[idx]])
+        features[batch_idx] = temp1[0]
+        labels[batch_idx] = temp2[0]
+        batch_idx+=1
+
+and then feed the batch data into network for training:
+summary,_,loss_total,loss,loss_reg = sess.run([summary_op, train_op, 
+                               loss_total_op,loss_op,loss_reg_op], 
+                              feed_dict={x_tensor: features, y_tensor: labels})
+
+The problem is: during training, I found that the memory usage of the process is consistently increasing. Please check the following screenshot. The process 3208 is the running process. At first, the memory usage is about 10%, but at the moment when I taken this picture, the memory usage has increased to 41.6%. So my question is: is this a memory problem? What's wrong? I cannot find the problem. If the memory usage is increasing to some certain amount, the computer will be halt down then I need to restart.

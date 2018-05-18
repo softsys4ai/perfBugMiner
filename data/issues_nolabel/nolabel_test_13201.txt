@@ -1,0 +1,31 @@
+Multiple infiniband cards support in tensorflow with RDMA
+
+It seems that tensorflow with RDMA  doesn't support multiple infiniband cards now.
+It only uses the first device in the infiniband device list.
+source rdma.cc
+ibv_context* open_default_device() {
+  ibv_device** dev_list;
+  ibv_device* ib_dev;
+  dev_list = ibv_get_device_list(NULL);
+  CHECK(dev_list) << "No InfiniBand device found";
+  ib_dev = dev_list[0];
+  CHECK(ib_dev) << "No InfiniBand device found";
+  ibv_context* context = ibv_open_device(ib_dev);
+  CHECK(context) << "Open context failed for " << ibv_get_device_name(ib_dev);
+  return context;
+}
+
+This will fail to communicate when there are different type infiniband cards in one node, and the order of infiniband device list is different in every node.
+Besides that, user can't specify one card to use.
+Usually, we will specify the IP:PORT when doing the distributed training.
+I think it's better to use the infiniband device which is corresponding to the IP in multiple infiniband cards environment.
+bazel-bin/inception/imagenet_distributed_train \
+--batch_size=32 \
+--data_dir=/test/ILSVRC2012 \
+--job_name='worker' \
+--task_id=0 \
+--ps_hosts='10.0.20.14:2276' \
+--worker_hosts='10.0.20.15:2276,10.0.20.16:2276' \
+--protocol='grpc+verbs'
+
+What do you think about this?

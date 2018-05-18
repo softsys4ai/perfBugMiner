@@ -1,0 +1,82 @@
+CTC loss with dynamic length
+
+This is a very specific questions, I'm afraid nobody on stackoverflow will ever answer this. I will copy the text from there, the original question can be found there:
+https://stackoverflow.com/questions/45568266/tensorflow-ctc-loss-ctc-merge-repeated-parameter
+And I'm not 100% sure if this behaviour is wanted or a bug (I think its the former one but I'm really not sure).
+I'm using Tensorflow 1.0 and its CTC loss [1]. When training, I sometimes get the "No valid path found." warning (which harms learning). It is not due to a high learning rate as sometimes reported by other Tensorflow users.
+After analyzing it a bit, I found the pattern that causes this warning:
+
+feeding an input sequence into the ctc_loss with length seqLen
+feeding a label with labelLen characters
+label has numRepeatedChars repeated chars in it, where I count "ab" as 0, "aa" as 1, "aaa" as 2 and so on
+warning occurs, when: seqLen - labelLen < numRepeatedChars
+
+Three examples:
+
+Ex.1: label="abb", len(label)=3, len(inputSequence)=3 => (3-3=0)<1 is true --> warning
+Ex.2: label="abb", len(label)=3, len(inputSequence)=4 => (4-3=1)<1 is false --> no warning
+Ex.3: label="bbb", len(label)=3, len(inputSequence)=4 => (4-3=1)<2 is true --> warning
+
+When I now set the ctc_loss parameter ctc_merge_repeated=False, then the warning disappears.
+Three questions:
+
+Q1: why is there a warning when repeated chars occur? I thought, as long as the input sequence is not shorter than the target labelling, there is no problem. And when repeated chars are merged in the label, then it gets even shorter, therefore the condition that the input sequence is not shorter still holds.
+Q2: why does the ctc_loss in its default settings produce this warning? Repeated chars are common in the domains CTCs are used such as handwritten text recognition (HTR)
+Q3: what settings should I use when doing HTR? Of course labels can have repeated chars. Therefore ctc_merge_repeated=False would make sense. Any suggestions?
+
+Python program to reproduce warning:
+import tensorflow as tf
+import numpy as np
+
+def createGraph():
+    tinputs=tf.placeholder(tf.float32, [100, 1, 65]) # max 100 time steps, 1 batch element, 64+1 classes
+    tlabels=tf.SparseTensor(tf.placeholder(tf.int64, shape=[None,2]) , tf.placeholder(tf.int32,[None]), tf.placeholder(tf.int64,[2])) # labels
+    tseqLen=tf.placeholder(tf.int32, [None]) # list of sequence length in batch
+    tloss=tf.reduce_mean(tf.nn.ctc_loss(labels=tlabels, inputs=tinputs, sequence_length=tseqLen, ctc_merge_repeated=True)) # ctc loss
+    return (tinputs, tlabels, tseqLen, tloss)
+
+def getNextBatch(nc): # next batch with given number of chars in label
+    indices=[[0,i] for i in range(nc)]
+    values=[i%65 for i in range(nc)]
+    values[0]=0
+    values[1]=0 # TODO: (un)comment this to trigger warning
+    shape=[1, nc]
+    labels=tf.SparseTensorValue(indices, values, shape)
+    seqLen=[nc]
+    inputs=np.random.rand(100, 1, 65)
+    return (labels, inputs, seqLen) 
+
+
+(tinputs, tlabels, tseqLen, tloss)=createGraph()
+
+sess=tf.Session()
+sess.run(tf.global_variables_initializer())
+
+nc=3 # number of chars in label
+print('next batch with 1 element has label len='+str(nc))
+(labels, inputs, seqLen)=getNextBatch(nc)
+res=sess.run([tloss], { tlabels: labels, tinputs:inputs, tseqLen:seqLen } )
+
+This is the C++ Tensorflow code [2] where the warning comes from:
+// It is possible that no valid path is found if the activations for the
+// targets are zero.
+if (log_p_z_x == kLogZero) {
+    LOG(WARNING) << "No valid path found.";
+    dy_b = y;
+    return;
+}
+
+[1] https://www.tensorflow.org/versions/r1.0/api_docs/python/tf/nn/ctc_loss
+[2] https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/util/ctc/ctc_loss_calculator.cc
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): costum
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.0.0-rc2-15-g47bba63-dirty, 1.0.0
+Python version: 3.5.2
+Bazel version (if compiling from source): -
+CUDA/cuDNN version: [problem also on CPU]
+GPU model and memory: [problem also on CPU]
+Exact command to reproduce: see code above

@@ -1,0 +1,123 @@
+Eager: error when restore tfe.Network checkpoint by tfe.restore_network_checkpoint
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Win10
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below):1.6.0dev20170105
+Python version: 3.6
+Bazel version (if compiling from source):N/A
+GCC/Compiler version (if compiling from source):N/A
+CUDA/cuDNN version:9.0/7.0
+GPU model and memory:pascal
+Exact command to reproduce:N/A
+
+Describe the problem
+When I want to restore tfe.Network by using tfe.restore_network_checkpoint from a graph-mode checkpoint(such as pretrained slim resnet ckpt, so need name map of tfe.restore_network_checkpoint), I get an error:
+---------------------------------------------------------------------------
+RuntimeError                              Traceback (most recent call last)
+<ipython-input-1-cbde22383c9e> in <module>()
+     20     images = tf.constant(toy_data)
+     21     logits = net(images)
+---> 22     tf.contrib.eager.restore_network_checkpoint(net, ckpt)
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\contrib\eager\python\network.py in restore_network_checkpoint(network, save_path, map_func)
+    946       save_path=save_path,
+    947       map_func=map_func,
+--> 948       user_map_func=user_map_func)
+    949   # Step two is to set a custom getter which restores variables on creation,
+    950   # for those variables which have not been added to sub-Layers yet.
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\contrib\eager\python\network.py in _restore_existing_variables(network, save_path, map_func, user_map_func)
+    859       sess = ops.get_default_session()
+    860     saver_lib.Saver(var_list=existing_variables_by_checkpoint_name).restore(
+--> 861         sess=sess, save_path=save_path)
+    862   return existing_variables_by_checkpoint_name
+    863 
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\training\saver.py in restore(self, sess, save_path)
+   1686                {self.saver_def.filename_tensor_name: save_path})
+   1687     else:
+-> 1688       self._build_eager(save_path, build_save=False, build_restore=True)
+   1689 
+   1690   @staticmethod
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\training\saver.py in _build_eager(self, checkpoint_path, build_save, build_restore)
+   1250   def _build_eager(self, checkpoint_path, build_save, build_restore):
+   1251     self._build(
+-> 1252         checkpoint_path, build_save=build_save, build_restore=build_restore)
+   1253 
+   1254   def _build(self, checkpoint_path, build_save, build_restore):
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\training\saver.py in _build(self, checkpoint_path, build_save, build_restore)
+   1282           restore_sequentially=self._restore_sequentially,
+   1283           filename=checkpoint_path,
+-> 1284           build_save=build_save, build_restore=build_restore)
+   1285     elif self.saver_def and self._name:
+   1286       # Since self._name is used as a name_scope by builder(), we are
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\training\saver.py in _build_internal(self, names_to_saveables, reshape, sharded, max_to_keep, keep_checkpoint_every_n_hours, name, restore_sequentially, filename, build_save, build_restore)
+    748                         [saveable.op for saveable in saveables]) as name:
+    749       # Add the Constant string tensor for the filename.
+--> 750       filename_tensor = constant_op.constant(filename or "model")
+    751 
+    752       # Add the save ops.
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\framework\constant_op.py in constant(value, dtype, shape, name, verify_shape)
+    182   ctx = context.context()
+    183   if not ctx.in_graph_mode():
+--> 184     t = convert_to_eager_tensor(value, ctx, dtype)
+    185     if shape is None:
+    186       return t
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\framework\constant_op.py in convert_to_eager_tensor(value, ctx, dtype)
+    129     return t
+    130   else:
+--> 131     return ops.EagerTensor(value, context=handle, device=device, dtype=dtype)
+    132 
+    133 
+
+RuntimeError: Error copying tensor to device: /job:localhost/replica:0/task:0/device:GPU:0. Can't copy Tensor with type string to device /job:localhost/replica:0/task:0/device:GPU:0.
+code to reproduce this error:
+first run graph code to save a ckpt:
+import tensorflow as tf
+import numpy as np
+config = tf.ConfigProto()
+config.gpu_options.allow_growth=True
+def cnn(x):
+    with tf.variable_scope('net'):
+        x = tf.layers.dense(x, 10, name='fc')
+        return x
+ckpt = '/tmp/graph/test.ckpt'
+with tf.Graph().as_default():
+    images = tf.placeholder(tf.float32, [None, 784])
+    logits = cnn(images)
+    saver = tf.train.Saver(save_relative_paths=True)
+    print(tf.global_variables())
+    with tf.Session(config=config) as sess:
+        sess.run(tf.global_variables_initializer())
+        saver.save(sess, ckpt)
+Then run eager code to load ckpt, note that any ckpt path can produce same error, so I think ckpt file has no problem.
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+import numpy as np
+config = tf.ConfigProto()
+config.gpu_options.allow_growth=True
+tfe.enable_eager_execution(config=config)
+class CNN(tfe.Network):
+    def __init__(self, name):
+        super(CNN, self).__init__(name)
+        self.fc = self.track_layer(tf.layers.Dense(10, name='fc'))
+    def call(self, x):
+        x = tf.reshape(x, [-1, 784])
+        x = self.fc(x)
+        return x
+toy_data = np.ones((100, 784)).astype(np.float32)
+device = "gpu:0" if tfe.num_gpus() else "cpu:0"
+net = CNN('net')
+ckpt = '/tmp/graph/test.ckpt' # any other paths produce same error
+with tf.device(device):
+    images = tf.constant(toy_data)
+    logits = net(images)
+    tfe.restore_network_checkpoint(net, ckpt)

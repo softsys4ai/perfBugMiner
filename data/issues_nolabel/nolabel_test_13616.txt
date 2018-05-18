@@ -1,0 +1,64 @@
+Force tensor evaluation inside while-loop, scan and others.
+
+Hello everyone,
+I had big plans for tf.while_loop until I discovered that it is impossible to re-evaluate tensor inside it. Let's dive into the the issue and potential useful feature:
+In [13]: import tensorflow as tf
+    ...: import numpy as np
+    ...:
+    ...: def cond(i, _x, _sq):
+    ...:       return tf.less(i, 10)
+    ...:
+    ...: def gen_body(v):
+    ...:     def body(i, x, sq):
+    ...:         x = tf.Print(x, [x, sq], "x and sq: ")
+    ...:         v_assign = v.assign(x + 1)
+    ...:         v_assign = tf.Print(v_assign, [v_assign], "v_assign: ")
+    ...:         with tf.control_dependencies([v_assign]):
+    ...:             sq_neg = tf.negative(sq)
+    ...:         sq_neg = tf.Print(sq_neg, [i, sq_neg], message='i and sq_neg:')
+    ...:         return tf.add(i, 1), sq_neg, sq
+    ...:     return body
+    ...:
+
+In [14]: sess = tf.InteractiveSession()
+
+In [15]: i = tf.Variable(0)
+    ...: v = tf.Variable(2)
+    ...: sq = tf.square(v)
+    ...: l = tf.while_loop(cond, gen_body(v), (i, v, sq))
+    ...: sess.run(tf.global_variables_initializer())
+    ...: sess.run(l)
+    ...:
+2017-10-10 22:59:44.819271: I tensorflow/core/kernels/logging_ops.cc:79] x and sq: [2][4]
+2017-10-10 22:59:44.819405: I tensorflow/core/kernels/logging_ops.cc:79] v_assign: [3]
+2017-10-10 22:59:44.819466: I tensorflow/core/kernels/logging_ops.cc:79] i and sq_neg:[0][-4]
+2017-10-10 22:59:44.819553: I tensorflow/core/kernels/logging_ops.cc:79] x and sq: [-4][4]
+2017-10-10 22:59:44.819615: I tensorflow/core/kernels/logging_ops.cc:79] v_assign: [-3]
+2017-10-10 22:59:44.819680: I tensorflow/core/kernels/logging_ops.cc:79] i and sq_neg:[1][-4]
+2017-10-10 22:59:44.819827: I tensorflow/core/kernels/logging_ops.cc:79] x and sq: [-4][4]
+2017-10-10 22:59:44.819885: I tensorflow/core/kernels/logging_ops.cc:79] v_assign: [-3]
+2017-10-10 22:59:44.819932: I tensorflow/core/kernels/logging_ops.cc:79] i and sq_neg:[2][-4]
+2017-10-10 22:59:44.820034: I tensorflow/core/kernels/logging_ops.cc:79] x and sq: [-4][4]
+2017-10-10 22:59:44.820094: I tensorflow/core/kernels/logging_ops.cc:79] v_assign: [-3]
+2017-10-10 22:59:44.820111: I tensorflow/core/kernels/logging_ops.cc:79] i and sq_neg:[3][-4]
+2017-10-10 22:59:44.820162: I tensorflow/core/kernels/logging_ops.cc:79] x and sq: [-4][4]
+2017-10-10 22:59:44.820250: I tensorflow/core/kernels/logging_ops.cc:79] v_assign: [-3]
+2017-10-10 22:59:44.820265: I tensorflow/core/kernels/logging_ops.cc:79] i and sq_neg:[4][-4]
+2017-10-10 22:59:44.820315: I tensorflow/core/kernels/logging_ops.cc:79] x and sq: [-4][4]
+2017-10-10 22:59:44.820379: I tensorflow/core/kernels/logging_ops.cc:79] v_assign: [-3]
+2017-10-10 22:59:44.820408: I tensorflow/core/kernels/logging_ops.cc:79] i and sq_neg:[5][-4]
+2017-10-10 22:59:44.820428: I tensorflow/core/kernels/logging_ops.cc:79] x and sq: [-4][4]
+2017-10-10 22:59:44.820438: I tensorflow/core/kernels/logging_ops.cc:79] v_assign: [-3]
+2017-10-10 22:59:44.820446: I tensorflow/core/kernels/logging_ops.cc:79] i and sq_neg:[6][-4]
+2017-10-10 22:59:44.820464: I tensorflow/core/kernels/logging_ops.cc:79] x and sq: [-4][4]
+2017-10-10 22:59:44.820490: I tensorflow/core/kernels/logging_ops.cc:79] v_assign: [-3]
+2017-10-10 22:59:44.820500: I tensorflow/core/kernels/logging_ops.cc:79] i and sq_neg:[7][-4]
+2017-10-10 22:59:44.820519: I tensorflow/core/kernels/logging_ops.cc:79] x and sq: [-4][4]
+2017-10-10 22:59:44.820532: I tensorflow/core/kernels/logging_ops.cc:79] v_assign: [-3]
+2017-10-10 22:59:44.820542: I tensorflow/core/kernels/logging_ops.cc:79] i and sq_neg:[8][-4]
+2017-10-10 22:59:44.820559: I tensorflow/core/kernels/logging_ops.cc:79] x and sq: [-4][4]
+2017-10-10 22:59:44.820580: I tensorflow/core/kernels/logging_ops.cc:79] v_assign: [-3]
+2017-10-10 22:59:44.820593: I tensorflow/core/kernels/logging_ops.cc:79] i and sq_neg:[9][-4]
+Out[15]: (10, -4, 4)
+I created v variable and tensor sq which equals to v^2. In fact, we don't have control over them, they are our input as x and y and we know that y depends on x. I would like to assign new value inside TensorFlow loop to x (equavalent to v at example) and evaluate fresh y (sq inside example) at each iteration of the loop. Meanwhile we can do other evaluations inside while_loop, but most important is that I need to update x and get updated y. Currently, assigning operation doesn't propagate updates down to the dependant nodes and it shouldn't, but when someone calls tensor depending on value which were updated via assign inside while_loop, I suppose the tensor node must detect this change and evaluate new tensor value again.
+Thanks!

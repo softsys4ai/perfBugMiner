@@ -1,0 +1,251 @@
+Inconsistency in Variable Creation Methods
+
+Currently it is not possible to scope all variables cleanly when using RNN cells and Optimizers. RNN cells create variables with tf.get_variable and optimizers create variables with tf.Variable. These two methods don't get along, creating messy variable names when variable scopes are handled differently by the two methods.
+Script for testing different variable creation and scoping combinations.
+# -*- coding: utf-8 -*-
+
+import tensorflow as tf
+
+
+def build_loss(use_get_variable=True):
+    y = tf.placeholder('int32', [None], name='y')
+    x = tf.placeholder('float32', shape=[None, None, 10], name='x')
+    cell = tf.contrib.rnn.GRUCell(128)  # RNN cell
+    if use_get_variable:
+        # Create variable with tf.get_variable
+        w = tf.get_variable('w', dtype='float32', initializer=tf.random_normal([128, 10]))
+    else:
+        # Create variable with tf.Variable
+        w = tf.Variable(initial_value=tf.random_normal([128, 10]), dtype='float32', name='w')
+    rnn_out, _ = tf.nn.dynamic_rnn(cell, x, dtype='float32', time_major=False)  # RNN
+    rnn_out = rnn_out[:, -1, :]  # Last timestep
+    rnn_out = tf.matmul(rnn_out, w)  # Output layer projection
+    loss_op = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y, logits=rnn_out))  # Cross entropy
+    return loss_op
+
+
+def inspect(use_get_variable=True, scope_optimizer=True, re_enter_scope=None, optimizer=tf.train.AdamOptimizer):
+    scope = 'scope'
+    if re_enter_scope:
+        with tf.variable_scope(scope) as variable_scope:  # Capture variable scope
+            if re_enter_scope == 'object':
+                # Save captured object for re-entering scope with captured variable scope object
+                scope = variable_scope
+            elif re_enter_scope == 'original_name_scope':
+                # Save original name scope of captured variable scope for re-entering the scope with original name scope
+                scope = variable_scope.original_name_scope
+    with tf.variable_scope(scope):  # (Re-)enter scope
+        loss_op = build_loss(use_get_variable=use_get_variable)
+        if scope_optimizer:
+            # Create optimizer in the variable scope
+            train_op = optimizer(0.1).minimize(loss_op)
+    if not scope_optimizer:
+        # Create optimizer outside of variable scope
+        train_op = optimizer(0.1).minimize(loss_op)
+    with tf.Session() as sess:
+        # Initialize variables
+        sess.run(tf.global_variables_initializer())
+
+    description = 'optimizer ' + ('NOT' if not scope_optimizer else 'IS') + ' scoped, '
+    if not re_enter_scope:
+        description += 'using ORIGINAL scope, '
+    elif re_enter_scope == 'object':
+        description += 're-entering scope with OBJECT, '
+    elif re_enter_scope == 'original_name_scope':
+        description += 're-entering scope with ORIGINAL_NAME_SCOPE, '
+    description += 'variables created with ' + ('tf.get_variable' if use_get_variable else 'tf.Variable')
+    print(description)
+
+    print('\n'.join(['  '+var.name for var in tf.global_variables()]))
+    print()
+
+    tf.reset_default_graph()
+
+
+def main():
+    # Ideally scope everything with re-entered scope, leads to double scoping of gradient variables and having duplicate
+    # scope (with unique name) for Adam optimizer beta power variables
+    inspect(use_get_variable=True, scope_optimizer=True, re_enter_scope='object')
+    # Not scoping optimizer fixes double scoping of RNN variables but leads to having AdamOptimizer beta_powers not
+    # scoped
+    inspect(use_get_variable=True, scope_optimizer=False, re_enter_scope='object')
+    # Using tf.Variable for variable creation when re-entering scope with scope object leads to creation of duplicate
+    # scope (with unique name) for non-RNN variables
+    inspect(use_get_variable=False, scope_optimizer=False, re_enter_scope='object')
+    # Changing scope re-entering method to variable_scope.original_name_scope fixes the problem of duplicate scope
+    # when using tf.Variable for variable creation, but creates additional problem of having double slashes in
+    # scope hierarchy path with RNN variables.
+    inspect(use_get_variable=False, scope_optimizer=False, re_enter_scope='original_name_scope')
+    # Similar problem is observed when using tf.get_variable for variable creation and re-entering scope with
+    # original_name_scope but this time double slashes are observed also with non-RNN variables.
+    inspect(use_get_variable=True, scope_optimizer=False, re_enter_scope='original_name_scope')
+    # Scoping optimizer without re-entering the scope fixes scoping of Adam optimizer beta power variables but does not
+    # fix the problem of having double scopes for RNN variables. However re-entering scopes is desired for OOP.
+    inspect(use_get_variable=False, scope_optimizer=True, re_enter_scope=False)
+    # Using tf.get_variable for variable creation won't help since Optimizer creates variables with tf.Variable and RNN
+    # cells create variables with tf.get_variable, these two methods don't get along
+    inspect(use_get_variable=True, scope_optimizer=True, re_enter_scope=False)
+    # Swapping AdamOptimizer for RMSPropOptimizer fixes the problem with AdamOptimizer's beta power variables
+    inspect(use_get_variable=True, scope_optimizer=False, re_enter_scope='object', optimizer=tf.train.RMSPropOptimizer)
+
+
+if __name__ == '__main__':
+    main()
+outputs
+optimizer IS scoped, re-entering scope with OBJECT, variables created with tf.get_variable
+  scope/w:0
+  scope/rnn/gru_cell/gates/weights:0
+  scope/rnn/gru_cell/gates/biases:0
+  scope/rnn/gru_cell/candidate/weights:0
+  scope/rnn/gru_cell/candidate/biases:0
+  scope_1/beta1_power:0
+  scope_1/beta2_power:0
+  scope/scope/w/Adam:0
+  scope/scope/w/Adam_1:0
+  scope/scope/rnn/gru_cell/gates/weights/Adam:0
+  scope/scope/rnn/gru_cell/gates/weights/Adam_1:0
+  scope/scope/rnn/gru_cell/gates/biases/Adam:0
+  scope/scope/rnn/gru_cell/gates/biases/Adam_1:0
+  scope/scope/rnn/gru_cell/candidate/weights/Adam:0
+  scope/scope/rnn/gru_cell/candidate/weights/Adam_1:0
+  scope/scope/rnn/gru_cell/candidate/biases/Adam:0
+  scope/scope/rnn/gru_cell/candidate/biases/Adam_1:0
+
+optimizer NOT scoped, re-entering scope with OBJECT, variables created with tf.get_variable
+  scope/w:0
+  scope/rnn/gru_cell/gates/weights:0
+  scope/rnn/gru_cell/gates/biases:0
+  scope/rnn/gru_cell/candidate/weights:0
+  scope/rnn/gru_cell/candidate/biases:0
+  beta1_power:0
+  beta2_power:0
+  scope/w/Adam:0
+  scope/w/Adam_1:0
+  scope/rnn/gru_cell/gates/weights/Adam:0
+  scope/rnn/gru_cell/gates/weights/Adam_1:0
+  scope/rnn/gru_cell/gates/biases/Adam:0
+  scope/rnn/gru_cell/gates/biases/Adam_1:0
+  scope/rnn/gru_cell/candidate/weights/Adam:0
+  scope/rnn/gru_cell/candidate/weights/Adam_1:0
+  scope/rnn/gru_cell/candidate/biases/Adam:0
+  scope/rnn/gru_cell/candidate/biases/Adam_1:0
+
+optimizer NOT scoped, re-entering scope with OBJECT, variables created with tf.Variable
+  scope_1/w:0
+  scope/rnn/gru_cell/gates/weights:0
+  scope/rnn/gru_cell/gates/biases:0
+  scope/rnn/gru_cell/candidate/weights:0
+  scope/rnn/gru_cell/candidate/biases:0
+  beta1_power:0
+  beta2_power:0
+  scope_1/w/Adam:0
+  scope_1/w/Adam_1:0
+  scope/rnn/gru_cell/gates/weights/Adam:0
+  scope/rnn/gru_cell/gates/weights/Adam_1:0
+  scope/rnn/gru_cell/gates/biases/Adam:0
+  scope/rnn/gru_cell/gates/biases/Adam_1:0
+  scope/rnn/gru_cell/candidate/weights/Adam:0
+  scope/rnn/gru_cell/candidate/weights/Adam_1:0
+  scope/rnn/gru_cell/candidate/biases/Adam:0
+  scope/rnn/gru_cell/candidate/biases/Adam_1:0
+
+optimizer NOT scoped, re-entering scope with ORIGINAL_NAME_SCOPE, variables created with tf.Variable
+  scope/w:0
+  scope//rnn/gru_cell/gates/weights:0
+  scope//rnn/gru_cell/gates/biases:0
+  scope//rnn/gru_cell/candidate/weights:0
+  scope//rnn/gru_cell/candidate/biases:0
+  beta1_power:0
+  beta2_power:0
+  scope/w/Adam:0
+  scope/w/Adam_1:0
+  scope//rnn/gru_cell/gates/weights/Adam:0
+  scope//rnn/gru_cell/gates/weights/Adam_1:0
+  scope//rnn/gru_cell/gates/biases/Adam:0
+  scope//rnn/gru_cell/gates/biases/Adam_1:0
+  scope//rnn/gru_cell/candidate/weights/Adam:0
+  scope//rnn/gru_cell/candidate/weights/Adam_1:0
+  scope//rnn/gru_cell/candidate/biases/Adam:0
+  scope//rnn/gru_cell/candidate/biases/Adam_1:0
+
+optimizer NOT scoped, re-entering scope with ORIGINAL_NAME_SCOPE, variables created with tf.get_variable
+  scope//w:0
+  scope//rnn/gru_cell/gates/weights:0
+  scope//rnn/gru_cell/gates/biases:0
+  scope//rnn/gru_cell/candidate/weights:0
+  scope//rnn/gru_cell/candidate/biases:0
+  beta1_power:0
+  beta2_power:0
+  scope//w/Adam:0
+  scope//w/Adam_1:0
+  scope//rnn/gru_cell/gates/weights/Adam:0
+  scope//rnn/gru_cell/gates/weights/Adam_1:0
+  scope//rnn/gru_cell/gates/biases/Adam:0
+  scope//rnn/gru_cell/gates/biases/Adam_1:0
+  scope//rnn/gru_cell/candidate/weights/Adam:0
+  scope//rnn/gru_cell/candidate/weights/Adam_1:0
+  scope//rnn/gru_cell/candidate/biases/Adam:0
+  scope//rnn/gru_cell/candidate/biases/Adam_1:0
+
+optimizer IS scoped, using ORIGINAL scope, variables created with tf.Variable
+  scope/w:0
+  scope/rnn/gru_cell/gates/weights:0
+  scope/rnn/gru_cell/gates/biases:0
+  scope/rnn/gru_cell/candidate/weights:0
+  scope/rnn/gru_cell/candidate/biases:0
+  scope/beta1_power:0
+  scope/beta2_power:0
+  scope/scope/w/Adam:0
+  scope/scope/w/Adam_1:0
+  scope/scope/rnn/gru_cell/gates/weights/Adam:0
+  scope/scope/rnn/gru_cell/gates/weights/Adam_1:0
+  scope/scope/rnn/gru_cell/gates/biases/Adam:0
+  scope/scope/rnn/gru_cell/gates/biases/Adam_1:0
+  scope/scope/rnn/gru_cell/candidate/weights/Adam:0
+  scope/scope/rnn/gru_cell/candidate/weights/Adam_1:0
+  scope/scope/rnn/gru_cell/candidate/biases/Adam:0
+  scope/scope/rnn/gru_cell/candidate/biases/Adam_1:0
+
+optimizer IS scoped, using ORIGINAL scope, variables created with tf.get_variable
+  scope/w:0
+  scope/rnn/gru_cell/gates/weights:0
+  scope/rnn/gru_cell/gates/biases:0
+  scope/rnn/gru_cell/candidate/weights:0
+  scope/rnn/gru_cell/candidate/biases:0
+  scope/beta1_power:0
+  scope/beta2_power:0
+  scope/scope/w/Adam:0
+  scope/scope/w/Adam_1:0
+  scope/scope/rnn/gru_cell/gates/weights/Adam:0
+  scope/scope/rnn/gru_cell/gates/weights/Adam_1:0
+  scope/scope/rnn/gru_cell/gates/biases/Adam:0
+  scope/scope/rnn/gru_cell/gates/biases/Adam_1:0
+  scope/scope/rnn/gru_cell/candidate/weights/Adam:0
+  scope/scope/rnn/gru_cell/candidate/weights/Adam_1:0
+  scope/scope/rnn/gru_cell/candidate/biases/Adam:0
+  scope/scope/rnn/gru_cell/candidate/biases/Adam_1:0
+
+optimizer NOT scoped, re-entering scope with OBJECT, variables created with tf.get_variable
+  scope/w:0
+  scope/rnn/gru_cell/gates/weights:0
+  scope/rnn/gru_cell/gates/biases:0
+  scope/rnn/gru_cell/candidate/weights:0
+  scope/rnn/gru_cell/candidate/biases:0
+  scope/w/RMSProp:0
+  scope/w/RMSProp_1:0
+  scope/rnn/gru_cell/gates/weights/RMSProp:0
+  scope/rnn/gru_cell/gates/weights/RMSProp_1:0
+  scope/rnn/gru_cell/gates/biases/RMSProp:0
+  scope/rnn/gru_cell/gates/biases/RMSProp_1:0
+  scope/rnn/gru_cell/candidate/weights/RMSProp:0
+  scope/rnn/gru_cell/candidate/weights/RMSProp_1:0
+  scope/rnn/gru_cell/candidate/biases/RMSProp:0
+  scope/rnn/gru_cell/candidate/biases/RMSProp_1:0
+
+Workaround for clean scoping is to create optimizer op outside of the variable scope and using eg. RMSPropOptimizer. However this is confusing behaviour, ideally everything should be able to be scoped. Unfortunately there is nothing to get variable names clean when using AdamOptimizer. AdamOptimizer creates variables for beta powers with tf.Variable.
+All of the mentioned problems would probably be fixed by using tf.get_variable everywhere. Until (and if) this change happens users should be instructed to use tf.get_variable only, creating optimizer outside of variable scope and avoid using AdamOptimizer if clean scoping is desired. Double scoping of RNN gradient variables would be tolerable but having several nested classes implementing different models with their own variable scopes lead to extremely messy variable names making debugging more difficult.
+Tested on Ubuntu 16.04 with Tensorflow 1.0.0 installed with pip.
+Related issues:
+#5786
+#6189
+#6007

@@ -1,0 +1,85 @@
+ValueError: Initializer for variable cudnn_gru/opaque_kernel/ is from inside a control-flow construct, such as a loop or conditional. When creating a variable inside a loop or conditional, use a lambda as the initializer.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution: Ubuntu 16.04
+TensorFlow installed from: Binary
+TensorFlow version: 1.5.0
+Python version: 3.5.2
+Bazel version: Not compiled from source
+GCC/Compiler version: Not compiled from source
+CUDA/cuDNN version: 9.0/7
+GPU model and memory: NVIDIA GTX 1080 8GB x 4
+Exact command to reproduce: Code as below
+
+I have been trying to use a for-loop with tf.cond applied on cudnn_gru to run multiple times on inputs, and the minimum error reproducible code is as below:
+import tensorflow as tf
+max_para = tf.placeholder(tf.int32)
+num_units = 150
+inputs = tf.placeholder(tf.float32,shape=[15,8,num_units])
+class cudnn_gru:
+	def __init__(self):
+		self.gru_fw = tf.contrib.cudnn_rnn.CudnnGRU(1, num_units, 
+						kernel_initializer=tf.random_normal_initializer(stddev=0.1))
+	def __call__(self,inputs):
+		out_fw, _ = self.gru_fw(inputs)
+
+class cudnn_gru2:
+	def __init__(self):
+		self.gru_fw = tf.contrib.cudnn_rnn.CudnnGRU(1, num_units-1, 
+						kernel_initializer=tf.random_normal_initializer(stddev=0.1))
+	def __call__(self,inputs):
+		out_fw, _ = self.gru_fw(inputs)
+
+def get_output():
+	gru = cudnn_gru()
+	out = gru(inputs)
+	return tf.constant(1)
+
+def get_output2():
+	gru = cudnn_gru2()
+	out = gru(inputs)
+	return tf.constant(2)
+
+for i in range(3):
+	i_ = tf.constant(i)
+	out = tf.cond(i_<max_para,get_output,get_output2)
+
+The error stacktrace is as follows:
+Traceback (most recent call last):
+  File "temp.py", line 31, in <module>
+    out = tf.cond(i_<max_para,get_output,get_output2)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/util/deprecation.py", line 316, in new_func
+    return func(*args, **kwargs)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1894, in cond
+    orig_res_t, res_t = context_t.BuildCondBranch(true_fn)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1752, in BuildCondBranch
+    original_result = fn()
+  File "temp.py", line 21, in get_output
+    out = gru(inputs)
+  File "temp.py", line 10, in __call__
+    out_fw, _ = self.gru_fw(inputs)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/layers/base.py", line 636, in __call__
+    self.build(input_shapes)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/contrib/cudnn_rnn/python/layers/cudnn_rnn.py", line 357, in build
+    "opaque_kernel", initializer=opaque_params_t, validate_shape=False)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 1262, in get_variable
+    constraint=constraint)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 1097, in get_variable
+    constraint=constraint)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 427, in get_variable
+    return custom_getter(**custom_getter_kwargs)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/contrib/cudnn_rnn/python/layers/cudnn_rnn.py", line 290, in _update_trainable_weights
+    variable = getter(*args, **kwargs)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 404, in _true_getter
+    use_resource=use_resource, constraint=constraint)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 806, in _get_single_variable
+    constraint=constraint)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/ops/variables.py", line 229, in __init__
+    constraint=constraint)
+  File "/home/search/snetP/virtual_bhavya/lib/python3.5/site-packages/tensorflow/python/ops/variables.py", line 342, in _init_from_args
+    "initializer." % name)
+ValueError: Initializer for variable cudnn_gru/opaque_kernel/ is from inside a control-flow construct, such as a loop or conditional. When creating a variable inside a loop or conditional, use a lambda as the initializer.
+
+How can I achieve this without causing compilation error during model building?

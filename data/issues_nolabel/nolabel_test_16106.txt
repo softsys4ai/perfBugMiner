@@ -1,0 +1,64 @@
+Eager: Invalid placement of vars/consts depending on their types and not the tf.device
+
+Hi,
+I'm currently testing eager execution on TF 1.5.0-rc1 (built it with XLA and CUDA enabled) and observe strange behavior: variables and constants get created either on GPU or CPU depending on their types, and not with tf.device(...): block. Moreover, on creation of int32 variable it fails completely. For example, when I run the following code
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+
+tfe.enable_eager_execution()
+
+print('TensorFlow version:', tf.__version__)
+
+with tf.device('/gpu:0'):
+    A = tf.constant([1.0, 2.0, 3.0], dtype=tf.float32)
+    print('Const A is placed on:', A.device)
+
+    B = tf.constant([1, 2, 3], dtype=tf.int32)
+    print('Const B is placed on:', B.device)
+
+    C = tfe.Variable([1.0, 2.0, 3.0], dtype=tf.float32)
+    print('Variable C is placed on:', C.device)
+
+    D = tfe.Variable([1, 2, 3], dtype=tf.int32)
+    print('Variable D is placed on:', D.device)
+
+I get the following output:
+TensorFlow version: 1.5.0-rc1
+2018-01-14 01:16:06.385929: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:895] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2018-01-14 01:16:06.386198: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1105] Found device 0 with properties:
+name: GeForce GTX 1080 Ti major: 6 minor: 1 memoryClockRate(GHz): 1.582
+pciBusID: 0000:01:00.0
+totalMemory: 10.91GiB freeMemory: 363.06MiB
+2018-01-14 01:16:06.386223: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1195] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 1080 Ti, pci bus id: 0000:01:00.0, compute capability: 6.1)
+Const A is placed on: /job:localhost/replica:0/task:0/device:GPU:0
+Const B is placed on: CPU:0
+Variable C is placed on: /job:localhost/replica:0/task:0/device:GPU:0
+Traceback (most recent call last):
+  File "tf_bug.py", line 18, in <module>
+    D = tfe.Variable([1, 2, 3], dtype=tf.int32)
+  File "/home/kpot/pyves/lib/python3.6/site-packages/tensorflow/python/ops/resource_variable_ops.py", line 277, in __init__
+    constraint=constraint)
+  File "/home/kpot/pyves/lib/python3.6/site-packages/tensorflow/python/ops/resource_variable_ops.py", line 422, in _init_from_args
+    graph_mode=self._in_graph_mode)
+  File "/home/kpot/pyves/lib/python3.6/site-packages/tensorflow/python/ops/resource_variable_ops.py", line 53, in _eager_safe_variable_handle
+    container=container)
+  File "/home/kpot/pyves/lib/python3.6/site-packages/tensorflow/python/ops/gen_resource_variable_ops.py", line 396, in var_handle_op
+    attrs=_attrs, ctx=_ctx, name=name)
+  File "/home/kpot/pyves/lib/python3.6/site-packages/tensorflow/python/eager/execute.py", line 66, in quick_execute
+    six.raise_from(core._status_to_exception(e.code, message), None)
+  File "<string>", line 3, in raise_from
+tensorflow.python.framework.errors_impl.NotFoundError: No registered 'VarHandleOp' OpKernel for GPU devices compatible with node VarHandleOp = VarHandleOp[container="eager-execution-2/", dtype=DT_INT32, shape=[3], shared_name="11"]()
+	 (OpKernel was found, but attributes didn't match)
+	.  Registered:  device='GPU'; dtype in [DT_VARIANT]
+  device='GPU'; dtype in [DT_COMPLEX128]
+  device='GPU'; dtype in [DT_COMPLEX64]
+  device='GPU'; dtype in [DT_BOOL]
+  device='GPU'; dtype in [DT_DOUBLE]
+  device='GPU'; dtype in [DT_FLOAT]
+  device='GPU'; dtype in [DT_HALF]
+  device='CPU'
+  device='XLA_GPU'
+  device='XLA_CPU'
+ [Op:VarHandleOp] name: Variable/
+
+As you can see, the constants and variables get placed either on GPU:0 or CPU:0 despite all of them gathered inside the same tf.device('/gpu:0') block.

@@ -1,0 +1,87 @@
+ValueError: At least one of the merge inputs is None
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes, it is my code that does not work as expected.
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04.1 LTS
+
+
+TensorFlow installed from (source or binary):
+Source.
+
+
+TensorFlow version (use command below):
+('v1.2.1-0-gb4957ff', '1.2.1')
+
+
+Python version:
+2.7.12
+
+
+Bazel version (if compiling from source):
+Build label: 0.4.5
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Mar 16 12:19:38 2017 (1489666778)
+Build timestamp: 1489666778
+Build timestamp as int: 1489666778
+
+
+CUDA/cuDNN version:
+5
+
+
+GPU model and memory:
+GTX 1080, 8GB.
+
+
+Exact command to reproduce:
+See below.
+
+
+Describe the problem
+The code below crashes with the error shown below, although I see no reason why it should not work fine.
+Source code / logs
+$ cat test.py
+import tensorflow as tf
+
+with tf.Graph().as_default():
+    values = tf.get_variable(name='foo', shape=[13])
+    some_values = tf.boolean_mask(values, tf.cast(values, tf.bool))
+    
+    k = tf.minimum(42, tf.shape(some_values)[0])
+    
+    top_values = tf.cond(
+        k > 0,
+        lambda: tf.nn.top_k(some_values, k=k).values,
+        lambda: tf.zeros(shape=[0])
+    )
+
+    loss = tf.reduce_sum(top_values)
+    
+    optimizer = tf.train.MomentumOptimizer(1e-3, 0.9)
+    train_op = tf.contrib.training.create_train_op(loss, optimizer)
+
+$ python test.py
+Traceback (most recent call last):
+  File "test.py", line 18, in <module>
+    train_op = tf.contrib.training.create_train_op(loss, optimizer)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/training/python/training/training.py", line 439, in create_train_op
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 386, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients_impl.py", line 540, in gradients
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients_impl.py", line 346, in _MaybeCompile
+    return grad_fn()  # Exit early
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients_impl.py", line 540, in <lambda>
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_grad.py", line 75, in _SwitchGrad
+    return merge([good_grad, zero_grad], name="cond_grad")[0], None
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 396, in merge
+    raise ValueError("At least one of the merge inputs is None: %s" % inputs)
+ValueError: At least one of the merge inputs is None: [<tf.Tensor 'gradients/cond/TopKV2_grad/tuple/control_dependency_1:0' shape=() dtype=int32>, None]

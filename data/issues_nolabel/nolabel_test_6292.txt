@@ -1,0 +1,34 @@
+Squeeze dimension in compute_weighted_loss()
+
+Operating System: Debian Jessy. CUDA8, CuDNN v5.1. TF 0.12rc0
+I am training a CNN for semantic image labeling task and use an FCN-style architecture. In one of the prediction layers I compute weighted loss. The prediction tensor is of dimensions [1, Height, Width, num_predictions] and weight tensor is [1, Height, Width], batch size is always 1 for me. Training fails on this piece of code:
+https://github.com/tensorflow/tensorflow/blob/master/tensorflow/contrib/losses/python/losses/loss_ops.py#L178-L179
+  File "/BS/eldar/work/src/pose-tf/train_net.py", line 30, in <module>
+    losses = pose_net_train(train_param, batch)
+  File "/BS/eldar/work/src/pose-tf/PoseNet.py", line 108, in pose_net_train
+    loss['locref_loss'] = loss_func(locref_pred, locref_targets, locref_weights)
+  File "/BS/eldar/work/src/pose-tf/losses.py", line 39, in huber_loss
+    return tf_losses.compute_weighted_loss(losses, weight)
+  File "/BS/eldar/work/software/python3_tf_0.12/lib/python3.4/site-packages/tensorflow/python/util/deprecation.py", line 191, in new_func
+    return func(*args, **kwargs)
+  File "/BS/eldar/work/software/python3_tf_0.12/lib/python3.4/site-packages/tensorflow/contrib/losses/python/losses/loss_ops.py", line 176, in compute_weighted_loss
+    weights = array_ops.squeeze(weights, [-1])
+  File "/BS/eldar/work/software/python3_tf_0.12/lib/python3.4/site-packages/tensorflow/python/ops/array_ops.py", line 2258, in squeeze
+    return gen_array_ops._squeeze(input, axis, name)
+  File "/BS/eldar/work/software/python3_tf_0.12/lib/python3.4/site-packages/tensorflow/python/ops/gen_array_ops.py", line 3313, in _squeeze
+    squeeze_dims=squeeze_dims, name=name)
+  File "/BS/eldar/work/software/python3_tf_0.12/lib/python3.4/site-packages/tensorflow/python/framework/op_def_library.py", line 759, in apply_op
+    op_def=op_def)
+  File "/BS/eldar/work/software/python3_tf_0.12/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 2240, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/BS/eldar/work/software/python3_tf_0.12/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 1128, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Tried to explicitly squeeze dimension 2 but dimension was not 1: 24
+         [[Node: absolute_difference/Squeeze = Squeeze[T=DT_FLOAT, squeeze_dims=[-1], _device="/job:localhost/replica:0/task:0/gpu:0"](fifo_queue_Dequeue/_1045)]]
+         [[Node: Momentum/update/_1080 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor
+_name="edge_4872_Momentum/update", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+My assumption is that it squeezes the dummy dimension that corresponds to the batch size=1, while it clearly shouldn't. For now I just comment out these two lines in the code, but it'd be nicer if there was a fix upstream.
+Cheers,
+Eldar.

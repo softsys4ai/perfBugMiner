@@ -1,0 +1,42 @@
+libcuda suffix issue
+
+For bugs/issues, please fill in the following.  The more information you
+provide, the more likely we can help you.
+Environment info
+Operating System: Centos 7
+Cuda 7.5, cuDNN v4
+If installed from sources, provide the commit hash: 99813c2
+Steps to reproduce
+
+Followed "Installing from sources" instructions
+./configure - run and cuda version explicitly set to 7.5
+bazel build -c opt --config=cuda //tensorflow/cc:tutorials_example_trainer - runs without issue
+bazel-bin/tensorflow/cc/tutorials_example_trainer --use_gpu - fails (relevant log below) due to an attempt to load libcuda.so.7.5 via tensorflow/stream_executor/dso_loader.cc.
+
+What have you tried?
+
+Attempting to create a symbolic link of libcuda.so.7.5 pointing at libcuda.so did not work.
+Editing tensorflow/stream_executor/dso_loader.cc line 99 from:
+
+/* static */ port::Status DsoLoader::GetLibcudaDsoHandle(void** dso_handle) {
+  return GetDsoHandle(FindDsoPath("libcuda.so" + GetCudaVersion(),
+                                  "third_party/gpus/cuda/driver/lib64"),
+                      dso_handle);
+}
+to
+/* static */ port::Status DsoLoader::GetLibcudaDsoHandle(void** dso_handle) {
+  return GetDsoHandle(FindDsoPath("libcuda.so", // + GetCudaVersion(),
+                                  "third_party/gpus/cuda/driver/lib64"),
+                      dso_handle);
+}
+fixed the issue.
+3. This naming convention issue also appears to be the case on Ubuntu 14.04 - but I have not attempted to rebuilt everything there.
+Logs or other output that would be helpful
+[tensorflow]$ bazel-bin/tensorflow/cc/tutorials_example_trainer --use_gpu
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so.7.5 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so.7.5 locally
+I tensorflow/stream_executor/dso_loader.cc:99] Couldn't open CUDA library libcuda.so.7.5. LD_LIBRARY_PATH:
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:121] hostname: ---
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:146] libcuda reported version is: Not found: was unable to find libcuda.so DSO loaded into this program
+...

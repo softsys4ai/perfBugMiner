@@ -1,0 +1,205 @@
+Request genuine consecutive scheme batch generation for RNN Trainning
+
+The concept of “genuine consecutive scheme ” can be seen at here(5.4. Batch).
+My scenario is as follows:
+I have some files with different sequence lengths.
+First, do buckecting to generate file-batches with parameter batch_size
+Then, split each  file-batch with parameter seq_len to generate trainning sample-batches
+Last, use each sample-batch for one step of trainning.
+Following is my test code:
+# -*- coding:utf8 -*-
+
+import os
+import time
+import random
+import tensorflow as tf
+from tensorflow.contrib.training import bucket_by_sequence_length, batch_sequences_with_states
+
+
+context_features = {
+    "length": tf.FixedLenFeature([], dtype=tf.int64)
+}
+
+sequence_features = {
+            "inputs": tf.FixedLenSequenceFeature([], dtype=tf.int64),
+}
+
+def GenerateFakeData():
+    FILE_NUM = 100
+    DATA_PATH = "test_dataset"
+    file_path_list, file_len_list = [], []
+    for idx in range(FILE_NUM):
+        filename = "{fileno}-of-{idx}".format(idx=idx+1, fileno=FILE_NUM)
+        token_length = random.randint(50, 100)
+        ex = tf.train.SequenceExample()
+        ex.context.feature["length"].int64_list.value.append(token_length)
+        ###########################################
+        ex_tokens = ex.feature_lists.feature_list["inputs"]
+        for tok in range(token_length):
+            ex_tokens.feature.add().int64_list.value.append(tok)
+        with tf.python_io.TFRecordWriter(os.path.join(DATA_PATH, filename) + ".tfrecord") as filew:
+            filew.write(ex.SerializeToString())
+        file_len_list.append(token_length)
+        file_path_list.append(os.path.join(DATA_PATH, filename) + ".tfrecord")
+    with open("filelist.txt", "w") as filew:
+        for file_name, file_len in zip(file_path_list, file_len_list):
+            filew.write("{fn}\t{fl}\n".format(fn=os.path.join(file_name), fl=file_len))
+
+def LoadFileList(filepath):
+    with open(filepath, "r") as filer:
+        wfilelist, wfilelengthlist = tuple(zip(*[tuple(line.strip().split("\t")) for line in filer if line.strip() != ""]))
+        return list(wfilelist), [int(item) for item in wfilelengthlist]
+
+        
+def InputProducer():
+    batch_size = 2
+    seq_len = 75
+    state_size = 1024
+    bucket_boundaries = [60, 70, 80, 90]
+    #####################################
+    filelist, filelengthlist = LoadFileList("filelist.txt")
+    #####################################
+    tf_file_queue = tf.train.string_input_producer(
+            string_tensor = filelist, 
+            num_epochs = 1, 
+            shuffle = False, 
+            seed = None, 
+            capacity = 32, 
+            shared_name = None,
+            name = "tf_file_queue",
+            cancel_op=None
+    )
+    ######################################
+    tf_reader = tf.TFRecordReader()
+    tf_key, tf_serialized = tf_reader.read(tf_file_queue)
+    tf_context, tf_sequence = tf.parse_single_sequence_example(
+            serialized = tf_serialized,
+            context_features = context_features,
+            sequence_features = sequence_features
+    )
+    ######################################
+    tf_bucket_sequence_length, tf_bucket_outputs = bucket_by_sequence_length(
+        input_length = tf.cast(tf_context["length"], dtype=tf.int32), 
+        tensors = tf_sequence, 
+        batch_size = batch_size, 
+        bucket_boundaries = bucket_boundaries, 
+        num_threads=1, 
+        capacity=32, 
+        shapes=None, 
+        dynamic_pad=True,
+        allow_smaller_final_batch=False, 
+        keep_input=True, 
+        shared_name=None, 
+        name="bucket_files"
+    )
+    #######################################
+    tf_bbucket_outputs = {}
+    for fkey in tf_bucket_outputs:
+        tf_bbucket_outputs[fkey]=tf_bucket_outputs[fkey][0]
+    #######################################
+    # Solution 1:
+    tf_fb_key=time.strftime('%Y-%m-%d-%H-%M-%S',time.localtime(time.time())) + str(random.randint(1,100000000))
+    initial_state_values = tf.zeros((state_size,), dtype=tf.float32)
+    initial_states = {"lstm_state": initial_state_values}
+    tf_batch=batch_sequences_with_states(
+        input_key = tf_fb_key, 
+        input_sequences = tf_bbucket_outputs, 
+        input_context = {}, 
+        input_length = tf.reduce_max(tf_bucket_sequence_length), 
+        initial_states=initial_states, 
+        num_unroll=seq_len, 
+        batch_size=batch_size, 
+        num_threads=3, 
+        capacity=1000, 
+        allow_small_batch=False, 
+        pad=True, 
+        name=None)
+    #######################################
+    # Solution 2:
+    '''
+    tf_index_queue=tf.train.range_input_producer(
+        limit=tf.reduce_max(tf_bucket_sequence_length),
+        num_epochs=1, 
+        shuffle=False, 
+        seed=None, 
+        capacity=32, 
+        shared_name=None, 
+        name=None
+    )
+    tf_index=tf_index_queue.dequeue()
+    tf_batch=tf_bbucket_outputs["inputs"][tf_index]
+    '''
+    #######################################
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        sess.run(tf.local_variables_initializer())
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess, coord)
+        try:
+            while True:
+                #####################################
+                # Test Bucketing
+                #bucket_sequence_length, bucket_outputs = sess.run([tf_bucket_sequence_length, tf_bucket_outputs])
+                #print(bucket_sequence_length)
+                #print(bucket_outputs)
+                #print("#################")
+                #####################################
+                # Test Solution 1:
+                batch = sess.run(tf_batch)
+                print(batch)
+                #####################################
+                # Test Solution 2:
+                #bucket_sequence_length, bucket_outputs, index = sess.run([tf_bucket_sequence_length, tf_bucket_outputs, tf_index])
+                #print(bucket_sequence_length)
+                #print(bucket_outputs)
+                #print(index)
+                #print("#################")
+        except tf.errors.OutOfRangeError:
+            pass
+        except tf.errors.InvalidArgumentError:
+            pass
+        finally:
+            coord.request_stop()
+        coord.join(threads)
+    
+if __name__ == "__main__":
+    #GenerateFakeData()
+    InputProducer()
+    pass
+
+With Solution 1, I raised the error as below:
+Traceback (most recent call last):
+  
+    File "/home/yangming/workspace/tfstudy-3.5.3-tf-1.1.0/BatchSchemas/make_test_dataset.py", line 157, in <module>
+    
+InputProducer()
+  
+    File "/home/yangming/workspace/tfstudy-3.5.3-tf-1.1.0/BatchSchemas/make_test_dataset.py", line 107, in InputProducer
+    
+name=None)
+  
+    File "/home/yangming/.pyenv/versions/tfstudy-3.5.3/lib/python3.5/site-packages/tensorflow/contrib/training/python/training/sequence_queueing_state_saver.py", line 1522, in batch_sequences_with_states
+    
+allow_small_batch=allow_small_batch)
+  
+    File "/home/yangming/.pyenv/versions/tfstudy-3.5.3/lib/python3.5/site-packages/tensorflow/contrib/training/python/training/sequence_queueing_state_saver.py", line 849, in __init__
+    
+initial_states)
+  
+    File "/home/yangming/.pyenv/versions/tfstudy-3.5.3/lib/python3.5/site-packages/tensorflow/contrib/training/python/training/sequence_queueing_state_saver.py", line 332, in _prepare_sequence_inputs
+    
+"sequence", inputs.sequences, ignore_first_dimension=True)
+  
+    File "/home/yangming/.pyenv/versions/tfstudy-3.5.3/lib/python3.5/site-packages/tensorflow/contrib/training/python/training/sequence_queueing_state_saver.py", line 326, in _assert_fully_defined
+    
+ignore_first_dimension else "", v.get_shape()))
+ValueError: Shape for sequence inputs is not fully defined (ignoring first dimension): (?, ?)
+
+See the document of batch_sequences_with_states, I found that
+
+it seems only support only one sequence and don't support multiple sequences .
+it don't support the situation of Shape for sequence inputs is not fully defined, which means bucket_by_sequence_length can not be followed with batch_sequences_with_states.
+
+What more, I have tried Solution 2, but I failed because of thread synchronization problem between tf.train.string_input_producer and tf.train.range_input_producer.
+So, how to relize my request ?
+Hope for your help.

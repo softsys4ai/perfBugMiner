@@ -1,0 +1,67 @@
+TypeError: int() argument must be a string, a bytes-like object or a number, not 'Tensor'
+
+System information
+
+Have I written custom code: Yes
+OS Platform and Distribution: Ubuntu 16.04
+TensorFlow installed from: binary
+TensorFlow version: 1.4.1
+Python version: 3.5.2
+Bazel version: Not compiled from source
+GCC/Compiler version: Not compiled from source
+CUDA/cuDNN version: 8.0
+GPU model and memory: GeForce GTX 1080 (8GB x 4)
+Exact command to reproduce: N/A
+
+I'm trying to convert a the initializer form from tf.Variable to tf.get_variable for Cudnn_GRU but I keep getting this error. I have to convert because tensorflow does not allow initializing in loop/control-flow functions and only allow lambda initializers or through tf.get_variable
+I have reduced the problem into the following minimal example:
+import tensorflow as tf
+e = tf.random_uniform_initializer(-0.1, 0.1)
+i = tf.constant(0)
+def func():
+    gru_fw = tf.contrib.cudnn_rnn.CudnnGRU(num_layers=1, num_units=75, input_size=25)
+    # original line: commented out and working if not under a control flow mechanism
+    # param_fw = tf.Variable(tf.random_uniform([gru_fw.params_size()], -0.1, 0.1), validate_shape=False)
+    # converted line
+    param_fw = tf.get_variable("abcd", shape=[gru_fw.params_size()],initializer=e, validate_shape=False)
+    return param_fw
+
+def func2():
+    ### repeat the same thing from func1
+    pass
+
+result = tf.cond(tf.equal(i, tf.constant(0)),func,func2)
+
+The traceback is as follows:
+Traceback (most recent call last):
+	File "test_run_error.py", line 16, in <module>
+		result = tf.cond(tf.equal(i, tf.constant(0)),func,func2)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/util/deprecation.py", line 316, in new_func
+		return func(*args, **kwargs)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1855, in cond
+		orig_res_t, res_t = context_t.BuildCondBranch(true_fn)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1725, in BuildCondBranch
+		original_result = fn()
+	File "test_run_error.py", line 9, in func
+		param_fw = tf.get_variable("abcd", shape=[gru_fw.params_size()],initializer=e, validate_shape=False)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 1203, in get_variable
+		constraint=constraint)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 1092, in get_variable
+		constraint=constraint)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 425, in get_variable
+		constraint=constraint)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 394, in _true_getter
+		use_resource=use_resource, constraint=constraint)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 730, in _get_single_variable
+		shape = tensor_shape.as_shape(shape)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/framework/tensor_shape.py", line 849, in as_shape
+		return TensorShape(shape)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/framework/tensor_shape.py", line 455, in __init__
+		self._dims = [as_dimension(d) for d in dims_iter]
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/framework/tensor_shape.py", line 455, in <listcomp>
+		self._dims = [as_dimension(d) for d in dims_iter]
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/framework/tensor_shape.py", line 397, in as_dimension
+		return Dimension(value)
+	File "/home/search/snetP/snet/lib/python3.5/site-packages/tensorflow/python/framework/tensor_shape.py", line 32, in __init__
+		self._value = int(value)
+TypeError: int() argument must be a string, a bytes-like object or a number, not 'Tensor'

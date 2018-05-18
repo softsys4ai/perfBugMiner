@@ -1,0 +1,236 @@
+S3 Checkpointing fails with large graphs
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): tensorflow/tensorflow:1.4.0 container running on Amazon Linux
+TensorFlow installed from (source or binary): Used tensorflow/tensorflow:1.4.0 image
+TensorFlow version (use command below): ('v1.4.0-rc1-11-g130a514', '1.4.0')
+Python version: 2.7.12
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:
+
+
+Exported AWS credentials to environment variables
+docker run -it --rm -p 8888:8888 -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN tensorflow/tensorflow:1.4.0
+Opened Jupyter UI in browser at localhost:8888
+Pasted code below in a new notebook, modified checkpoint_s3_dir variable to point to my S3 bucket, and ran it:
+
+# Replace with a bucket that you have write access to
+checkpoint_s3_dir = 's3://<your_bucket>/checkpoint_testing'
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.python.keras.layers import Dense, LSTM
+from tensorflow.python.estimator.model_fn import ModeKeys
+from tensorflow.contrib.learn import RunConfig
+
+# I don't believe the specifics of how my Estimator is configured are important;
+# this is a toy example similar to the code where we encountered the problem.
+# By varying the embedding dimension used, we can easily generate a graph
+# large enough to trigger this problem.
+
+WINDOW_SIZE = 7
+BATCH_SIZE = 128
+MAX_VOCAB_SIZE = 100000
+HIDDEN_DIM = 512
+NUM_CLASSES = 2
+NUM_PARTITIONS = 10
+
+def partitioned_embeddings(embedding_dim):    
+    # Randomly generate embedding
+    emb = np.random.rand(MAX_VOCAB_SIZE, embedding_dim).astype(np.float32)
+    partitioned_embeddings = []
+    for i in range(NUM_PARTITIONS):
+        partitioned_embeddings.append(tf.constant(emb[i::NUM_PARTITIONS]))
+
+    return partitioned_embeddings
+
+def model_fn(features, labels, mode, params):
+    emb_parts = partitioned_embeddings(params['embedding_dim'])
+    embedded_vectors = tf.nn.embedding_lookup(params=emb_parts, ids=features['inputs'],
+                                          name='embedding_lookup', partition_strategy='mod')
+    l = LSTM(HIDDEN_DIM)(embedded_vectors)
+    layers = Dense(NUM_CLASSES, activation='sigmoid')(l)
+
+    global_step = tf.train.get_or_create_global_step()
+    
+    optimizer = tf.train.AdamOptimizer()
+    loss = tf.losses.sigmoid_cross_entropy(multi_class_labels=labels, logits=layers)
+    train_op = optimizer.minimize(loss, global_step=global_step)
+    
+    return tf.estimator.EstimatorSpec(ModeKeys.TRAIN, loss=loss, train_op=train_op)
+
+def train(embedding_dim, model_dir=None):
+    # Generate random training data
+    word_ids = np.random.randint(0, high=MAX_VOCAB_SIZE, size=(BATCH_SIZE * 10, WINDOW_SIZE),
+                             dtype=np.int32)
+    # Generate random labels
+    labels = np.random.randint(0, high=NUM_CLASSES, size=(BATCH_SIZE * 10, NUM_CLASSES), dtype=np.int32)
+    
+    input_fn = tf.estimator.inputs.numpy_input_fn(x={'inputs': word_ids}, y=labels, batch_size=BATCH_SIZE,
+                                              shuffle=False)
+    
+    estimator = tf.estimator.Estimator(model_fn=model_fn, params={'embedding_dim': embedding_dim},
+                                       config=RunConfig(model_dir=model_dir))
+    estimator.train(input_fn=input_fn)
+
+# Embedding dimension = 5 succeeds
+train(5, model_dir=checkpoint_s3_dir + '/dim_5')
+# Embedding dimension = 500 fails during checkpointing to S3
+train(500, model_dir=checkpoint_s3_dir + '/dim_500')
+
+Describe the problem
+I believe this is a TensorFlow Bug.
+My example code, which trains using an Estimator and checkpoints to an S3 bucket I own, succeeds when the graph it produces is small, but fails during checkpointing when I increase the embedding_dimension variable. Everything else should be the same, so I suspect file sizes are the issue.
+I've dug into this a bit and my guess is that when the graph size gets too large, the S3 operations time out during checkpointing due to the default client-side timeout on the AWS C++ S3 SDK. That issue is described here: https://stackoverflow.com/questions/38647444/aws-c-s3-sdk-putobjectrequest-unable-to-connect-to-endpoint
+The S3 file system currently uses the default timeout: 
+  
+    
+      tensorflow/tensorflow/core/platform/s3/s3_file_system.cc
+    
+    
+         Line 513
+      in
+      b3d5ec9
+    
+    
+    
+    
+
+        
+          
+           Aws::S3::S3Client s3Client(GetDefaultClientConfig()); 
+        
+    
+  
+
+
+Which is 3 seconds:
+https://sdk.amazonaws.com/cpp/api/0.12.9/df/d19/struct_aws_1_1_client_1_1_client_configuration.html#a68c35ac8d14619e4bfc77d848fd89473
+Source code / logs
+Example code above.
+Full output is below:
+INFO:tensorflow:Using config: {'_model_dir': 's3://sagemaker-826912895975/checkpoint_testing/dim_5', '_save_checkpoints_secs': 600, '_num_ps_replicas': 0, '_keep_checkpoint_max': 5, '_session_config': None, '_tf_random_seed': None, '_task_type': None, '_environment': 'local', '_is_chief': True, '_cluster_spec': <tensorflow.python.training.server_lib.ClusterSpec object at 0x7f6ad8212510>, '_tf_config': gpu_options {
+  per_process_gpu_memory_fraction: 1.0
+}
+, '_num_worker_replicas': 0, '_task_id': 0, '_save_summary_steps': 100, '_save_checkpoints_steps': None, '_evaluation_master': '', '_keep_checkpoint_every_n_hours': 10000, '_master': '', '_log_step_count_steps': 100}
+INFO:tensorflow:Create CheckpointSaverHook.
+INFO:tensorflow:Saving checkpoints for 1 into s3://sagemaker-826912895975/checkpoint_testing/dim_5/model.ckpt.
+INFO:tensorflow:loss = 0.733852, step = 1
+INFO:tensorflow:Saving checkpoints for 10 into s3://sagemaker-826912895975/checkpoint_testing/dim_5/model.ckpt.
+INFO:tensorflow:Loss for final step: 0.693191.
+INFO:tensorflow:Using config: {'_model_dir': 's3://sagemaker-826912895975/checkpoint_testing/dim_500', '_save_checkpoints_secs': 600, '_num_ps_replicas': 0, '_keep_checkpoint_max': 5, '_session_config': None, '_tf_random_seed': None, '_task_type': None, '_environment': 'local', '_is_chief': True, '_cluster_spec': <tensorflow.python.training.server_lib.ClusterSpec object at 0x7f6ac1672690>, '_tf_config': gpu_options {
+  per_process_gpu_memory_fraction: 1.0
+}
+, '_num_worker_replicas': 0, '_task_id': 0, '_save_summary_steps': 100, '_save_checkpoints_steps': None, '_evaluation_master': '', '_keep_checkpoint_every_n_hours': 10000, '_master': '', '_log_step_count_steps': 100}
+INFO:tensorflow:Create CheckpointSaverHook.
+---------------------------------------------------------------------------
+InternalError                             Traceback (most recent call last)
+<ipython-input-1-1df0ebd892ce> in <module>()
+     61 train(5, model_dir=checkpoint_s3_dir + '/dim_5')
+     62 # Embedding dimension = 500 fails during checkpointing to S3
+---> 63 train(500, model_dir=checkpoint_s3_dir + '/dim_500')
+
+<ipython-input-1-1df0ebd892ce> in train(embedding_dim, model_dir)
+     56     estimator = tf.estimator.Estimator(model_fn=model_fn, params={'embedding_dim': embedding_dim},
+     57                                        config=RunConfig(model_dir=model_dir))
+---> 58     estimator.train(input_fn=input_fn)
+     59 
+     60 # Embedding dimension = 5 succeeds
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/estimator.pyc in train(self, input_fn, hooks, steps, max_steps, saving_listeners)
+    300 
+    301     saving_listeners = _check_listeners_type(saving_listeners)
+--> 302     loss = self._train_model(input_fn, hooks, saving_listeners)
+    303     logging.info('Loss for final step: %s.', loss)
+    304     return self
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/estimator.pyc in _train_model(self, input_fn, hooks, saving_listeners)
+    781         loss = None
+    782         while not mon_sess.should_stop():
+--> 783           _, loss = mon_sess.run([estimator_spec.train_op, estimator_spec.loss])
+    784       return loss
+    785 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    519                           feed_dict=feed_dict,
+    520                           options=options,
+--> 521                           run_metadata=run_metadata)
+    522 
+    523   def should_stop(self):
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    890                               feed_dict=feed_dict,
+    891                               options=options,
+--> 892                               run_metadata=run_metadata)
+    893       except _PREEMPTION_ERRORS as e:
+    894         logging.info('An error was raised. This may be due to a preemption in '
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.pyc in run(self, *args, **kwargs)
+    965         raise six.reraise(*original_exc_info)
+    966       else:
+--> 967         raise six.reraise(*original_exc_info)
+    968 
+    969 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.pyc in run(self, *args, **kwargs)
+    950   def run(self, *args, **kwargs):
+    951     try:
+--> 952       return self._sess.run(*args, **kwargs)
+    953     except _PREEMPTION_ERRORS:
+    954       raise
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+   1014     options = options or config_pb2.RunOptions()
+   1015     feed_dict = self._call_hook_before_run(run_context, actual_fetches,
+-> 1016                                            feed_dict, options)
+   1017 
+   1018     # Do session run.
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.pyc in _call_hook_before_run(self, run_context, fetch_dict, user_feed_dict, options)
+   1040     hook_feeds = {}
+   1041     for hook in self._hooks:
+-> 1042       request = hook.before_run(run_context)
+   1043       if request is not None:
+   1044         if request.fetches is not None:
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/basic_session_run_hooks.pyc in before_run(self, run_context)
+    432           ops.get_default_graph().as_graph_def(add_shapes=True),
+    433           self._checkpoint_dir,
+--> 434           "graph.pbtxt")
+    435       saver_def = self._get_saver().saver_def if self._get_saver() else None
+    436       graph = ops.get_default_graph()
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/graph_io.pyc in write_graph(graph_or_graph_def, logdir, name, as_text)
+     67   if as_text:
+     68     file_io.atomic_write_string_to_file(path,
+---> 69                                         text_format.MessageToString(graph_def))
+     70   else:
+     71     file_io.atomic_write_string_to_file(path, graph_def.SerializeToString())
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/lib/io/file_io.pyc in atomic_write_string_to_file(filename, contents, overwrite)
+    421   write_string_to_file(temp_pathname, contents)
+    422   try:
+--> 423     rename(temp_pathname, filename, overwrite)
+    424   except errors.OpError:
+    425     delete_file(temp_pathname)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/lib/io/file_io.pyc in rename(oldname, newname, overwrite)
+    400   with errors.raise_exception_on_not_ok_status() as status:
+    401     pywrap_tensorflow.RenameFile(
+--> 402         compat.as_bytes(oldname), compat.as_bytes(newname), overwrite, status)
+    403 
+    404 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/errors_impl.pyc in __exit__(self, type_arg, value_arg, traceback_arg)
+    471             None, None,
+    472             compat.as_text(c_api.TF_Message(self.status.status)),
+--> 473             c_api.TF_GetCode(self.status.status))
+    474     # Delete the underlying status object from memory otherwise it stays alive
+    475     # as there is a reference to status from this from the traceback due to
+
+InternalError: : Unable to connect to endpoint

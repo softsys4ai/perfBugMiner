@@ -1,0 +1,54 @@
+MaxPool3DGrad - Out of Memory Issue
+
+I am training a fairly big network with many 3D convolutions that almost fills up all the GPU memory (Titan X). When settings the batch size to a small amount, e.g. 32 examples the training process crashes after a number of steps with an out of memory issue caused by MaxPool3DGrad. I lowered the batch size to 20, which makes the training run fine for >2000 training steps but then at some point the model crashes again with the same error. It seems like some operations are not freeing memory, maybe the MaxPool3DGrad kernel? Full error message is given below.
+Configuration: Linux Mint, checkout of the TensorFlow master 5 days ago (dfc5cd48a095b133ece9caff663e3cc512e8a268) with CUDA 8.0 and CuDNN 5.1.
+This might be relevant: #3696
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 3 Chunks of size 1722368000 totalling 4.81GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 2674491392 totalling 2.49GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 3444734720 totalling 3.21GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:700] Sum Total of in-use chunks: 11.21GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:702] Stats:
+Limit:                 12051264308
+InUse:                 12032303616
+MaxInUse:              12032303616
+NumAllocs:                 2860074
+MaxAllocSize:           3444734976
+
+W tensorflow/core/common_runtime/bfc_allocator.cc:274] ******************************xxxxxxxxxxxxx**************************************************xxxxxxx
+W tensorflow/core/common_runtime/bfc_allocator.cc:275] Ran out of memory trying to allocate 205.32MiB.  See logs for memory state.
+W tensorflow/core/framework/op_kernel.cc:975] Resource exhausted: OOM when allocating tensor with shape[20,64,50,29,29]
+Traceback (most recent call last):
+  File "train_c3d.py", line 324, in <module>
+    is_training: True
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 766, in run
+    run_metadata_ptr)
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 964, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+    target_list, options, run_metadata)
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.ResourceExhaustedError: OOM when allocating tensor with shape[20,64,50,29,29]
+         [[Node: gradients/3D_CNN/conv-relu-0/MaxPool3D_grad/MaxPool3DGrad = MaxPool3DGrad[T=DT_FLOAT, ksize=[1, 1, 2, 2, 1], padding="VALID", strides=[1, 2, 2, 2, 1], _device="/job:localhost/repl
+ica:0/task:0/gpu:0"](3D_CNN/conv-relu-0/Relu, 3D_CNN/conv-relu-0/MaxPool3D, gradients/3D_CNN/conv-relu-1/conv-1_grad/tuple/control_dependency)]]
+
+Caused by op u'gradients/3D_CNN/conv-relu-0/MaxPool3D_grad/MaxPool3DGrad', defined at:
+  File "train_c3d.py", line 145, in <module>
+    grads_and_vars = optimizer.compute_gradients(total_loss)
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 335, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/ops/gradients_impl.py", line 482, in gradients
+    in_grads = grad_fn(op, *out_grads)
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/ops/nn_grad.py", line 130, in _MaxPool3DGrad
+    padding=op.get_attr("padding"))
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/ops/gen_nn_ops.py", line 1657, in max_pool3d_grad
+    name=name)
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 759, in apply_op
+    op_def=op_def)
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2259, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/trunia/virtualenv/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1130, in __init__
+    self._traceback = _extract_stack()
+
+...which was originally created as op u'3D_CNN/conv-relu-0/MaxPool3D', defined at:
+  File "train_c3d.py", line 128, in <module>

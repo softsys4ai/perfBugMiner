@@ -1,0 +1,39 @@
+Inception model error on upgrading Tensorflow
+
+I am loading the Inception model as,
+def load_network(png=False):
+        with gfile.FastGFile(CONFIG_PATH + '/data/network.pb', 'rb') as f:
+            graph_def = tf.GraphDef()
+            data = f.read()
+            graph_def.ParseFromString(data)
+            if png:
+                png_data = tf.placeholder(tf.string, shape=[])
+                decoded_png = tf.image.decode_png(png_data, channels=3)
+                _ = tf.import_graph_def(graph_def, name='', input_map={'DecodeJpeg': decoded_png})
+                return png_data
+            else:
+                _ = tf.import_graph_def(graph_def, name='')
+
+However, after upgrading from Tensorflow 0.8 to 0.10, this is giving an error,
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/importer.py", line 241, in import_graph_def
+    raise ValueError('tf.import_graph_def() requires a non-empty `name` '
+ValueError: tf.import_graph_def() requires a non-empty `name` if `input_map` is used.
+
+I then removed the name='' part as,
+                _ = tf.import_graph_def(graph_def, input_map={'DecodeJpeg': decoded_png})
+                return png_data
+            else:
+                _ = tf.import_graph_def(graph_def)
+
+
+This part then runs fine, however later on in my code when I am trying to get the pool3 layer's output I get the following error,
+    pool3 = sess.graph.get_tensor_by_name('pool_3:0')
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2531, in get_tensor_by_name
+    return self.as_graph_element(name, allow_tensor=True, allow_operation=False)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2385, in as_graph_element
+    return self._as_graph_element_locked(obj, allow_tensor, allow_operation)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2427, in _as_graph_element_locked
+    "graph." % (repr(name), repr(op_name)))
+KeyError: "The name 'pool_3:0' refers to a Tensor which does not exist. The operation, 'pool_3', does not exist in the graph."
+
+What could be the problem?

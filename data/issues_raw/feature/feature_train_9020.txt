@@ -1,0 +1,39 @@
+tf.image.crop_and_resize not working with uint8 images
+
+Installation
+
+Custom code
+Pip install
+TensorFlow version: 1.0.1
+Python 2.7.9
+CPU based
+Debian 3.16.39-1+deb8u2 (2017-03-07) x86_64 GNU/Linux
+
+Problem
+When reading images with opencv and then trying to use crop_and_resize on a tensor of uint8 data type, i get the following error :
+InvalidArgumentError (see above for traceback): No OpKernel was registered to support Op 'CropAndResize' with these attrs.  Registered devices: [CPU], Registered kernels:
+  device='CPU'; T in [DT_FLOAT]
+
+	 [[Node: generate_resized_crop = CropAndResize[T=DT_UINT8, extrapolation_value=0, method="bilinear"](ExpandDims, stack, zeros_like, generate_resized_crop/crop_size)]]
+
+However, when casting my tensor in float32, the program works perfectly.
+But the documentation specifies that it should work with uint8 datatype.
+Source Code
+import cv2
+import tensorflow as tf
+
+frame=cv2.imread('path to img.jpg',-1)
+raw_image=tf.placeholder(dtype=tf.uint8, shape=frame.shape, name='input_image')
+
+def img2batch(input_image):
+    raw_sample_tensor_4d=tf.expand_dims(input_image, 0)
+    patches_top=[0,0.5]
+    patches_bottom =[0.25,0.75]
+    boxes=tf.stack([patches_top, patches_top, patches_bottom, patches_bottom], axis=1)
+    crops=tf.image.crop_and_resize(raw_sample_tensor_4d, boxes, box_ind=tf.zeros_like(patches_top, dtype=tf.int32), crop_size=[200,200], method="bilinear", extrapolation_value=None, name="generate_resized_crop")
+    return crops
+
+with tf.Session() as sess:
+    myBatchedImage=sess.run(img2batch(raw_image), feed_dict={raw_image:frame})
+Problem solved with :
+crops=tf.image.crop_and_resize(tf.cast(raw_sample_tensor_4d, dtype=tf.float32), boxes, box_ind=tf.zeros_like(patches_top, dtype=tf.int32), crop_size=[200,200], method="bilinear", extrapolation_value=None, name="generate_resized_crop")

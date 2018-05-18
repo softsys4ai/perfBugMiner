@@ -1,0 +1,83 @@
+CPU slowdown with Quantized Eight bit graphs
+
+In attempts to highly optimize my Tensorflow client application (and TF install) for consumer desktop hardware i've noticed (and noticed in other bug reports) that quantized eight bit graphs appear to run very slow.  My goal is to match the realtime 1 batch (1 x 299 x 299 x3 ) iOS performance that the Camera Example gets, yet I can't get a Desktop CPU compile of TF to get lower than roughly 150ms per frame, where in reality close to 16ms per frame is needed for roughly 60hz, or 33ms for 30hz performance. It appears somehow the iOS / ArmV7 build is able to achieve this performance unless I am missing something!
+From the discussion group, I was asked by @petewarden to start a bug based on findings
+Thread here: https://groups.google.com/a/tensorflow.org/forum/?utm_medium=email&utm_source=footer#!msg/discuss/PJwgfoeNIKs/jiegynxLBAAJ
+Briefly, I've added Stat Tracing to the Image Label example.  Modified source is here:
+https://gist.github.com/vade/18d7e72f633f9479c5080a251661ebd9
+Ive downloaded compiled tensor flow with the following bazel build commands, referenced from the makefile for iOS which speeds things up just a bit more than the standard compile:
+bazel build -c opt --copt=-mavx --cxxopt=-fno-exceptions --cxxopt=--std=c++11 --cxxopt=-DNDEBUG --cxxopt=-DNOTFDBG --cxxopt=-O2 --cxxopt=-DUSE_GEMM_FOR_CONV //tensorflow:libtensorflow_cc.so
+I then compiled Image Label via the standard bazel command:
+bazel build tensorflow/examples/label_image/...
+And ran it with 4 graphs:
+
+Standard InceptionV3
+InceptionV3 run through Inference Optimizer Script
+InceptionV3 run through Inference Optimizer and Quantizer in Weighted Rounding mode
+InceptionV3 run through Inference Optimizer and Quantizer in eight bit mode
+
+The output of the runs are documented here, in order:
+
+https://gist.github.com/vade/a7d95da155c25dc8134f7cda8168e540
+https://gist.github.com/vade/71af1cbd38864cb176ce64bcafb934de
+https://gist.github.com/vade/e1923d7e7a9abfe1d8c912cc5d36a763
+https://gist.github.com/vade/1d9d5e102878cfb42f9c02a4200b3a50
+
+Note the time for the Quantized Eight bit mode is roughly 2x longer than previous runs.
+As a second set of data, my custom C++ app which uses the same lib_tensorfow_cc.so nets similar results to the benchmark : 
+
+
+InceptionV3 (no optimizations or quantizations)
+
+
+222 frames took 32.598143 seconds
+
+
+https://gist.github.com/vade/77a9314a5c7a5bda9b4a2c90f691a98e
+
+
+InceptionV3 (Inference Optimizations - no quantizations)
+
+
+222 frames took 28.129690 seconds
+
+
+https://gist.github.com/vade/1c5dc51015f5a0fa24f4e0a7209cabf9
+
+
+InceptionV3 (Inference Optimizations & Quantizations Rounded)
+
+
+222 frames took 25.201791 seconds
+
+
+https://gist.github.com/vade/ad8a2c42c5fbcf9be9f074c95d2e95ae
+
+
+InceptionV3 (Inference Optimizations & Quantizations Eightbit)
+
+
+222 frames took 63.174700 seconds
+
+
+https://gist.github.com/vade/d6dcce06861bf8932446ae5ed33d93bb
+
+
+Operating System:
+Mac OS X 10.12.1 2.8 GHz Intel Core i7 16GB Ram Xcode 8.1 / Command Line Tools from 7.3.1 and enabled via xcselect
+If installed from source, provide
+
+The commit hash
+
+41285cf7a11fa3a2c2ead6b6e9adcec4232b18ad
+
+The output of
+
+Build label: 0.4.0-homebrew Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar Build time: Wed Nov 2 19:18:00 2016 (1478114280) Build timestamp: 1478114280 Build timestamp as int: 1478114280
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)`
+See above for source code for minimally modified label image source.
+What other attempted solutions have you tried?
+Attempted to run cuda but am targeting consumer desktop systems and would like similar performance to iOS targets for realtime or better than realtime performance for InceptionV3 / pool_3 feature vector determination and possibly labelling / classification.
+For my system, cuda compilation netted similar results to CPU, although admittedly I did not enable batch sizes larger than 1. However, I think this is moot because iOS appears to be able to get realtime labelling and desktop cant, (is roughly 10x slower)
+Logs or other output that would be helpful
+Logs and links provided in preamble  / description

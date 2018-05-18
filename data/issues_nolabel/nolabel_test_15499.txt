@@ -1,0 +1,83 @@
+Go bindings: No shape inference function exists for op 'CreateSummaryFileWriter'
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Arch Linux
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4.1
+Python version: NA (using Go bindings)
+Bazel version (if compiling from source): NA
+GCC/Compiler version (if compiling from source): NA
+CUDA/cuDNN version: cuda-9.1.85-1 cudnn-7.0.5-1
+GPU model and memory: GTX 1060 6GB
+Exact command to reproduce: See below
+
+Describe the problem
+Calling op.CreateSummaryFileWriter() panics with: panic: failed to add operation "CreateSummaryFileWriter": No shape inference function exists for op 'CreateSummaryFileWriter', did you forget to define it?
+Source code / logs
+package main
+
+import (
+	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	"github.com/tensorflow/tensorflow/tensorflow/go/op"
+)
+
+func main() {
+	s := op.NewScope()
+	writer := op.SummaryWriter(s)
+	createSummaryWriter := op.CreateSummaryFileWriter(s,
+		writer,
+		op.Const(s.SubScope("log_dir"), "tb_logs"),
+		op.Const(s.SubScope("max_queue"), int32(10)),
+		op.Const(s.SubScope("flush_millis"), int32(1000)),
+		op.Const(s.SubScope("filename_suffix"), "tb_demo"),
+	)
+	scalar := op.Const(s.SubScope("scalar"), float32(3.1415))
+	step := op.Const(s.SubScope("step"), int64(1))
+	tag := op.Const(s.SubScope("tag"), "foo_scalar")
+	summary := op.ScalarSummary(s, tag, scalar)
+	merged := op.MergeSummary(s, []tf.Output{summary})
+	write := op.WriteSummary(s, writer, step, scalar, tag, merged)
+	closeSummaryWriter := op.CloseSummaryWriter(s, writer)
+	graph, err := s.Finalize()
+	if err != nil {
+		panic(err)
+	}
+	sess, err := tf.NewSession(graph, nil)
+	if err != nil {
+		panic(err)
+	}
+	_, err = sess.Run(nil, nil, []*tf.Operation{createSummaryWriter})
+	if err != nil {
+		panic(err)
+	}
+	_, err = sess.Run(nil, nil, []*tf.Operation{write})
+	if err != nil {
+		panic(err)
+	}
+	_, err = sess.Run(nil, nil, []*tf.Operation{closeSummaryWriter})
+	if err != nil {
+		panic(err)
+	}
+}
+
+Returns:
+2017-12-19 20:39:06.314322: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+panic: failed to add operation "CreateSummaryFileWriter": No shape inference function exists for op 'CreateSummaryFileWriter', did you forget to define it? (Stacktrace: goroutine 1 [running]:
+runtime/debug.Stack(0xc420082130, 0x13eb530, 0x14298a0)
+	/usr/lib/go/src/runtime/debug/stack.go:24 +0xa7
+github.com/tensorflow/tensorflow/tensorflow/go/op.(*Scope).UpdateErr(0xc42007c180, 0x4d9527, 0x17, 0x750140, 0xc42000e068)
+	/home/isaac/go/src/github.com/tensorflow/tensorflow/tensorflow/go/op/scope.go:120 +0x72
+github.com/tensorflow/tensorflow/tensorflow/go/op.(*Scope).AddOperation(0xc42007c180, 0x4d9527, 0x17, 0x4d9527, 0x17, 0xc4200820f0, 0x5, 0x5, 0x0, 0xc4200181a0)
+	/home/isaac/go/src/github.com/tensorflow/tensorflow/tensorflow/go/op/scope.go:85 +0xfd
+github.com/tensorflow/tensorflow/tensorflow/go/op.CreateSummaryFileWriter(0xc42007c180, 0xc420010200, 0x0, 0xc420010210, 0x0, 0xc420010220, 0x0, 0xc420010230, 0x0, 0xc420010240, ...)
+	/home/isaac/go/src/github.com/tensorflow/tensorflow/tensorflow/go/op/wrappers.go:16474 +0x2cc
+main.main()
+	/home/isaac/go/src/github.com/is8ac/gotf/tb_demo.go:11 +0x282
+)
+
+goroutine 1 [running]:
+main.main()
+	/home/isaac/go/src/github.com/is8ac/gotf/tb_demo.go:27 +0x7cc
+exit status 2

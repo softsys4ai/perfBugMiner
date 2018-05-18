@@ -1,0 +1,117 @@
+Shape must be rank 0 but is rank 1, Potential issue with parse_single_sequence_example
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Spent quite some time digging around didn't come up with anything from stack overflow or other issues that landed near my issues. I also debugged the stack trace all the way down into where it jumps out of python and didn't come up with anything particularly useful.
+Environment info
+Operating System:
+Ubuntu 16.04 64bit
+Installed version of CUDA and cuDNN: 8 and 5
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+-rw-r--r-- 1 root root 558720 Sep 14 19:02 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Sep 14 19:05 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root     19 Sep 14 19:05 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rw-r--r-- 1 root root 415432 Sep 14 19:02 /usr/local/cuda/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root 775162 Sep 14 19:02 /usr/local/cuda/lib64/libcudart_static.a
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+The output from python3 -c "import tensorflow; print(tensorflow.__version__)".
+
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcurand.so locally
+0.11.0rc1
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+import tempfile
+from IPython import embed
+
+sequences = [[1, 2, 3], [4, 5, 1], [1, 2]]
+label_sequences = [[0, 1, 0], [1, 0, 0], [1, 1]]
+
+def make_example(sequence, labels):
+
+    ex = tf.train.SequenceExample()
+
+    sequence_length = len(sequence)
+    ex.context.feature["length"].int64_list.value.append(sequence_length)
+
+    fl_tokens = ex.feature_lists.feature_list["tokens"]
+    fl_labels = ex.feature_lists.feature_list["labels"]
+    for token, label in zip(sequence, labels):
+        fl_tokens.feature.add().int64_list.value.append(token)
+        fl_labels.feature.add().int64_list.value.append(label)
+    return ex
+
+
+writer = tf.python_io.TFRecordWriter('./test.tfrecords')
+for sequence, label_sequence in zip(sequences, label_sequences):
+    ex = make_example(sequence, label_sequence)
+    writer.write(ex.SerializeToString())
+writer.close()
+
+tf.reset_default_graph()
+
+file_name_queue = tf.train.string_input_producer(['./test.tfrecords'], num_epochs=None)
+
+reader = tf.TFRecordReader()
+
+
+
+context_features = {
+    "length": tf.FixedLenFeature([], dtype=tf.int64)
+}
+sequence_features = {
+    "tokens": tf.FixedLenSequenceFeature([], dtype=tf.int64),
+    "labels": tf.FixedLenSequenceFeature([], dtype=tf.int64)
+}
+
+ex = reader.read(file_name_queue)
+
+# Parse the example (returns a dictionary of tensors)
+context_parsed, sequence_parsed = tf.parse_single_sequence_example(
+    serialized=ex,
+    context_features=context_features,
+    sequence_features=sequence_features
+)
+
+
+context = tf.contrib.learn.run_n(context_parsed, n=1, feed_dict=None)
+print(context[0])
+sequence = tf.contrib.learn.run_n(sequence_parsed, n=1, feed_dict=None)
+print(sequence[0])
+
+
+What other attempted solutions have you tried?
+This was the quickest reproduction I could put together using some sample code from the web with a few tweaks. Initially I was trying to do this on a more serious problem with an entirely different dataset/proto, but same issue. I've considered skipping this and using some other file format. However, I think the binary format will be best.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+Traceback (most recent call last):
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/common_shapes.py", line 594, in call_cpp_shape_fn
+status)
+File "/usr/lib/python3.5/contextlib.py", line 66, in exit
+next(self.gen)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/errors.py", line 463, in raise_exception_on_not_ok_status
+pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors.InvalidArgumentError: Shape must be rank 0 but is rank 1
+During handling of the above exception, another exception occurred:
+Traceback (most recent call last):
+File "my_test.py", line 51, in 
+sequence_features=sequence_features
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/parsing_ops.py", line 640, in parse_single_sequence_example
+feature_list_dense_defaults, example_name, name)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/parsing_ops.py", line 837, in _parse_single_sequence_example_raw
+name=name)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/gen_parsing_ops.py", line 285, in _parse_single_sequence_example
+name=name)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/op_def_library.py", line 749, in apply_op
+op_def=op_def)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 2382, in create_op
+set_shapes_for_outputs(ret)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 1783, in set_shapes_for_outputs
+shapes = shape_func(op)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/common_shapes.py", line 596, in call_cpp_shape_fn
+raise ValueError(err.message)
+ValueError: Shape must be rank 0 but is rank 1

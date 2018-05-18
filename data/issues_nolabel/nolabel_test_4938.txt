@@ -1,0 +1,15 @@
+A bug on embedding_attention_seq2seq when output_projection is None?
+
+When I use embedding_attention_seq2seq without giving an output_projection argument, I experienced that the program crashes by a memory allocation error, even when the model ran fine in other libraries or my own implementation of attention seq2seq.
+I didn't suffer this problem when I give an output_projection argument to the function explicitly.
+I suspect it occurs by the following fact: when output_projection is None, it wraps the cell with OutputProjectionWrapper) in embedding_attention_seq2seq. This wrapped cell emits output whose dimension matches the number of decoder symbols.
+Then the wrapped cell variable is passed to embedding_attention_decoder, and to attention_decoder.
+Here, in the attention_decoder function, the awkward memory allocation happens.
+
+Since the output_size argument is None, it is set to cell.output_size, which is identical to the number of decoder symbols. (line 576)
+cell_output of line 650 has dimensions proportional to the number of decoder symbols.
+Thus, in line 660, it creates a very large matrix whose size is proportional to the square of the number of decoder symbols.
+
+According to the paper the implementation is referencing, the attention mechanism should not depend on the number of decoder symbols.
+So I think the implementation is somewhat wrong and should be corrected by passing the cell without wrapping an OutputProjectionWrapper and then performing projection afterwards.
+If it is truly a bug and no one is working now, I will submit a pull request since it can be easily fixed, IMO.

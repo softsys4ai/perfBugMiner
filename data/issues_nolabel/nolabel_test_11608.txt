@@ -1,0 +1,266 @@
+Distributed Tensorflow : Cannot assign a device for operation...
+
+I am trying to use a distributed version of Self-Normalizing Networks on MNIST
+The full code is provided here:
+`
+class DNN_forward_MC(object):
+    def __init__(self,num_data,num_test,dim_input,dim_output,num_hidden_layers,num_hidden_dims,keep_prob,num_minibatch,X_train,Y_train,X_test,Y_test):
+
+
+            # cluster specification
+            parameter_servers = ["localhost:2222"]
+            workers = [     "localhost:2223", 
+                    "localhost:2224",
+                    "localhost:2225"]
+
+            cluster = tf.train.ClusterSpec({"ps":parameter_servers, "worker":workers})
+
+            # input flags
+            tf.app.flags.DEFINE_string("job_name", "", "Either 'ps' or 'worker'")
+            tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
+            FLAGS = tf.app.flags.FLAGS
+
+            # start a server for a specific task
+            server = tf.train.Server(
+                                    cluster,
+                                    job_name=FLAGS.job_name,
+                                    task_index=FLAGS.task_index)
+
+
+            is_chief=(FLAGS.task_index == 0)
+            if FLAGS.job_name == "ps":
+                    server.join()
+
+            elif FLAGS.job_name == "worker":
+                    with tf.device(tf.train.replica_device_setter(
+            worker_device="/job:worker/task:%d/cpu:0" % FLAGS.task_index,
+            cluster=cluster,ps_device="/job:ps/cpu:0")):
+
+                            global_step = tf.Variable(0, name="global_step", trainable=False)
+                            self.initialize_model(num_data,num_test,dim_input,dim_output,num_hidden_layers,num_hidden_dims,keep_prob,num_minibatch)
+
+                            predictions = self.predict_training(tip='redus')
+                            predictions_training_full = self.predict_training(tip='full')
+
+                            predictions_testing_full = self.predict_testing()
+
+                            cost =  tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=self.Y_train, logits=predictions))
+                            opt = tf.train.GradientDescentOptimizer(1e-3)
+                            opt = tf.train.SyncReplicasOptimizer(opt, replicas_to_aggregate=3,total_num_replicas=3)
+                            train_op = opt.minimize(cost,global_step=global_step)
+                            init_op = tf.global_variables_initializer()
+
+                            #grads_and_vars = optimizer.compute_gradients(cost, tf.trainable_variables())
+
+                            local_init_op = opt.local_step_init_op
+                            if is_chief:
+                                    local_init_op = opt.chief_init_op
+
+                            ready_for_local_init_op = opt.ready_for_local_init_op
+
+                            # Initial token and chief queue runners required by the sync_replicas mode
+                            chief_queue_runner = opt.get_chief_queue_runner()
+                            sync_init_op = opt.get_init_tokens_op()
+
+                    train_dir = tempfile.mkdtemp()
+                    sv = tf.train.Supervisor(logdir=train_dir,is_chief=(FLAGS.task_index == 0),init_op=init_op,local_init_op=local_init_op,recovery_wait_secs=1,ready_for_local_init_op=ready_for_local_init_op)
+
+                    if is_chief:
+                            print("Worker %d: Initializing session..." % FLAGS.task_index)
+                    else:
+                            print("Worker %d: Waiting for session to be initialized..." % FLAGS.task_index)
+
+
+                    sess_config = tf.ConfigProto(allow_soft_placement=True,log_device_placement=False,device_filters=["/job:ps", "/job:worker/task:%d" % FLAGS.task_index])
+
+                    with sv.prepare_or_wait_for_session(server.target,config=sess_config) as sess:
+                    #with tf.train.MonitoredTrainingSession(master=server.target,is_chief=is_chief,checkpoint_dir='./logs/',save_checkpoint_secs=60,save_summaries_steps=1) as sess:        
+                            while True:
+
+                                    lista = np.arange(self.num_data)
+                                    np.random.shuffle(lista)
+                                    current_index = lista[:self.num_minibatch]
+
+                                    likelihood_now,_,step_now = self.sess.run([cost,train_op,global_step],feed_dict={self.X_train:X_train[current_index],self.Y_train:Y_train[current_index]})
+                                    printare = 'nll for minibatch at iteration '+str(i)+' is '+str(likelihood_now)
+                                    print(printare)
+                                    predictions_now = self.sess.run(predictions_training_full,feed_dict={self.X_train_full:X_train})
+                                    print 'accuracy is : '+str(self.sess.run(tf.reduce_mean(tf.cast(tf.equal(tf.argmax(Y_train,1),tf.argmax(tf.nn.softmax(predictions_now),1)),tf.float32))))
+                                    if step_now>10:
+                                            break
+
+                            print '*******training last iteration**********'
+                            
+                            if is_chief:
+
+                                    predictions_now = self.sess.run(predictions_testing_full,feed_dict={self.X_test:X_test})
+                                    print '***********testing*************'
+
+                                    print 'accuracy at testing time is :' +str(self.sess.run(tf.reduce_mean(tf.cast(tf.equal(tf.argmax(Y_test,1),tf.argmax(tf.nn.softmax(predictions_now),1)),tf.float32))))
+
+                    sv.stop()
+    def initialize_model(self,num_data,num_test,dim_input,dim_output,num_hidden_layers,num_hidden_dims,keep_prob,num_minibatch):
+
+            ### model using just Hinton's Dropout
+            self.sess = tf.Session()
+            self.num_minibatch = num_minibatch
+            self.num_data = num_data
+            self.num_test = num_test
+            self.dim_input = dim_input
+            self.dim_output = dim_output
+            self.num_hidden_layers = num_hidden_layers
+            self.num_hidden_dims = num_hidden_dims
+
+            self.keep_prob = keep_prob
+            self.alpha_p = -1.7580993408473766
+            q = 1.0 - keep_prob
+            prod  = q + np.power(self.alpha_p,2)*q*(1-q)
+            self.a_affine = np.power(prod,-0.5)
+            self.b_affine = -self.a_affine * (self.alpha_p*(1-q))
+
+            self.X_train_full = tf.placeholder(shape=(self.num_data,dim_input),dtype=tf.float32)
+    
+            self.X_train = tf.placeholder(tf.float32,shape=(num_minibatch,dim_input))
+            self.Y_train = tf.placeholder(tf.float32,shape=(num_minibatch,dim_output))
+            self.X_test = tf.placeholder(tf.float32,shape=(num_test,dim_input))
+            self.Y_test = tf.placeholder(tf.float32,shape=(num_test,dim_output))
+
+            self.weights = []
+            self.biases = []
+
+            ### create parameters for Global DNN
+            for j in range(self.num_hidden_layers+1):                                                                                                              
+                    self.weights.append(tf.Variable(tf.random_normal(shape=(num_hidden_dims[j-1],self.num_hidden_dims[j]),stddev=1.0/num_hidden_dims[j-1]),dtype=tf.float32,name='weights_'+str(j)))
+                    self.biases.append(tf.Variable(tf.random_normal(shape=(self.num_hidden_dims[j],)),dtype=tf.float32,name='biases'+str(j)))          
+            
+            self.weights.append(tf.Variable(tf.random_normal(shape=(self.num_hidden_dims[self.num_hidden_layers],self.num_hidden_dims[self.num_hidden_layers+1])
+            ,stddev=1.0/self.num_hidden_dims[self.num_hidden_layers]),dtype=tf.float32,name='weights_'+str(self.num_hidden_layers+1)))
+            self.biases.append(tf.Variable(tf.random_normal(shape=(self.num_hidden_dims[self.num_hidden_layers+1],)),dtype=tf.float32,name='biases_'+str(self.num_hidden_layers+1)))
+
+           
+    def selu(self,x):
+
+            alpha= 1.6732632423543772848170429916717
+            lamb = 1.0507009873554804934193349852946
+            return lamb * tf.where(x>0.0,x,alpha * tf.nn.elu(x))
+
+    def alpha_dropout(self,x):
+
+            mask = tf.cast(tf.random_uniform(shape=x.get_shape()) < ( 1.0 - self.keep_prob ),dtype=tf.float32)
+            x_masked = tf.multiply(x,mask)
+            out = x_masked * self.a_affine + self.b_affine
+            return out      
+
+    def model(self,input,apply_dropout=True):
+
+            for j in range(1,self.num_hidden_layers +1):
+
+                    input = self.selu(tf.add(tf.matmul(input,self.weights[j]),self.biases[j]))
+                    if apply_dropout:
+
+                            input = self.alpha_dropout(input)
+
+            final_output = tf.add(tf.matmul(input,self.weights[self.num_hidden_layers+1]),self.biases[self.num_hidden_layers+1])
+
+            return final_output
+
+
+    def predict_training(self,tip):
+
+            if tip == 'full':
+                    prediction_DNN_global = self.model(input=self.X_train_full,apply_dropout=False)
+            else:
+                    prediction_DNN_global = self.model(input = self.X_train,apply_dropout=True)
+
+            return prediction_DNN_global
+
+            
+    def predict_testing(self):
+
+            prediction_DNN_global = self.model(input = self.X_test,apply_dropout=False)
+
+            return prediction_DNN_global
+
+if name == 'main':
+    training_data = np.genfromtxt('/home/spopescu/mnist_train.csv',dtype=np.float64,delimiter=',')
+    testing_data = np.genfromtxt('/home/spopescu/mnist_test.csv',dtype=np.float64,delimiter=',')
+
+    X_training = training_data[:,1:]
+    X_testing = testing_data[:,1:]
+    Y_training = one_hot_encoder(training_data[:,0].reshape(X_training.shape[0],1))
+    Y_testing = one_hot_encoder(testing_data[:,0].reshape(X_testing.shape[0],1))
+
+    obiect = DNN_forward_MC(num_data=X_training.shape[0],num_test=X_testing.shape[0],dim_input=X_training.shape[1],dim_output=Y_training.shape[1],num_hidden_layers=3,num_hidden_dims=[X_training.shape[1],200,50,20,Y_training.shape[1]],keep_prob=0.80,num_minibatch=20,X_train=X_training,Y_train=Y_training,X_test=X_testing,Y_test=Y_testing)
+
+`
+I am using the following Slurm bash script to send an array job:
+`
+#!/bin/sh
+#SBATCH --mem=20G
+#SBATCH -J SNN
+#SBATCH --array=0-3
+#SBATCH -o slurm-%A_%a.out
+#SBATCH -e slurm-%A_%a.err
+#SBATCH --nodelist=compute-2-3
+task_type=("ps" "worker" "worker" "worker")
+task_index_array=(0 0 1 2)
+srun --exclusive -N1 -n1 /home/spopescu/anaconda/bin/python2.7 DNN_forward_MC.py --job_name=${task_type[$SLURM_ARRAY_TASK_ID]} --task_index=${task_index_array[$SLURM_ARRAY_TASK_ID]}
+`
+I am using the latest version of Tensorflow as of today.
+I am getting the following error on my chief worker:
+`
+2017-07-19 14:49:14.087646: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:2222}
+2017-07-19 14:49:14.087702: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:2223, 1 -> localhost:2224, 2 -> localhost:2225}
+2017-07-19 14:49:14.091606: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:316] Started server with target: grpc://localhost:2223
+2017-07-19 14:49:15.137109: I tensorflow/core/distributed_runtime/master_session.cc:999] Start master session 4b5afb77d3aa2b77 with config:
+device_filters: "/job:ps"
+device_filters: "/job:worker/task:0"
+allow_soft_placement: true
+Traceback (most recent call last):
+File "DNN_forward_MC.py", line 221, in 
+obiect = DNN_forward_MC(num_data=X_training.shape[0],num_test=X_testing.shape[0],dim_input=X_training.shape[1],dim_output=Y_training.shape[1],num_hidden_layers=3,num_hidden_dims=[X_training.shape[1],200,50,20,Y_training.shape[1]],keep_prob=0.80,num_minibatch=20,X_train=X_training,Y_train=Y_training,X_test=X_testing,Y_test=Y_testing)
+File "DNN_forward_MC.py", line 108, in init
+likelihood_now,_,step_now = self.sess.run([cost,train_op,global_step],feed_dict={self.X_train:X_train[current_index],self.Y_train:Y_train[current_index]})
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 789, in run
+run_metadata_ptr)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 997, in _run
+feed_dict_string, options, run_metadata)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1132, in _do_run
+target_list, options, run_metadata)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1152, in _do_call
+raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Cannot assign a device for operation 'save/RestoreV2_10': Operation was explicitly assigned to /job:ps/task:0/device:CPU:0 but available devices are [ /job:localhost/replica:0/task:0/cpu:0 ]. Make sure the device specification refers to a valid device.
+[[Node: save/RestoreV2_10 = RestoreV2[dtypes=[DT_FLOAT], _device="/job:ps/task:0/device:CPU:0"](save/Const, save/RestoreV2_10/tensor_names, save/RestoreV2_10/shape_and_slices)]]
+Caused by op u'save/RestoreV2_10', defined at:
+File "DNN_forward_MC.py", line 221, in 
+obiect = DNN_forward_MC(num_data=X_training.shape[0],num_test=X_testing.shape[0],dim_input=X_training.shape[1],dim_output=Y_training.shape[1],num_hidden_layers=3,num_hidden_dims=[X_training.shape[1],200,50,20,Y_training.shape[1]],keep_prob=0.80,num_minibatch=20,X_train=X_training,Y_train=Y_training,X_test=X_testing,Y_test=Y_testing)
+File "DNN_forward_MC.py", line 90, in init
+sv = tf.train.Supervisor(logdir=train_dir,is_chief=(FLAGS.task_index == 0),init_op=init_op,local_init_op=local_init_op,recovery_wait_secs=1,ready_for_local_init_op=ready_for_local_init_op)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/training/supervisor.py", line 300, in init
+self._init_saver(saver=saver)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/training/supervisor.py", line 448, in _init_saver
+saver = saver_mod.Saver()
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1139, in init
+self.build()
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1170, in build
+restore_sequentially=self._restore_sequentially)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 691, in build
+restore_sequentially, reshape)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 407, in _AddRestoreOps
+tensors = self.restore_op(filename_tensor, saveable, preferred_shard)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 247, in restore_op
+[spec.tensor.dtype])[0])
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/ops/gen_io_ops.py", line 640, in restore_v2
+dtypes=dtypes, name=name)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+op_def=op_def)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2506, in create_op
+original_op=self._default_original_op, op_def=op_def)
+File "/home/spopescu/.local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1269, in init
+self._traceback = _extract_stack()
+InvalidArgumentError (see above for traceback): Cannot assign a device for operation 'save/RestoreV2_10': Operation was explicitly assigned to /job:ps/task:0/device:CPU:0 but available devices are [ /job:localhost/replica:0/task:0/cpu:0 ]. Make sure the device specification refers to a valid device.
+[[Node: save/RestoreV2_10 = RestoreV2[dtypes=[DT_FLOAT], _device="/job:ps/task:0/device:CPU:0"](save/Const, save/RestoreV2_10/tensor_names, save/RestoreV2_10/shape_and_slices)]]
+`
+I have mostly seen the "cannot assign a device for operation ..." error in the case of people using GPU without specifying allow_soft_placement=True but in my case I am using just CPUs.
+I have seen another instance of this error when users were not specifying server.target as the device of a session,thereby creating a local session but this is not the case in my code.
+Any help would be much appreciated.

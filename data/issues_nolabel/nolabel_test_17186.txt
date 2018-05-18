@@ -1,0 +1,59 @@
+Conv2D is not called if it has only control dependency
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):
+source
+TensorFlow version (use command below):
+r1.5
+Python version:
+2
+Bazel version (if compiling from source):
+0.5.4
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+9.0/7.0
+GPU model and memory:
+Titan XP, 12GB
+
+Describe the problem
+If conv2d operation has control dependency in the graph, the operation is not executed at all.
+I've tested with tf.tfprof and timeline. If I connect the conv2d with its value, it is finally executed.
+Is it intended behavior in TensorFlow?
+Source code / logs
+```
+opts = tf.contrib.tfprof.model_analyzer.PRINT_ALL_TIMING_MEMORY
+opts['min_accelerator_micros'] = 1
+run_metadata = tf.RunMetadata()
+
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+#config.allow_soft_placement = True
+config.inter_op_parallelism_threads=0
+config.graph_options.optimizer_options.opt_level = tf.OptimizerOptions.L0
+batch = 32
+size = 224
+in_channels = 3
+out_channels = 1
+filter_size = 7
+inp = tf.ones(shape=[batch, size, size, in_channels], dtype=tf.float32)
+v = tf.Variable(inp)
+filters = tf.ones(shape=[filter_size, filter_size, in_channels, out_channels], dtype=tf.float32)
+conv2d = tf.nn.conv2d(v, filters, [1,1,1,1], padding='VALID')
+with tf.control_dependencies([conv2d]): 
+  train = tf.no_op() 
+with tf.Session(config=config) as sess:
+  sess.run(tf.global_variables_initializer())
+  sess.run(train, options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE), run_metadata=run_metadata)
+  # conv2d is not executed
+
+  sess.run(conv_ops, options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE), run_metadata=run_metadata)
+  # conv2d is executed
+root_node = tf.contrib.tfprof.model_analyzer.print_model_analysis(
+              tf.get_default_graph(),
+              run_meta=run_metadata,
+              tfprof_options=opts)

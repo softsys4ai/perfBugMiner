@@ -1,0 +1,54 @@
+Incorrect computation results on /gpu:1 on dual K80 servers
+
+We have a bunch of servers with 2 K80 cards each (2 GPUs per card, for a total of 4 GPUs per machine). We're having problems with even simple computations on /gpu:1 returning wrong results. This happens across multiple machines. Interestingly, if we re-map the GPUs, using CUDA_VISIBLE_DEVICES (e.g. CUDA_VISIBLE_DEVICES="3,2,1,0"), it's still always /gpu:1 that has problems.
+To reproduce, I wrote a short script that multiplies random matrices together on each GPU, comparing the results with Numpy:
+import tensorflow as tf
+import numpy as np
+
+def test(sess, device):
+    x = tf.placeholder(tf.float32, (500, 500))
+    w_np = np.random.random((500, 20)).astype(np.float32)
+    w = tf.Variable(w_np, dtype=tf.float32)
+
+    with tf.device("/" + device):
+        y = tf.matmul(x, w)
+
+    x_np = np.random.random((500, 500)).astype(np.float32)
+    y_np = np.dot(x_np, w_np)
+
+    with sess.as_default():
+        sess.run([tf.initialize_all_variables()])
+        y_tf = sess.run([y], feed_dict={x: x_np})
+
+    assert(np.all(np.abs(y_tf - y_np) < 1e-3))
+
+
+def test_all():
+    sess = tf.Session()
+    for i in range(4):
+        device = "/gpu:{}".format(i)
+        try:
+            for _ in range(10):
+                test(sess, device)
+        except AssertionError:
+            print "GPU {} FAILED!".format(i)
+            continue
+        print "GPU {} passed".format(i)
+
+
+if __name__ == "__main__":
+    test_all()
+
+After some initialization logging, this produces the output:
+GPU 0 passed
+GPU 1 FAILED!
+GPU 2 passed
+GPU 3 passed
+
+Environment Information (we've tried several different permutations):
+OS: CentOS 7.2
+CUDA: 8.0.44 and 7.5.17
+CUDNN: 5.1 and 5.0
+Tensorflow: 0.11.0rc0, 0.11.0, 0.12.1, 1.0.0rc0
+Nvidia drivers: 352.39, 367.48
+We have another machine running Ubuntu 16.04 with 4x Titan Xs. All 4 GPUs pass this test script there.

@@ -1,0 +1,54 @@
+Improve video input pipeline (using TFRecord files)
+
+I am building a video input pipeline for DeepMind's Kinetics dataset using TFRecord files. Since the dataset is large (200k videos) my TFRecord files store the frames as compressed JPG images; otherwise it would require too much space on disk. Each tf.train.Example has the following structure:
+Example {
+  'num_frames': tf.int64,
+  'label': tf.int64,
+  'frames/0001': tf.string,
+  'frames/0002': tf.string,
+  ...
+}
+
+Where all the frames store a JPG image as compressed bytes. Using tf.data.TFRecordDataset and tf.image.decode_jpg I am able to load the images and decode from JPG into tf.uint8 tensors (full code can be found here):
+def decode(serialized_example):
+  
+    # Prepare feature list; read encoded JPG images as bytes
+    features = dict()
+    features["class_label"] = tf.FixedLenFeature((), tf.int64)
+    for i in range(64):
+        features["frames/{:04d}".format(i)] = tf.FixedLenFeature((), tf.string)
+
+    # Parse into tensors
+    parsed_features = tf.parse_single_example(serialized_example, features)
+
+    # Decode the encoded JPG images
+    images = []
+    for i in range(64):
+        images.append(tf.image.decode_jpeg(parsed_features["frames/{:04d}".format(i)]))
+
+    # Pack the frames into one big tensor of shape (N,H,W,3)
+    images = tf.stack(images)
+    label  = tf.cast(parsed_features['class_label'], tf.int64)
+
+    return images, label
+
+Two things currently seem impossible with the current features of TFRecord files:
+
+There seems to be no way to take a random sample of frames. The code example now takes the first 64 frames from the TFRecord, but what is often preferred is taking a random sample of consecutive frames. In one of my failed attempts I have tried to accomplish this along the lines of:
+
+num_frames = tf.cast(parsed_features['num_frames'], tf.int64)
+offset = tf.random_uniform(shape=(), minval=0, maxval=label, dtype=tf.int64)
+
+
+The number of frames in the video example seems impossible to access in TensorFlow. It can be obtained using tf.train.Example.FromString as given here, but that does not help me in this case. If this was possible I could just load all the video frames into a tensor (at increased cost...) and than use tf.random_crop to sample a random number of frames from the video.
+
+My overall question is whether the input pipeline for videos using TFRecord files can be improved? This needs to consider speed of reading data and compression options to limit file size for enormous  datasets. It would be convenient to directly use mp4 streams with TFRecord files, however decoding this is problably much slower than decoding JPG images (EDIT: this pull request is related: #13242)
+Note that there are many ways to setup the data pipeline for videos. I have described some of them in this post on StackOverflow and motivated why I chose for TFRecord files. This post also describes the problem described here, so it may be informative: https://stackoverflow.com/questions/48101576/tensorflow-read-video-frames-from-tfrecords-file
+Have I written custom code: N/A
+OS Platform and Distribution: N/A
+TensorFlow installed from: N/A
+TensorFlow version: N/A
+Bazel version: N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A

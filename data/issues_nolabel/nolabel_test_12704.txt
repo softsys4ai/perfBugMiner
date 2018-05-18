@@ -1,0 +1,53 @@
+Memory leak when reusing variables with slim
+
+System information:
+
+Windows 7 x64
+Python 3.5.2 |Anaconda 4.2.0 (64-bit)
+Tensorflow 1.3.0 installed via pip
+
+Problem
+I want to use TF-Slim models to classify images in a server. For this, I would like to load the network only once and reuse the variables. I adjusted the tutorial given here: https://github.com/tensorflow/models/blob/master/slim/slim_walkthrough.ipynb
+Code to reproduce
+import tensorflow as tf
+from tensorflow.contrib import slim
+
+import urllib.request as urllib
+from nets import inception
+from preprocessing import inception_preprocessing
+
+
+image_size = inception.inception_v1.default_image_size
+
+initialized = False
+graph = tf.Graph()
+
+init_fn = None
+
+def predict():
+    global initialized
+    global init_fn
+    with graph.as_default():
+        url = 'https://upload.wikimedia.org/wikipedia/commons/7/70/EnglishCockerSpaniel_simon.jpg'
+        image_string = urllib.urlopen(url).read()
+        image = tf.image.decode_jpeg(image_string, channels=3)
+        processed_image = inception_preprocessing.preprocess_image(image, image_size, image_size, is_training=False)
+        processed_images  = tf.expand_dims(processed_image, 0)
+        with slim.arg_scope(inception.inception_v1_arg_scope()):
+            logits, _ = inception.inception_v1(processed_images, num_classes=1001, is_training=False, reuse=initialized)
+        probabilities = tf.nn.softmax(logits)
+        if not initialized:
+            init_fn = slim.assign_from_checkpoint_fn("tmp/checkpoints/inception_v1.ckpt", slim.get_model_variables("InceptionV1"))
+        with tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=8)) as sess:
+            init_fn(sess)
+            np_probabilities = sess.run(probabilities)
+        initialized = True
+    return np_probabilities.tolist()
+
+for _ in range(20):
+    predict()
+
+Memory Usage monitored with Process Explorer
+
+This is the memory usage when calling the predict function 20 times. As you can see, it keeps increasing.
+Am I doing it wrong, or is it a bug?

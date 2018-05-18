@@ -1,0 +1,74 @@
+conv3d_transpose -- Error in 'python': free(): invalid pointer
+
+I'm running into an issue with the recently added conv3d_transpose -- error statement in the title. The network builds, but upon first training session it outputs the above error, runs for a second, and then Aborted (core dumped).  I have verified all dimensions and data.
+I wrote a simple convolutional-deconvolutional network to reproduce the bug. This small program actually outputs a different error than the network I am trying to build, but I believe it is pointing to the same issue.
+The error it is outputting is: Error in 'python': double free or corruption (out):
+I have tried running the program on two different linux (Ubuntu 14) machines. I had to install Tensorflow from the nightly builds in order to include the conv3d_transpose source code. I want to try and run the program on my Mac, but there isn't a build out yet that includes the function.
+#this is a small program to reproduce the bug
+    # Error in 'python': free(): invalid pointer:
+    # and
+    # Error in `python': double free or corruption (out):
+
+    #the network is designed for image segmentation
+        #input and outputs have the same dimensions
+
+import tensorflow as tf
+import numpy as np
+import pdb
+
+learning_rate = 0.001
+
+n_depth = 5
+n_input_x = 200
+n_input_y = 200
+n_classes = 2
+n_examples = 3
+
+x = tf.placeholder(tf.float32, [n_examples, n_depth, n_input_x, n_input_y])
+y = tf.placeholder(tf.float32, [n_examples, n_depth, n_input_x, n_input_y, n_classes], name="ground_truth")
+
+#generate random data
+input_data = np.random.rand(n_examples, n_depth, n_input_x, n_input_y)
+label_data = np.random.rand(n_examples * n_depth * n_input_x * n_input_y, n_classes)
+
+weights = {
+    'l1': tf.Variable(tf.random_normal([5, 5, 5, 1, 32])),
+    'l2': tf.Variable(tf.random_normal([3, 2, 2, 2, 32]))
+}
+
+biases = {
+    'l1': tf.Variable(tf.random_normal([32])),
+    'l2': tf.Variable(tf.random_normal([2]))
+}
+
+#build network
+def conv(x, w, b):
+    #one convolutional layer followed by one deconvolutional layer
+    x = tf.reshape(x, shape=[-1, n_depth, n_input_x, n_input_y, 1])
+
+    conv1 = tf.nn.conv3d(x, weights['l1'], strides=[1,1,1,1,1], padding="SAME")
+    conv1 = tf.nn.bias_add(conv1, biases['l1'])
+    conv1 = tf.nn.relu(conv1)
+    conv1 = tf.nn.max_pool3d(conv1, ksize=[1,2,2,2,1], strides=[1,2,2,2,1], padding="SAME")
+
+    output_shape = [n_examples, n_depth, n_input_x, n_input_y, n_classes]
+    deconv1 = tf.nn.conv3d_transpose(conv1, weights['l2'], output_shape=output_shape, strides=[1,1,2,2,1], padding="VALID")
+    deconv1 = tf.nn.bias_add(deconv1, biases['l2'])
+
+    return deconv1
+
+pred = conv(x, weights, biases)
+
+#reshape for classification
+temp_pred = tf.reshape(pred, [-1,n_classes])
+temp_y = tf.reshape(y, [-1,n_classes])
+
+#define loss & optimizer
+cost = tf.nn.softmax_cross_entropy_with_logits(temp_pred, temp_y)
+optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+init = tf.initialize_all_variables()
+
+#train
+with tf.Session() as sess:
+    sess.run(init)
+    sess.run(optimizer, feed_dict={x: input_data, temp_y: label_data})

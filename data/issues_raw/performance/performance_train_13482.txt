@@ -1,0 +1,65 @@
+Error in creating the final binary using AOT compilation for CPU backend
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): v1.3.0-rc1-2665-g242b0f1
+Python version: Python3
+Bazel version (if compiling from source): 0.6.0
+CUDA/cuDNN version: No
+GPU model and memory: No
+Exact command to reproduce:
+bazel build //tensorflow/compiler/aot/tests:my_binary
+
+Describe the problem
+I simply followed the tutorial here: https://www.tensorflow.org/performance/xla/tfcompile
+According to Step 1 and 2, I compiled the subgraph and generated the header (test_graph_tfmatmul.h) and object (test_graph_tfmatmul.o) files using tfcompile;
+According to Step 3, I used the example code (named as my_code.cc) to invoke the subgraph;
+According to Step 4, I added the code snippet cc_binary to the existing BUILD file (//tensorflow/compiler/aot/tests/BUILD), and tried to create the final binary with the command:
+bazel build //tensorflow/compiler/aot/tests:my_binary
+but I got the following error:
+undeclared inclusion(s) in rule '//tensorflow/compiler/aot/tests:my_binary': this rule is missing dependency declarations for the following files included by 'tensorflow/compiler/aot/tests/my_code.cc': '/home/tensorFlow_src/tensorflow/tensorflow/compiler/aot/tests/test_graph_tfmatmul.h'
+Source code / logs
+my_code.cc (exactly the same as in the tutorial):
+#define EIGEN_USE_THREADS
+#define EIGEN_USE_CUSTOM_THREAD_POOL
+
+#include <iostream>
+#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "tensorflow/compiler/aot/tests/test_graph_tfmatmul.h" // generated
+
+int main(int argc, char** argv) {
+  Eigen::ThreadPool tp(2);  // Size the thread pool as appropriate.
+  Eigen::ThreadPoolDevice device(&tp, tp.NumThreads());
+
+  foo::bar::MatMulComp matmul;
+  matmul.set_thread_pool(&device);
+
+  // Set up args and run the computation.
+  const float args[12] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  std::copy(args + 0, args + 6, matmul.arg0_data());
+  std::copy(args + 6, args + 12, matmul.arg1_data());
+  matmul.Run();
+
+  // Check result
+  if (matmul.result0(0, 0) == 58) {
+    std::cout << "Success" << std::endl;
+  } else {
+    std::cout << "Failed. Expected value 58 at 0,0. Got:"
+              << matmul.result0(0, 0) << std::endl;
+  }
+
+  return 0;
+}
+cc_binary in BUILD file:
+cc_binary(
+    name = "my_binary",
+    srcs = ["my_code.cc"],
+    deps = [
+        "//tensorflow/compiler/aot/tests:test_graph_tfmatmul",
+        "//third_party/eigen3",
+    ],
+    linkopts = ["-lpthread",]
+)

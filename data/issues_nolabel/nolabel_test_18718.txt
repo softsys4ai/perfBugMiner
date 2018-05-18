@@ -1,0 +1,55 @@
+Bug: CPU/multinomial_op_test fails on AVX512 systems most likely due to bug in Eigen AVX512 log implementation
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):
+source
+TensorFlow version (use command below):
+('v1.8.0-rc0-561-g075fbb59d7', '1.8.0-rc0')
+Python version:
+Python 2.7.12
+Bazel version (if compiling from source):
+Build label: 0.11.0
+GCC/Compiler version (if compiling from source):
+gcc (Ubuntu 5.4.0-6ubuntu1~16.04.5) 5.4.0 20160609
+CUDA/cuDNN version:
+NA
+GPU model and memory:
+NA
+Exact command to reproduce:
+bazel test --config=opt //tensorflow/python/kernel_tests/random:multinomial_op_test
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+On machines with AVX512 instruction set, multinomial_op_test fails on CPU device. Most likely this is an issue with Eigen's AVX512 log implementation.
+Test passes if I disable the AVX512 plog implementation https://bitbucket.org/eigen/eigen/src/3215c06819b99ce52d5a8d6939d072024e1e3fa0/Eigen/src/Core/arch/AVX512/MathFunctions.h?fileviewer=file-view-default#MathFunctions.h-36:125
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+exec ${PAGER:-/usr/bin/less} "$0" || exit 1
+2 -----------------------------------------------------------------------------
+3 ..2018-04-20 03:28:51.833924: W tensorflow/core/framework/op_kernel.cc:1290] CtxFailure at multinomial_op.cc:165: Invalid argument: num_classes should be positive, got 0
+...
+/bazel-out/k8-opt/bin/tensorflow/python/kernel_tests/random/multinomial_op_test.runfiles/org_tensorflow/tensorflow/python/kernel_tests/random/multinomial_op_test.py:194: RuntimeWarning: divide by zero encountered in true_divide
+12   chi2 = np.sum(diff * diff / expected, axis=0)
+13 F....
+14 ======================================================================
+15 FAIL: testSamplingCorrectness (main.MultinomialTest)
+https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/kernel_tests/random/multinomial_op_test.py#L44
+def composed_sampler(logits, num_samples):
+unif = random_ops.random_uniform(logits.get_shape().concatenate(
+tensor_shape.TensorShape([num_samples])))
+noise = -math_ops.log(-math_ops.log(unif))
+Current tensorflow (for nodes highlighted in the link above):
+unif: [[[0.824622393 0.0375790596 0.197375655]]...]
+noise: [[[inf inf inf]]...]
+After disabling Eigen's AVX512 plog implementation:
+unif: [[[0.824622393 0.0375790596 0.197375655]]...]
+noise: [[[1.64594793 -1.1882422 -0.48405844]]...]

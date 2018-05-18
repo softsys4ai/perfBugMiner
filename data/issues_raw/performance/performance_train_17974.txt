@@ -1,0 +1,65 @@
+QuantizedConv2D dimension mismatch
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Y
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Arch
+TensorFlow installed from (source or binary): binary / source for transform_graph
+TensorFlow version (use command below):  1.6
+Python version:  3.6
+Bazel version (if compiling from source): 0.11.1-1
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 9.1
+GPU model and memory: GTX  1060
+Exact command to reproduce:
+
+I have a frozen model (frozen.pb) and followed the guideline to produce quantized.pb.
+Inference with frozen.pb is ok but with quantized.pb it crashes on tf.import_graph_def.
+If the quantized model expects the same shape of input/output, just replacing frozen.pb with quantized.pb should work.
+
+I followed https://www.tensorflow.org/performance/quantization
+quantized with this command:
+
+../tensorflow/bazel-bin/tensorflow/tools/graph_transforms/transform_graph \
+  --in_graph=graph_def/frozen.pb \
+  --out_graph=graph_def/quantized.pb \
+  --inputs=img \
+  --outputs=out1,out2,out3,out4,out5,out6 \
+  --transforms='add_default_attributes strip_unused_nodes(type=float, shape="1,3,256,256")
+    remove_nodes(op=Identity, op=CheckNumerics) fold_constants(ignore_errors=true)
+    fold_batch_norms fold_old_batch_norms quantize_weights quantize_nodes
+    strip_unused_nodes sort_by_execution_order'
+
+
+backtrace:
+
+Traceback (Most recent call last):
+8    test_tf.py                                                                    <module>                --> detector = Detector()                              
+114  /home/user/project/net_tf.py                                             __init__                --> tf.import_graph_def(graph_def, name='')            
+432  /usr/lib/python3.6/site-packages/tensorflow/python/util/deprecation.py        new_func                --> return func(*args, **kwargs)                       
+663  /usr/lib/python3.6/site-packages/tensorflow/python/framework/importer.py      import_graph_def        --> ops.set_shapes_for_outputs(op)                     
+2501 /usr/lib/python3.6/site-packages/tensorflow/python/framework/ops.py           set_shapes_for_outputs  --> return _set_shapes_for_outputs(op)                 
+2474 /usr/lib/python3.6/site-packages/tensorflow/python/framework/ops.py           _set_shapes_for_outputs --> shapes = shape_func(op)                            
+2404 /usr/lib/python3.6/site-packages/tensorflow/python/framework/ops.py           call_with_requiring     --> return call_cpp_shape_fn(op, require_shape_fn=True)
+627  /usr/lib/python3.6/site-packages/tensorflow/python/framework/common_shapes.py call_cpp_shape_fn       --> require_shape_fn)                                  
+691  /usr/lib/python3.6/site-packages/tensorflow/python/framework/common_shapes.py _call_cpp_shape_fn_impl --> raise ValueError(err.message)                      
+ValueError: Dimensions must be equal, but are 32 and 64 for 'conv2_1/Conv2D/eightbit' (op: 'QuantizedConv2D') with input shapes: [1,3,?,32], [3,3,64,128], [], [], [], [].
+> /usr/lib/python3.6/site-packages/tensorflow/python/framework/common_shapes.py(691)_call_cpp_shape_fn_impl()
+
+related model code:
+
+    max_pool = tf.contrib.layers.max_pool2d
+
+    x = tf.placeholder(tf.float32, shape=[1, 3, None, None], name='img')
+
+    x = relu(conv2d(x, 64, kernel_size=3, padding='same', data_format='channels_first', name='conv1_1'))
+    x = relu(conv2d(x, 64, kernel_size=3, padding='same', data_format='channels_first', name='conv1_2'))
+    x = max_pool(x, kernel_size=2, data_format='NCHW')
+
+    x = relu(conv2d(x, 128, kernel_size=3, padding='same', data_format='channels_first', name='conv2_1'))
+    x = relu(conv2d(x, 128, kernel_size=3, padding='same', data_format='channels_first', name='conv2_2'))
+    x = max_pool(x, kernel_size=2, data_format='NCHW')
+...
+This is fully convolutional, and the channel number goes from 3 to 64 and 128.
+So 32 in the error message comes out of nowhere. (Is [1,3,?,32] a NCHW shape or conv2d kernel shape?)
+Can it be related to NCHW? Somehow max_pool halves the channel number instead of spatial dimensions, then it explains how 32 appears (64/2=32).

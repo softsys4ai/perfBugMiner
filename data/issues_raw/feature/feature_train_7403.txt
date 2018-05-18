@@ -1,0 +1,47 @@
+Incorrect second derivative of softmax cross entropy loss
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+
+logits = tf.Variable([0.5, 0.5])
+y = tf.constant([1,0], dtype=tf.float32)
+
+# direct computation
+loss1 = -tf.reduce_sum(y * tf.log(tf.nn.softmax(logits)))
+
+# optimized version
+loss2 = tf.nn.softmax_cross_entropy_with_logits(logits, y)
+
+feed = {logits: [0.5, 0.5]}
+
+with tf.Session() as sess:
+    for i, loss in enumerate([loss1, loss2]):
+        g = tf.gradients(loss, [logits])[0]
+        
+        h0 = tf.gradients(g[0], [logits])[0]
+        h1 = tf.gradients(g[1], [logits])[0]
+        h = tf.pack([h0, h1])
+        
+        print 'loss%d:' % (i+1)
+        print 'gradient:'
+        print g.eval(feed_dict=feed)
+        print 'hessian:'
+        print h.eval(feed_dict=feed)
+        print 
+produces the output
+loss1:
+gradient:
+[-0.5  0.5]
+hessian:
+[[ 0.25 -0.25]
+ [-0.25  0.25]]
+
+loss2:
+gradient:
+[-0.5  0.5]
+hessian:
+[[-0.  0.]
+ [-0.  0.]]
+
+Although the gradient is correct in both cases, the hessian computed using loss1 is correct while the one computed from softmax_cross_entropy_with_logits is not.
+I have not figured out where the issue arises from.

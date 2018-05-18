@@ -1,0 +1,95 @@
+Placeholder not replaced by import_graph_def input_map argument
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): I have written custom code
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.6
+Python version: 3.5
+Bazel version (if compiling from source): n/a
+GCC/Compiler version (if compiling from source): n/a
+CUDA/cuDNN version: n/a
+GPU model and memory: n/a
+Exact command to reproduce:
+
+Problem Description
+I'm having trouble connecting a placeholder in a GraphDef loaded from a file to a dataset provider using theinput_map argument to tf.import_graph_def, and I don't think it's behaving as expected.
+I first set up a data source, referenced in a tensor called images. Then I load a GraphDef from a file that contains a Placeholder called batch. Then I call
+  tf.import_graph_def(quantized_graph_def, input_map={'batch': images}, name='')
+
+to connect them together. When I run this I get the error:
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 
+'batch_1' with dtype float and shape [100,224,224,3]
+             [[Node: batch_1 = Placeholder[dtype=DT_FLOAT, shape=[100,224,224,3], 
+_device="/job:localhost/replica:0/task:0/device:CPU:0"]()]]
+
+According to the documentation for tf.import_graph_def:
+
+input_map: A dictionary mapping input names (as strings) in graph_def to Tensor objects. The values of the named input tensors in the imported graph will be re-mapped to the respective Tensor values.
+
+As I understand it, the input_map argument should connect the two graphs, but that doesn't seem to be working. See related article "Connecting Two Graphs Together using import_graph_def". I believe that I am doing the same thing as in the article.
+Source Code/Logs
+This script borrows heavily from models/research/slim/eval_image_classifier.py.
+First I open a graph
+with tf.Graph().as_default():
+
+Then I set up a dataset provider and preprocessing function using the slim API
+  # Select the dataset
+  # Create a dataset provider that loads data from the dataset
+  # Select the preprocessing function
+  ...
+  image = image_preprocessing_fn(image, eval_image_size, eval_image_size)
+
+  images, labels = tf.train.batch(
+      [image, label],
+      batch_size=batch_size,
+      num_threads=num_preprocessing_threads,
+      capacity=5 * batch_size)
+
+Then I import a graph from a GraphDef from a file and load it into the current graph using import_graph_def
+  quantized_graph_def = graph_pb2.GraphDef()
+  with tf.gfile.FastGFile(path.join(cwd(), quantized_graph_filename), 'rb') as f:
+    quantized_graph_def.ParseFromString(f.read())
+  tf.import_graph_def(quantized_graph_def, input_map={'batch': images}, name='')
+
+Then I set up the metrics and call slim.evaluation.evaluate_once to process the batches
+  # Define the metrics:
+  names_to_values, names_to_updates = slim.metrics.aggregate_metric_map({
+      'Accuracy': slim.metrics.streaming_accuracy(predictions, labels),
+      'Recall_5': slim.metrics.streaming_recall_at_k(
+          logits, labels, 5),
+  })
+
+  ...
+
+  slim.evaluation.evaluate_once(
+      master=master,
+      checkpoint_path=checkpoint_path,
+      logdir=log_dir,
+      num_evals=num_batches,
+      eval_op=list(names_to_updates.values()))
+
+When I run this I get the following error:
+Caused by op 'batch_1', defined at:
+  File "vanilla_vgg.py", line 319, in <module>
+    import_quantized_graph_with_imagenet()
+  File "vanilla_vgg.py", line 251, in import_quantized_graph_with_imagenet
+    tf.import_graph_def(quantized_graph_def, input_map={'batch': images}, name='')
+  File "/localtmp/mp3t/venv/doggett/lib/python3.5/site-packages/tensorflow/python/util/deprecation.py", line 432, in new_func
+    return func(*args, **kwargs)
+  File "/localtmp/mp3t/venv/doggett/lib/python3.5/site-packages/tensorflow/python/framework/importer.py", line 553, in import_graph_def
+    op_def=op_def)
+  File "/localtmp/mp3t/venv/doggett/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 3271, in create_op
+    op_def=op_def)
+  File "/localtmp/mp3t/venv/doggett/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1650, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'batch_1' with dtype float and shape [100,224,224,3]
+         [[Node: batch_1 = Placeholder[dtype=DT_FLOAT, shape=[100,224,224,3], _device="/job:localhost/replica:0/task:0/device:CPU:0"]()]]
+
+The GraphDef that I am loading has a Placeholder op with the name batch, with the same shape and dtype as the tensor images. For reference, running print(images) returns:
+Tensor("batch:0", shape=(100, 224, 224, 3), dtype=float32)
+
+I have also tried using batch:0 and batch_1 as the key to the input_map but neither works.
+The evaluate_once function runs a batch of images in a single function call, so I cannot simply call images.eval() and pass the result to evaluate_once because it would only run the first batch. So the two graphs must be connected and able to be run with a single invocation.

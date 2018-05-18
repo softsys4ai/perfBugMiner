@@ -1,0 +1,79 @@
+How to sync worker models of KMeansClustering in distributed tensorflow?
+
+System information
+-Have I written custom code: yes
+-OS Platform and Distribution: Open SUSE Leap 42.3
+-TensorFlow installed from: python pip
+-TensorFlow version: 1.6.0
+-Python version: 2.7
+-Bazel version  :N/A
+-CUDA/cuDNN version : N/A
+-GPU model and memory : N/A
+-Exact command to reproduce : N/A
+Hi,
+I am trying to use distributed tensorflow over KMeansClustering. I have one parameter server and two workers. Training data in both the workers are different.  After training, cluster centers in the two workers are different. Is there a function in tensorflow which can be called to sync the models while training so that the cluster   centers are similar if not same.
+Source Code
+def startCluster(jobName,taskId):
+    parameter_servers = ["localhost:2222"]
+    workers = ["localhost:2223",
+               "localhost:2224"]
+
+    cluster = tf.train.ClusterSpec({"ps": parameter_servers, "worker": workers})
+    server = tf.train.Server(
+        cluster,
+        job_name=jobName,
+        task_index=taskId)
+
+    return cluster,server
+
+def trainModelInParallel(cluster,server,taskId):
+    k = 4
+    n = 1000
+    variables = 2
+
+    points = np.random.uniform(0, 1, [n, variables])
+
+    # Between-graph replication
+    with tf.device(tf.train.replica_device_setter(
+            worker_device="/job:worker/task:%d" % taskId,
+            cluster=cluster)):
+
+        input_fn = lambda: tf.train.limit_epochs(tf.convert_to_tensor(
+                                    points, dtype=tf.float32), num_epochs=1)
+        kmeans = tf.contrib.factorization.KMeansClustering(
+            num_clusters=k, use_mini_batch=False,model_dir=defaultModel)
+
+
+    sv = tf.train.Supervisor(is_chief=(taskId == 0),save_model_secs=1)
+
+    with sv.prepare_or_wait_for_session(server.target) as sess:
+
+        for _ in xrange(10):
+            kmeans.train(input_fn)
+            centers = kmeans.cluster_centers()
+            print centers[0],centers[1],centers[2],centers[3]
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        print"Please pass job name and task ID"
+        sys.exit()
+
+    jobName = sys.argv[1]
+    taskId = (sys.argv[2])
+    defaultModel += taskId
+    cluster, server = startCluster(jobName, int(taskId))
+
+    if jobName == "ps":
+        server.join()
+    else:
+        trainModelInParallel(cluster,server,int(taskId))
+
+
+Command Line
+To execute the above code please enter following commands in 3 different terminals:
+python kmeansDistributed.py ps 0
+python kmeansDistributed.py worker 0
+python kmeansDistributed.py worker 1
+
+@ccolby Your inputs will be very helpful.

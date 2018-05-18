@@ -1,0 +1,61 @@
+strange output and jam while running "train_setp.run()" in tensorflow
+
+I am a newcomer of Tensorflow and I encounter trouble while trying to train a convolutional neuralnetwork. I receive massive output information which seems initializing something while running:
+train_step.run(session=sess,feed_dict={x:batch[0],y_:batch[1],keep_prob:0.5})
+What is more, while testing the accuracy of my training data, the program output some information and stop working, so I have to stop it with "ctrl+c"
+I think there is something wrong with "sess"  but I do not know how to fix them. Part of my code are listed below:
+to emphasize the places I think are important and help you understand it quickly, I use # in my code and (  )in my output to express what  I think and mark some vital command by ->
+->sess = tf.InteractiveSession(config=tf.ConfigProto(log_device_placement=True))
+# I initialized my sess
+for d in ['/gpu:0']:
+    with tf.device(d):
+        x=tf.placeholder(tf.float32,shape=[None, 224, 224, 1])
+        y_=tf.placeholder(tf.float32,shape=[None,3])
+      ->vggNet=vgg16( x, weights='vgg16_weights.npz', sess=sess)
+         # vgg16 is a Class to define and initialize neuralnetwork
+        cross_entropy = -tf.reduce_sum(y_*tf.log(tf.clip_by_value(vggNet.probs,1e-10,1.0)))
+train_step=tf.train.AdamOptimizer(l_rate).minimize(cross_entropy)
+correct_prediction=tf.equal(tf.argmax(vggNet.probs,1),tf.argmax(y_,1))
+accuracy=tf.reduce_mean(tf.cast(correct_prediction,"float"))
+->sess.run(tf.initialize_all_variables())
+print ('\n\n\n session run successfully ! \n\n\n')
+#I think after this, there should not be any initialize work
+for i in range (20000):
+    batch=octData.train.next_batch(train_batch_size)
+    #load data to batch
+    if (i+1)%5==0:
+        print '#',
+        #this has been printed
+    if (i+1)%20==0:
+        print ('evaluating train dataset ...')
+        #this has been printed but the program get stuck after some output
+        train_accuracy = sess.run(accuracy,feed_dict={x:batch[0], y_: batch[1], vggNet.keep_prob: 1.0})
+        #after this my program jammed, the following print do not work
+        print "  step %d, training accuracy %g"%(i,train_accuracy)
+   ->train_step.run(session=sess,feed_dict={x:batch[0],y_:batch[1],vggNet.keep_prob:0.5})
+    #I think all the strange output are printed by this,vggNet.keep_prob is a parameter to control drop out in fc layer
+
+According to the tutorial of tensorflow, the output in the loop for i in range (20000): should be what I print in the program. However, the following information are presented to me.
+session run successfully !   
+(I believe this is the printed info at previous line before the loop **for i in range (20000):**)
+
+
+Adam/epsilon: /job:localhost/replica:0/task:0/gpu:0
+. . .  . . . (I omit some similar output there )
+gradients/clip_by_value/Minimum_grad/Shape_1: /job:localhost/replica:0/task:0/gpu:0
+. . .  . . . 
+fc3/weights/read: /job:localhost/replica:0/task:0/gpu:0
+. . .  . . .
+I tensorflow/core/common_runtime/simple_placer.cc:819] conv5_3/biases/read: /job:localhost/replica:0/task:0/gpu:0
+. . .  . . .
+conv5_3/biases/read: /job:localhost/replica:0/task:0/gpu:0
+. . . . . . 
+. . . . . . 
+# # # # evaluating train dataset ...
+(I think the program is about to calculate the accuracy of training set)
+. . . . . .
+fc3/biases/read: /job:localhost/replica:0/task:0/gpu:0
+. , . . . .
+I tensorflow/core/common_runtime/simple_placer.cc:819] fc1/Reshape/shape: /job:localhost/replica:0/task:0/gpu:0
+
+And after that my program got jammed. There is nothing wrong with the batch, which is used to read data and it has nothing to do with tensorflow. I think sess is the most likely cause of the problem. Do anybody know what is going on and how to fix it?

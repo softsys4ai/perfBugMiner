@@ -1,0 +1,70 @@
+optimize variable with dynamic shape not supported
+
+TensorFlow 0.11.0.
+I want to use a variable where the shape is unknown in advance and it will change from time to time (although ndim is known and fixed).
+I declare it like:
+initializer = tf.random_uniform_initializer()
+shape = (s0, s1, s2)  # these are symbolic vars
+foo_var = tf.Variable(initializer(shape=shape), name="foo", validate_shape=False)
+
+This seems to work when I create the computation graph up to the point where I want to optimize w.r.t. this variable, i.e.:
+optimizer = tf.train.AdamOptimizer(learning_rate=0.1, epsilon=1e-4)
+optim = optimizer.minimize(loss, var_list=[foo_var])
+
+That fails in the optimizer in some function create_zeros_slot where it seems to depend on the static shape information (it uses primary.get_shape().as_list()).
+So, using the optimizer works only with variables with static shape? Is that a bug?
+My current solution is some hacky monkey patching:
+def _tf_create_slot_var(primary, val, scope):
+  """Helper function for creating a slot variable."""
+
+  from tensorflow.python.ops import variables
+  slot = variables.Variable(val, name=scope, trainable=False, validate_shape=primary.get_shape().is_fully_defined())
+  # pylint: disable=protected-access
+  if isinstance(primary, variables.Variable) and primary._save_slice_info:
+    # Primary is a partitioned variable, so we need to also indicate that
+    # the slot is a partitioned variable.  Slots have the same partitioning
+    # as their primaries.
+    real_slot_name = scope[len(primary.op.name + "/"):-1]
+    slice_info = primary._save_slice_info
+    slot._set_save_slice_info(variables.Variable.SaveSliceInfo(
+        slice_info.full_name + "/" + real_slot_name,
+        slice_info.full_shape[:],
+        slice_info.var_offset[:],
+        slice_info.var_shape[:]))
+  # pylint: enable=protected-access
+  return slot
+
+
+def _tf_create_zeros_slot(primary, name, dtype=None, colocate_with_primary=True):
+  """Create a slot initialized to 0 with same shape as the primary object.
+
+  Args:
+    primary: The primary `Variable` or `Tensor`.
+    name: Name to use for the slot variable.
+    dtype: Type of the slot variable.  Defaults to the type of `primary`.
+    colocate_with_primary: Boolean.  If True the slot is located
+      on the same device as `primary`.
+
+  Returns:
+    A `Variable` object.
+  """
+  if dtype is None:
+    dtype = primary.dtype
+  from tensorflow.python.ops import array_ops
+  val = array_ops.zeros(
+      primary.get_shape().as_list() if primary.get_shape().is_fully_defined() else tf.shape(primary),
+      dtype=dtype)
+  from tensorflow.python.training import slot_creator
+  return slot_creator.create_slot(primary, val, name, colocate_with_primary=colocate_with_primary)
+
+
+def monkey_patch_tf_slot_creator():
+    """
+    The TensorFlow optimizers cannot handle variables with unknown shape.
+    We hack this.
+    """
+    from tensorflow.python.training import slot_creator
+    slot_creator._create_slot_var = _tf_create_slot_var
+    slot_creator.create_zeros_slot = _tf_create_zeros_slot
+
+(That was also asked on StackOverflow.)

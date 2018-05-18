@@ -1,0 +1,148 @@
+Dockerfile.gpu keeps the pip package
+
+$ docker run --rm tensorflow/tensorflow:nightly-gpu-py3 sh -c 'ls -lh /*.whl'
+-rw-rw-r-- 1 root root 207M May  1 04:54 /tf_nightly_gpu-1.9.0.dev20180429-cp35-cp35m-manylinux1_x86_64.whl
+
+This is 200MB we should get rid of.
+In Dockerfile.gpu we have this:
+
+  
+    
+      tensorflow/tensorflow/tools/docker/Dockerfile.gpu
+    
+    
+        Lines 47 to 56
+      in
+      d0f5bc1
+    
+    
+    
+    
+
+        
+          
+           # --- DO NOT EDIT OR DELETE BETWEEN THE LINES --- # 
+        
+
+        
+          
+           # These lines will be edited automatically by parameterized_docker_build.sh. # 
+        
+
+        
+          
+           # COPY _PIP_FILE_ / 
+        
+
+        
+          
+           # RUN pip --no-cache-dir install /_PIP_FILE_ 
+        
+
+        
+          
+           # RUN rm -f /_PIP_FILE_ 
+        
+
+        
+          
+            
+        
+
+        
+          
+           # Install TensorFlow GPU version. 
+        
+
+        
+          
+           RUN pip --no-cache-dir install \ 
+        
+
+        
+          
+               http://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-0.0.0-cp27-none-linux_x86_64.whl 
+        
+
+        
+          
+           # --- ~ DO NOT EDIT OR DELETE BETWEEN THE LINES --- # 
+        
+    
+  
+
+
+In parameterized_docker_build.sh this block is replaced this way:
+
+  
+    
+      tensorflow/tensorflow/tools/docker/parameterized_docker_build.sh
+    
+    
+        Lines 260 to 263
+      in
+      d0f5bc1
+    
+    
+    
+    
+
+        
+          
+               sed -e "/# --- DO NOT EDIT OR DELETE BETWEEN THE LINES --- #/,"\ 
+        
+
+        
+          
+           "/# --- ~ DO NOT EDIT OR DELETE BETWEEN THE LINES --- #/c"\ 
+        
+
+        
+          
+           "COPY ${PIP_WHL} /\n"\ 
+        
+
+        
+          
+           "RUN pip --no-cache-dir install /${PIP_WHL}" "${ORIG_DOCKERFILE}" \ 
+        
+    
+  
+
+
+We don't have the RUN rm -f /_PIP_FILE_ but it doesn't really matter for the size of the image. Since the COPY is necessarily a different layer than the RUN, see my commit message here: 9da73de
+There is no simple solution here, multi-stage builds won't help, I will spare you the black magic technique since we have another option right in front of us:
+
+  
+    
+      tensorflow/tensorflow/tools/docker/Dockerfile.gpu
+    
+    
+        Lines 53 to 55
+      in
+      d0f5bc1
+    
+    
+    
+    
+
+        
+          
+           # Install TensorFlow GPU version. 
+        
+
+        
+          
+           RUN pip --no-cache-dir install \ 
+        
+
+        
+          
+               http://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-0.0.0-cp27-none-linux_x86_64.whl 
+        
+    
+  
+
+
+What prevents us from modifying the parameters passed to parameterized_docker_build.sh to download the pip package? I think a 200MB improvement is worth it.
+cc @gunan

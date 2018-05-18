@@ -1,0 +1,57 @@
+restore part of model using Estimator API
+
+Hi,
+I am trying to restore part of model using tensorflow high level API Estimator,  but I can not find I way.
+I can only specify checkpoint_path for Estimator.
+Here is an example.
+I what to extract COCO images feature using tf-slim pretrained model resnet_v2, but this pretrained model does not provide "resnet_v2_152/block1/unit_1/bottleneck_v2/conv2/biases". So, I need to initialize it to zero.
+But using Estimator, It will find that this biases not in checkpoint and raise a Not found error.
+import tensorflow as tf
+
+import tensorflow.contrib.slim.python.slim.nets.resnet_v2 as resnet_v2
+
+
+def cnn_model_fn(features, labels, mode):
+    net, end_points = resnet_v2.resnet_v2_152(inputs=features, is_training=mode == tf.estimator.ModeKeys.TRAIN)
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=net)
+    else:
+        raise NotImplementedError('only support predict!')
+
+
+def parse_filename(filename):
+    image_string = tf.read_file(filename)
+    image_decoded = tf.image.decode_jpeg(image_string, channels=3)
+    image_resized = tf.image.resize_images(image_decoded, [256, 256])
+    return image_resized
+
+
+def dataset_input_fn(dataset, num_epochs=None, batch_size=128, shuffle=False, buffer_size=1000, seed=None):
+    def input_fn():
+        d = dataset.repeat(num_epochs).batch(batch_size)
+        if shuffle:
+            d = d.shuffle(buffer_size)
+        iterator = d.make_one_shot_iterator()
+        next_example = iterator.get_next()
+        return next_example
+
+    return input_fn
+
+
+filenames = sorted(tf.gfile.Glob('/root/data/COCO/download/val2014/*'))
+dataset = tf.contrib.data.Dataset.from_tensor_slices(filenames).map(parse_filename)
+
+input_fn = dataset_input_fn(dataset, num_epochs=1, batch_size=1, shuffle=False)
+
+estimator = tf.estimator.Estimator(model_fn=cnn_model_fn, model_dir=None)
+
+es = estimator.predict(input_fn=input_fn,
+                       checkpoint_path='/root/data/checkpoints/resnet_v2_152_2017_04_14/resnet_v2_152.ckpt')
+print(es.__next__())
+
+
+print("Done!")
+
+
+The error is obvious.
+2017-09-12 20:36:31.231422: W tensorflow/core/framework/op_kernel.cc:1192] Not found: Tensor name "resnet_v2_152/block1/unit_1/bottleneck_v2/conv2/biases" not found in checkpoint files /root/data/checkpoints/resnet_v2_152_2017_04_14/resnet_v2_152.ckpt

@@ -1,0 +1,36 @@
+[Feature Request] Sparse compute_gradient
+
+I am working on an extremely large scale linear model and have been trying to optimize the performance of the TF optimizer.
+Have I written custom code
+Version I.
+My feature size is huge (500Mil) and sparse, so I was testing if I could make TF only compute the necessary gradients and apply it using some function like tf.scatter_sub()
+My graph is like this:
+cost = fn(w)
+vars_to_update = tf.gather(w, non_zero_indices)
+grads = tf.gradients(cost, vars_to_update)
+update_op = tf.scatter_sub(w, non_zero_indeces, grads)
+
+I found that tf.graidents() always returns None for tf.gather(). Similar condition if I pass tf.gather() to any optimizer like tf.train.GradientDescentOpitmizer(cost, tf.gather(w, indices)), it will throw unsupported error for tf.gather().
+I was wondering if I did anything wrong or TF just doesn't support sparse gradient computation? If latter does TF team plan to have that implemented in short future?
+Version II.
+In stead of creating a sparse tensor and do sparse_tensor_dense_matmul(), I also tried using tf.gather() follow by tf.segment_sum() to implement W*X. By doing this the optimizer apparently automatically performed sparse grad computation and sparse update. However, the speed of the optimizer was horribly slower (15seconds) than the sparse tensor approach. And idea why?
+Pseudo code:
+active_weights = tf.gather(weights, non_zero_indices)
+total = tf.segment_sum(
+                tf.reshape(activated_weights, [-1]),
+                segment_ids //which is the row number e.g. [0,0,0,0,1,1,1,2,2,2,3,3,...]
+                )
+update_op = tf.train.GradientDescentOptimizer().minimize(total, active_weights)
+
+OS Platform and Distribution
+Centos Linux version 3.10.0-229.4.2.el7.x86_64 (gcc version 4.8.2 20140120 (Red Hat 4.8.2-16) (GCC) )
+TensorFlow installed from (source or binary)
+pip install tensorflow
+TF version
+1.3.0
+Python version
+2.7.5
+Bazel version, CUDA/cuDNN, GPU model and memory, Exact command to reproduce
+N/A
+Also there might be a potential bug
+If in the second approach (tf.gather() and tf.segment_sum()) I replace GradientDescentOptimizer with Adam or Adagrad optimizer, the memory would blow up very quickly. I did not look into why that happened so I am not sure if this worth a bug ticket.

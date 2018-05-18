@@ -1,0 +1,93 @@
+tf.contrib.util.make_ndarray is slow the first time it is run
+
+System information
+Output of tf_env_collect.sh: tf_env.txt
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+
+
+TensorFlow installed from (source or binary): binary
+
+
+TensorFlow version (use command below): v1.3.0-rc1-479-g82456f9 1.2.1-rc1
+
+
+Python version: Python 3.5.2
+
+
+Bazel version (if compiling from source): n/a
+
+
+CUDA/cuDNN version:
+== cuda libs  ===================================================
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0.61
+/usr/local/cuda-8.0/lib64/libcudart_static.a
+/usr/local/lib/python3.5/dist-packages/torch/lib/libcudart.so.8.0
+/usr/local/cuda-7.5/doc/man/man7/libcudart.7
+/usr/local/cuda-7.5/doc/man/man7/libcudart.so.7
+/usr/local/cuda-7.5/lib/libcudart.so.7.5.18
+/usr/local/cuda-7.5/lib/libcudart_static.a
+/usr/local/cuda-7.5/lib64/libcudart.so.7.5.18
+/usr/local/cuda-7.5/lib64/libcudart_static.a
+
+
+GPU model and memory:
+
+
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 381.22                 Driver Version: 381.22                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 1060    Off  | 0000:01:00.0      On |                  N/A |
+| N/A   48C    P0    28W /  N/A |    591MiB /  6064MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+
+
+
+Exact command to reproduce:
+Download  frame.summary.zip and extract it to frame.summary. Some info about it:
+
+tensor_proto dtype: DT_UINT8
+tensor_shape {
+  dim {
+    size: 1059
+  }
+  dim {
+    size: 768
+  }
+}
+
+Run the following:
+import time
+from google.protobuf import message
+import tensorflow as tf
+
+for i in range(2):
+  path = 'frame.summary'
+  with open(path, 'rb') as summary_file:
+    summary_string = summary_file.read()
+
+  summary_proto = tf.Summary()
+  summary_proto.ParseFromString(summary_string)
+  tensor_proto = summary_proto.value[0].tensor
+  a = time.time()
+  array = tf.contrib.util.make_ndarray(tensor_proto)
+  b = time.time()
+  print('b-a', b-a)
+Describe the problem
+The first time make_ndarray is run, it takes a long time. For this isolated example, the output is this on my machine:
+b-a 2.810185194015503
+b-a 0.00030040740966796875
+
+In my project, it took 105.96585726737976 for the first run, and 0.0005743503570556641 the second time (and closer to 0.0003 afterwards).
+Source code / logs
+Here is the branch I was using : https://github.com/chrisranderson/beholder/tree/bug-report
+And the line that took ~105 seconds: https://github.com/chrisranderson/beholder/blob/b54d4203d803492af9852b7c8453e8a1e5342f46/beholder/file_system_tools.py#L34

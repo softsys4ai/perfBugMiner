@@ -1,0 +1,107 @@
+Conflict between Defun and py_func
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Mac OS 10.12.5
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.1.0-rc0-61-g1ec6ed5 1.1.0
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A (run on CPU)
+Exact command to reproduce:
+
+import tensorflow as tf
+from tensorflow.python.framework import function
+
+def f(x):
+    return x
+
+@function.Defun(tf.float32, func_name='f')
+def f1(x): 
+    return tf.py_func(f, [x], tf.float32)
+
+with tf.Session() as sess:
+    x = tf.constant(1.)
+    print(sess.run(f1(x)))
+
+Describe the problem
+The decorator Defun does not work with py_func, and generates the KeyError when attempting to call with the token pyfunc_#.  If one comments out the decorator @function.Defun(...), or if one redefines def f1(x): return x, the error will disappear.
+Source code / logs
+Error traceback:
+---------------------------------------------------------------------------
+KeyError                                  Traceback (most recent call last)
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/ops/script_ops.py in __call__(self, token, args)
+     77   def __call__(self, token, args):
+     78     """Calls the registered function for `token` with args."""
+---> 79     func = self._funcs[token]
+     80     if func is None:
+     81       raise ValueError("callback %s is not found" % token)
+
+KeyError: 'pyfunc_0'
+
+---------------------------------------------------------------------------
+InternalError                             Traceback (most recent call last)
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+   1038     try:
+-> 1039       return fn(*args)
+   1040     except errors.OpError as e:
+
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/client/session.py in _run_fn(session, feed_dict, fetch_list, target_list, options, run_metadata)
+   1020                                  feed_dict, fetch_list, target_list,
+-> 1021                                  status, run_metadata)
+   1022 
+
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/contextlib.py in __exit__(self, type, value, traceback)
+     65             try:
+---> 66                 next(self.gen)
+     67             except StopIteration:
+
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py in raise_exception_on_not_ok_status()
+    465           compat.as_text(pywrap_tensorflow.TF_Message(status)),
+--> 466           pywrap_tensorflow.TF_GetCode(status))
+    467   finally:
+
+InternalError: Failed to run py callback pyfunc_0: see error log.
+	 [[Node: n1 = PyFunc[Tin=[DT_FLOAT], Tout=[DT_FLOAT], token="pyfunc_0"](n0)]]
+	 [[Node: f = f[_device="/job:localhost/replica:0/task:0/cpu:0"](Const)]]
+
+During handling of the above exception, another exception occurred:
+
+InternalError                             Traceback (most recent call last)
+<ipython-input-1-0ed0f802b342> in <module>()
+      8 with tf.Session() as sess:
+      9     x = tf.constant(1.)
+---> 10     print(sess.run(f1(x)))
+
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+    776     try:
+    777       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 778                          run_metadata_ptr)
+    779       if run_metadata:
+    780         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    980     if final_fetches or final_targets:
+    981       results = self._do_run(handle, final_targets, final_fetches,
+--> 982                              feed_dict_string, options, run_metadata)
+    983     else:
+    984       results = []
+
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+   1030     if handle is None:
+   1031       return self._do_call(_run_fn, self._session, feed_dict, fetch_list,
+-> 1032                            target_list, options, run_metadata)
+   1033     else:
+   1034       return self._do_call(_prun_fn, self._session, handle, feed_dict,
+
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+   1050         except KeyError:
+   1051           pass
+-> 1052       raise type(e)(node_def, op, message)
+   1053 
+   1054   def _extend_graph(self):
+
+InternalError: Failed to run py callback pyfunc_0: see error log.
+	 [[Node: n1 = PyFunc[Tin=[DT_FLOAT], Tout=[DT_FLOAT], token="pyfunc_0"](n0)]]
+	 [[Node: f = f[_device="/job:localhost/replica:0/task:0/cpu:0"](Const)]]

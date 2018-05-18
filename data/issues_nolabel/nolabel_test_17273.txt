@@ -1,0 +1,73 @@
+Numerical error with tf.nn.conv2d, tf.nn.moments and tf.sqrt
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes (see code below)
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): SUSE Linux Enterprise Server 12.2 (x86_64)
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.5.0 (git v1.5.0-0-g37aa430d84) & also present in 1.4.0
+Python version: 3.6.4
+Bazel version (if compiling from source): 0.10.1
+GCC/Compiler version (if compiling from source): GCC/7.2.0
+CUDA/cuDNN version: None
+GPU model and memory: None
+Exact command to reproduce: See script below
+
+Describe the problem
+There is a numerical error with a very specific sequence of operations, that make tf.sqrt() return a tensor of zeros when applied on the output of tf.nn.moments (regardless of the value returned by tf.nn.moments). This error happens when the input of tf.nn.moments comes from tf.nn.conv2d, but not when removing the latter.
+This error happens when running on a cluster where TensorFlow has been installed from source with "-m64 -march=native -mtune=native". We tried upgrading from 1.4.0 to 1.5.0, but the error still occurs. The following flags were used during compilation:
+TF_NEED_JEMALLOC="1"
+TF_NEED_HDFS="1"
+TF_NEED_OPENCL="0"
+TF_NEED_CUDA="0"
+TF_ENABLE_XLA="0"
+TF_CUDA_CLANG="0"
+TF_NEED_GCP="0"
+TF_NEED_MKL="1"
+TF_NEED_VERBS="0"
+TF_NEED_MPI="1"
+TF_NEED_S3="0"
+TF_NEED_GDR="0"
+TF_NEED_OPENCL_SYCL="0"
+TF_MKL_ROOT="[DIR]/mkl-dnn/external/mklml_lnx_2018.0.1.20171007"
+export MPI_HOME="[DIR]/2018.1.038/compilers_and_libraries_2018.1.163/linux/mpi/intel64"
+Android build: No.
+Compiled using Intel MPI plus complete MKL (2018.1.038) loaded in the environment.
+We also tested this same code in two other machines, where it works properly. One of them is an older cluster, with TensorFlow compiled from source using the same configuration; the main difference is that the processors in this cluster do not support AVX512. The other machine is a laptop where TensorFlow was installed with pip.
+Source code / logs
+The smallest code to reproduce the error is the following:
+import tensorflow as tf
+import numpy as np
+
+# TensorFlow version
+print('TF version:', tf.__version__, tf.__git_version__, '\n')
+
+# Create placeholders
+o = tf.placeholder(tf.float32, [None, 84, 84, 4])
+
+# Create graph: conv(x, w) -> (x-mean(x))/std(x)
+x = o
+
+w = tf.get_variable("w", [3, 3, x.get_shape()[-1], 16])
+x = tf.nn.conv2d(x, w, [1, 1, 1, 1], padding="SAME")  # remove this and the error disappears...
+
+avg, variance = tf.nn.moments(x, np.arange(len(x.get_shape().as_list()) - 1), keep_dims=True)
+epsilon = 1e-3  # for numerical stability in sqrt
+
+variance = tf.Print(variance, [avg], message='mean(x): ')
+variance = tf.Print(variance, [variance], message='variance(x): ')
+variance = tf.Print(variance, [tf.sqrt(variance + epsilon)], message='sqrt(variance(x)): ')
+variance = tf.Print(variance, [tf.sqrt(avg**2 + epsilon)], message='sqrt(mean(x)^2): ')
+
+x = (x - avg) / (tf.sqrt(variance + epsilon))
+
+# Run
+sess = tf.InteractiveSession()
+sess.run(tf.global_variables_initializer())
+sess.run(x, feed_dict={o: np.random.rand(32, 84, 84, 4)})
+
+And the output:
+mean(x): [[[[0.176351935 -0.11745432 -0.17503795]]]...]
+variance(x): [[[[0.0344150327 0.0378020629 0.0353332]]]...]
+sqrt(variance(x)): [[[[0 0 0]]]...]
+sqrt(mean(x)^2): [[[[0 0 0]]]...]

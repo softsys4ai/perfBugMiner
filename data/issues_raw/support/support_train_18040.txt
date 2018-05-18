@@ -1,0 +1,42 @@
+[distributed tensorflow] End of sequence after a few batch with dataset.shard
+
+When running distributed training, my session gets terminated after a few batches when using dataset.shard. The issue disappears when I run distributed training with an independent dataset object on each worker (in which case the same data gets shuffled and read on each worker).
+Have I written custom code: No.
+OS Platform and Distribution: ubuntu
+TensorFlow installed from: standard TF1.5 distribution
+Bazel version: NA
+CUDA/cuDNN version: CUDA 9.1
+GPU model and memory: No GPU
+Exact command to reproduce: Cf Below
+Dataset construction:
+def construct_dataset(filenames, labels, batch_size, num_workers,worker_index):
+    dataset = tf.data.TextLineDataset(filenames)
+    dataset = tf.data.Dataset.from_tensor_slices((filenames,labels))
+    dataset = dataset.shard(num_workers, worker_index) #works fine when commenting this out
+    dataset = dataset.shuffle(buffer_size=10000)  # Equivalent to min_after_dequeue=10000.
+    dataset = dataset.map(_parse_function)
+    dataset = dataset.batch(batch_size)
+    return dataset
+
+main
+with tf.device(device):
+        filelist, labels = get_filelist(FLAGS.data_dir)
+        dataset = construct_dataset(...)
+        iterator = dataset.make_one_shot_iterator()
+        batch = iterator.get_next()
+        img_batch, filepath_batch, label_batch = batch
+        ...
+
+       hooks=[tf.train.StopAtStepHook(last_step=1000000)] 
+
+    with tf.train.MonitoredTrainingSession(master=target,
+        is_chief=(FLAGS.task_index == 0),checkpoint_dir=logs,hooks = hooks) as sess:
+        try:
+            while not sess.should_stop():
+                sess.run(train_op)
+        except Exception as e:
+            print(e)
+
+Stacktrace -
+	 [[Node: IteratorGetNext = IteratorGetNext[output_shapes=[[?,300,300,?], [?], [?]], output_types=[DT_UINT8, DT_STRING, DT_INT32], _device="/job:ps/replica:0/task:0/device:CPU:0"](OneShotIterator)]]
+	 [[Node: Training_Loss_S17 = _HostRecv[client_terminated=false, recv_device="/job:worker/replica:0/task:0/device:CPU:0", send_device="/job:ps/replica:0/task:0/device:CPU:0", send_device_incarnation=-379211586651304706, tensor_name="edge_133_Training_Loss", tensor_type=DT_STRING, _device="/job:worker/replica:0/task:0/device:CPU:0"]()]]

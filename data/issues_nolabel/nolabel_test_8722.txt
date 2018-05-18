@@ -1,0 +1,48 @@
+Added support for case callables to return namedtuples
+
+This commit adds support fornamedtuple to be used with tf.case.
+tf.cond already supports namedtuple:
+nt = collections.namedtuple('Point', ['x', 'y'])
+f1 = lambda: nt(tf.Variable(1), tf.Variable(2))
+f2 = lambda: nt(tf.Variable(3), tf.Variable(4))
+c  = tf.cond(tf.less(1,0), f1, f2)
+print c
+
+Output
+[<tf.Tensor 'cond/Merge:0' shape=() dtype=int32>, <tf.Tensor 'cond/Merge_1:0' shape=() dtype=int32>]
+
+However, if
+c =  tf.case([(tf.less(1,0), f1)], default=f2)
+print c
+
+Output
+TypeError: __new__() takes exactly 3 arguments (2 given)
+
+After this commit, the output for above is
+[<tf.Tensor 'case/If_1/Merge:0' shape=() dtype=int32>, <tf.Tensor 'case/If_1/Merge_1:0' shape=() dtype=int32>]
+Using namedtuple with tf.case should have the same effect as using a regular tuple.
+nt = collections.namedtuple('Point', ['x', 'y'])
+
+f1 = lambda: nt(tf.Variable(1), tf.Variable(2))
+f2 = lambda: nt(tf.Variable(3), tf.Variable(4))
+
+f3 = lambda: (tf.Variable(1), tf.Variable(2))
+f4 = lambda: (tf.Variable(3), tf.Variable(4))
+
+c1  = tf.case([(tf.less(1,0), f1)], default=f2)
+c2  = tf.case([(tf.less(1,0), f3)], default=f4)
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+
+    print "With namedtuple: ",
+    v = sess.run(c1)
+    print v
+
+    print "With tuple: ",
+    v2 = sess.run(c2)
+    print v2
+
+Output
+With namedtuple:  [3, 4]
+With tuple:  [3, 4]

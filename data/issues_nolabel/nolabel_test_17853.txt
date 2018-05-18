@@ -1,0 +1,91 @@
+cannot decode FixedLenFeature with decode_raw
+
+I try to parse data from tfrecord file with Dataset, and when I try to parse image with decode_raw, it throws an error.  I use tf1.6, the code is as following:
+def _parse_tfrecords_func(record):
+    """
+    :param record:
+    :return:
+    """
+    features = {"img": tf.FixedLenFeature([],tf.string),
+                "label": tf.FixedLenFeature((), tf.int64, default_value=0),
+                "width": tf.FixedLenFeature((), tf.int64, default_value=0),
+                "height": tf.FixedLenFeature((), tf.int64, default_value=0),
+                "channel": tf.FixedLenFeature((), tf.int64, default_value=0)}
+    parsed_features = tf.parse_single_example(record, features)
+    for keys in parsed_features:
+        print(keys)
+
+    print(type(features['img']))
+    print(dir(features['img']))
+    img = tf.decode_raw(features['img'], tf.uint8)  # TODO: fix the error
+    img_reshape = tf.reshape(img, (parsed_features['width'], parsed_features['height'], parsed_features['channel']))
+    return img_reshape, parsed_features['label']
+
+def dataset_tfrecords():
+    """
+    Dataset读tfrecords
+    :return:
+    """
+    tfrecords_files = ['tfrecords_example']
+    dataset = tf.data.TFRecordDataset(tfrecords_files)
+    dataset = dataset.map(_parse_tfrecords_func)
+    dataset.repeat()
+
+    iterator = dataset.make_initializable_iterator()
+    next_elem = iterator.get_next()
+    sess = tf.Session()
+    sess.run(iterator.initializer)
+
+    for i in range(1):
+        next_elem = sess.run(next_elem)
+        print(type(next_elem))
+
+label, width, height, channel are parsed succeed, however, decode image with decode_raw causes an error, error information is as following:
+Traceback (most recent call last):
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 510, in _apply_op_helper
+    preferred_dtype=default_dtype)
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\framework\ops.py", line 1036, in internal_convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\framework\constant_op.py", line 235, in _constant_tensor_conversion_function
+    return constant(v, dtype=dtype, name=name)
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\framework\constant_op.py", line 214, in constant
+    value, dtype=dtype, shape=shape, verify_shape=verify_shape))
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\framework\tensor_util.py", line 433, in make_tensor_proto
+img
+channel
+height
+label
+width
+<class 'tensorflow.python.ops.parsing_ops.FixedLenFeature'>
+['__add__', '__class__', '__contains__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattribute__', '__getitem__', '__getnewargs__', '__gt__', '__hash__', '__init__', '__iter__', '__le__', '__len__', '__lt__', '__module__', '__mul__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__rmul__', '__setattr__', '__sizeof__', '__slots__', '__str__', '__subclasshook__', '_asdict', '_fields', '_make', '_replace', '_source', '_tf_api_names', 'count', 'default_value', 'dtype', 'index', 'shape']
+    _AssertCompatible(values, dtype)
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\framework\tensor_util.py", line 344, in _AssertCompatible
+    (dtype.name, repr(mismatch), type(mismatch).__name__))
+TypeError: Expected string, got tf.string of type 'DType' instead.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "test_dataset.py", line 99, in <module>
+    dataset_tfrecords()
+  File "test_dataset.py", line 75, in dataset_tfrecords
+    dataset = dataset.map(_parse_tfrecords_func)
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\data\ops\dataset_ops.py", line 790, in map
+    return MapDataset(self, map_func)
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\data\ops\dataset_ops.py", line 1597, in __init__
+    self._map_func.add_to_graph(ops.get_default_graph())
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\framework\function.py", line 486, in add_to_graph
+    self._create_definition_if_needed()
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\framework\function.py", line 321, in _create_definition_if_needed
+    self._create_definition_if_needed_impl()
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\framework\function.py", line 338, in _create_definition_if_needed_impl
+    outputs = self._func(*inputs)
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\data\ops\dataset_ops.py", line 1562, in tf_map_func
+    ret = map_func(nested_args)
+  File "test_dataset.py", line 64, in _parse_tfrecords_func
+    img = tf.decode_raw(features['img'], tf.uint8)  # TODO: fix the error
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\ops\gen_parsing_ops.py", line 214, in decode_raw
+    little_endian=little_endian, name=name)
+  File "D:\Anaconda\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 519, in _apply_op_helper
+    repr(values), type(values).__name__))
+TypeError: Expected string passed to parameter 'bytes' of op 'DecodeRaw', got FixedLenFeature(shape=[], dtype=tf.string, default_value=None) of type 'FixedLenFeature' instead.

@@ -1,0 +1,16 @@
+Give accumulate_n op a gradient (version 2)
+
+This pull request is a restructuring of the changes in #13022 to address high-level comments. Two major changes to call out vis a vis the previous PR:
+
+Instead of replacing accumulate_n, this PR now adds a new op, accumulate_n_v2. This new op is defined under contrib/framework.
+Refactoring changes have been broken out into a separate PR, #13159
+
+Overall, this pull request addresses issue #10607 by adding a gradient to the existing accumulate_n operator. I followed the approach suggested by @alextp: rewrite accumulate_n as an atomic op which has a gradient defined for it and which gets rewritten by the runtime into the current implementation. Previously, this op had been implemented in Python as a constellation of lower-level ops, some of which are not differentiable.
+Implementation Details
+I have added a new C++ op, AccumulateNV2, which serves as a placeholder for type inference and gradient computation. A new rewrite, implemented in accumulate_n_optimizer.cc, replaces this placeholder with a group of AssignAdd ops and some additional ops that create, initialize, and destroy temporary variables.
+I wrote a new Python wrapper function accumulate_n_v2 that has the same signature as the original accumulate_n function. Unlike the original, accumulate_n_v2 only validates its arguments and creates an instance of the AccumulateNV2 placeholder op.
+Testing
+I added a more complete set of tests for accumulate_n in a previous pull request (#12196) to ensure that the op would still be correct after the changes in the current pull request. I copied all of the existing tests for accumulate_n into a test suite for the new accumulate_n_v2 op (see tensorflow/contrib/framework/python/ops/accumulate_n_v2_test.py). I also added one additional test to verify that accumulate_n_v2 now has a gradient. All the tests under //tensorflow/python/... currently pass on my MacOS and Linux test machines.
+Things to Note
+The semantics of the new implementation are broadly the same as the original, with the exception of one corner case. The original implementation allowed all the inputs to accumulate_n to have an undefined shape. My new code requires that at least one input have a defined shape; or that the user provides a shape using the shape argument to the accumulate_n function.
+I had to put the graph rewrite code into the main build to get the rewrite to compile and run properly. It looks like some part of the API for adding an optimizer pass instantiates some static global data structures and can't be called from a dynamically-linked library.

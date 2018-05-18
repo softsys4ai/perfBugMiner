@@ -1,0 +1,68 @@
+Variable values are not present in Java when saving a model in python and restoring in Java
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes. Provided bellow
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Mac OS 10.12.5
+TensorFlow installed from (source or binary): pip install
+TensorFlow version (use command below): 1.2.1
+Python version: 2.7
+Bazel version (if compiling from source): No compiled
+CUDA/cuDNN version: No
+GPU model and memory: No
+Exact command to reproduce:
+
+Describe the problem
+I've a script where a graph and variables are being saved using add_meta_graph_and_variables and tried to load it in Java but the weights seems that not are present.
+I've created two mini-examples of what it seems to me a bug.
+Source code / logs
+Here it's how I have saved the things:
+with tf.Session(graph=tf.Graph()) as session:
+    ##HERE IS THE CODE OF MY NETWORK (Very long)
+
+    session.run(tf.global_variables_initializer())
+    #Load
+    saver = tf.train.Saver()
+    saver.restore(session, "newModel.chkpt")
+
+    features = loadFeatures(["cat2.jpg"])
+    res = predictions.eval(
+            feed_dict={
+                x: features,
+                keep_prob: 1.0, })
+    print('Image {} has a prob {} '.format(image, res))
+
+    b = saved_model_builder.SavedModelBuilder(pathToSaveModel)
+    b.add_meta_graph_and_variables(session, [tf.saved_model.tag_constants.TRAINING])
+    b.save()
+
+And here is how I tried to load in the Java side:
+public static void main(String[] args) throws Exception {
+
+        final int IMG_SIZE = 128;
+        final String value = "Hello from " + TensorFlow.version();
+
+        byte[] imageBytes = readAllBytesOrExit(Paths.get("./cat1.jpg"));
+        Tensor image = constructAndExecuteGraphToNormalizeImage(IMG_SIZE, imageBytes);
+
+        SavedModelBundle load = SavedModelBundle.load("./tmpTestNew/model", "train");
+
+        long[] sitio2;
+        try (Graph g = load.graph()) {
+            try (Session s = load.session();
+                 Tensor result = s.runner()
+                         .feed("keep_prob", Tensor.create(1.0F))
+                         .feed("input_jm", image)
+                         .fetch("predictions").run().get(0))
+            {
+                sitio2 = result.copyTo(new long[1]);
+                System.out.print(sitio2[0]+"\n");
+            }
+        }
+        load.close();
+    }
+
+I've checked the content of some Tensor variables and in the python side the values are correct but the same variable in the Java side have another values (I can paste the code if needed), as a result the predictions are always wrong.
+I can provide the model saved or any other thing that is needed.
+Thanks.

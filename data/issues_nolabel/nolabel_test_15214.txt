@@ -1,0 +1,48 @@
+tf.profiler overrides shape_invariants in while_loop
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.5.0-dev20171120
+Python version: 3.5
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:
+
+import tensorflow as tf
+
+a = tf.zeros((1,))
+n = tf.constant(10.)
+do_profile = True
+
+_, b = tf.while_loop(
+    lambda x, y: x[0] < n,
+    lambda x, y: (x + 1, tf.concat((y, x), 0)),
+    (a, tf.zeros((0,))),
+    shape_invariants=(tf.TensorShape((1,)), tf.TensorShape((None,))))
+
+with tf.Session() as sess:
+    for _ in range(2):
+        grads = tf.gradients(b, a)
+
+        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+        run_metadata = tf.RunMetadata()
+        print(sess.run((b, grads), options=run_options,
+                       run_metadata=run_metadata))
+
+        if do_profile:
+            tf.profiler.profile(tf.get_default_graph(), run_meta=run_metadata)
+If do_profile=True, this will give an error on the second pass through the for loop:
+Traceback (most recent call last):
+  File ".../tmp3.py", line 15, in <module>
+    grads = tf.gradients(b, a)
+  File "...\lib\site-packages\tensorflow\python\ops\gradients_impl.py", line 638, in gradients
+    % (op.name, i, t_in.shape, in_grad.shape))
+ValueError: Incompatible shapes between op input and calculated input gradient.  Forward operation: while/Switch_1.  Input index: 0. Original input shape: (0,).  Calculated input gradient shape: (10,)
+
+Describe the problem
+I believe this is caused by this function, which goes through the graph and fills in missing shapes from the run_metadata.  This modifies the graph in-place, so on the second pass through the for loop the loop variable that was intentionally defined with an unknown shape has been overwritten with the fixed shape from the last run.  This causes the shape mismatch error.

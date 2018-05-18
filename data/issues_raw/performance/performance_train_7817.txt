@@ -1,0 +1,44 @@
+Reading data with queue is even slower than using feed_dict
+
+It seems reading data with feed_dict is inefficient in tensorflow (I found it 3-4 times slower than a theano-based implementation with a totally same network structure), I turn to a queue-based method as official recommendation. However, my experiment result give a even worse performance. Is there anything wrong ?
+Related issue
+#3377 Moving data from CPU to GPU is slow
+Environment info
+Operating System: Ubuntu 16.04
+CPU: Intel i4790-k
+GPU: Nvidia GTX 1070 (8 GB)
+Memory: 16 GB
+Tensorflow version: 1.0
+CUDA version: 8.0
+cuDNN version: 5.0
+Implementation Example
+
+Using feed_dict
+
+x, y = np.array(...)
+in_x, in_y = tf.placeholder(...)
+""" f() is some computation in the network, including embedding_lookup, 
+bidirectional_dynamic_rnn, dense """
+train_op = f(in_x, in_y) 
+sess = tf.Session()
+for _ in range(num_epochs): # num_epochs is 100 here
+    sess.run(train_op, {in_x: x, in_y: y})
+
+Using queue
+
+x, y = np.array(...)
+x, y = tf.convert_to_tensor(...)
+in_x, in_y = tf.train.slice_input_producer([x, y], num_epochs=100)
+in_x, in_y = tf.train.batch([in_x, in_y], batch_size=32)
+train_op = f(in_x, in_y)
+sess = tf.Session()
+coord = tf.train.Coordinator()
+threads = tf.train.start_queue_runners(sess, coord)
+try:
+    while not coord.should_stop():
+        sess.run(train_op)
+    except Exception as e:
+        coord.request_stop(e)
+    finally:
+        coord.request_stop()
+coord.join(threads)

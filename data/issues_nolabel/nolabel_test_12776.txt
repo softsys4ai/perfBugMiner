@@ -1,0 +1,68 @@
+nest.flatten() does not work with list
+
+System information
+== cat /etc/issue ===============================================
+Linux mews3153 3.16.0-4-amd64 #1 SMP Debian 3.16.36-1+deb8u2 (2016-10-19) x86_64 GNU/Linux
+VERSION_ID="8"
+VERSION="8 (jessie)"
+== are we in docker =============================================
+No
+== compiler =====================================================
+c++ (Debian 4.9.2-10) 4.9.2
+Copyright (C) 2014 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+== uname -a =====================================================
+Linux mews3153 3.16.0-4-amd64 #1 SMP Debian 3.16.36-1+deb8u2 (2016-10-19) x86_64 GNU/Linux
+== check pips ===================================================
+numpy (1.13.1)
+protobuf (3.4.0)
+tensorflow (1.3.0)
+tensorflow-tensorboard (0.1.5)
+== check for virtualenv =========================================
+True
+== tensorflow import ============================================
+tf.VERSION = 1.3.0
+tf.GIT_VERSION = v1.3.0-rc2-20-g0787eee
+tf.COMPILER_VERSION = v1.3.0-rc2-20-g0787eee
+Sanity check: array([1], dtype=int32)
+== env ==========================================================
+LD_LIBRARY_PATH /usr/lib/libipp-intel:/opt/boost/lib/:/usr/lib64/:/mobileye/shared/boost-python2.7/lib
+DYLD_LIBRARY_PATH is unset
+== nvidia-smi ===================================================
+/tmp/tf_env_collect.sh: line 105: nvidia-smi: command not found
+== cuda libs  ===================================================
+Describe the problem
+The function tensorflow.contrib.data.python.util.nest.flatten fails to flatten a list. Given a flat list, it returns a nested list. This causes a problem in dataset_ops.py, when the datasource is created by zipping several datasources and then attempting to create an iterator.
+Source code / logs
+Example 1:
+from tensorflow.contrib.data.python.util import nest
+nest.flatten([1,2,3,4])
+
+[[1, 2, 3, 4]]
+
+nest.flatten((1,2,3,4)) # works with a tuple
+
+[1, 2, 3, 4]
+
+Example 2:
+import tensorflow as tf
+dataset1 = tf.contrib.data.Dataset.from_tensor_slices(tf.random_uniform([4, 10]))
+dataset2 = tf.contrib.data.Dataset.from_tensor_slices(tf.random_uniform([4]))
+dataset3 = tf.contrib.data.Dataset.zip([dataset1, dataset2])
+iterator = dataset3.make_initializable_iterator()
+sess = tf.InteractiveSession()
+sess.run(iterator.initializer)
+next1, next2 = iterator.get_next()
+
+running the above code:
+Traceback (most recent call last):
+File "/tmp/tds.py", line 7, in 
+iterator = dataset3.make_initializable_iterator()
+File "/homes/elyassaf/venv/local/lib/python2.7/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.py", line 464, in make_initializable_iterator
+return Iterator.from_dataset(self, shared_name)
+File "/homes/elyassaf/venv/local/lib/python2.7/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.py", line 97, in from_dataset
+output_types=nest.flatten(dataset.output_types),
+File "/homes/elyassaf/venv/local/lib/python2.7/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.py", line 1199, in output_types
+ds.output_types for ds in nest.flatten(self._datasets)
+AttributeError: 'list' object has no attribute 'output_types'

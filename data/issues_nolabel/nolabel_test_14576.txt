@@ -1,0 +1,50 @@
+FAIL://tensorflow/core:common_runtime_direct_session_with_tracking_alloc_test with GPU support
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04 (ppc64le)
+TensorFlow installed from (source or binary):
+Installed from source
+TensorFlow version (use command below):
+TF-1.3.1
+Python version:
+Python 2.7.5
+Bazel version (if compiling from source):
+Bazel - 0.5.4
+CUDA/cuDNN version:
+cuda-8.0 and cuDNN-6.0.21
+GPU model and memory:
+0   Tesla P100-SXM2 16276MiB
+1   Tesla P100-SXM2 16276MiB
+Exact command to reproduce:
+bazel test --config=opt --config=cuda -k //tensorflow/core:common_runtime_direct_session_with_tracking_alloc_test
+
+Describe the problem
+This test passed successfully with CPU only. However its failing for GPU , getting following error :
+F tensorflow/core/common_runtime/direct_session_with_tracking_alloc_test.cc:141] Check failed: cost_models.size() == 1 (2 vs. 1)
+(Test expects cost_models.size() == '1' , but we are getting '2' with GPU)
+I was looking into this test failure and I found some relevant discussion links -
+
+lukeiwanski#75  - Here mentioned , this test is marked for no_gpu
+lukeiwanski#115 - Here I found following comments:
+
+The aim of this test is to ensure that there is at least one cost model (that of the CPU), as if there are no cost models then the test should fail and there is no point in trying to run the other tests on the cost
+model.
+The number of cost models provided by a session should matches the number of devices used by that session. When additional devices are present there will be more than one cost model, so we should not be checking for equality, but rather that the number of cost models is at least one.
+As per above comments , I think we should raise a PR with following changes to pass on GPU as well -
+https://github.com/tensorflow/tensorflow/blob/v1.3.1/tensorflow/core/common_runtime/direct_session_with_tracking_alloc_test.cc#L141
+Original - CHECK_EQ(cost_models.size(), 1);
+Updated to - CHECK_GE(cost_models.size(), 1);
+Please provide your comments on this. Thanks!
+Source code / logs
+$  bazel test --config=opt --config=cuda -k //tensorflow/core:common_runtime_direct_session_with_tracking_alloc_test
+
+...
+2017-11-15 08:42:51.345108: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1045] Creating TensorFlow device (/gpu:1) -> (device: 1, name: Tesla P100-SXM2-16GB, pci bus id: 0006:01:00.0)
+2017-11-15 08:42:51.352293: F tensorflow/core/common_runtime/direct_session_with_tracking_alloc_test.cc:141] Check failed: cost_models.size() == 1 (2 vs. 1)
+================================================================================
+Target //tensorflow/core:common_runtime_direct_session_with_tracking_alloc_test up-to-date:
+  bazel-bin/tensorflow/core/common_runtime_direct_session_with_tracking_alloc_test
+INFO: Elapsed time: 80.635s, Critical Path: 80.25s
+//tensorflow/core:common_runtime_direct_session_with_tracking_alloc_test FAILED in 75.0s

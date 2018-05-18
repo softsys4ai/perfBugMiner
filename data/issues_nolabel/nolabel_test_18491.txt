@@ -1,0 +1,87 @@
+crf_log_likelihood become 2x slower after upgrade TensorFlow from 1.4 to 1.7
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): CentOS Linux release 7.4.1708
+TensorFlow installed from (source or binary): pip install tensorflow-gpu==1.4.0, pip install tensorflow-gpu==1.7.0
+TensorFlow version (use command below): 1.4 and 1.7
+Python version:  2.7.5
+Bazel version (if compiling from source): N/A (not compiled from source)
+GCC/Compiler version (if compiling from source): N/A (not compiled from source)
+CUDA/cuDNN version: CUDA8.0 + cuDNN6.0 for Tensorflow 1.4, CUDA9 + cuDNN7.0 for Tensorflow 1.7
+GPU model and memory: GeForce GTX 1080 Ti, 11178MiB
+Exact command to reproduce: python profile_crf.py
+
+Describe the problem
+After upgrade TensorFlow from 1.4 to 1.7,  crf become 2x slower.
+When run in TF1.4, it cost about 19 seconds every 100 steps, but about 43 seconds every 100 steps in TF1.7, the source code are the same, see below.
+Source code / logs
+the source code are modified from
+https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/crf
+import numpy as np
+import tensorflow as tf
+import time
+
+# Data settings.
+num_examples = 1000
+num_words = 100
+num_features = 1000
+num_tags = 50
+
+# Random features.
+x = np.random.rand(num_examples, num_words, num_features).astype(np.float32)
+
+# Random tag indices representing the gold sequence.
+y = np.random.randint(num_tags, size=[num_examples, num_words]).astype(np.int32)
+
+# All sequences in this example have the same length, but they can be variable in a real model.
+# sequence_lengths = np.full(num_examples, num_words - 1, dtype=np.int32)
+sequence_lengths = np.full(num_examples, num_words, dtype=np.int32)
+
+# Train and evaluate the model.
+with tf.Graph().as_default():
+  with tf.Session() as session:
+    # Add the data to the TensorFlow graph.
+    x_t = tf.constant(x)
+    y_t = tf.constant(y)
+    sequence_lengths_t = tf.constant(sequence_lengths)
+
+    # Compute unary scores from a linear layer.
+    weights = tf.get_variable("weights", [num_features, num_tags])
+    matricized_x_t = tf.reshape(x_t, [-1, num_features])
+    matricized_unary_scores = tf.matmul(matricized_x_t, weights)
+    unary_scores = tf.reshape(matricized_unary_scores,
+                              [num_examples, num_words, num_tags])
+
+    # Compute the log-likelihood of the gold sequences and keep the transition
+    # params for inference at test time.
+    log_likelihood, transition_params = tf.contrib.crf.crf_log_likelihood(
+        unary_scores, y_t, sequence_lengths_t)
+
+    # Compute the viterbi sequence and score.
+    viterbi_sequence, viterbi_score = tf.contrib.crf.crf_decode(
+        unary_scores, transition_params, sequence_lengths_t)
+
+    # Add a training op to tune the parameters.
+    loss = tf.reduce_mean(-log_likelihood)
+    train_op = tf.train.GradientDescentOptimizer(0.01).minimize(loss)
+
+    session.run(tf.global_variables_initializer())
+
+    mask = (np.expand_dims(np.arange(num_words), axis=0) <
+            np.expand_dims(sequence_lengths, axis=1))
+    total_labels = np.sum(sequence_lengths)
+
+    # Train for a fixed number of iterations.
+    seconds = 0
+    for i in range(500):
+      start_time = time.time()
+      tf_viterbi_sequence, _ = session.run([viterbi_sequence, train_op])
+      seconds += time.time() - start_time
+      if i>0 and i % 100 == 0:
+        print('time elapsed: {}'.format(seconds))
+        seconds = 0
+        correct_labels = np.sum((y == tf_viterbi_sequence) * mask)
+        accuracy = 100.0 * correct_labels / float(total_labels)
+        print("Accuracy: %.2f%%" % accuracy)

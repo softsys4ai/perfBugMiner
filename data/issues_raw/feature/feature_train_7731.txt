@@ -1,0 +1,30 @@
+Provide a way to clear variable and name scope
+
+This is a follow-up of #6189
+It would be nice to be able to create a variable or name scope that does not obey all currently open scopes.
+As an example:
+with tf.variable_scope('foo'):
+    with tf.variable_scope('bar'):
+        x = tf.constant(1.0, name='x')     # foo/bar/x
+
+with tf.variable_scope('foo'):
+    with tf.variable_scope('bar', fresh=True):
+        x = tf.constant(1.0, name='x')    # bar/x
+This would be useful for using scopes with object oriented TensorFlow graphs.
+Consider a slightly modified version of the example from #6189 . Assume each method pushes a scope for the instance (with the class name) and for the method.
+class Foo(object):
+    def __init__(self):
+        self.x = tf.get_variable('x', [], initializer=tf.constant(0.0))
+
+    def meth(self, foo):
+        z = tf.multiply(foo, 3.14, name='z')
+        return self.x.assign(z)
+
+    def boom(self, foo):
+        return tf.multiple(2.0, self.meth(foo), name='baz')
+
+f0 = Foo()      # Foo/__init__/x
+f1 = Foo()      # Foo_1/__init__/x
+f0.meth(1.0)    # Foo/meth/*
+f0.boom(2.0)  # Foo/boom/baz, Foo/boom/Foo/meth/z
+I'd like the variables in boom's call to meth to be prefixed with only Foo/meth rather than Foo/boom/Foo/meth. This requires either releasing the variable scope within boom before calling out (hard) or providing a way for meth to clear the existing variable scope.

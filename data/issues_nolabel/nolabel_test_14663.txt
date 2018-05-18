@@ -1,0 +1,41 @@
+DropoutWrapper and dynamic_rnn with parallel iterations not reproducible
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): CPU Binary (pip wheel)
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version: 3.6.3 and 3.5.2
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:
+The following script fails with an assertion error, even though I've explicitly set the random seed:
+
+import tensorflow as tf
+import numpy as np
+
+def run():
+    tf.reset_default_graph()
+    tf.set_random_seed(0)
+
+    sess = tf.Session()
+    x = tf.placeholder(tf.float32, [None, None, 1])
+    cell = tf.nn.rnn_cell.DropoutWrapper(
+        tf.nn.rnn_cell.LSTMCell(100), input_keep_prob=0.5)
+    output, state = tf.nn.dynamic_rnn(
+        cell, x, dtype=tf.float32, parallel_iterations=100)
+    # if parallel_iterations=1, then everything works
+
+    sess.run(tf.global_variables_initializer())
+    return sess.run([output, state], {x: np.arange(100).reshape(1, 100, 1)})
+
+o1, (c1, h1) = run()
+o2, (c2, h2) = run()
+  
+assert (o1 == o2).all()
+assert (c1 == c2).all()
+assert (h1 == h2).all()
+Describe the problem
+It looks like using parallel iterations options creates some non-determinism when using DropoutWrapper (and parallel_iterations=32 by default). Ideally, when setting the random seed, all TensorFlow operations should be deterministic and reproducible (or the non-determinism should at least be documented).
+cc @tudorgt @adamAlnatsheh

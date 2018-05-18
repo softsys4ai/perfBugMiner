@@ -1,0 +1,56 @@
+Can we optimize redundant computation?
+
+I just find that for now, tensorflow haven't optimize the computation and leads to very slow performance. This issue I think might be very severe while compute the gradients to all trainable variables of a DNN network via tf.gradients(). To simplify the issue demonstration, I wrote a toy code snippets and run a small experiment.
+import tensorflow as tf
+import numpy as np
+
+@profile
+def main():
+    a = tf.Variable(tf.random_normal(shape=[1000, 1000]))
+    b = a * 2
+    c = b * 3
+    sess = tf.Session()
+    sess.run(tf.initialize_all_variables())
+
+    for _ in xrange(1000):
+        d = sess.run(b)
+    for _ in xrange(1000):
+        e = sess.run(c)
+    for _ in xrange(1000):
+        f = sess.run([b, c])
+
+if __name__ == '__main__':
+    main()
+And here's the profile result using line_profiler.
+Timer unit: 1e-06 s
+
+Total time: 7.54528 s
+File: test_tf_time.py
+Function: main at line 4
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+     4                                           @profile
+     5                                           def main():
+     6         1         9650   9650.0      0.1      a = tf.Variable(tf.random_normal(shape=[1000, 1000]))
+     7         1         1611   1611.0      0.0      b = a * 2
+     8         1         1501   1501.0      0.0      c = b * 3
+     9         1       375872 375872.0      5.0      sess = tf.Session()
+    10         1       232079 232079.0      3.1      sess.run(tf.initialize_all_variables())
+    11                                           
+    12      1001         1663      1.7      0.0      for _ in xrange(1000):
+    13      1000      1321475   1321.5     17.5          d = sess.run(b)
+    14      1001         2179      2.2      0.0      for _ in xrange(1000):
+    15      1000      1570674   1570.7     20.8          e = sess.run(c)
+    16      1001         2835      2.8      0.0      for _ in xrange(1000):
+    17      1000      4025739   4025.7     53.4          f = sess.run([b, c])
+
+You see what I mean? If the graph is like below:
+a-------b--------c
+     *         *
+     |          |
+    2         3
+
+And if calculating b and c will consume comparable 20% time, then when I want to get [b, c], it should be optimized to consume around 20% time, right? Since I already have result of "b" in the middle of the procedure if I want to get result of "c".
+Let's think about the gradient computing as I stated in the head of this issue. You have, say 10 layers DNN.
+You want to get the gradients to all the 10 "W" variables, then will the computation being very unoptimized? Since you treat the 10 gradients separately, you will compute gradients to the 10th layer first, and get the result, and compute gradients to the 9th layer while not using the result of 10th layer, and so on.

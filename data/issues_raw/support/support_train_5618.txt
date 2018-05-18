@@ -1,0 +1,86 @@
+0.11.0rc2 bug weird placeholder feeding problem when using exponential moving average
+
+using 0.11.0rc2
+this simple (nonesense) script breaks:
+import tensorflow as tf
+from tensorflow.examples.tutorials.mnist import input_data
+mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
+
+BATCH_SIZE = 128
+learning_rate = 0.01
+
+def model(x):
+  """Defines the CNN architecture and returns its output tensor."""
+  ema = tf.train.ExponentialMovingAverage(decay=0.5)
+
+  def mean_var_with_update():
+    ema_apply_op = ema.apply([tf.constant(1.0), tf.constant(2.0)])
+    return tf.constant(1.0), tf.constant(2.0)
+
+  mean, var = tf.cond(is_training,
+                      mean_var_with_update,
+                      lambda: (tf.constant(2.0), tf.constant(3.0)))
+  return x
+
+batch_size = tf.placeholder(tf.float32, name="batch_size")
+lr = tf.placeholder(tf.float32, name="learning_rate")
+is_training = tf.placeholder(tf.bool, name='is_training')
+input_image_batch = tf.placeholder(tf.float32, shape=[BATCH_SIZE, 28, 28, 1],
+                                   name="input_image_batch")
+input_label_batch = tf.placeholder(tf.float32, shape=[None, 10], name="input_label_batch")
+logits = model(input_image_batch)
+init_op = tf.global_variables_initializer()
+sess = tf.Session()
+sess.run(init_op)
+
+produces:
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1080, pci bus id: 0000:05:00.0)
+Traceback (most recent call last):
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1021, in _do_call
+    return fn(*args)
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1003, in _run_fn
+    status, run_metadata)
+  File "/usr/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py", line 469, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: You must feed a value for placeholder tensor 'is_training' with dtype bool
+	 [[Node: is_training = Placeholder[dtype=DT_BOOL, shape=[], _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "slim.py", line 48, in <module>
+    sess.run(init_op)
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 766, in run
+    run_metadata_ptr)
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 964, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+    target_list, options, run_metadata)
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: You must feed a value for placeholder tensor 'is_training' with dtype bool
+	 [[Node: is_training = Placeholder[dtype=DT_BOOL, shape=[], _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+Caused by op 'is_training', defined at:
+  File "slim.py", line 36, in <module>
+    is_training = tf.placeholder(tf.bool, name='is_training')
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/ops/array_ops.py", line 1519, in placeholder
+    name=name)
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/ops/gen_array_ops.py", line 2039, in _placeholder
+    name=name)
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 759, in apply_op
+    op_def=op_def)
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2259, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/schlag/MyStuff/LearnSpecific/env/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1130, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'is_training' with dtype bool
+	 [[Node: is_training = Placeholder[dtype=DT_BOOL, shape=[], _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+I don't understand the problem. If I remove the ema (which I'm not using in the example) it works. I can also fix this by adding a feed dict to the init operation like this:
+sess.run(init_op, feed_dict={is_training.name: False})
+
+I don't think I have this problem with v0.11. I'm using ema in my batchnorm function. I removed all the unnecessary code from my full implementation.

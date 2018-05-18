@@ -1,0 +1,55 @@
+The 2015 Inception checkpoint gives incorrect results
+
+Problems
+
+The 2015 Inception checkpoint file called classify_image_graph_def.pb, which can be found in inception-2015-12-05.tgz, gives weird results.
+The tutorial on quantization (together with this one) needs corrections.
+
+Explanation
+I originally wanted to try this tutorial on quantization to quantize the model and then check the result with label_image.
+Using the same name convention as in the tutorial, the quantize step will quantize the original graph, called classify_image_graph_def.pb, into a quantized one, called quantized_graph.pb. So before checking the latter, I wanted to first label_image using this classify_image_graph_def.pb and this sample image.
+The result should be the same as in this label_image's README, as shown below. This example, however, uses a newer pre-trained graph, inception_v3_2016_08_28_frozen.pb, from this compressed file. In addition to the pb file, the compressed tarball also contains imagenet_slim_labels.txt, containing 1,001 lines of label names, e.g. "military uniform".
+# expected result
+military uniform (653): 0.834306
+mortarboard (668): 0.0218692
+academic gown (401): 0.0103579
+pickelhaube (716): 0.00800814
+bulletproof vest (466): 0.00535088
+So, to check classify_image_graph_def.pb, I looked at the tutorial and changed the --graph argument from /tmp/quantized_graph.pb to /tmp/classify_image_graph_def.pb. However, the --labels argument also needs to be fixed, because it suggests using imagenet_synset_to_human_label_map.txt (from inception-2015-12-05.tgz), which actually has 21,842 lines of (synset id, label name). So, after downloading imagenet_slim_labels.txt by following this label_image's README, fix the --labels argument by either leaving it out (because it's the default if following those steps) or explicitly calling the labels file.
+The code to run label_image for classify_image_graph_def.pb becomes:
+bazel build tensorflow/examples/label_image:label_image
+bazel-bin/tensorflow/examples/label_image/label_image \
+--image=tensorflow/examples/label_image/data/grace_hopper.jpg \
+--graph=/tmp/classify_image_class_def.pb \
+--input_width=299 \
+--input_height=299 \
+--input_mean=128 \
+--input_std=128 \
+--input_layer="Mul:0" \
+--output_layer="softmax:0"
+And here is the result.
+# classify_image_graph_def.pb
+toyshop (866): 0.684115
+shower cap (794): 0.0394605
+warplane (896): 0.0219743
+tape player (849): 0.0138034
+zucchini (940): 0.013588
+Differences between checkpoint files
+There is also another Inception v3 checkpoint file, inception-v3-2016-03-01.tar.gz, according to this tutorial on how to fine-tune Inception!
+So I used import_pb_to_tensorboard.py to check why the two checkpoints are different.
+Besides the difference in implementation (e.g. how each layers are named), the most important difference I noticed is in the last FC layer. While inception_v3_2016_08_28_frozen.pb maps from 2048 to 1001 (the 0th class is "dummy"), classify_image_graph_def.pb maps from 2048 to 1008! I'm not sure what 1008 means, but maybe it was trained with a different set of labels in a different order?
+The naming difference also makes things a little more complicated. When calling label_image with classify_image_graph_def.pb, I need to specify --input_layer="Mul:0" --output_layer="softmax:0" because these are the names of the input and output layers. However, with the new checkpoint that works, we don't have to specify these two arguments because input_layer = "input" and output_layer = "InceptionV3/Predictions/Reshape_1" are already hard-coded as the default values in the implementations (C++ and python).
+Related issues
+There are question related to the differences between these two checkpoints and why they give different performances on certain tasks. I've found these issues in the tensorflow/models repo: #1314, #1316.
+Quantization
+Now, back to quantization ... Following the current code in the tutorial to quantize classify_image_graph_def.pb into quantized_graph.pb will give an error. This is because the sample code is missing an --inputs argument, compared to this tutorial on graph_transforms. The transform_graph example needs --inputs="Mul". Then it will work, i.e. predicting "toyshop" as the top choice.
+Actually, this quantization process works with the new inception_v3_2016_08_28_frozen.pb -- predicting that the picture is "military uniform" by both original and quantized graphs.
+Questions
+
+What are the actual differences between the three checkpoints? Which one should we use? Any clarification would be really helpful. When different tutorials refer to different checkpoint files, at first I thought all of them can be used interchangeably. As it turns out, they are actually not the same and this has caused a lot of confusion.
+Why is the last layer in classify_image_graph_def.pb from 2015 have 1008 nodes, not 1001?
+Is there a way to make classify_image_graph_def.pb work, following the tutorial? Did I miss any arguments or other settings?
+Somewhat unrelated question: The tutorial on quantization mentioned above seems to be the same as this one on tensorflow.org, except for the last few commits. Therefore, the tutorial on the website is not up-to-date. Are they supposed to be the same?
+How should the tutorials on quantization be updated? Personally, I think it can be fixed to use the new checkpoint, then adjust the example codes accordingly.
+
+Thank you!

@@ -1,0 +1,64 @@
+How can I get kernel wait time for GPU
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):
+source
+TensorFlow version (use command below):
+r1.5
+Python version:
+2
+Bazel version (if compiling from source):
+0.5.4
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+9.0/7.0
+GPU model and memory:
+Titan XP, 12GB
+Exact command to reproduce:
+You can collect some of this information using our environment capture script:
+
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+I've tested the code to get kernel queue wait time for GPU, but GPU kernel time is constants even though the number of operations is increased. Instead, the CPU kernel time is changed like below.
+Can I get the information to analyze the results? Moreover, profiling of kernel queue wait time would be useful. Do you have any plan to add that kind of features?
+#ops| GPU kernel time(us)| CPU kernel time (us)
+50 | 1862 | 184
+100 | 1746 | 181
+150 |  1750 | 167
+200 | 1750 | 173
+250 | 1751 | 307
+300 | 1756 | 551
+350 | 1757 | 721
+400 | 1767 | 859
+450 | 1767 | 959
+Source code / logs
+```
+opts = tf.contrib.tfprof.model_analyzer.PRINT_ALL_TIMING_MEMORY
+opts['min_accelerator_micros'] = 1
+run_metadata = tf.RunMetadata()
+
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+#config.allow_soft_placement = True
+config.inter_op_parallelism_threads=0
+config.graph_options.optimizer_options.opt_level = tf.OptimizerOptions.L0
+with tf.Session(config=config) as sess:
+  sess.run(tf.global_variables_initializer())
+  #sess.run(conv_ops)
+  #print('first itereation ends')
+  #sess.run(conv_ops)
+  sess.run(conv_ops, options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE), run_metadata=run_metadata)
+
+  sess.run(conv_ops, options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE), run_metadata=run_metadata)
+
+root_node = tf.contrib.tfprof.model_analyzer.print_model_analysis(
+              tf.get_default_graph(),
+              run_meta=run_metadata,
+              tfprof_options=opts)

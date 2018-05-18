@@ -1,0 +1,28 @@
+KeyError in tf.contrib.graph_editor.graph_replace
+
+When applying graph_replace to graphs containing ops with the _original_op attribute, it can fail with a KeyError. The error occurs in Transformer._copy_ops when trying to copy an op whose _original_op has not yet been copied. The ordering of ops that are copied is not deterministic so this error pops up somewhat randomly.
+The _original_op attributes appear to be created by tf.gradients to point back to the op from the forward pass.
+Example code snippet (note: you may need to run this multiple times to get a failure):
+import tensorflow as tf
+graph_replace = tf.contrib.graph_editor.graph_replace
+w = tf.Variable(0.0, name="w")
+y = tf.multiply(tf.multiply(w, w, name="mul1"), w, name="mul2")
+g = tf.gradients(y, w)[0]
+g_new = graph_replace(g, {w.value(): g})
+Error:
+/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/graph_editor/transform.py in transform_op_if_inside_handler(info, op, keep_if_possible)
+    122   """
+    123   if op in info.sgv.ops:
+--> 124     return info.transformed_ops[op]
+    125   else:
+    126     if keep_if_possible and info.graph is info.graph_:
+
+KeyError: <tf.Operation 'mul1' type=Mul>
+
+I see three possible fixes:
+
+Remove _original_op attributes in the copied graph (I don't see anywhere in the TF codebase where it is used)
+Move the creation of the _original_op attribute from the copy_op_handler function to the end of Transformer._copy_ops after all ops have been copied.
+Topologically sort the ops being copied so that ops that are _original_op attributes are created before their children.
+
+My implementation of option 2 seems to fix this problem, but I might be missing something about the usage of _original_op.

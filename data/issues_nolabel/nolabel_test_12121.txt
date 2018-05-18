@@ -1,0 +1,40 @@
+tf.random_normal_initializer produces inconsistent results with fixed seed on GPU
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.0.0, 1.1.0, 1.2.1
+Python version: 2.7.10, 3.5.2
+Bazel version (if compiling from source): -
+CUDA/cuDNN version: CUDA release 8.0, V8.0.46; cuDNN 8.0
+GPU model and memory: GeForce GTX TITAN X 12GB, GK210GL [Tesla K80] 12GB
+Exact command to reproduce: below
+
+Describe the problem
+Setting both graph-level and op-level random seeds to fixed values, I still get inconsistent results initializing variables with tf.random_normal_initializer. Here's the code to reproduce the problem
+import numpy as np
+import tensorflow as tf
+
+tf.set_random_seed(0)
+np.random.seed(0)
+shape = (100, 2048)
+seed = 0
+for i in range(100):
+    seed += 1
+    init = tf.random_normal_initializer(stddev=0.02, seed=seed)
+    tf.get_variable(str(i), shape, initializer=init)
+
+session = tf.Session()
+session.run(tf.global_variables_initializer())
+var_dict = {}
+for var in tf.trainable_variables():
+    var_dict[var.name] = session.run(var.name)
+
+np.savez_compressed("weights.npz", **var_dict)
+session.close()
+
+Here I initialize 100 variables with tf.random_normal_initializer with a fixed op-level seed and with a fixed graph-level seed.
+Running this two times I get different results saved in weights.npz. Interestingly, this happens only when using GPU and the difference between the saved weights is very slight: usually only some of the variables are different, and they only differ in some small number of positions.
+I experience this problem on Tensorflow 1.0.0 (Python2), 1.1.0, 1.2.1 (Python3) and on two different GPUs.

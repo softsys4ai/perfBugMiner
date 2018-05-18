@@ -1,0 +1,51 @@
+something wrong with attentionwrapper?
+
+I am trying to write a seq2seq model with attention. But it gets the following error:
+cell_inputs = self._cell_input_fn(inputs, state.attention)
+
+AttributeError: 'tuple' object has no attribute 'attention'
+It seems the state which initialize by the encoder state that does't has the attribute 'attention'.
+How should I call AttentionWrapper?
+Here is my code:
+    cell_list = []
+    for layer_i in xrange(hps.num_layers):
+        cell_list.append( tf.contrib.rnn.LSTMCell(hps.num_hidden) )
+        with tf.variable_scope('encoder%d'%layer_i):
+            cell_list.append( tf.contrib.rnn.LSTMCell(hps.num_hidden) )
+    enc_cell = tf.contrib.rnn.MultiRNNCell(cell_list)
+
+    encoder_outputs, encoder_state = tf.contrib.rnn.static_rnn(enc_cell, enc_inp, dtype=dtype)
+
+    cell_list = []
+    for layer_i in xrange(hps.num_layers):
+        with tf.variable_scope('decoder%d'%layer_i):
+            cell_list.append( tf.contrib.rnn.LSTMCell(hps.num_hidden) )
+    dec_cell = tf.contrib.rnn.MultiRNNCell(cell_list)
+
+
+    new_enc_out = tf.reshape(encoder_outputs, [hps.batch_size, 30, 256])
+    attn_mech = tf.contrib.seq2seq.BahdanauAttention(
+            num_units = 128, # depth of query mechanism
+            memory = new_enc_out, # hidden states to attend (output of RNN)
+            normalize=False, # normalize energy term
+            name='BahdanauAttention')
+
+    attn_cell = tf.contrib.seq2seq.AttentionWrapper(
+            cell = dec_cell,# Instance of RNNCell
+            attention_mechanism = attn_mech, # Instance of AttentionMechanism
+            name="attention_wrapper")
+
+    if hps.mode=="train":
+        # TrainingHelper does no sampling, only uses inputs
+        helper = tf.contrib.seq2seq.TrainingHelper(
+                inputs = dec_inp[:decoder_size], # decoder inputs
+                sequence_length = [1]*decoder_size, # decoder input length
+                name = "decoder_training_helper")
+
+        decoder = tf.contrib.seq2seq.BasicDecoder(
+                cell = attn_cell,
+                helper = helper, # A Helper instance
+                initial_state = encoder_state, # initial state of decoder
+                output_layer = None) # instance of tf.layers.Layer, like Dense
+
+    decoder_outputs, final_state, _ = tf.contrib.seq2seq.dynamic_decode(decoder)

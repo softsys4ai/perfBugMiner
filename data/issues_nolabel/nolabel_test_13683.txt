@@ -1,0 +1,39 @@
+How to feed SparseTensor in C++ API?
+
+I trained model via python. After training done, I want to load the model and its checkpoint for prediction via C++. But I can't find any solutions about how to feed SparseTensor or Example in C++ API.
+python train code:
+with tf.name_scope('input'):
+    filename_queue = tf.train.string_input_producer(
+    tf.train.match_filenames_once(file_name), num_epochs=max_epoch)
+    serialized_example = self.Decode(filename_queue)
+    capacity = thread_num * batch_size + min_after_dequeue
+    batch_serialized_example = tf.train.shuffle_batch(
+                                    [serialized_example],
+                                    batch_size=batch_size,
+                                    num_threads=thread_num,
+                                    capacity=capacity,
+                                    min_after_dequeue=min_after_dequeue)
+    features = {}
+    features['label'] = tf.FixedLenFeature([], tf.float32)
+    features['continuous_feature'] = tf.FixedLenFeature([], tf.float32)
+    features['sparse_id'] = tf.VarLenFeature(tf.int64)
+    features['sparse_val'] = tf.VarLenFeature(tf.float32)
+    instance = tf.parse_example(batch_serialized_example, features)
+
+    label_tensor = instance['label']
+    continuous_feature_tensor = instance['continuous_val']
+    sparse_id_tensor = instance['sparse_id']
+    sparse_val_tensor = instance['sparse_val']
+
+with tf.variable_scope("emb") as scope:
+    embedding_variable = tf.Variable(tf.truncated_normal([1000000, 50], stddev=0.05), name='emb_matrix')
+    embedding = tf.nn.embedding_lookup_sparse(embedding_variable, sparse_id_tensor, sparse_val_tensor, "mod", combiner="sum")
+net = tf.concat([embedding, continuous_feature_tensor], 1, name='concat')
+dim = net.get_shape().as_list()[1]
+weight = tf.Variable(tf.truncated_normal([dim, 100], stddev=0.05), name='fully_weight')
+bias = tf.Variable(tf.truncated_normal([100], stddev=0.05), name='fully_bias')
+net = tf.matmul(net, weight) + bias
+cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=net, labels=label_tensor, name='cross_entropy')
+In C++, all solutions I have found is to feed vector<pair<string, Tensor>> into session.Run(). However, in my model, I don't know which function in C++ I should use.
+Thanks.
+@martinwicke

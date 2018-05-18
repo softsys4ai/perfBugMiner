@@ -1,0 +1,55 @@
+Distributed training fault tolerance
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 14.04.5 LTS
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): v1.4.0-19-ga52c8d9 1.4.1
+Python version: Python 3.6.3
+Bazel version (if compiling from source): NA
+GCC/Compiler version (if compiling from source): NA
+CUDA/cuDNN version: release 8.0, V8.0.44/ libcudnn v6.0.21
+GPU model and memory: Titan X (Pascal) 12 GB
+Exact command to reproduce: In the description
+
+Describe the problem
+I am using the parameter server/master/worker paradigm to run model training in distributed mode. The master node does the training and evaluation, while the worker nodes only do the training (on their shard of the data). I should also note that I am using the tf.contrib.learn.Experiment interface.
+This model of distributed training works as expected, however, sometimes one or more of the worker nodes fail. While they have failed, the master node and other worker nodes continue the training. The problem is that when this occurs (even when only one of the worker nodes have failed), the loss suddenly becomes zero, and as a result gradients as well become zero, while the metrics suddenly change to the value of a random model, as can be seen in the figures below.
+
+
+Loss curve. As can be seen one or more of the workers have failed three times during the training.
+
+
+
+Gradient norm curve
+
+
+
+Accuracy (on the validation set)
+
+
+
+Is there a way to prevent this behavior, either by stopping the training when one of the workers fails, or pausing the training until the failed worker comes back online again (like in the beginning of the training when training only starts when all of the workers come online)?
+Source code / logs
+As indicated above, I use the experiment interface. This is the configuration for distributed training:
+dist_config = {}
+dist_config['cluster'] = {
+    'master': ['127.0.0.1:{}'.format(dist_start_port + 1)],
+    'ps': ['127.0.0.1:{}'.format(dist_start_port)],
+    'worker': ['127.0.0.1:{}'.format(dist_start_port + 2 + i)
+            for i in range(worker_count)]
+}
+dist_config['task'] = {
+    'type': dist_type,
+    'index': (worker_index if args.dist_type == 'worker' else 0)
+}
+dist_config['environment'] = 'cloud'
+os.environ['TF_CONFIG'] = json.dumps(dist_config)
+And this is how I start each node:
+if dist_type == 'master':
+    experiment.train_and_evaluate()
+elif dist_type == 'ps':
+    experiment.run_std_server()
+else:
+    experiment.train()

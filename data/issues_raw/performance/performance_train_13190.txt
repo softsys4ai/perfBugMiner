@@ -1,0 +1,53 @@
+TF_AddGradients gradients returns wrong result when multiple outputs specified
+
+System information
+Darwin Mac-Admin.local 15.6.0 Darwin Kernel Version 15.6.0: Thu Jun 23 18:25:34 PDT 2016; root:xnu-3248.60.10~1/RELEASE_X86_64 x86_64
+Mac OS X 10.11.6
+Describe the problem
+Hi. I've added a unit test for TF_AddGradients API (see code below) which is similar to
+this python test
+In the test, I provide two outputs
+y[0]=x[0] ** 2
+y[1] = y[0] ** 8
+where input x[0]=3.
+According to the documentation  result should be calculated by formula d(y_1 + y_2 + ...)/dx_1 and be equal to 17502, but the API prints 6.
+What am I missing? Thanks.
+Source code / logs
+    TF_Status* s = TF_NewStatus();
+    TF_Graph* graph = TF_NewGraph();
+
+    const int ny = 2;
+    const int nx = 1;
+    TF_Output inputs[nx];
+    TF_Output outputs[ny];
+    TF_Output grad_outputs[nx];
+
+    TF_Operation* ph0 = Placeholder(graph, s);
+
+    TF_Operation* y0 = Square(graph, s, ph0, "Square0");
+    TF_Operation* y1 = Square(graph, s, y0, "Square1");
+    TF_Operation* y2 = Square(graph, s, y1, "Square2");
+    inputs[0] = TF_Output{ph0, 0};
+    outputs[0] = TF_Output{y0, 0};
+    outputs[1] = TF_Output{y2, 0};
+
+    TF_AddGradients(graph, outputs, ny, inputs, nx, nullptr, s, grad_outputs);
+    EXPECT_EQ(TF_OK, TF_GetCode(s)) << TF_Message(s);
+
+    std::unique_ptr<CSession> csession(new CSession(graph, s));
+
+    std::vector<TF_Output> grad_outputs_vec;
+    grad_outputs_vec.assign(grad_outputs, grad_outputs + 2);
+    csession->SetInputs({{ph0, Int32Tensor(3)}});
+    csession->SetOutputs(grad_outputs_vec);
+    csession->Run(s);
+    ASSERT_EQ(TF_OK, TF_GetCode(s)) << TF_Message(s);
+
+    TF_Tensor* out0 = csession->output_tensor(0);
+    int* data = static_cast<int*>(TF_TensorData(out0));
+    ASSERT_EQ(17502, *data); 
+
+Failure
+      Expected: 17502
+To be equal to: *data
+      Which is: 6

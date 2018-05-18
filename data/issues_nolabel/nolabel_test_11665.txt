@@ -1,0 +1,48 @@
+Feature request: add a `local_init_feed_dict` to `tf.train.Scaffold`
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.2.0
+Python version: 3.6.1
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: See below.
+
+Describe the problem
+Feature request: add a local_init_feed_dict to tf.train.Scaffold. It would be useful to be able to create local variables (which are not saved or restored) and have them initialized by a tf.train.MonitoredTrainingSession with a feed_dict. In the example below, the variable X_var is forced to be part of the GLOBAL_VARIABLES collection in order to be able to initialize the variable with a feed_dict. This has the undesirable consequence that the variable will be saved to disk.
+Source code / logs
+import tensorflow as tf
+import numpy as np
+
+# Data that we wish to sample, but not save to disk.
+X = np.eye(15, dtype=np.float32)
+
+# Create a graph that samples rows from X randomly.
+graph = tf.Graph()
+with graph.as_default():
+    X_init = tf.placeholder(tf.float32, shape=X.shape)
+    # Here, we want to use tf.GraphKeys.LOCAL_VARIABLES,
+    # but can't because there is no feed_dict for that collection in tf.train.Scaffold.
+    X_var = tf.Variable(X_init, trainable=False, collections=[tf.GraphKeys.GLOBAL_VARIABLES])
+    queue = tf.RandomShuffleQueue(
+        capacity=X.shape[0],
+        min_after_dequeue=1,
+        dtypes=[tf.float32],
+        shapes=[X.shape[1]])
+    enqueue_op = queue.enqueue_many([X_var])
+    row = queue.dequeue()
+
+# Sample a few rows from X.
+with graph.as_default():
+    sess_params = {
+        'scaffold': tf.train.Scaffold(
+            init_feed_dict={X_init: X},
+            init_fn=lambda scaffold, sess: sess.run(enqueue_op))
+    }
+    with tf.train.MonitoredTrainingSession(**sess_params) as sess:
+        print(sess.run(row))
+        print(sess.run(row))

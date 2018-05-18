@@ -1,0 +1,66 @@
+MonitoredTrainingSession: CreateSession still waiting
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): MacOS
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): v1.3.0-rc1-2195-gd86ee219e 1.4.0-dev
+Python version: Python 3.6.1 :: Anaconda 4.4.0 (x86_64)
+Bazel version (if compiling from source): 0.5.2-homebrew
+CUDA/cuDNN version: no
+GPU model and memory: no
+Exact command to reproduce: ./run.sh
+
+Describe the problem
+I've already raised this problem on stackoverflow, but haven't got any feedback.
+I run the python script four times with the bash script. There are three worker tasks and one master task. Sometimes all the workers successfully exit. But often one or two of them hang and begin emitting "CreateSession still waiting for some other task" messages. Such waiting worker can wait for the chief (worker task 0) or some other task which is already completed.
+So, the problem is that workers and even the chief do not wait for some lagging worker. Is it a bug? Chief is responsible for initialisation of variables. But if I put a variable on each worker nothing changes. The chief still do not wait.
+I've succeeded in synchronisation of these workers by adding FIFOQueue barriers to the beginning of each session.
+Source code / logs
+TF script (train.py):
+import argparse
+import tensorflow as tf
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--job', type=str)
+parser.add_argument('--task', type=int)
+args = parser.parse_args()
+hosts = {
+    "master": [
+        "localhost:2222",
+    ],
+    "worker": [
+        "localhost:2223",
+        "localhost:2224",
+        "localhost:2225",
+    ]
+}
+
+nworkers = len(hosts['worker'])
+cluster = tf.train.ClusterSpec(hosts)
+server = tf.train.Server(cluster, job_name=args.job, task_index=args.task)
+
+with tf.device(f'/job:master/task:0'):
+    global_step = tf.train.get_or_create_global_step()
+    inc_global_step = tf.assign(global_step, global_step + 1)
+
+if args.job == 'worker':
+    hooks = [
+        tf.train.StopAtStepHook(last_step=4),
+    ]
+    with tf.train.MonitoredTrainingSession(master=server.target,
+                                           is_chief=(args.task == 0),
+                                           hooks=hooks) as sess:
+        while not sess.should_stop():
+            print(args.task, sess.run(inc_global_step))
+else:
+    server.join()
+Bash script (run.sh):
+#!/bin/bash
+python train.py --job master --task 0 &
+python train.py --job worker --task 0 &
+python train.py --job worker --task 1 &
+python train.py --job worker --task 2 &
+Example of message:
+2017-09-27 11:52:48.973442: I tensorflow/core/distributed_runtime/master.cc:221] CreateSession still waiting for response from worker: /job:worker/replica:0/task:0

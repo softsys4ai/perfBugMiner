@@ -1,0 +1,55 @@
+Tensorflow profiler problem, maybe bug.
+
+Describe the problem
+The implementation of topk kernel operation seems faster on my cpu than on gpu(for example below profiler outputs 6us for cpu and 345us for gpu, and result reapeats for other inputs). But that is not the case for this issue, I started some testing on that which lead me to this:
+I extracted the kernel implementation from tf source. Put some time measuring code in Compute around functor call, for real(using std::chrono::time_steady) and cpu(clock() from ctime) time. Compiled it without optimizations, loaded in python as tensorflow library. For cpu the result was much bigger than what profiler printed, 6us(profiler) vs 1432us(clock()), 473us(using std::chrono::time_steady).
+Then I added in functor code thread sleep, only real time duration extended, then I added long for loop and both real and cpu duration got bigger but again profiler output stayed the same as in code without modifications ~6us, what is not proper in my understanding.
+Source code / logs
+Here is the python3 code I used:
+import tensorflow as tf
+import random
+
+arr=[[int(100000*random.random())
+    for i in range(100)] for j in range(100)]
+
+a = tf.convert_to_tensor(arr)
+topk_module = tf.load_op_library("topk_op.so")
+b = topk_module.matrix_top_k(a, 10)
+
+builder = tf.profiler.ProfileOptionBuilder
+opts = builder(builder.time_and_memory()).order_by('micros').build()
+
+
+with tf.contrib.tfprof.ProfileContext('/tmp/train_dir',
+                                    trace_steps=[],
+                                    dump_steps=[]) as pctx:
+    with tf.Session() as sess:
+        pctx.trace_next_step()
+        pctx.dump_next_step()
+        x = sess.run(b)
+        pctx.profiler.profile_operations(options=opts)
+
+and snippet from topk_op.cc
+    std::chrono::steady_clock::time_point time_begin_real =
+        std::chrono::steady_clock::now();
+    clock_t time_begin_cpu = clock();
+
+
+    Status s = functor::TopKFunctor<Device, T>::Compute(
+        context, sorted_, k, input, num_rows, num_cols, values, indices);
+    
+    clock_t time_end_cpu = clock();
+    std::chrono::steady_clock::time_point time_end_real =
+        std::chrono::steady_clock::now();
+    //stdout printing
+
+
+System information
+Have I written custom code: yes, can post modified topk op kernel code and makefile if you want
+ubuntu 16.04
+tensorflow installed from pip package manager.
+tensorflow 1.7.0
+bazel: n/a, used gcc 4.9.3
+cuda 9.0 cudnn 7.0
+gtx 1050 ti 4GB
+n/a

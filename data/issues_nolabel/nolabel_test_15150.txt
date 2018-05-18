@@ -1,0 +1,49 @@
+`variational_recurrent` in contrib DropoutWrapper causes extreme perplexity jumps
+
+I have done extensive testing of the variational_recurrent option in the tf.contrib dropout wrapper and neither me nor my colleagues can explain the extreme perplexity jumps that are caused by it.
+I am training an RNN language model on the Penn Treebank Dataset. The model code is very similar to the one provided in the TensorFlow Tutorial, using the same learning parameters, hidden sizes, etc. like the MEDIUM config. I am using the newest TensorFlow version (1.4.0).
+Consider the following models together with the dropout values used in the tf.contrib Dropout Wrapper. If not mentioned, no further regularization was used.
+model1:
+
+input dropout 0.3, state dropout: 0.3, output dropout: 0.3
+variational_recurrent=True
+Perplexity test set: 83.81
+Perplexity validation set: 86.97
+
+model2:
+
+input dropout 0.5, state dropout: 0.3, output dropout: 0.5
+variational_recurrent=True
+Perplexity test set: 639.65
+Perplexity validation set: 686.95
+
+model3 (as a comparison):
+
+input dropout 0.5, output dropout: 0.5
+variational_recurrent=False
+Perplexity test set: 82.88
+Perplexity validation set: 86.11
+
+I have tested various architectures, with and without variational dropout. I could not find an explanation for the fact that the perplexity sometimes jumps up to >600 when using variational dropout. Also, the effects vanish when tying the embedding and softmax weights.
+In general, variational dropout does not improve but worsen the results (which is different to the results reported in recent papers using variational dropout on the PTB dataset).
+To test this problem further, I have adapted the official tensorflow tutorial to use variational dropout instead of standard dropout, by removing lines 131+132 and replacing lines 218-220 with:
+if is_training and config.keep_prob < 1:
+  cell = tf.contrib.rnn.DropoutWrapper(cell,
+            input_keep_prob=config.keep_prob,
+            output_keep_prob=config.keep_prob,
+            state_keep_prob=config.keep_prob,
+            variational_recurrent=True, dtype=tf.float32,
+            input_size=config.hidden_size)
+
+Training the medium model with this configuration causes the same issues, i.e. perplexity > 600
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): custom code
+OS Platform and Distribution:  Debian GNU/Linux 8.9 (jessie)
+**TensorFlow version **: v1.4.0-rc1-11-g130a514 1.4.0
+Python version: Python 3.5.4
+GCC/Compiler version:
+tf.VERSION = 1.4.0
+tf.GIT_VERSION = v1.4.0-rc1-11-g130a514
+tf.COMPILER_VERSION = v1.4.0-rc1-11-g130a514

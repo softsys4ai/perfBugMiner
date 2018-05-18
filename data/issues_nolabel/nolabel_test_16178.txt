@@ -1,0 +1,96 @@
+Crash in TF lite demo android app when using preprocessing layer
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 14.04
+TensorFlow installed from (source or binary): pip
+TensorFlow version (use command below): v1.4.0-rc0-21-g1e25994 1.4.0-rc1
+Python version: Python 3.6.2
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 8/6
+GPU model and memory: Titan X (Pascal), 12 GB
+Exact command to reproduce:
+
+Describe the problem
+I have a problem adding preprocessing layers to MobileNetV1 model that is quantized afterward. As preprocessing method I would like to use inception preprocessing, but TF lite does not support several operations (sub, div, broadcasting, ...), so I modified following preprocessing
+images = tf.divide(images, tf.constant(255.0))
+images = tf.subtract(images, tf.constant(0.5))
+images = tf.multiply(images, tf.constant(2.0))
+to
+shape = images.get_shape()
+c1 = tf.constant(1.0/255.0, shape=shape)
+c1 = tf.fake_quant_with_min_max_args(c1, min=-1, max=1)
+c2 = tf.constant(-0.5, shape=shape)
+c2 = tf.fake_quant_with_min_max_args(c1, min=-1, max=1)
+c3 = tf.constant(2.0, shape=shape)
+c3 = tf.fake_quant_with_min_max_args(c1, min=-1, max=1)
+
+images = tf.multiply(images, c1)
+images = tf.fake_quant_with_min_max_args(images, min=0, max=1)
+images = tf.add(images, c2)
+images = tf.fake_quant_with_min_max_args(images, min=-0.5, max=0.5)
+images = tf.multiply(images, c3)
+images = tf.fake_quant_with_min_max_args(images, min=-1.0, max=1.0)
+Quantization is performed with
+fold_batch_norms.FoldBatchNorms(graph)
+quantize.Quantize(graph, is_training=is_training)
+and can be trained and evaluated.
+Further, graph is frozen.
+bazel-bin/tensorflow/python/tools/freeze_graph \
+  --input_graph=MobileNetV1-4.pbtxt \
+  --input_checkpoint=MobileNetV1-4.ckpt \
+  --output_node_names=output/softmax \
+  --output_graph=MobileNetV1-4-frozen.pb
+Finally, frozen graph is converted to TF lite model using command.
+bazel-bin/tensorflow/contrib/lite/toco/toco \
+ --input_file=MobileNetV1-4-frozen.pb \
+ --input_format=TENSORFLOW_GRAPHDEF \
+ --output_format=TFLITE \
+ --output_file=model.tflite \
+ --inference_type=QUANTIZED_UINT8 \
+ --inference_input_type=QUANTIZED_UINT8 \
+ --input_array=input/image \
+ --output_array=output/softmax \
+ --input_shape=1,224,224,3
+During conversion no error occurs.
+2018-01-17 11:25:52.905034: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before general graph transformations: 604 operators, 896 arrays (0 quantized)
+2018-01-17 11:25:53.301108: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] After general graph transformations pass 1: 66 operators, 127 arrays (1 quantized)
+2018-01-17 11:25:53.302502: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before pre-quantization graph transformations: 66 operators, 127 arrays (1 quantized)
+2018-01-17 11:25:53.303020: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] After pre-quantization graph transformations pass 1: 35 operators, 96 arrays (1 quantized)
+2018-01-17 11:25:53.303601: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before quantization graph transformations: 35 operators, 96 arrays (1 quantized)
+2018-01-17 11:25:53.326761: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] After quantization graph transformations pass 1: 34 operators, 95 arrays (94 quantized)
+2018-01-17 11:25:53.327269: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] After quantization graph transformations pass 2: 34 operators, 95 arrays (94 quantized)
+2018-01-17 11:25:53.327854: I tensorflow/contrib/lite/toco/allocate_transient_arrays.cc:313] Total transient array allocated size: 1756160 bytes, theoretical optimal value: 1204224 bytes.
+2018-01-17 11:25:53.328080: I tensorflow/contrib/lite/toco/toco_tooling.cc:269] Estimated count of arithmetic ops: 1.14175 billion (note that a multiply-add is counted as 2 ops).
+
+When I upload generated model to TF lite demo application, app crashes logcat prints this error.
+01-17 11:56:52.190 10923-10923/? A/DEBUG: *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+01-17 11:56:52.190 10923-10923/? A/DEBUG: Build fingerprint: 'samsung/dreamlteks/dreamlteks:7.0/NRD90M/G950NKSU1AQL3:user/release-keys'
+01-17 11:56:52.191 10923-10923/? A/DEBUG: Revision: '11'
+01-17 11:56:52.191 10923-10923/? A/DEBUG: ABI: 'arm64'
+01-17 11:56:52.191 10923-10923/? A/DEBUG: pid: 10865, tid: 10881, name: CameraBackgroun  >>> android.example.com.tflitecamerademo <<<
+01-17 11:56:52.191 10923-10923/? A/DEBUG: signal 6 (SIGABRT), code -6 (SI_TKILL), fault addr --------
+01-17 11:56:52.191 10923-10923/? A/DEBUG:     x0   0000000000000000  x1   0000000000002a81  x2   0000000000000006  x3   0000000000000008
+01-17 11:56:52.191 10923-10923/? A/DEBUG:     x4   0000007e81515040  x5   0000007e815166c0  x6   0000ffffffffffff  x7   ffffffffffffffff
+01-17 11:56:52.191 10923-10923/? A/DEBUG:     x8   0000000000000083  x9   ffffffffffffffdf  x10  0000000000000000  x11  ffffffffffffffff
+01-17 11:56:52.191 10923-10923/? A/DEBUG:     x12  0000000000000000  x13  ffffffffffff0000  x14  00000000000002e0  x15  000000000000044d
+01-17 11:56:52.191 10923-10923/? A/DEBUG:     x16  0000007e9533aed0  x17  0000007e952e29f4  x18  0000000000000001  x19  0000007e817524f8
+01-17 11:56:52.191 10923-10923/? A/DEBUG:     x20  0000000000000006  x21  0000007e81752450  x22  000000000000000b  x23  0000007e858340f0
+01-17 11:56:52.191 10923-10923/? A/DEBUG:     x24  0000007e817524e8  x25  0000000000000000  x26  0000000000000080  x27  0000007e81516740
+01-17 11:56:52.191 10923-10923/? A/DEBUG:     x28  0000000000000001  x29  0000007e81750730  x30  0000007e952dfd14
+01-17 11:56:52.191 10923-10923/? A/DEBUG:     sp   0000007e81750710  pc   0000007e952e29fc  pstate 0000000060000000
+01-17 11:56:52.198 10923-10923/? A/DEBUG: backtrace:
+01-17 11:56:52.198 10923-10923/? A/DEBUG:     #00 pc 000000000006f9fc  /system/lib64/libc.so (tgkill+8)
+01-17 11:56:52.198 10923-10923/? A/DEBUG:     #01 pc 000000000006cd10  /system/lib64/libc.so (pthread_kill+64)
+01-17 11:56:52.198 10923-10923/? A/DEBUG:     #02 pc 0000000000025078  /system/lib64/libc.so (raise+24)
+01-17 11:56:52.198 10923-10923/? A/DEBUG:     #03 pc 000000000001cc04  /system/lib64/libc.so (abort+52)
+01-17 11:56:52.198 10923-10923/? A/DEBUG:     #04 pc 00000000000881a0  /data/app/android.example.com.tflitecamerademo-1/lib/arm64/libtensorflowlite_jni.so
+01-17 11:56:52.199 10923-10923/? A/DEBUG:     #05 pc 0000000000071ce4  /data/app/android.example.com.tflitecamerademo-1/lib/arm64/libtensorflowlite_jni.so
+01-17 11:56:52.199 10923-10923/? A/DEBUG:     #06 pc 00000000000707fc  /data/app/android.example.com.tflitecamerademo-1/lib/arm64/libtensorflowlite_jni.so
+01-17 11:56:52.199 10923-10923/? A/DEBUG:     #07 pc 000000000007f99c  /data/app/android.example.com.tflitecamerademo-1/lib/arm64/libtensorflowlite_jni.so
+01-17 11:56:52.199 10923-10923/? A/DEBUG:     #08 pc 0000000000011c5c  /data/app/android.example.com.tflitecamerademo-1/lib/arm64/libtensorflowlite_jni.so (Java_org_tensorflow_lite_NativeInterpreterWrapper_run+1628)
+01-17 11:56:52.199 10923-10923/? A/DEBUG:     #09 pc 0000000000384abc  /data/app/android.example.com.tflitecamerademo-1/oat/arm64/base.odex (offset 0x329000)
+
+This error doesn't seem to be related to added preprocessing layer, but without adding preprocessing layer, no error occurs and app can run.

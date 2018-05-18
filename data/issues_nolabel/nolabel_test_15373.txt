@@ -1,0 +1,45 @@
+GPU memory usage changed from TF 1.3.0 to 1.4.0 - runs out of memory
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Custom code included below
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 14.04
+TensorFlow installed from (source or binary): From pip
+TensorFlow version (use command below): 1.3.0 and 1.4.0
+Python version: 2.7
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: cuda-8.0 cudnn-6.0
+GPU model and memory: GTX 1080 8GB
+Exact command to reproduce: python <example_script.py>
+
+Describe the problem
+Bug. TensorFlow runs out of GPU memory (ResourceExhaustedError) when using version 1.4.0 when running code that runs fine on version 1.3.0. Please see the following script to reproduce.
+Source code / logs
+import tensorflow as tf
+import tensorflow.contrib.slim.nets as nets
+import tensorflow.contrib.slim as slim
+from tensorflow.contrib.slim.nets import resnet_v2
+
+kBatchSize = 4
+kCropSize = 500
+kNumClasses = 10
+
+with tf.device('/gpu:0'):
+  images = tf.random_normal([kBatchSize, kCropSize, kCropSize, 3])
+  labels = tf.constant(0, dtype=tf.int32, shape=[kBatchSize, kCropSize, kCropSize])
+
+  with slim.arg_scope(resnet_v2.resnet_arg_scope()):
+    backbone, end_points = resnet_v2.resnet_v2_101(
+        images, None, is_training=True, global_pool=False,
+        output_stride=8)
+
+    final_conv = tf.layers.conv2d(backbone, kNumClasses, [1, 1], name='final_conv')
+    logits = tf.image.resize_bilinear(final_conv, tf.slice(tf.shape(images), [1], [2]))
+
+  loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+        labels=labels, logits=logits)
+
+optimizer = tf.train.GradientDescentOptimizer(learning_rate=.001)
+train_op = slim.learning.create_train_op(loss, optimizer)
+slim.learning.train(train_op, '/tmp/resnet')

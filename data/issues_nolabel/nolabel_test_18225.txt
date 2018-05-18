@@ -1,0 +1,175 @@
+Distributed TensorFlow: All works use the same GPU device on host with 4 GPUs
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): NO
+**OS Platform and Distribution **: Ubuntu 16.04
+TensorFlow installed from (source or binary): pip2.7 install
+TensorFlow version (use command below):
+tf.VERSION = 1.4.0
+tf.GIT_VERSION = v1.4.0-rc1-11-g130a514
+tf.COMPILER_VERSION = v1.4.0-rc1-11-g130a514
+Python version: python2.7
+Bazel version (if compiling from source): None
+GCC/Compiler version (if compiling from source): None
+CUDA/cuDNN version:  cuda_8.0.61_375.26_linux.run/cudnn-8.0-linux-x64-v6.0.tgz
+GPU model and memory: TITAN Xp, 12189MiB
+Exact command to reproduce:
+Cuda libs:
+/usr/local/cuda-8.0/lib64/libcudart_static.a
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0.61
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+
+Describe the problem
+All the 4 works use the same GPU device(GPU:0) when running a distributed training on a host with 4 GPUs.
+Source code / logs
+The distributed runner:
+START_PORT = 2222
+
+def evaluate_on_data(estimator, test_input_fn, steps=1):
+    """Evaluates and prints results, set data to test_data or train_data."""
+    evaluation = estimator.evaluate(
+        input_fn=test_input_fn,
+        steps=steps)
+    print("Evaluation on test data:")
+    for key in evaluation:
+        print("| {}: {:.4f} |".format(key, evaluation[key]))
+
+
+def ps_start(num_gpus):
+    with tf.device('/job:worker/task:0/device:CPU:0'):
+        worker_hosts = ["localhost:" + str(START_PORT + i + 1) for i in range(num_gpus)]
+        cluster = tf.train.ClusterSpec({"ps": ["localhost:" + str(START_PORT)], "worker": worker_hosts})
+
+        # Create and start a server for the local task.
+        ps_server = tf.train.Server(cluster, job_name="ps", task_index=0)
+        ps_server.join()
+
+
+def distributed_train(num_gpus,
+                      task_index,
+                      train_input_fn,
+                      test_input_fn,
+                      model_fn,
+                      **model_params):
+    worker_hosts = ["localhost:" + str(START_PORT + i + 1) for i in range(num_gpus)]
+    cluster = tf.train.ClusterSpec({"ps": ["localhost:" + str(START_PORT)], "worker": worker_hosts})
+    server = tf.train.Server(cluster, job_name="worker", task_index=task_index)
+
+    if task_index == 0:
+        tf.logging.info('hyper-params:')
+        for k, v in model_params.items():
+            tf.logging.info("  - " + k + ":\t" + str(v))
+
+    num_steps_per_epoch = model_params["num_steps_per_epoch"]
+    total_steps = num_steps_per_epoch * model_params["num_epochs"]
+    evaluate_when_train = model_params.get("evaluate_when_train", 0)
+    eval_steps = model_params["eval_steps"]
+    model_dir = model_params["model_dir"]
+
+    # Assigns ops to the local worker by default.
+    with tf.device(tf.train.replica_device_setter(
+            worker_device="/job:worker/task:%d/device:GPU:%d" % (task_index, task_index),
+            cluster=cluster)):
+
+        os.environ['TF_CONFIG'] = json.dumps(
+            {'is_chief': task_index == 0})
+
+        sess_config = tf.ConfigProto(
+            allow_soft_placement=True,
+            intra_op_parallelism_threads=0)
+        model_config = tf.contrib.learn.RunConfig(
+            master=server.target,
+            log_device_placement=False,
+            save_checkpoints_steps=2000,
+            session_config=sess_config
+        )
+
+        model_params.update({"device_info": "gpu-" + str(task_index)})
+        model = tf.estimator.Estimator(
+            model_fn=model_fn,
+            model_dir=model_dir,
+            config=model_config,
+            params=model_params
+        )
+
+        if evaluate_when_train > 0:
+            steps_trained = 0
+            while steps_trained < total_steps:
+                train_steps = min(num_steps_per_epoch, total_steps - steps_trained)
+                model.train(input_fn=train_input_fn, steps=train_steps)
+                steps_trained += train_steps
+                tf.logging.info("Trained for {} steps, total {} so far.".format(train_steps, steps_trained))
+                # evaluation on the last device
+                if task_index == num_gpus - 1:
+                    evaluate_on_data(model, test_input_fn, steps=eval_steps)
+        else:
+            model.train(input_fn=train_input_fn, steps=total_steps)
+            # evaluation on the last device
+            if task_index == num_gpus - 1:
+                evaluate_on_data(model, test_input_fn, steps=eval_steps)
+
+Main python script to use the runner:
+def main(_):
+    if FLAGS.job_name == "ps":
+        ps_start(FLAGS.num_gpus)
+    else:
+        """Train and test input_fn."""
+        train_input_fn = functools.partial(
+            generate_sparse_batch_from_proto,
+            data_source=FLAGS.train_data,
+            batch_size=FLAGS.batch_size,
+            max_field_index=FLAGS.max_field_index,
+            mode='train'
+        )
+
+        test_input_fn = functools.partial(
+            generate_sparse_batch_from_proto,
+            data_source=FLAGS.test_data,
+            batch_size=FLAGS.eval_batch_size,
+            max_field_index=FLAGS.max_field_index,
+            mode='eval'
+            )
+
+        num_steps_per_epoch = FLAGS.num_train // FLAGS.batch_size
+        field_size = FLAGS.max_field_index + 1
+        model_params = {
+            "dropout_keep": 0.6,
+            "learning_rate": FLAGS.learning_rate,
+            "lr_decay_rate": FLAGS.lr_decay_rate,
+            "l2_reg": FLAGS.l2_reg,
+            "field_size": field_size,
+            "num_steps_per_epoch": num_steps_per_epoch,
+            "num_epochs": FLAGS.train_epochs,
+            "model_dir": FLAGS.model_dir,
+            "eval_steps": FLAGS.eval_steps,
+            "evaluate_when_train": FLAGS.evaluate_when_train
+        }
+
+        distributed_train(
+            task_index=FLAGS.task_index,
+            num_gpus=FLAGS.num_gpus,
+            train_input_fn=train_input_fn,
+            test_input_fn=test_input_fn,
+            model_fn=model_fn,
+            **model_params)
+
+Shell script to trigger the main script:
+#!/usr/bin/env bash
+
+gpu_index=(0 1 2 3)
+
+num_gpus=${#gpu_index[@]}
+date=`date  +"%Y%m%d"`
+# start ps
+export CUDA_VISIBLE_DEVICES=-1
+nohup python -m examples/*_async --job_name=ps --num_gpus=${num_gpus} 1>>ps.${date}.log 2>>ps.${date}.log &
+sleep 5
+
+# start worker
+for index in ${gpu_index[@]}
+do
+    export CUDA_VISIBLE_DEVICES=${index}
+    nohup python -m examples/*_async --task_index=${index} --num_gpus=${num_gpus} 1>>train.${date}.log 2>>train.${date}.log &
+done

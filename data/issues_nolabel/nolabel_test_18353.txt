@@ -1,0 +1,57 @@
+InvalidArgumentError in tensorflow reduce_sum gradient when compiling from sources (still a problem in TF 1.7)
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): source, without AVX support
+TensorFlow version (use command below): 1.7.0
+Python version: 3.5.4
+Bazel version (if compiling from source): CMake 3.10.3
+GCC/Compiler version (if compiling from source): MSVC 2017
+CUDA/cuDNN version: CPU only
+GPU model and memory: CPU only
+Exact command to reproduce:
+Using the same example provided in #12177 and following the suggestions in the comment:
+
+import tensorflow as tf
+import numpy as np
+
+x = tf.placeholder(tf.float32, [2,3])
+y = tf.placeholder(tf.float32, [2,3])
+W = tf.Variable(tf.random_normal([3,3], stddev=0.01))
+
+z = tf.matmul(x, W)
+# works when removing the reduce_sum op
+z = tf.reduce_sum(tf.multiply(z, y), axis=1, keep_dims=True)
+
+optimizer = tf.train.AdamOptimizer()
+train_op = optimizer.minimize(z)
+
+Xdata = np.array([[1,2,3],[4,5,6]])
+Ydata = np.array([[2,3,4],[3,4,5]])
+
+op = tf.get_default_graph().get_operation_by_name("gradients/Sum_grad/Reshape")
+with tf.Session() as sess:
+    for input_ in op.inputs:
+        print(input_, sess.run(input_, feed_dict={x: Xdata, y: Ydata}))
+    sess.run(tf.global_variables_initializer())
+    sess.run(train_op, feed_dict={ x: Xdata, y: Ydata })
+    print('done')
+
+Results:
+
+Build from source
+
+Tensor("gradients/Fill:0", shape=(2, 1), dtype=float32) [[1.]
+ [1.]]
+Tensor("gradients/Sum_grad/DynamicStitch:0", shape=(?,), dtype=int32) [2 1 0 ... 0 0 0]
+2018-04-09 14:59:09.801431: F C:\Users\hcheng\tensorflow\tensorflow\core\framework\tensor_shape.cc:243] Check failed: ndims_byte() < MaxDimensions() (unsigned char value 254 vs. 254)Too many dimensions in tensor
+
+
+Precompiled binary
+
+Tensor("gradients/Fill:0", shape=(2, 1), dtype=float32) [[1.]
+ [1.]]
+Tensor("gradients/Sum_grad/DynamicStitch:0", shape=(?,), dtype=int32) [2 1]
+done

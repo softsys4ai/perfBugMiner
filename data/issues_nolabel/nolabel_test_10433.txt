@@ -1,0 +1,113 @@
+BeamsearchDecoder w/ AttentionWrapper
+
+Ubuntu 16.04
+TF version; 1.2.0.rc1
+Hi Team, I'm implementing seq2seq framework using BeamSearchDecoder and got an error when using with AttentionWrapper that has no predefined time-steps.
+Here's my rough code
+
+....
+self.encoder_cell = build_encoder_cell()
+self.encoder_inputs = tf.placeholder(dtype=tf.int32, shape=(None, None), name='encoder_inputs')
+self.encoder_inputs_length = tf.placeholder(dtype=tf.int32, shape=(None,), name='encoder_inputs_length')
+....
+self.encoder_outputs, self.encoder_last_state = tf.nn.dynamic_rnn(
+cell=self.encoder_cell, inputs=self.encoder_inputs_embedded,
+sequence_length=self.encoder_inputs_length, dtype=self.dtype,
+time_major=False)
+....
+self.decoder_cell = build_decoder_cell()
+self.decoder_cell = seq2seq.AttentionWrapper(
+cell=self.decoder_cell,
+attention_mechanism=self.attention_mechanism,
+attention_layer_size=self.hidden_units,
+cell_input_fn=attn_decoder_input_fn,
+initial_cell_state=encoder_last_state,
+alignment_history=False,
+name='Attention_Wrapper')
+tiled_batch_size = self.batch_size * self.beam_width
+self.decoder_initial_state = self.decoder_cell.zero_state(batch_size=tiled_batch_size)
+....
+inference_decoder = beam_search_decoder.BeamSearchDecoder(cell=self.decoder_cell,
+embedding=embed_and_input_proj,
+start_tokens=start_tokens,
+end_token=end_token,
+initial_state=self.decoder_initial_state,
+beam_width=self.beam_width,
+output_layer=output_layer,)
+
+running the code made an error as below,
+
+/home/pjh/ml_tutorials/tensorflow/tf-nmt/beam_search_decoder.pyc in init(self, cell, embedding, start_tokens, end_token, initial_state, beam_width, output_layer, length_penalty_weight)
+173     self._initial_cell_state = nest.map_structure(
+174         self._maybe_split_batch_beams,
+--> 175         initial_state, self._cell.state_size)
+176     self._start_tokens = array_ops.tile(
+177         array_ops.expand_dims(self._start_tokens, 1), [1, self._beam_width])
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/util/nest.pyc in map_structure(func, *structure, **check_types_dict)
+323
+324   return pack_sequence_as(
+--> 325       structure[0], [func(*x) for x in entries])
+326
+327
+/home/pjh/ml_tutorials/tensorflow/tf-nmt/beam_search_decoder.pyc in _maybe_split_batch_beams(self, t, s)
+363       print t
+364       print s
+--> 365       return self._split_batch_beams(t, s)
+366     else:
+367       return t
+/home/pjh/ml_tutorials/tensorflow/tf-nmt/beam_search_decoder.pyc in _split_batch_beams(self, t, s)
+314     print s
+315     if isinstance(s, ops.Tensor):
+--> 316       s = tensor_util.constant_value_as_shape(s)
+317     else:
+318       s = tensor_shape.TensorShape(s)
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_util.pyc in constant_value_as_shape(tensor)
+732     A TensorShape based on the constant value of the given tensor.
+733   """
+--> 734   shape = tensor.get_shape().with_rank(1)
+735   if tensor.get_shape() == [0]:
+736     return tensor_shape.scalar()
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_shape.pyc in with_rank(self, rank)
+630       return self.merge_with(unknown_shape(ndims=rank))
+631     except ValueError:
+--> 632       raise ValueError("Shape %s must have rank %d" % (self, rank))
+633
+634   def with_rank_at_least(self, rank):
+ValueError: Shape () must have rank 1
+
+I added a log to track the tensor argument (t) and the shape argument (s) of the _split_batch_beams function
+In the log, 1024 is the size of hidden units. batch_size is 80 and beam_width is 12. For each cell, I used tf.contrib.rnn.LSTMCell()
+
+Tensor("decoder/AttentionWrapperZeroState/checked_cell_state:0", shape=(?, 1024), dtype=float32) (t)
+1024 (s)
+1024 (s)
+Tensor("decoder/AttentionWrapperZeroState/checked_cell_state_1:0", shape=(?, 1024), dtype=float32)
+1024
+1024
+Tensor("decoder/AttentionWrapperZeroState/zeros_1:0", shape=(960, 1024), dtype=float32)
+1024
+1024
+Tensor("decoder/AttentionWrapperZeroState/zeros_2:0", shape=(960, ?), dtype=float32)
+Tensor("decoder/LuongAttention/strided_slice_2:0", shape=(), dtype=int32)
+Tensor("decoder/LuongAttention/strided_slice_2:0", shape=(), dtype=int32)
+
+It turned out that the reason of the error was 'None' argument in the second dimension of self.encoder_inputs placeholder (which denotes max-time-steps).
+I implemented self.encoder_inputs placeholder to have (None, None) shape to support dynamic batch_size and time-steps of input feeds.
+When i hardcoded max-time-steps to be 80, the code worked well.
+(self.encoder_inputs = tf.placeholder(tf.int32, shape=(None, ""80"")),
+The input argument of _split_batch_beams was like this
+Tensor("decoder/AttentionWrapperZeroState/checked_cell_state:0", shape=(?, 1024), dtype=float32)
+1024
+1024
+Tensor("decoder/AttentionWrapperZeroState/checked_cell_state_1:0", shape=(?, 1024), dtype=float32)
+1024
+1024
+Tensor("decoder/AttentionWrapperZeroState/zeros_1:0", shape=(960, 1024), dtype=float32)
+1024
+1024
+Tensor("decoder/AttentionWrapperZeroState/zeros_2:0", shape=(960, ""80""), dtype=float32)
+""80""
+""80""
+
+Also the error did not occur if i used normal decoder cell (not with AttentionWrapper)
+I'm wondering if this is a bug or a strict design rule for BeamSearchDecoder to support only AttentionWrapper with static_time_steps

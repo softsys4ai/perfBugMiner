@@ -1,0 +1,111 @@
+using tf.layers.batch_normalization() gives erratic validation loss though implementation seems correct.
+
+I am trying to use Batch Normalization using tf.layers.batch_normalization() and I have followed the documentation closely. My code looks like this:
+
+def create_conv_exp_model(fingerprint_input, model_settings, is_training):
+  
+
+  # Dropout placeholder
+  if is_training:
+    dropout_prob = tf.placeholder(tf.float32, name='dropout_prob')
+
+  # Mode placeholder
+  mode_placeholder = tf.placeholder(tf.bool, name="mode_placeholder")
+
+  he_init = tf.contrib.layers.variance_scaling_initializer(mode="FAN_AVG")
+
+  # Input Layer
+  input_frequency_size = model_settings['bins']
+  input_time_size = model_settings['spectrogram_length']
+  net = tf.reshape(fingerprint_input,
+                   [-1, input_time_size, input_frequency_size, 1],
+                   name="reshape")
+  net = tf.layers.batch_normalization(net, 
+                                      training=mode_placeholder,
+                                      name='bn_0')
+
+  for i in range(1, 6):
+    net = tf.layers.conv2d(inputs=net,
+                           filters=8*(2**i),
+                           kernel_size=[5, 5],
+                           padding='same',
+                           kernel_initializer=he_init,
+                           name="conv_%d"%i)
+    net = tf.layers.batch_normalization(net,
+                                        training=mode_placeholder,
+                                        name='bn_%d'%i)
+    with tf.name_scope("relu_%d"%i):
+      net = tf.nn.relu(net)
+    net = tf.layers.max_pooling2d(net, [2, 2], [2, 2], 'SAME', 
+                                  name="maxpool_%d"%i)
+
+  net_shape = net.get_shape().as_list()
+  net_height = net_shape[1]
+  net_width = net_shape[2]
+  net = tf.layers.conv2d( inputs=net,
+                          filters=1024,
+                          kernel_size=[net_height, net_width],
+                          strides=(net_height, net_width),
+                          padding='same',
+                          kernel_initializer=he_init,
+                          name="conv_f")
+  net = tf.layers.batch_normalization( net, 
+                                        training=mode_placeholder,
+                                        name='bn_f')
+  with tf.name_scope("relu_f"):
+    net = tf.nn.relu(net)
+
+  net = tf.layers.conv2d( inputs=net,
+                          filters=model_settings['label_count'],
+                          kernel_size=[1, 1],
+                          padding='same',
+                          kernel_initializer=he_init,
+                          name="conv_l")
+
+  ### Squeeze
+  squeezed = tf.squeeze(net, axis=[1, 2], name="squeezed")
+
+  if is_training:
+    return squeezed, dropout_prob, mode_placeholder
+  else:
+    return squeezed, mode_placeholder
+
+And my train step looks like this:
+
+update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+with tf.control_dependencies(update_ops):
+  optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate_input)
+  gvs = optimizer.compute_gradients(cross_entropy_mean)
+  capped_gvs = [(tf.clip_by_value(grad, -2., 2.), var) for grad, var in gvs]
+  train_step = optimizer.apply_gradients(gvs))
+
+During training, I am feeding the graph with:
+
+train_summary, train_accuracy, cross_entropy_value, _, _ = sess.run(
+    [
+        merged_summaries, evaluation_step, cross_entropy_mean, train_step,
+        increment_global_step
+    ],
+    feed_dict={
+        fingerprint_input: train_fingerprints,
+        ground_truth_input: train_ground_truth,
+        learning_rate_input: learning_rate_value,
+        dropout_prob: 0.5,
+        mode_placeholder: True
+    })
+
+During validation,
+
+validation_summary, validation_accuracy, conf_matrix = sess.run(
+                [merged_summaries, evaluation_step, confusion_matrix],
+                feed_dict={
+                    fingerprint_input: validation_fingerprints,
+                    ground_truth_input: validation_ground_truth,
+                    dropout_prob: 1.0,
+                    mode_placeholder: False
+                })
+
+My loss and accuracy curves (orange is training, blue is validation):
+Plot of loss vs number of iterations,
+Plot of accuracy vs number of iterations
+The validation loss (and accuracy) seem very erratic. Is my implementation of Batch Normalization wrong? Or is this normal with Batch Normalization and I should wait for more iterations? Or maybe, moving statistics are not being saved and hence poor performance. I tried StackOverflow and found many people have the same problem and there is no definitive guide on how to resolve this.

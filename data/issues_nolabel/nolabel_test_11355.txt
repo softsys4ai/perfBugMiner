@@ -1,0 +1,125 @@
+Use pretrained model VGG16 for android app (demo example)
+
+I download demo example which uses tensorflow_inception_graph.pb from the google tensorflow download page.
+What I want to do is to replace it with vgg_16.pb. (The same demo app, only difference is the model')
+But I need a help for replacing those with new ones.
+In ClassifierActivity.java (https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/android)
+private static final int **INPUT_SIZE** = 224; ==> 224
+private static final int **IMAGE_MEAN** = 117; ==> ?
+private static final float **IMAGE_STD** = 1; ==> ?
+private static final String **INPUT_NAME** = "input";
+private static final String **OUTPUT_NAME** = "output";
+
+private static final String MODEL_FILE = "file:///android_asset/tensorflow_inception_graph.pb"; ==>changing the file 
+private static final String **LABEL_FILE** =
+    "file:///android_asset/imagenet_comp_graph_label_strings.txt";  ==> reusing it. Is it ok? (vgg16 is also trained with imagenet data)
+
+I want to replace "tensorflow_inception_graph.pb" with "vgg_16.pb"
+For that, I followed those step
+
+converting ckpt to pbtxt
+
+import tensorflow as tf
+import tensorflow.contrib.slim as slim
+from nets.vgg import vgg_16, vgg_arg_scope
+import numpy as np
+
+height = 224
+width = 224
+channels = 3
+
+# Create graph
+X = tf.placeholder(tf.float32, shape=[None, height, width, channels])
+with slim.arg_scope(vgg_arg_scope()):
+        logits, end_points = vgg_16(X, num_classes=1000, is_training=False)
+predictions = end_points["vgg_16/fc8"]
+saver = tf.train.Saver()
+
+X_test = np.ones((1,224,224,3))
+
+with tf.Session() as sess:
+        saver.restore(sess,"./vgg_16.ckpt")
+        predictions_val = predictions.eval(feed_dict={X: X_test})
+        tf.train.write_graph(sess.graph_def, './', 'vgg_16.pbtxt')
+
+
+
+creating pb file
+python [../../../../]tensorflow/tensorflow/python/tools/freeze_graph.py --input_graph=./vgg_16.pbtxt --input_checkpoint=./vgg_16.ckpt --output_graph=./vgg_16.pb --output_node_names=vgg_16/fc8/squeezed
+
+
+Finding input, output
+
+
+
+import tensorflow as tf
+import os
+import numpy as np
+from tensorflow.python.platform import gfile
+
+with gfile.FastGFile("./vgg_16.pb",'rb') as f:
+    graph_def = tf.GraphDef()
+    graph_def.ParseFromString(f.read())
+    tf.import_graph_def(graph_def, name='')
+
+[n.name + '=>' +  n.op for n in graph_def.node if n.op in ( 'Softmax','Placeholder', 'Squeeze')]
+
+[u'Placeholder=>Placeholder', u'vgg_16/fc8/squeezed=>Squeeze']
+with tf.Session() as sess:
+    input_x = sess.graph.get_tensor_by_name("Placeholder:0")
+    print input_x
+    input_x = sess.graph.get_operation_by_name("Placeholder")
+    print input_x
+    out = sess.graph.get_tensor_by_name("vgg_16/fc8/squeezed:0")
+    print out
+    output = sess.graph.get_operation_by_name("vgg_16/fc8/squeezed")
+    print output
+
+Tensor("Placeholder:0", dtype=float32)
+name: "Placeholder"
+op: "Placeholder"
+attr {
+  key: "dtype"
+  value {
+    type: DT_FLOAT
+  }
+}
+attr {
+  key: "shape"
+  value {
+    shape {
+    }
+  }
+}
+
+Tensor("vgg_16/fc8/squeezed:0", shape=(?, 1000), dtype=float32)
+name: "vgg_16/fc8/squeezed"
+op: "Squeeze"
+input: "vgg_16/fc8/BiasAdd"
+attr {
+  key: "T"
+  value {
+    type: DT_FLOAT
+  }
+}
+attr {
+  key: "squeeze_dims"
+  value {
+    list {
+      i: 1
+      i: 2
+    }
+  }
+}
+
+But why input and output is not kind of demo codes. Do I change it to
+  private static final String **INPUT_NAME** = "input"; ==> "Policeholde"
+  private static final String **OUTPUT_NAME** = "output"; ==> "vgg_16/fc8/squeezed"
+
+
+Last one. the size of
+eventhough I run the script. the size is not changed much.. Still big 553MB
+python ../../../../tensorflow/tensorflow/python/tools/optimize_for_inference.py --input=./inception_v3.pb --output=./vgg_16.pb --input_names= ? --output_names=vgg_16/fc8/squeezed
+
+553440161 Jul  7 16:06 optimized_graph_vgg_16.pb
+553444585 Jul  7 09:46 vgg_16.pb

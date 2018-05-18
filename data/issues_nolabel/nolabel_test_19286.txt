@@ -1,0 +1,93 @@
+[tf-gpu1.7][tf-serving] Error with cuDNN version incompatible issue when load a ckpt model to do the inference
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):  NO
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Red Hat 4.8.5-16, Linux version 3.10.0-693.5.2.el7.x86_64
+TensorFlow installed from (source or binary): pip (python 2.7)
+TensorFlow version (use command below): tensorflow-gpu==1.7.0
+Python version:  python 2.7
+Bazel version (if compiling from source): NA
+GCC/Compiler version (if compiling from source): gcc 5.3
+CUDA/cuDNN version: CUDA9.0, cuDNN7.0.5
+GPU model and memory: Tesla P4, 8GB
+Exact command to reproduce: NA
+
+Describe the problem
+I established a tensorflow-serving environment by gRPC, which load a model in MetaGraph/ckpt format and create a session to do inference. It worked fine under tensorflow-gpu 1.4.1, but now Error happened when I changed to tensorflow-gpu 1.7.0.
+Here is the log when server side starts up:
+$ python classification_server.py -m inception_v3.ckpt-85000 -p 10000
+2018-05-15 14:44:53.703251: I tensorflow/core/platform/cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX2 FMA
+2018-05-15 14:44:53.992419: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1344] Found device 0 with properties: 
+name: TITAN Xp major: 6 minor: 1 memoryClockRate(GHz): 1.582
+pciBusID: 0000:84:00.0
+totalMemory: 11.90GiB freeMemory: 11.74GiB
+2018-05-15 14:44:54.221179: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1344] Found device 1 with properties: 
+name: TITAN Xp major: 6 minor: 1 memoryClockRate(GHz): 1.582
+pciBusID: 0000:88:00.0
+totalMemory: 11.90GiB freeMemory: 11.74GiB
+2018-05-15 14:44:54.222130: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1423] Adding visible gpu devices: 0, 1
+2018-05-15 14:44:55.050563: I tensorflow/core/common_runtime/gpu/gpu_device.cc:911] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-05-15 14:44:55.050618: I tensorflow/core/common_runtime/gpu/gpu_device.cc:917]      0 1 
+2018-05-15 14:44:55.050667: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 0:   N Y 
+2018-05-15 14:44:55.050677: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 1:   Y N 
+2018-05-15 14:44:55.051199: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 2437 MB memory) -> physical GPU (device: 0, name: TITAN Xp, pci bus id: 0000:84:00.0, compute capability: 6.1)
+2018-05-15 14:44:55.098488: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:1 with 2437 MB memory) -> physical GPU (device: 1, name: TITAN Xp, pci bus id: 0000:88:00.0, compute capability: 6.1)
+Tensor("InceptionV3/Logits/global_pool:0", shape=(?, 1, 1, 2048), dtype=float32)
+[Tue May 15 14:44:57 2018]server port 10000
+[Tue May 15 14:44:57 2018]config visual_model 
+[Tue May 15 14:44:57 2018]server start at 10000
+
+
+Here is the log on the server side when a client asks for image classification service:
+2018-05-15 14:45:10.095470: E tensorflow/stream_executor/cuda/cuda_dnn.cc:396] Loaded runtime CuDNN library: 7103 (compatibility version 7100) but source was compiled with 7005 (compatibility version 7000).  If using a binary install, upgrade your CuDNN library to match.  If building from sources, make sure the library loaded at runtime matches a compatible version specified during compile configuration.
+2018-05-15 14:45:10.096881: F tensorflow/core/kernels/conv_ops.cc:712] Check failed: stream->parent()->GetConvolveAlgorithms( conv_parameters.ShouldIncludeWinogradNonfusedAlgo<T>(), &algorithms) 
+Aborted (core dumped)
+
+What does client side gets:
+$ python client.py  -p 127.0.0.1:10000
+Traceback (most recent call last):
+  File "client.py", line 52, in <module>
+    run(options.port, options.feat_len)
+  File "client.py", line 26, in run
+    reply = stub.GetFeatureByImgs(tmp2)
+  File "/home/web_server/dlpy72/dlpy/lib/python2.7/site-packages/grpc/_channel.py", line 487, in __call__
+    return _end_unary_response_blocking(state, call, False, deadline)
+  File "/home/web_server/dlpy72/dlpy/lib/python2.7/site-packages/grpc/_channel.py", line 437, in _end_unary_response_blocking
+    raise _Rendezvous(state, None, None, deadline)
+grpc._channel._Rendezvous: <_Rendezvous of RPC that terminated with (StatusCode.UNAVAILABLE, Socket closed)>
+
+I checked the CUDA+cuDNN version in below way to ensure that I am using CUDA9.0 and cuDNN 7.0.5. Not sure why Tensorflow says I'm using cuDNN 7.1.3.
+$ nvcc --version
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2017 NVIDIA Corporation
+Built on Fri_Sep__1_21:08:03_CDT_2017
+Cuda compilation tools, release 9.0, V9.0.176
+
+$ python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib() + "/python/_pywrap_tensorflow_internal.so")' | xargs ldd
+/home/web_server/dlpy72/dlpy/lib/python2.7/site-packages/h5py/__init__.py:34: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+	linux-vdso.so.1 =>  (0x00007ffd3b9f7000)
+	libtensorflow_framework.so => /home/web_server/dlpy72/dlpy/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so (0x00007f5927b53000)
+	libcublas.so.9.0 => /home/web_server/xiaolun/cuda-9.0/lib64/libcublas.so.9.0 (0x00007f592440e000)
+	libcusolver.so.9.0 => /home/web_server/xiaolun/cuda-9.0/lib64/libcusolver.so.9.0 (0x00007f591f812000)
+	libcudart.so.9.0 => /home/web_server/xiaolun/cuda-9.0/lib64/libcudart.so.9.0 (0x00007f591f5a5000)
+	libdl.so.2 => /lib64/libdl.so.2 (0x00007f591f392000)
+	libpthread.so.0 => /lib64/libpthread.so.0 (0x00007f591f175000)
+	libgomp.so.1 => /home/web_server/gcc-5.3/lib64/libgomp.so.1 (0x00007f591ef56000)
+	librt.so.1 => /lib64/librt.so.1 (0x00007f591ed4e000)
+	libm.so.6 => /lib64/libm.so.6 (0x00007f591ea4b000)
+	libstdc++.so.6 => /home/web_server/gcc-5.3/lib64/libstdc++.so.6 (0x00007f591e6bd000)
+	libgcc_s.so.1 => /home/web_server/gcc-5.3/lib64/libgcc_s.so.1 (0x00007f591e4a7000)
+	libc.so.6 => /lib64/libc.so.6 (0x00007f591e0e3000)
+	/lib64/ld-linux-x86-64.so.2 (0x000055944f876000)
+	libcuda.so.1 => /lib64/libcuda.so.1 (0x00007f591d265000)
+	libcudnn.so.7 => /home/web_server/xiaolun/cuda-9.0/lib64/libcudnn.so.7 (0x00007f59093f9000)
+	libcufft.so.9.0 => /home/web_server/xiaolun/cuda-9.0/lib64/libcufft.so.9.0 (0x00007f5901358000)
+	libcurand.so.9.0 => /home/web_server/xiaolun/cuda-9.0/lib64/libcurand.so.9.0 (0x00007f58fd3f3000)
+	libnvidia-fatbinaryloader.so.384.90 => /lib64/libnvidia-fatbinaryloader.so.384.90 (0x00007f58fd1a1000)
+
+Moreover, I tried to load a frozen model to do the inference in tensorflow-serving, and it worked fine.
+Has anyone encountered a similar problem? Any idea will be welcome.
+Thanks,
+Source code / logs

@@ -1,0 +1,23 @@
+Problem of fusing CONV-BN-RELU together of TF-Lite
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.7
+Python version: 3.5
+Bazel version (if compiling from source): 0.11.0
+GCC/Compiler version (if compiling from source): 4.9
+CUDA/cuDNN version: 9.0
+GPU model and memory: 16GB
+Exact command to reproduce:
+
+Describe the problem
+BN-RELU-CONV structure is becoming more popular recently. However, for TF-Lite, if there are frequent BN-RELU-CONV structures in the graph, the (BN-RELU-CONV) * N sequence will be matched as BN-RELU-(CONV-BN-RELU) * (N-1) - CONV sequence. To make TOCO tools work, it is simply to add an additional 1x1 CONV op at the very beginning, such like conv-(BN-RELU-CONV) * N. Then, it will be  conv-BN-RELU-(CONV-BN-RELU) * (N-1) -CONV and TOCO can fuse them. However, the shapes between CONV in first block and BN-RELU in second block could be not matched. Thus, it will be crashed during the runtime. The single way to solve this problem is to add an 1x1 conv in front of every BN-RELU-CONV strcture. However, this changes too much from the original model. Thus, in my opinion, fusion of CONV-BN-RELU ops should not be hard coded.
+I am not sure that this problem only occurs in TF-Lite. It seems that the BN folding method of TF graph_transform will also match the corresponding CONV-BN structure at first.
+Source code / logs
+For example, DenseNet:
+Runtime Error:
+
+java.lang.NullPointerException: Can not allocate memory for the given inputs: third_party/tensorflow/contrib/lite/kernels/mul.cc:48 NumDimensions(input1) != NumDimensions(input2) (4 != 1)

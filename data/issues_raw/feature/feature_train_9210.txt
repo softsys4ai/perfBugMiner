@@ -1,0 +1,50 @@
+Feature: Sparse matrix multiplications for Tensors with rank > 2
+
+System Information:
+Windows 10, x64, Tensorflow 1.1.0.rc1
+Description:
+The 3-D sparse tensor (placeholder) multiply with 3-D dense tensor has bug, the operation will failed.
+x = tf.sparse_placeholder(tf.float32, shape=[None, 2, 2])
+y = tf.constant(np.ones([3, 2, 1]), dtype=tf.float32)
+z = tf.matmul(x, y, a_is_sparse=True)
+
+indices = [[1, 1, 1], [2, 0, 0], [3, 0, 1]]
+values = [1.0, 2.0, 3.0]
+dense_shape = [3, 2, 2]
+x_val = tf.SparseTensorValue(indices, values, dense_shape)
+
+with tf.Session() as sess:
+  res = sess.run(z, feed_dict={x: x_val})
+  print(res)
+expected result(3x2x1):
+[[[ 0.][ 1.]]
+ [[ 1.][ 0.]]
+ [[ 1.][ 0.]]]
+
+but output some errors actually :
+Traceback (most recent call last):
+  File "D:/Learning/master_project/clinicalText/SourceCode/Python/DNN_CWS/seg_dnn.py", line 369, in <module>
+    cws = SegDNN(constant.VOCAB_SIZE, embed_size, constant.DNN_SKIP_WINDOW)
+  File "D:/Learning/master_project/clinicalText/SourceCode/Python/DNN_CWS/seg_dnn.py", line 76, in __init__
+    self.loss = tf.reduce_sum(tf.matmul(self.slim_map_matrix,tf.expand_dims(tf.transpose(self.word_score),2),a_is_sparse=True))
+  File "E:\IntelPython35\envs\tensorflow-intel\lib\site-packages\tensorflow\python\ops\math_ops.py", line 1755, in matmul
+    a = ops.convert_to_tensor(a, name="a")
+  File "E:\IntelPython35\envs\tensorflow-intel\lib\site-packages\tensorflow\python\framework\ops.py", line 639, in convert_to_tensor
+    as_ref=False)
+  File "E:\IntelPython35\envs\tensorflow-intel\lib\site-packages\tensorflow\python\framework\ops.py", line 704, in internal_convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "E:\IntelPython35\envs\tensorflow-intel\lib\site-packages\tensorflow\python\framework\constant_op.py", line 113, in _constant_tensor_conversion_function
+    return constant(v, dtype=dtype, name=name)
+  File "E:\IntelPython35\envs\tensorflow-intel\lib\site-packages\tensorflow\python\framework\constant_op.py", line 102, in constant
+    tensor_util.make_tensor_proto(value, dtype=dtype, shape=shape, verify_shape=verify_shape))
+  File "E:\IntelPython35\envs\tensorflow-intel\lib\site-packages\tensorflow\python\framework\tensor_util.py", line 444, in make_tensor_proto
+    tensor_proto.string_val.extend([compat.as_bytes(x) for x in proto_values])
+  File "E:\IntelPython35\envs\tensorflow-intel\lib\site-packages\tensorflow\python\framework\tensor_util.py", line 444, in <listcomp>
+    tensor_proto.string_val.extend([compat.as_bytes(x) for x in proto_values])
+  File "E:\IntelPython35\envs\tensorflow-intel\lib\site-packages\tensorflow\python\util\compat.py", line 65, in as_bytes
+    (bytes_or_text,))
+TypeError: Expected binary or unicode string, got <tensorflow.python.framework.sparse_tensor.SparseTensor object at 0x00000195FA86B1D0>
+
+change the z to
+z = tf.sparse_tensor_dense_matmul(x,y)
+also failed because the shape of sparse must 2-D,but xandbhas 3-D

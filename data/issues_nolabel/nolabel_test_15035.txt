@@ -1,0 +1,39 @@
+NadamOptimizer does not work with sparse gradients
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): pip
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version: 3.6.3
+
+Code:
+import tensorflow as tf
+from tensorflow.contrib.opt import NadamOptimizer
+
+optimizer = NadamOptimizer(learning_rate=0.001)
+# optimizer = tf.train.AdamOptimizer(learning_rate=0.001)  # this works
+w = tf.get_variable("w", shape=(100, 10))
+idxs = tf.placeholder(tf.int32, shape=(None,))
+emb = tf.gather(w, idxs)
+loss = tf.reduce_sum(emb ** 2)
+minimize = optimizer.minimize(loss)
+
+with tf.Session() as sess:
+  sess.run(tf.global_variables_initializer())
+  sess.run(minimize, feed_dict={idxs: [1, 2, 3]})
+
+This fails with:
+...
+  File "/u/zeyer/.local/lib/python3.6/site-packages/tensorflow/contrib/opt/python/training/nadam_optimizer.py", line 83, in _apply_sparse_shared
+    m_bar = m_scaled_g_values + beta1_t * m_t
+...
+
+InvalidArgumentError (see above for traceback): Incompatible shapes: [3,10] vs. [100,10]
+         [[Node: Adam/update_w/add = Add[T=DT_FLOAT, _class=["loc:@w"], _device="/job:localhost/replica:0/task:0/device:GPU:0"](Adam/update_w/mul_1, Adam/update_w/mul_3)]]
+
+The bug is pretty obvious in nadam_optimizer.py. The fix would be to do it like in adam.py:
+m_t = state_ops.assign(m, m * beta1_t, use_locking=self._use_locking)
+with ops.control_dependencies([m_t]):
+  m_t = scatter_add(m, indices, m_scaled_g_values)

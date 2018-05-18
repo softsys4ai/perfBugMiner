@@ -1,0 +1,13 @@
+Allows C++ API to be built on Windows within Visual Studio and Debug configurations.
+
+Problem: TensorFlow does not build directly from Visual Studio.
+Cause 1: The CMake scripts were written to assume building from CMake directly due to it's usage of the CMAKE_BUILD_TYPE variable.  If you generate a Visual Studio solution and build from directly within that solution, the build will fail because Visual Studio has multiple-configurations, rendering this variable blank when generating a solution.
+Solution 1: Replace CMAKE_BUILD_TYPE with $(Configuration) which is a Visual Studio macro.  During build time, Visual Studio will replace $(Configuration) with the currently active configuration being built.
+Cause 2: The CMake build scripts were written to assume 'Release' builds would only be built.  When building in Debug, some external libraries generate 'lib' files with a 'd' fixed to the end of the name.  However, the reference to these 'lib' files do not account for the 'd' at the end of the name.  During debug builds, linker errors occur when the file is not found.
+Solution 2: use the CMake command 'debug' and 'optimized' to specify references to difference file names upon 'Debug' and 'Release' builds respectively.
+Cause 3: The CMake build scripts were written to assume 'Release' builds would only be built.  When building in Debug, linker errors occur because _ITERATOR_DEBUG_LEVEL is defined and set to zero for all configurations.  External libraries (like Eigen) build with it's own CMake scripts do not define this, causing a different code path to be built.
+Solution 3: Only define _ITERATOR_DEBUG_LEVEL in Debug builds.
+Cause 4: Visual Studio compile errors occur.  Functions must always have a return value.
+Solution 4: For function stubs without proper implementation, we return NULL.
+Cause 5: Visual Studio compile errors occur.  We define a "double" code path for Eigen that is not available for CPU builds using SSE only.
+Solution 5: We remove the "double" code path if AVX and CUDA are not available on Windows builds.  This error only shows up on Debug builds.  I'm assuming because the compiler doesn't strip out unused symbols and tries to link against it.

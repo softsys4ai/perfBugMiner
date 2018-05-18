@@ -1,0 +1,93 @@
+SVD in TensorFlow is slower than in numpy
+
+I am observing that on my machine SVD in tensorflow is running significantly slower than in numpy. I have GTX 1080 GPU, and expecting SVD to be at least as fast as when running the code using CPU (numpy).
+Environment Info
+Operating System
+lsb_release -a
+No LSB modules are available.
+Distributor ID:	Ubuntu
+Description:	Ubuntu 16.10
+Release:	16.10
+Codename:	yakkety
+
+Installed version of CUDA and cuDNN:
+ls -l /usr/local/cuda-8.0/lib64/libcud*
+-rw-r--r-- 1 root      root    556000 Feb 22  2017 /usr/local/cuda-8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root      root        16 Feb 22  2017 /usr/local/cuda-8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root      root        19 Feb 22  2017 /usr/local/cuda-8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.61
+-rwxr-xr-x 1 root      root    415432 Feb 22  2017 /usr/local/cuda-8.0/lib64/libcudart.so.8.0.61
+-rw-r--r-- 1 root      root    775162 Feb 22  2017 /usr/local/cuda-8.0/lib64/libcudart_static.a
+lrwxrwxrwx 1 voldemaro users       13 Nov  6  2016 /usr/local/cuda-8.0/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 voldemaro users       18 Nov  6  2016 /usr/local/cuda-8.0/lib64/libcudnn.so.5 -> libcudnn.so.5.1.10
+-rwxr-xr-x 1 voldemaro users 84163560 Nov  6  2016 /usr/local/cuda-8.0/lib64/libcudnn.so.5.1.10
+-rw-r--r-- 1 voldemaro users 70364814 Nov  6  2016 /usr/local/cuda-8.0/lib64/libcudnn_static.a
+
+TensorFlow Setup
+python -c "import tensorflow; print(tensorflow.__version__)"
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+1.0.0
+
+Code:
+'''
+Created on Sep 21, 2017
+
+@author: voldemaro
+'''
+import numpy as np
+import tensorflow as tf
+import time;
+import numpy.linalg as NLA;
+
+
+
+
+N=1534;
+
+svd_array = np.random.random_sample((N,N));
+svd_array = svd_array.astype(complex);
+
+specVar = tf.Variable(svd_array, dtype=tf.complex64);
+
+[D2, E1,  E2] = tf.svd(specVar);
+
+init_OP = tf.global_variables_initializer();
+
+with tf.Session() as sess:
+    # Initialize all tensorflow variables
+    start = time.time();
+    sess.run(init_OP);
+    print 'initializing variables: {} s'.format(time.time()-start);
+    
+    start_time = time.time();
+    [d, e1, e2]  = sess.run([D2, E1,  E2]);
+    print("Tensorflow SVD ---: {} s" . format(time.time() - start_time));
+
+
+# Equivalent numpy 
+start = time.time();
+
+u, s, v = NLA.svd(svd_array);   
+print 'numpy SVD  ---: {} s'.format(time.time() - start);
+
+Code Trace:
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:910] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties: 
+name: GeForce GTX 1080
+major: 6 minor: 1 memoryClockRate (GHz) 1.7335
+pciBusID 0000:01:00.0
+Total memory: 7.92GiB
+Free memory: 7.11GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1080, pci bus id: 0000:01:00.0)
+initializing variables: 0.230546951294 s
+Tensorflow SVD ---: 6.56117296219 s
+numpy SVD  ---: 4.41714000702 s

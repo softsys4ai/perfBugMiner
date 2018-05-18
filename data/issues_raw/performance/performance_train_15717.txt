@@ -1,0 +1,117 @@
+Performance issues when multiplying constant matrices
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes, the code sample is provided below
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Installed from official wheel
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version:  Python 3.6.3 | packaged by conda-forge | (default, Dec  9 2017, 16:18:26)
+[GCC 4.8.2 20140120 (Red Hat 4.8.2-15)] on linux
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version:  8.0/6.0.21
+GPU model and memory: GTX 1070, 8GB
+Exact command to reproduce: run the provided code sample
+
+Describe the problem
+I think this is a bug or an unclear performance issue. I also posted on StackOverflow to check if it was a known issue before posting, but not getting replies and I don't think it's a support problem.
+I'm using Tensorflow for some non-DL computation, and I'm running into a behaviour I don't understand. I am testing the multiplication of a square matrix by itself: tf.matmul(a, a):
+
+when the matrix is created with tf.constant
+when the matrix is randomly initialized at each run
+
+My expectation is that the first case should have some overhead for transferring the initial data, 100 MB (5000x5000 matrix using float32) but then the execution of the second case should be slightly slower due to the random initialization at each run.
+However, what I see is that the multiplication of the constant is much slower even on successive runs in the same session.
+Below I include logs generated on different GPUs: it seems that on lower-level GPUs (K1100M, GTX 940MX) constant multiplication is faster or the same, while on newer GPUs (GTX 1070, Tesla P100) it's slower. Details included in the logs.
+Source code
+import tensorflow as tf
+import numpy as np
+from timeit import timeit
+import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"]="2"
+SIZE = 5000
+NUM_RUNS = 10
+
+a = np.random.random((SIZE, SIZE))
+_const_a = tf.constant(a, dtype=tf.float32, name="Const_A")
+_mul_const_a = tf.matmul(_const_a, _const_a, name="Mul_Const")
+
+_random_a = tf.random_uniform((SIZE, SIZE), dtype=tf.float32, name="Random_A")
+_mul_random_a = tf.matmul(_random_a, _random_a, name="Mul_Random")
+
+with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as s:
+    # Run once to make sure everything is initialised
+    s.run((_const_a, _mul_const_a, _random_a, _mul_random_a))
+
+    # timeit
+    print("TF with const\t", timeit(lambda: s.run((_mul_const_a.op)), number=NUM_RUNS))
+    print("TF with random\t", timeit(lambda: s.run((_mul_random_a.op)), number=NUM_RUNS))
+
+
+Logs: I have accurate environment details only for the GTX 1070 and the P100, as reported above.
+GTX 1070 X (multiplying constants is much slower)
+Device mapping:
+/job:localhost/replica:0/task:0/device:GPU:0 -> device: 0, name: GeForce GTX 1070, pci bus id: 0000:01:00.0, compute capability: 6.1
+Random_A/sub: (Sub): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/RandomUniform: (RandomUniform): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/mul: (Mul): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A: (Add): /job:localhost/replica:0/task:0/device:GPU:0
+Mul_Random: (MatMul): /job:localhost/replica:0/task:0/device:GPU:0
+Mul_Const: (MatMul): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/max: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/min: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/shape: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+Const_A: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+TF with const    2.9953213009994215
+TF with random   0.513827863998813
+
+Tesla P100 (multiplying constants is much slower)
+Device mapping:
+/job:localhost/replica:0/task:0/device:GPU:0 -> device: 0, name: Tesla P100-PCIE-16GB, pci bus id: 0000:00:04.0, compute capability: 6.0
+/job:localhost/replica:0/task:0/device:GPU:1 -> device: 1, name: Tesla P100-PCIE-16GB, pci bus id: 0000:00:05.0, compute capability: 6.0
+Random_A/sub: (Sub): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/RandomUniform: (RandomUniform): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/mul: (Mul): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A: (Add): /job:localhost/replica:0/task:0/device:GPU:0
+Mul_Random: (MatMul): /job:localhost/replica:0/task:0/device:GPU:0
+Mul_Const: (MatMul): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/max: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/min: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/shape: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+Const_A: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+TF with const     1.5770663949660957
+TF with random     0.32687677699141204
+
+
+K1100M (multiplying constants is much faster. But I am not sure which version of TF this was run with)
+Device mapping:
+/job:localhost/replica:0/task:0/device:GPU:0 -> device: 0, name: Quadro K1100M, pci bus id: 0000:01:00.0, compute capability: 3.0
+Random_A/sub: (Sub): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/RandomUniform: (RandomUniform): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/mul: (Mul): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A: (Add): /job:localhost/replica:0/task:0/device:GPU:0
+Mul_Random: (MatMul): /job:localhost/replica:0/task:0/device:GPU:0
+Mul_Const: (MatMul): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/max: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/min: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+Random_A/shape: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+Const_A: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+TF with const    4.3167382130868175
+TF with random   9.889055849542306
+
+GTX 940 MX (multiplying constants is slightly slower)
+/job:localhost/replica:0/task:0/gpu:0 -> device: 0, name: GeForce 940MX, pci bus id: 0000:01:00.0
+Random_A/sub: (Sub): /job:localhost/replica:0/task:0/gpu:0
+Random_A/RandomUniform: (RandomUniform): /job:localhost/replica:0/task:0/gpu:0
+Random_A/mul: (Mul): /job:localhost/replica:0/task:0/gpu:0
+Random_A: (Add): /job:localhost/replica:0/task:0/gpu:0
+Mul_Random: (MatMul): /job:localhost/replica:0/task:0/gpu:0
+Mul_Const: (MatMul): /job:localhost/replica:0/task:0/gpu:0
+Random_A/max: (Const): /job:localhost/replica:0/task:0/gpu:0
+Random_A/min: (Const): /job:localhost/replica:0/task:0/gpu:0
+Random_A/shape: (Const): /job:localhost/replica:0/task:0/gpu:0
+Const_A: (Const): /job:localhost/replica:0/task:0/gpu:0
+TF with const    3.5542741210010718
+TF with random   3.519956939999247

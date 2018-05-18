@@ -1,0 +1,65 @@
+slim.batch_norm as normalizer_fn in tf.contrib.layers.fully_connected destroys network
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Mac OS X 10.12.4
+TensorFlow installed from (source or binary):
+binary, conda
+TensorFlow version (use command below):
+1.1.0
+Exact command to reproduce:
+net = layers.fully_connected(input_dim, dim, biases_initializer=tf.constant_initializer(0.1), activation_fn=None, normalizer_fn=tf.contrib.slim.batch_norm)
+
+Describe the problem
+After training a network without normalizer_fn set (or set to =False) and after trying to restore the network with incorrect setting of normalizer_fn, in my case with tf.contrib.slim.batch_norm, TensorFlow creates a new network structure with batch norms and completely annihilates the previously trained model and its structure, leaving the previously trained structure unavailable for restoring. There should be some way to restore previously trained models even after setting incorrect parameters.
+Source code / logs
+Function for creating a network given an initial
+self.layers = [200, 100]
+self.embedding_size = 50
+    def dense_batchnorm_relu(self, dimensions, phase):
+        input_dim = self.query
+        for dim in dimensions:
+            print input_dim
+            net = layers.fully_connected(input_dim, dim, biases_initializer=tf.constant_initializer(0.1), activation_fn=None, normalizer_fn=tf.contrib.slim.batch_norm)
+            self.layers.append(net)
+            input_dim = net
+        net = layers.fully_connected(input_dim, self.embedding_size, biases_initializer=tf.constant_initializer(0.1), activation_fn=None)
+        self.layers.append(net)
+
+Errors:
+`
+
+2017-05-23 21:09:50.047879: W tensorflow/core/framework/op_kernel.cc:1152] Not found: Key fully_connected_1/biases not found in checkpoint
+2017-05-23 21:09:50.481725: W tensorflow/core/framework/op_kernel.cc:1152] Not found: Key fully_connected_1/weights not found in checkpoint
+
+....
+line 785, in restore
+    loader = tf.train.Saver()
+  File "/anaconda/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1056, in __init__
+    self.build()
+  File "/anaconda/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1086, in build
+    restore_sequentially=self._restore_sequentially)
+  File "/anaconda/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 691, in build
+    restore_sequentially, reshape)
+  File "/anaconda/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 407, in _AddRestoreOps
+    tensors = self.restore_op(filename_tensor, saveable, preferred_shard)
+  File "/anaconda/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 247, in restore_op
+    [spec.tensor.dtype])[0])
+  File "/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/gen_io_ops.py", line 669, in restore_v2
+    dtypes=dtypes, name=name)
+  File "/anaconda/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 768, in apply_op
+    op_def=op_def)
+  File "/anaconda/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2336, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/anaconda/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1228, in __init__
+    self._traceback = _extract_stack()
+
+NotFoundError (see above for traceback): Key fully_connected_1/biases not found in checkpoint
+	 [[Node: save/RestoreV2_6 = RestoreV2[dtypes=[DT_FLOAT], _device="/job:localhost/replica:0/task:0/cpu:0"](_recv_save/Const_0, save/RestoreV2_6/tensor_names, save/RestoreV2_6/shape_and_slices)]]
+
+
+`
+Etc.

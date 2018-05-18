@@ -1,0 +1,153 @@
+SparseTensor
+
+Hi, i want to have a prediction with continuous and categorial features.
+i faced a problem with the last line with SparseTensor
+i used Tensorflow version : 1.5.0 installed with anaconda
+os : windows 7
+conda version : 4.4.10
+conda-build version : 3.0.27
+python version : 3.6.3.final.0
+there is my code :
+from future import absolute_import
+from future import division
+from future import print_function
+import tensorflow as tf
+import itertools
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+import warnings
+from sklearn.ensemble import IsolationForest
+warnings.filterwarnings('ignore')
+categorial with continuous
+train = pd.read_csv('Dataset3.csv', delimiter=';')
+train.drop('Matricule',axis = 1, inplace = True)
+train_numerical = train.select_dtypes(exclude=['object'])
+train_numerical.fillna(0,inplace = True)
+train_categoric = train.select_dtypes(include=['object'])
+train_categoric.fillna('NONE',inplace = True)
+train = train_numerical.merge(train_categoric, left_index = True, right_index = True)
+test = pd.read_csv('Dataset3_test.csv', delimiter=';')
+Matricule = test.Matricule
+test.drop('Matricule',axis = 1, inplace = True)
+test_numerical = test.select_dtypes(exclude=['object'])
+test_numerical.fillna(0,inplace = True)
+test_categoric = test.select_dtypes(include=['object'])
+test_categoric.fillna('NONE',inplace = True)
+test = test_numerical.merge(test_categoric, left_index = True, right_index = True)
+clf = IsolationForest( random_state = 42)
+clf.fit(train_numerical)
+y_noano = clf.predict(train_numerical)
+y_noano = pd.DataFrame(y_noano, columns = ['Top'])
+y_noano[y_noano['Top'] == 1].index.values
+train_numerical = train_numerical.iloc[y_noano[y_noano['Top'] == 1].index.values]
+train_numerical.reset_index(drop = True, inplace = True)
+train_categoric = train_categoric.iloc[y_noano[y_noano['Top'] == 1].index.values]
+train_categoric.reset_index(drop = True, inplace = True)
+train = train.iloc[y_noano[y_noano['Top'] == 1].index.values]
+train.reset_index(drop = True, inplace = True)
+col_train = list(train_numerical.columns)
+col_train_bis = list(train_numerical.columns)
+col_train_cat = list(train_categoric.columns)
+col_train_bis.remove('DEM')
+mat_train = np.matrix(train_numerical)
+mat_test  = np.matrix(test_numerical)
+mat_new = np.matrix(train_numerical.drop('DEM',axis = 1))
+mat_y = np.array(train.DEM)
+prepro_y = MinMaxScaler()
+prepro_y.fit(mat_y.reshape(len(mat_y),1))
+prepro = MinMaxScaler()
+prepro.fit(mat_train)
+prepro_test = MinMaxScaler()
+prepro_test.fit(mat_new)
+train_num_scale = pd.DataFrame(prepro.transform(mat_train),columns = col_train)
+test_num_scale  = pd.DataFrame(prepro_test.transform(mat_test),columns = col_train_bis)
+train[col_train] = pd.DataFrame(prepro.transform(mat_train),columns = col_train)
+test[col_train_bis]  = test_num_scale
+List of features
+COLUMNS = col_train
+FEATURES = col_train_bis
+LABEL = "SalePrice"
+FEATURES_CAT = col_train_cat
+print (FEATURES_CAT)
+engineered_features = []
+for continuous_feature in FEATURES:
+engineered_features.append(
+tf.contrib.layers.real_valued_column(continuous_feature))
+for categorical_feature in FEATURES_CAT:
+sparse_column = tf.contrib.layers.sparse_column_with_hash_bucket(
+categorical_feature, hash_bucket_size=1000)
+engineered_features.append(
+tf.contrib.layers.embedding_column(sparse_id_column=sparse_column, dimension=16, combiner="sum"))
+print (engineered_features)
+Training set and Prediction set with the features to predict
+training_set = train[FEATURES + FEATURES_CAT]
+prediction_set = train.DEM
+print (training_set)
+Train and Test
+x_train, x_test, y_train, y_test = train_test_split(training_set[FEATURES + FEATURES_CAT] ,
+prediction_set, test_size=0.33, random_state=42)
+y_train = pd.DataFrame(y_train, columns = [LABEL])
+training_set = pd.DataFrame(x_train, columns = FEATURES + FEATURES_CAT).merge(y_train, left_index = True, right_index = True)
+Training for submission
+training_sub = training_set[FEATURES + FEATURES_CAT]
+testing_sub = test[FEATURES + FEATURES_CAT]
+Same thing but for the test set
+y_test = pd.DataFrame(y_test, columns = [LABEL])
+testing_set = pd.DataFrame(x_test, columns = FEATURES + FEATURES_CAT).merge(y_test, left_index = True, right_index = True)
+testing_set[FEATURES_CAT] = testing_set[FEATURES_CAT].applymap(str)
+print (training_set[FEATURES_CAT])
+def input_fn_new(data_set, training=True):
+continuous_cols = {k: tf.constant(data_set[k].values) for k in FEATURES}
+categorical_cols = {k: tf.SparseTensor(
+    indices=[[i, 0] for i in range(data_set[k].size)], values=data_set[k].values, dense_shape=[data_set[k].size, 1])
+for k in FEATURES_CAT}
+
+# Merges the two dictionaries into one.
+feature_cols = dict(list(continuous_cols.items()) + list(categorical_cols.items()))
+print(feature_cols)
+if training == True:
+    # Converts the label column into a constant Tensor.
+    label = tf.constant(data_set[LABEL].values)
+
+    # Returns the feature columns and the label.
+    return feature_cols, label
+
+return feature_cols
+
+Model
+regressor = tf.contrib.learn.DNNRegressor(feature_columns = engineered_features,
+activation_fn = tf.nn.relu, hidden_units=[200, 100, 50, 25, 12])
+training_set[FEATURES_CAT] = training_set[FEATURES_CAT].applymap(str)
+categorical_cols = {k: tf.SparseTensor(
+indices=[[i, 0] for i in range(training_set[k].size)],
+values=training_set[k].values,
+dense_shape=[training_set[k].size, 1])
+for k in FEATURES_CAT}
+Error:
+WARNING:tensorflow:Using temporary folder as model directory: C:\Users\S9E55~1.GHO\AppData\Local\Temp\tmpl279_r04
+Traceback (most recent call last):
+File "C:\Users\s.ghorbel\AppData\Local\conda\conda\envs\tensorflow\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 576, in merge_with
+self.assert_same_rank(other)
+File "C:\Users\s.ghorbel\AppData\Local\conda\conda\envs\tensorflow\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 621, in assert_same_rank
+other))
+ValueError: Shapes (0,) and (?, ?) must have the same rank
+During handling of the above exception, another exception occurred:
+Traceback (most recent call last):
+File "C:\Users\s.ghorbel\AppData\Local\conda\conda\envs\tensorflow\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 651, in with_rank
+return self.merge_with(unknown_shape(ndims=rank))
+File "C:\Users\s.ghorbel\AppData\Local\conda\conda\envs\tensorflow\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 582, in merge_with
+raise ValueError("Shapes %s and %s are not compatible" % (self, other))
+ValueError: Shapes (0,) and (?, ?) are not compatible
+During handling of the above exception, another exception occurred:
+Traceback (most recent call last):
+File "prediction.py", line 156, in 
+for k in FEATURES_CAT}
+File "prediction.py", line 156, in 
+for k in FEATURES_CAT}
+File "C:\Users\s.ghorbel\AppData\Local\conda\conda\envs\tensorflow\lib\site-packages\tensorflow\python\framework\sparse_tensor.py", line 131, in init
+indices_shape = indices.get_shape().with_rank(2)
+File "C:\Users\s.ghorbel\AppData\Local\conda\conda\envs\tensorflow\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 653, in with_rank
+raise ValueError("Shape %s must have rank %d" % (self, rank))
+ValueError: Shape (0,) must have rank 2

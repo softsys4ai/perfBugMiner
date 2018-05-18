@@ -1,0 +1,50 @@
+Mixture model with gaussians fails to create
+
+Hello!
+I have written some code to model GMM and further prob some data points. I already have weights and other params for initialization. Here is the code:
+ds = tf.contrib.distributions
+gaussians = []
+for i in range(0, len(weights)):
+    mns = means[i]
+    covs = covariances[i]
+    gaussians.append(ds.MultivariateNormalFullCovariance(loc=np.array(means).astype(np.float64), covariance_matrix=np.array(covariances).astype(np.float64)))
+
+gmm = ds.Mixture(
+  cat=ds.Categorical(probs=weights.astype(np.float64)),
+  components=gaussians
+)
+
+However in this stage:
+cat=ds.Categorical(probs=weights.astype(np.float64)),
+there is this error:
+
+Traceback (most recent call last):
+File "D:\Programs\Anaconda3\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 560, in merge_with
+self.assert_same_rank(other)
+File "D:\Programs\Anaconda3\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 605, in assert_same_rank
+other))
+ValueError: Shapes () and (32,) must have the same rank
+
+I have 32 gaussians per mixture, data has 26 features.
+Weights is a list of floats, means - list of floats for each gaussian, covariances - matrix in form of list of lists for each gaussian.
+I started to see why Shapes is just empty, and found this piece of code from tf from exception:
+  @property
+  def batch_shape(self):
+    """Shape of a single sample from a single event index as a `TensorShape`.
+
+    May be partially defined or unknown.
+
+    The batch dimensions are indexes into independent, non-identical
+    parameterizations of this distribution.
+
+    Returns:
+      batch_shape: `TensorShape`, possibly unknown.
+    """
+    return self._batch_shape()
+
+So, the problem might be somewhere in self._batch_shape() function. And in categorical.py, I found this lines of code:
+ def _batch_shape(self):
+    return self.logits.get_shape()[:-1]
+
+When debugging, I found out that this exact function is hit when Shape check is performed. And self.logits.get_shape() does return Shape(32,), but taking [:-1] from it, leads to an error.
+Is this an intended behaviour?

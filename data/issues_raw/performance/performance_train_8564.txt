@@ -1,0 +1,35 @@
+`tf.test.compute_gradient` gives error when computation involves TensorArrays
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+a = tf.TensorArray(tf.float32, size=1)
+x = tf.ones(5)
+a = a.write(0, x)
+y = a.stack()
+
+grads = tf.gradients(y, x)
+
+with tf.Session() as sess:
+    print("y")
+    print(sess.run(y))
+
+    print("grad")
+    print(sess.run(grads))
+
+    # gives error:
+    tf.test.compute_gradient(x, (5,), y, (5,))
+The gradient calculation (sess.run(grads)) works fine, it is just something to do with how the gradients are being calculated within tf.test.compute_gradients.  Here is the stack trace:
+File "...\tensorflow\python\ops\gradient_checker.py", line 312, in compute_gradient
+    dx, dy = _compute_dx_and_dy(x, y, y_shape)
+  File "...\tensorflow\python\ops\gradient_checker.py", line 193, in _compute_dx_and_dy
+    grads = gradients.gradients(y, x, dy)
+  File "...\tensorflow\python\ops\gradients_impl.py", line 560, in gradients
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "...\tensorflow\python\ops\gradients_impl.py", line 368, in _MaybeCompile
+    return grad_fn()  # Exit early
+  File "...\tensorflow\python\ops\gradients_impl.py", line 560, in <lambda>
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "...\tensorflow\python\ops\tensor_array_grad.py", line 158, in _TensorArrayGatherGrad
+    grad_source = _GetGradSource(grad)
+  File "...\tensorflow\python\ops\tensor_array_grad.py", line 74, in _GetGradSource
+    ", got: %s" % op_or_tensor.name)
+ValueError: Expected op/tensor name to start with gradients (excluding scope), got: Identity:0

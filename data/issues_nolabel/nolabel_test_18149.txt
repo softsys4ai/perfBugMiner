@@ -1,0 +1,147 @@
+C++ Const and Assign to initialize variable causes a segfault depending on the Const constructor used
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes see a very short example below.
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+macOS 10.13.3 clang 900.0.39.2 and CentOS Linux 7 gcc-4.8.5
+
+
+TensorFlow installed from (source or binary):
+Source from the 1.7.0 release tag
+
+
+TensorFlow version (use command below):
+I have not actually installed the python pip package, but the source tree came from:
+https://github.com/tensorflow/tensorflow/archive/v1.7.0.tar.gz
+
+
+Python version:
+N/A using the C++ API
+
+
+Bazel version (if compiling from source):
+macOS Build label: 0.11.1-homebrew and Centos Linux 7 Build label: 0.11.1- (@non-git)
+
+
+GCC/Compiler version (if compiling from source):
+macOS clang 900.0.39.2 and CentOS Linux 7 gcc-4.8.5
+
+
+CUDA/cuDNN version:
+N/A
+
+
+GPU model and memory:
+N/A
+
+
+Exact command to reproduce:
+extract the sources/configure
+tar -xzvf v1.7.0.tar.gz
+cd tensorflow-1.7.0
+./configure
+
+
+Then add the following directory to hold the work:
+mkdir tensorflow/basic-example
+Put into basic-example the following BUILD file:
+load("//tensorflow:tensorflow.bzl", "tf_cc_binary")
+
+tf_cc_binary(
+    name = "basic-example",
+    srcs = [
+        "basic-example.cc",
+    ],
+    deps = [
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:client_session",
+        "//tensorflow/core:tensorflow"
+    ]
+)
+
+Put into basic-example the following C++ source file:
+#include "tensorflow/cc/client/client_session.h"
+#include "tensorflow/cc/ops/standard_ops.h"
+#include "tensorflow/core/framework/tensor.h"
+
+using namespace tensorflow;
+using namespace tensorflow::ops;
+using namespace std;
+
+int main() {
+
+  Scope scope = Scope::NewRootScope();
+ 
+  auto c = Const(scope.WithOpName("const_c"), {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0}, {3,3});
+
+  auto v = Variable(scope.WithOpName("var1"), {3, 3}, DT_FLOAT);
+  auto init_v = Assign(scope.WithOpName("init_v"), v, c);
+
+  std::vector<Tensor> outputs;
+  ClientSession session(scope);
+
+  TF_CHECK_OK(session.Run({init_v}, &outputs));
+}
+Now compile and run the resulting program:
+bazel build -c dbg //tensorflow/basic-example
+./bazel-bin/tensorflow/basic-example/basic-example
+Observe the following behavior:
+./bazel-bin/tensorflow/basic-example/basic-example
+2018-03-31 11:47:57.135532: I tensorflow/core/platform/cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.2 AVX
+Segmentation fault: 11
+
+Describe the problem
+The code given above causes a segfault when the session runner tries to get the name of a node because the node is nullptr. I have included a stacktrace using lldb below (a trace showing the same information can be created using gdb on Linux).
+However the following slightly modified C++ program works fine:
+#include "tensorflow/cc/client/client_session.h"
+#include "tensorflow/cc/ops/standard_ops.h"
+#include "tensorflow/core/framework/tensor.h"
+
+using namespace tensorflow;
+using namespace tensorflow::ops;
+using namespace std;
+
+int main() {
+
+  std::vector<float> initConstData = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
+
+  Scope scope = Scope::NewRootScope();
+
+  Tensor initConstT(DT_FLOAT, TensorShape({3,3}));
+  std::copy_n(initConstData.begin(), initConstData.size(), initConstT.flat<float>().data());
+
+  auto c = Const(scope.WithOpName("const_c"), initConstT);
+
+  auto v = Variable(scope.WithOpName("var1"), {3, 3}, DT_FLOAT);
+  auto init_v = Assign(scope.WithOpName("init_v"), v, c);
+
+  std::vector<Tensor> outputs;
+  ClientSession session(scope);
+
+  TF_CHECK_OK(session.Run({init_v}, &outputs));
+}
+The difference between the code that works and the code that doesn't:
+a) the explicit creation of a tensor initConstT
+b) calling Const with a Tensor rather than an Input::Initializer
+The behavior is identical if I omit the use of scope.WithOpName and just pass scope.
+I have been able to test this back as far as Tensorflow 1.4 I can not build Tensorflow 1.3.1 with my installed version of bazel.
+If I have done something wrong, please point it out. Otherwise I feel that because there is no semantic difference between the two programs and the API allows the former program to compile then they should both work.
+Source code / logs
+Stacktrace of the problem:
+(lldb) bt
+* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0x60)
+  * frame #0: 0x0000000126e677bc libtensorflow_framework.so`tensorflow::Node::name() const [inlined] std::__1::shared_ptr<tensorflow::NodeProperties>::operator->(this=0x0000000000000060) const at memory:4071
+    frame #1: 0x0000000126e677bc libtensorflow_framework.so`tensorflow::Node::name(this=0x0000000000000000) const at graph.cc:140
+    frame #2: 0x000000010018592f basic-example`tensorflow::Output::name(this=0x000000012bc020f0) const at ops.h:76
+    frame #3: 0x0000000100184e7a basic-example`tensorflow::ClientSession::Run(this=0x00007ffeefbff4a8, run_options=0x00007ffeefbfefd0, inputs=size=0, fetch_outputs=size=1, run_outputs=size=1, outputs=0x00007ffeefbff4b0 size=1, run_metadata=0x0000000000000000) const at client_session.cc:118
+    frame #4: 0x0000000100184145 basic-example`tensorflow::ClientSession::Run(this=0x00007ffeefbff4a8, inputs=size=0, fetch_outputs=size=1, run_outputs=size=1, outputs=0x00007ffeefbff4b0 size=1) const at client_session.cc:89
+    frame #5: 0x000000010018408a basic-example`tensorflow::ClientSession::Run(this=0x00007ffeefbff4a8, fetch_outputs=size=1, outputs=0x00007ffeefbff4b0 size=1) const at client_session.cc:76
+    frame #6: 0x0000000100002bfc basic-example`main at basic-example.cc:22
+    frame #7: 0x00007fff76249115 libdyld.dylib`start + 1
+    frame #8: 0x00007fff76249115 libdyld.dylib`start + 1
+(lldb)

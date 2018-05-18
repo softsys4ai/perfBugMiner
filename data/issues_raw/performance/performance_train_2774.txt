@@ -1,0 +1,22 @@
+Poor numerics in CPU tf.multinomial
+
+The CPU implementation of tf.multinomial seems to have numerical underflow/overflow when logits are outside of a certain narrow range. The usable logit range on my system is about -88 to 88, which is unacceptably small for my use case (where the logits come from an automatically-trained hidden layer).
+For example:
+>>> logits = np.array([[1000.]*5])
+>>> sess.run(tf.multinomial(logits, 10))
+array([[5, 5, 5, 5, 5, 5, 5, 5, 5, 5]])
+
+Note that the index 5 is out of range (which is the undocumented behavior used to signal an error condition). Expected behavior is to sample uniformly from [0, 4], such as in this workaround:
+>>> logits = np.array([[1000.]*5])
+>>> sess.run(tf.multinomial(tf.nn.log_softmax(logits), 10))
+array([[2, 0, 4, 1, 0, 0, 2, 2, 2, 4]])
+
+It's a similar story for negative logits:
+>>> logits = np.array([[-1000.]*5])
+>>> sess.run(tf.multinomial(logits, 10))
+array([[5, 5, 5, 5, 5, 5, 5, 5, 5, 5]])
+>>> sess.run(tf.multinomial(tf.nn.log_softmax(logits), 10))
+array([[2, 4, 3, 3, 3, 2, 2, 2, 3, 0]])
+
+I think tf.multinomial should be fixed to accept a wider range of inputs. Or, if that's not possible e.g. due to speed tradeoffs, the workaround above should be noted in the documentation.
+System info: tensorflow 845fb7a, Python 3, CPU only on Mac OSX.

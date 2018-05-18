@@ -1,0 +1,89 @@
+Bug in boolean input tensors for ops
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes.
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04
+
+
+TensorFlow installed from (source or binary):
+pip3 install --user tensorflow-gpu
+
+
+TensorFlow version (use command below):
+1.4.1
+
+
+Python version:
+3.5.2
+
+
+Bazel version (if compiling from source):
+NA
+
+
+GCC/Compiler version (if compiling from source):
+gcc (Ubuntu 5.4.0-6ubuntu1~16.04.5) 5.4.0 20160609
+
+
+CUDA/cuDNN version:
+cuda-8.0.61-cudnn-v6
+
+
+GPU model and memory:
+any
+
+
+Exact command to reproduce:
+see description below
+
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+Boolean tensors seem to have a bug.
+In C++ I define an op with a boolean input tensor like so:
+REGISTER_OP("SpatialAugmentationPossible")
+.Input("input: float32")
+.Output("output: bool")
+.Input("mirror: bool")
+.Input("angle: float32")
+.Input("dx: float32")
+.Input("dy: float32")
+.Input("sx: float32")
+.Input("sy: float32")
+.Attr("crop_width: int")
+.Attr("crop_height: int")
+...
+Note that mirror is a boolean tensor. The op compiles fine. When calling like this:
+                op = ops.spatial_augmentation_possible(
+                    input=test_input,
+                    mirror=tf.cast(mirror, dtype=tf.bool),
+                    angle=tf.convert_to_tensor(angle, dtype=tf.float32),
+                    dx=tf.convert_to_tensor(dx, dtype=tf.float32),
+                    dy=tf.convert_to_tensor(dy, dtype=tf.float32),
+                    sx=tf.convert_to_tensor(sx, dtype=tf.float32),
+                    sy=tf.convert_to_tensor(sy, dtype=tf.float32),
+                    crop_width = 500,
+                    crop_height = 300
+                )
+
+                possible_tensor = sess.run(op)
+
+I get:
+2018-01-11 14:57:45.722505: F tensorflow/core/framework/tensor.cc:586] Check failed: dtype() == expected_dtype (10 vs. 1)
+I checked the proto, 10 corresponds to boolean and 1 to float32. If I change the line with the mirror argument like this:
+                mirror=tf.cast(mirror, dtype=tf.float32),
+
+I get:
+ValueError: Tensor conversion requested dtype bool for Tensor with dtype float32: 'Tensor("Cast:0", shape=(1,), dtype=float32, device=/device:GPU:0)'
+That means now it is complaining that I don't input a bool. But the message above is saying that I shouldn't input a bool. For this reason there seems to be a bug.
+Best,
+Eddy

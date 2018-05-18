@@ -1,0 +1,20 @@
+Lack of support for word-embedding on GPU
+
+Dear experts,
+I faced some problems when training model with word-embedding. For simplify the case, I make a helloworld example in this file:
+WE_example.py.txt
+The task is to classify each sentence into 10 classes. Each sentence is length of 30 words. Firstly I use embedding_lookup to get all 30 word-vectors, then I use tf.map_fn(lambda x:tf.reduce_max(x,0), …) to reduce each sentence’s 30 word-vectors into a single “sentence vector”. Then It put this “sentence vector” as DNN's input.
+The following are problems & questions:
+a.    If I use “tf.train.RMSPropOptimizer” as optimizer, it reports “NotImplementedError”, the details is in the following stderr file:
+RMSPropOptimizer_NotImplemented.stderr.txt
+So, is there a plan to implement RMSPropOptimizer’s support for word-embedding in next release?
+b.    Then I replace “tf.train.RMSPropOptimizer” by “tf.train.MomentumOptimizer”.  It works! But the GPU usage is only around 22%. I think putting embedding matrix on host memory (“/cpu:0”) causes data-transfer delay, which may lower down the GPU usage. Then I remove the “with tf.device(‘/cpu:0’)” in line 21(just before definition of word-embedding variable), to put the word-embedding matrix into GPU memory. And run it again. It shows “tensorflow.python.framework.errors.InvalidArgumentError: AttrValue must not have reference type value of float_ref”.
+I put the stdout & stderr as follows:
+MomentumOptimizer_on_GPU.stdout.txt
+MomentumOptimizer_on_GPU.stderr.txt
+It seems that putting word-embedding into GPU memory is not supported by all operators. I also found the same issue in word2vec_basic.py , the line 144 “# Ops and variables pinned to the CPU because of missing GPU implementation” .
+And also word2vec.py Ln508. It also put word-embedding definition onto /cpu:0.
+Word-embedding is very popular in NLP domain. It is usually very large(more than 1GB in internet-level data). So putting it from host memory side to GPU global memory side may save a lot of data-transfer time cost. Is there any plan to fully support it in ALL operators in future release?
+c.    Then I replace “tf.train.MomentumOptimizer” by “tf.train.GradientDescentOptimizer”, still removing “/cpu:0”. Then it works! The GPU usage is around 25%~30%. If adding “/cpu:0”, the GPU usage is around 20%~25%.
+d.    Because the GPU usage is always below 30%(also in my real code running real data). Is there any way to profiling it to find where is the speed bottleneck?
+Sorry for so many questions... But it's really a blocking issue for NLP guys...

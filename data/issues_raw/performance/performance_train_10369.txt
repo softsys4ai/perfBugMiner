@@ -1,0 +1,143 @@
+Deadlock in MapDataset
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+no
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 14.04
+
+
+TensorFlow installed from (source or binary): source
+
+
+TensorFlow version (use command below):
+95d90ab
+
+
+Bazel version (if compiling from source):
+0.5.0
+
+
+CUDA/cuDNN version:
+None
+
+
+GPU model and memory:
+None
+
+
+Exact command to reproduce:
+python map_dataset_op_test.py
+
+
+Describe the problem
+The process hangs forever
+Source code / logs
+Below is from map_dataset_op_test.py:
+"""Tests for the experimental input pipeline ops."""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import numpy as np
+
+from tensorflow.contrib.data.python.ops import dataset_ops
+from tensorflow.python.framework import constant_op
+from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import errors
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import data_flow_ops
+from tensorflow.python.ops import lookup_ops
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import random_ops
+from tensorflow.python.ops import string_ops
+from tensorflow.python.ops import variable_scope
+from tensorflow.python.platform import test
+
+
+class MapDatasetTest(test.TestCase):
+
+  def _buildParallelMapDataset(self, components, count, num_threads,
+							   output_buffer_size):
+	def _map_fn(x, y, z):
+	  return math_ops.square(x), math_ops.square(y), math_ops.square(z)
+	return (dataset_ops.Dataset.from_tensor_slices(components).map(
+		_map_fn, num_threads=num_threads, output_buffer_size=output_buffer_size)
+			.repeat(count))
+
+  def testParallelMapDataset(self):
+	"""Test an dataset that maps a TF function across its input elements."""
+	# The pipeline is TensorSliceDataset -> ParallelMapDataset(square_3) ->
+	# RepeatDataset(count).
+	components = [np.arange(7),
+				  np.array([[1, 2, 3]]) * np.arange(7)[:, np.newaxis],
+				  np.array(37.0) * np.arange(7)]
+	count = array_ops.placeholder(dtypes.int64, shape=[])
+	num_threads = array_ops.placeholder(dtypes.int32, shape=[])
+	output_buffer_size = array_ops.placeholder(dtypes.int64, shape=[])
+
+	dataset = self._buildParallelMapDataset(components, count, num_threads,
+											output_buffer_size)
+	iterator = dataset.make_initializable_iterator()
+	init_op = iterator.initializer
+	get_next = iterator.get_next()
+
+	self.assertEqual([c.shape[1:] for c in components],
+					 [t.shape for t in get_next])
+
+	with self.test_session() as sess:
+	  def do_test(num_threads_val, output_buffer_size_val):
+		# Test single-threaded access to the iterator.
+		sess.run(init_op, feed_dict={
+			count: 14,
+			num_threads: num_threads_val,
+			output_buffer_size: output_buffer_size_val})
+		for _ in range(14):
+		  for i in range(7):
+			result = sess.run(get_next)
+			for component, result_component in zip(components, result):
+			  self.assertAllEqual(component[i]**2, result_component)
+		with self.assertRaises(errors.OutOfRangeError):
+		  sess.run(get_next)
+
+		# Test multi-threaded access to the same iterator.
+		sess.run(init_op, feed_dict={
+			count: 18,
+			num_threads: num_threads_val,
+			output_buffer_size: output_buffer_size_val})
+		results = []
+		def iterator_thread():
+		  while True:
+			try:
+			  results.append(sess.run(get_next))
+			except errors.OutOfRangeError:
+			  return
+		threads = [self.checkedThread(target=iterator_thread) for _ in range(8)]
+		for t in threads:
+		  t.start()
+		for t in threads:
+		  t.join()
+
+		# `results` will contain the same elements components**2
+		# repeated 18 times, but in a non-deterministic order. Sort the
+		# results, and assert that each element of components**2 is
+		# produced 18 times.
+		results.sort(key=lambda x: x[0])
+		for i in range(7):
+		  for j in range(18):
+			for component, result_component in zip(components,
+												   results[i * 18 + j]):
+			  self.assertAllEqual(component[i]**2, result_component)
+
+	  for num_threads_val, output_buffer_size_val in [
+		  (1, 1), (1, 2), (2, 2), (2, 4), (8, 8), (8, 16)]:
+		do_test(num_threads_val, output_buffer_size_val)
+
+if __name__ == "__main__":
+  test.main()
+
+bt.txt

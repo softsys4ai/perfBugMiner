@@ -1,0 +1,40 @@
+tensorflow.nn.dynamic_rnn with variable as init_state cannot work with Estimator.train
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Windows10
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below):1.8.0
+Python version: 3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+I wrote my own function to generate the init state variable
+def get_initial_cell_state(cell, batch_size, dtype):
+  state_size = cell.state_size
+  i = 0
+  def get_state_shape(s):
+    c = _concat(1, s, static=True)
+    nonlocal i
+    name = "init_state_" + str(i)
+    i = i + 1
+    size = tf.get_variable(name, shape=c, dtype=dtype, initializer=tf.initializers.zeros)
+    size = tf.tile(size, [batch_size] + [1] * (len(c) - 1))
+    return size
+  return nest.map_structure(get_state_shape, state_size)
+And use it as below:
+  rnn_output, _ = tf.nn.dynamic_rnn(
+    cell=cell,
+    inputs=inputs,
+    initial_state=get_initial_cell_state(cell, batch_size=batch_size, dtype=tf.float32),
+    parallel_iterations=128,
+    dtype=tf.float32
+  )
+It's compilable and runnable. But got this error:
+WARNING:tensorflow:It seems that global step (tf.train.get_global_step) has not been increased. Current value (could be stable): 0 vs previous value: 0. You could increase the global step by passing tf.train.get_global_step() to Optimizer.apply_gradients or Optimizer.minimize.
+I use Estimator to train. If I don't use this init state variable, everything goes fine.

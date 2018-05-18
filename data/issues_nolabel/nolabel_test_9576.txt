@@ -1,0 +1,246 @@
+dilated convolution in 3D, error:  No algorithm without scratch worked
+
+I'm using tf.nn.convolution to implement the dilated convolution in 3D. I got "No algorithm without scratch worked" error during training. Here is the related code
+To define the model,
+def inference(self, images, is_training, keep_prob):
+        """ Forward inference
+        Return:
+
+        """
+        c1 = self._dilation_conv(images, self._n_filters, scope = 'c1', dilation_rate = (1,1,1))
+        score = self._conv(c1, scope = 'score', filters = 2,  filter_size = (1,1,1) )
+
+        pred = tf.nn.softmax(score)
+
+        # pdb.set_trace()
+        return score, pred
+
+    def _conv(self, in_tensor, filters, scope, filter_size = None):
+        """ """
+
+        if self._wd is None:
+            myreg = None
+        else:
+            myreg = tf.contrib.layers.l2_regularizer(float(self._wd))
+
+        if filter_size is None:
+            filter_size = self._filter_size
+
+        with tf.variable_scope(scope):
+            return tf.layers.conv3d(
+                in_tensor, filters = filters,
+                kernel_size = filter_size, padding = 'valid',
+                activation = None,
+                kernel_initializer  = tf.truncated_normal_initializer(stddev = self._stddev),
+                kernel_regularizer =myreg,
+                name = 'conv')        
+
+    def _dilation_conv(self, in_tensor, n_filters, scope, dilation_rate, filter_size = None):
+        """ dilated convolution filter with batch norm. """
+        
+        if self._wd is None:
+            myreg = None
+        else:
+            myreg = tf.contrib.layers.l2_regularizer(float(self._wd))
+
+        if filter_size is None:
+            filter_size = self._filter_size
+
+        batch_size, H, W, D, in_channel = in_tensor.get_shape().as_list()            
+
+        with tf.variable_scope(scope):
+            kernel = tf.get_variable('weights', shape = self._filter_size + (in_channel, n_filters),
+                                     dtype = tf.float32,
+                                     initializer = tf.truncated_normal_initializer(stddev=self._stddev))
+            output = tf.nn.convolution(in_tensor, kernel, padding = 'SAME', strides = (1,1,1), dilation_rate = dilation_rate, name = 'dilation_conv')
+
+            # Somehow set training = True even for testing phase works
+            # better.
+            if self._bn:
+                output = tf.layers.batch_normalization(
+                    output, training = True, name = 'bn')
+
+            return tf.nn.relu(output, 'relu')
+            
+    def get_loss(self, labels, scores, beta = 0.9999):
+        """
+        return total loss of the model, including data loss and
+        regularization loss.
+    
+        It looks that softmax_cross_entropy_with_logits does not need the
+        input logits 2 dimension. As long as the last dimension is for
+        classes, it should work. So, we do not need reshape the input tensor. 
+
+        TF has a weighted_cross_entropy_with_logits, but this function is
+        for multi-class problem, i.e. a picture may have both a dog and a
+        truck.
+        """
+
+        class_weight = tf.constant([beta, 1.0 - beta])
+        # TF suppot numpy's broadcasting. score array has dim BXY2,
+        # weights array has dim (2), which is broadcast to BXY2.
+        weighted_logits = tf.multiply(scores, class_weight)
+
+        # both logits and labels are BXY2 dimension. 
+        cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits = weighted_logits, labels = labels)
+        # fromm dim BXY to dim 0 (scalar)
+        cross_entropy_mean = tf.reduce_mean(cross_entropy, name = 'cross_entropy')
+
+        reg_loss_list = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        if reg_loss_list:
+            return cross_entropy_mean + tf.add_n(reg_loss_list)
+        else:
+            return cross_entropy_mean
+
+And to train the model, I used tf.train.AdamOptimizer. I didn't paste the training related code, since I don't think they are relevant, but I can add them later if that helps.
+Here is the error logs I saw:
+In [40]: train.train(train_dataset, test_dataset, model = model, out_ckpt='./ckpt_3d/dilation', summary_dir='./summary_3d/dilation')
+2017-05-01 15:08:10.813716: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Graphics Device, pci bus id: 0000:85:00.0)
+---------------------------------------------------------------------------
+NotFoundError                             Traceback (most recent call last)
+/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+   1038     try:
+-> 1039       return fn(*args)
+   1040     except errors.OpError as e:
+
+/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/client/session.py in _run_fn(session, feed_dict, fetch_list, target_list, options, run_metadata)
+   1020                                  feed_dict, fetch_list, target_list,
+-> 1021                                  status, run_metadata)
+   1022 
+
+/usr/lib/python3.4/contextlib.py in __exit__(self, type, value, traceback)
+     65             try:
+---> 66                 next(self.gen)
+     67             except StopIteration:
+
+/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/framework/errors_impl.py in raise_exception_on_not_ok_status()
+    465           compat.as_text(pywrap_tensorflow.TF_Message(status)),
+--> 466           pywrap_tensorflow.TF_GetCode(status))
+    467   finally:
+
+NotFoundError: No algorithm without scratch worked!
+	 [[Node: gradients/c1/dilation_conv_grad/Conv3DBackpropInputV2 = Conv3DBackpropInputV2[T=DT_FLOAT, padding="SAME", strides=[1, 1, 1, 1, 1], _device="/job:localhost/replica:0/task:0/gpu:0"](gradients/c1/dilation_conv_grad/Shape, c1/weights/read, gradients/AddN_3)]]
+	 [[Node: Adam/update/_26 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_89_Adam/update", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+NotFoundError                             Traceback (most recent call last)
+<ipython-input-40-c48a6e49a4b4> in <module>()
+----> 1 train.train(train_dataset, test_dataset, model = model, out_ckpt='./ckpt_3d/dilation', summary_dir='./summary_3d/dilation')
+
+/home/weiliu/projects/seismic/code/weiliu/train.py in train(train_dataset, test_dataset, model, init_lr, summary_dir, in_ckpt, out_ckpt)
+    141                          keep_prob_pl: 0.5}
+    142 
+--> 143             _, loss_value = sess.run([optimizer, loss], feed_dict = feed_dict)
+    144 
+    145             global_step_val = tf.train.global_step(sess, global_step)
+
+/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+    776     try:
+    777       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 778                          run_metadata_ptr)
+    779       if run_metadata:
+    780         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    980     if final_fetches or final_targets:
+    981       results = self._do_run(handle, final_targets, final_fetches,
+--> 982                              feed_dict_string, options, run_metadata)
+    983     else:
+    984       results = []
+
+/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/client/session.py in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+   1030     if handle is None:
+   1031       return self._do_call(_run_fn, self._session, feed_dict, fetch_list,
+-> 1032                            target_list, options, run_metadata)
+   1033     else:
+   1034       return self._do_call(_prun_fn, self._session, handle, feed_dict,
+
+/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+   1050         except KeyError:
+   1051           pass
+-> 1052       raise type(e)(node_def, op, message)
+   1053 
+   1054   def _extend_graph(self):
+
+NotFoundError: No algorithm without scratch worked!
+	 [[Node: gradients/c1/dilation_conv_grad/Conv3DBackpropInputV2 = Conv3DBackpropInputV2[T=DT_FLOAT, padding="SAME", strides=[1, 1, 1, 1, 1], _device="/job:localhost/replica:0/task:0/gpu:0"](gradients/c1/dilation_conv_grad/Shape, c1/weights/read, gradients/AddN_3)]]
+	 [[Node: Adam/update/_26 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_89_Adam/update", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+Caused by op 'gradients/c1/dilation_conv_grad/Conv3DBackpropInputV2', defined at:
+  File "/usr/local/bin/ipython", line 11, in <module>
+    sys.exit(start_ipython())
+  File "/usr/local/lib/python3.4/dist-packages/IPython/__init__.py", line 119, in start_ipython
+    return launch_new_instance(argv=argv, **kwargs)
+  File "/usr/local/lib/python3.4/dist-packages/traitlets/config/application.py", line 658, in launch_instance
+    app.start()
+  File "/usr/local/lib/python3.4/dist-packages/IPython/terminal/ipapp.py", line 348, in start
+    self.shell.mainloop()
+  File "/usr/local/lib/python3.4/dist-packages/IPython/terminal/interactiveshell.py", line 440, in mainloop
+    self.interact()
+  File "/usr/local/lib/python3.4/dist-packages/IPython/terminal/interactiveshell.py", line 431, in interact
+    self.run_cell(code, store_history=True)
+  File "/usr/local/lib/python3.4/dist-packages/IPython/core/interactiveshell.py", line 2717, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/usr/local/lib/python3.4/dist-packages/IPython/core/interactiveshell.py", line 2827, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/usr/local/lib/python3.4/dist-packages/IPython/core/interactiveshell.py", line 2881, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-40-c48a6e49a4b4>", line 1, in <module>
+    train.train(train_dataset, test_dataset, model = model, out_ckpt='./ckpt_3d/dilation', summary_dir='./summary_3d/dilation')
+  File "/home/weiliu/projects/seismic/code/weiliu/train.py", line 116, in train
+    optimizer = tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step = global_step)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/training/optimizer.py", line 315, in minimize
+    grad_loss=grad_loss)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/training/optimizer.py", line 386, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/ops/gradients_impl.py", line 560, in gradients
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/ops/gradients_impl.py", line 368, in _MaybeCompile
+    return grad_fn()  # Exit early
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/ops/gradients_impl.py", line 560, in <lambda>
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/ops/nn_grad.py", line 77, in _Conv3DGrad
+    padding=op.get_attr("padding")),
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/ops/gen_nn_ops.py", line 663, in conv3d_backprop_input_v2
+    padding=padding, name=name)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/framework/op_def_library.py", line 768, in apply_op
+    op_def=op_def)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 2336, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 1228, in __init__
+    self._traceback = _extract_stack()
+
+...which was originally created as op 'c1/dilation_conv', defined at:
+  File "/usr/local/bin/ipython", line 11, in <module>
+    sys.exit(start_ipython())
+[elided 8 identical lines from previous traceback]
+  File "<ipython-input-40-c48a6e49a4b4>", line 1, in <module>
+    train.train(train_dataset, test_dataset, model = model, out_ckpt='./ckpt_3d/dilation', summary_dir='./summary_3d/dilation')
+  File "/home/weiliu/projects/seismic/code/weiliu/train.py", line 67, in train
+    images_placeholder, is_training = istraining_pl, keep_prob = keep_prob_pl )
+  File "/home/weiliu/projects/seismic/code/weiliu/dilation_net_3d.py", line 71, in inference
+    c1 = self._dilation_conv(images, self._n_filters, scope = 'c1', dilation_rate = (1,1,1))
+  File "/home/weiliu/projects/seismic/code/weiliu/dilation_net_3d.py", line 116, in _dilation_conv
+    output = tf.nn.convolution(in_tensor, kernel, padding = 'SAME', strides = (1,1,1), dilation_rate = dilation_rate, name = 'dilation_conv')
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/ops/nn_ops.py", line 661, in convolution
+    op=op)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/ops/nn_ops.py", line 331, in with_space_to_batch
+    return op(input, num_spatial_dims, padding)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/ops/nn_ops.py", line 653, in op
+    name=name)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/ops/nn_ops.py", line 140, in _non_atrous_convolution
+    name=name)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/ops/gen_nn_ops.py", line 529, in conv3d
+    strides=strides, padding=padding, name=name)
+  File "/home/weiliu/.local/lib/python3.4/site-packages/tensorflow/python/framework/op_def_library.py", line 768, in apply_op
+    op_def=op_def)
+
+NotFoundError (see above for traceback): No algorithm without scratch worked!
+	 [[Node: gradients/c1/dilation_conv_grad/Conv3DBackpropInputV2 = Conv3DBackpropInputV2[T=DT_FLOAT, padding="SAME", strides=[1, 1, 1, 1, 1], _device="/job:localhost/replica:0/task:0/gpu:0"](gradients/c1/dilation_conv_grad/Shape, c1/weights/read, gradients/AddN_3)]]
+	 [[Node: Adam/update/_26 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_89_Adam/update", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+
+I also check the atrous_convolution_test.py and it seems I used it right.
+I'm on Ubuntu 14.04 64 bit, tensorflow version 1.1.0-rc2.
+If anyone can point me direction how to debug, that would be great.

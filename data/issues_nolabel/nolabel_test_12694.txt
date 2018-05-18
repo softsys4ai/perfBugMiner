@@ -1,0 +1,105 @@
+queue skips first few elements under multiple enqueue threads
+
+Possible problems
+I want to use tf.slice_input_producer to produce a list of filenames, and then use multiple threads to load data and feed it to a tf.FIFOQueue. It seems first few elements have been skipped unexpectedly.
+It only happens when there exist multiple enqueue threads.
+I have searched the web, and only find one similar question on stackoverflow.com with zero answer.
+https://stackoverflow.com/questions/44725917/tensorflow-train-batch-skip-3-examples
+Sorry for creating this issue. Maybe I missed something. However, I really feel deeply puzzled about this and tried a lot to solve this.
+Minimum reproducible example
+import tensorflow as tf
+
+a, = tf.train.slice_input_producer([tf.range(100)], shuffle=False)
+q = tf.FIFOQueue(32, [tf.int32], shapes=[[]])
+tf.train.queue_runner.add_queue_runner(
+    tf.train.queue_runner.QueueRunner(q, [q.enqueue([a])] * 8)
+)
+with tf.Session() as sess:
+    tf.train.start_queue_runners(sess=sess)
+    for _ in range(100):
+        print(sess.run(q.dequeue()))
+Expected output
+Some reordering may take place, but roughly, the programs count from 0 to 99.
+Actual output
+7
+8
+9
+...
+96
+97
+98
+99
+0
+1
+2
+3
+4
+5
+6
+
+System information
+My TensorFlow is installed from pip install tensorflow-gpu --user the day before yesterday.
+
+System: ArchLinux x86_64
+CUDA: V8.0.61
+Python: 3.6.2
+GPU: GTX 860M (2G memory)
+CPU: i7-4710MQ (4 cores 8 threads)
+
+== cat /etc/issue ===============================================
+Linux archlinux-sun 4.12.8-2-ARCH #1 SMP PREEMPT Fri Aug 18 14:08:02 UTC 2017 x86_64 GNU/Linux
+LSB_VERSION=1.4
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+c++ (GCC) 7.1.1 20170630
+Copyright (C) 2017 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+== uname -a =====================================================
+Linux archlinux-sun 4.12.8-2-ARCH #1 SMP PREEMPT Fri Aug 18 14:08:02 UTC 2017 x86_64 GNU/Linux
+
+== check pips ===================================================
+numpy (1.13.1)
+protobuf (3.3.2)
+tensorflow (1.3.0)
+tensorflow-gpu (1.3.0)
+tensorflow-tensorboard (0.1.5)
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.3.0
+tf.GIT_VERSION = v1.3.0-rc2-20-g0787eee
+tf.COMPILER_VERSION = v1.3.0-rc2-20-g0787eee
+Sanity check: array([1], dtype=int32)
+
+== env ==========================================================
+LD_LIBRARY_PATH /usr/lib/nvidia:/usr/lib32/nvidia:/usr/lib:/usr/lib32:/usr/lib:
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+Wed Aug 30 08:42:01 2017       
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 384.59                 Driver Version: 384.59                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 860M    Off  | 00000000:01:00.0 Off |                  N/A |
+| N/A   53C    P0    N/A /  N/A |      5MiB /  2002MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0      4172    G   /usr/lib/xorg-server/Xorg                        4MiB |
++-----------------------------------------------------------------------------+
+
+== cuda libs  ===================================================

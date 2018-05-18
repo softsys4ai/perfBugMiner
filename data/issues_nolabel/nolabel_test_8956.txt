@@ -1,0 +1,61 @@
+Linking errors when using Tensorflow/Bazel to call Python from C++
+
+I am writing a C++ application (based on Tensorflow Serving) in which I need to call Python and Numpy functions (from Python.h and numpy.h).
+This application is built with Bazel.
+So I include the header:
+#include "tensorflow/python/lib/core/numpy.h"
+which in turn includes Python.h.
+This file seems to wrap numpy to fix an issue described in this Stack Overflow post.
+Any other C++ code within the Tensorflow project which needs to make calls to Python.h also does not directly include it, but only includes tensorflow/python/lib/core/numpy.h. On the Bazel side, it seems to suffice to simply add //util/python:python_headers to the deps of the build.
+My BUILD file looks like this:
+
+...
+
+cc_library(
+	name = "my_library",
+	srcs = ["my_library.cc"],
+	hdrs = ["my_library.h"],
+	deps = [
+		@org_tensorflow//util/python:python_headers",
+		@org_tensorflow//third_party/py/numpy:headers",
+			] + SOME_OTHER_DEPS + TENSORFLOW_DEPS + SUPPORTED_TENSORFLOW_OPS,
+)
+
+cc_binary(
+	name = "my_main",
+	srcs = ["my_main.cc"],
+	deps = [":my_library"],
+)
+
+...
+
+
+Building the library with bazel build :my_library works fine.
+Building the binary the same way does not work, I get the following errors:
+bazel-out/local-fastbuild/bin/servable/_objs/my_library/servable/my:library.pic.o:my_library.cc:function tensorflow::serving::NumpyInitializer::init(): error: undefined reference to 'Py_Initialize'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::MakeArgTuple(tensorflow::(anonymous namespace)::PyCall*, _object**): error: undefined reference to 'PyList_New'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::MakeArgTuple(tensorflow::(anonymous namespace)::PyCall*, _object**): error: undefined reference to 'PyList_SetItem'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::MakeArgTuple(tensorflow::(anonymous namespace)::PyCall*, _object**): error: undefined reference to 'Py_BuildValue'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::IsSingleNone(_object*): error: undefined reference to 'PyType_IsSubtype'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::IsSingleNone(_object*): error: undefined reference to '_Py_NoneStruct'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::DoCallPyFunc(tensorflow::(anonymous namespace)::PyCall*): error: undefined reference to 'PyEval_CallObjectWithKeywords'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::DoCallPyFunc(tensorflow::(anonymous namespace)::PyCall*): error: undefined reference to 'PyErr_Occurred'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::DoCallPyFunc(tensorflow::(anonymous namespace)::PyCall*): error: undefined reference to 'PyErr_Print'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::DoCallPyFunc(tensorflow::(anonymous namespace)::PyCall*): error: undefined reference to 'PyList_Size'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::DoCallPyFunc(tensorflow::(anonymous namespace)::PyCall*): error: undefined reference to 'PyList_GetItem'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::(anonymous namespace)::DoCallPyFunc(tensorflow::(anonymous namespace)::PyCall*): error: undefined reference to 'PyType_IsSubtype'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::ConvertNdarrayToTensor(_object*, tensorflow::Tensor*): error: undefined reference to 'PyString_AsStringAndSize'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::ConvertTensorToNdarray(tensorflow::Tensor const&, _object**): error: undefined reference to 'PyString_FromStringAndSize'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::PyFuncOp::Compute(tensorflow::OpKernelContext*): error: undefined reference to 'PyGILState_Ensure'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/py_func_lib/external/org_tensorflow/tensorflow/python/lib/core/py_func.pic.o:py_func.cc:function tensorflow::PyFuncOp::Compute(tensorflow::OpKernelContext*): error: undefined reference to 'PyGILState_Release'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/numpy_lib/external/org_tensorflow/tensorflow/python/lib/core/numpy.pic.o:numpy.cc:function _import_array: error: undefined reference to 'PyImport_ImportModule'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/numpy_lib/external/org_tensorflow/tensorflow/python/lib/core/numpy.pic.o:numpy.cc:function _import_array: error: undefined reference to 'PyExc_ImportError'
+bazel-out/local-fastbuild/bin/external/org_tensorflow/tensorflow/python/_objs/numpy_lib/external/org_tensorflow/tensorflow/python/lib/core/numpy.pic.o:numpy.cc:function _import_array: error: undefined reference to 'PyErr_SetString'
+
+
+
+So there is obviously linking errors against Python.h. However, compiling any Tensorflow-internal goals works fine. I find it weird that it now can not link to Python.h even inside Tensorflow files.
+After spending a few days looking into Tensorflow and their BUILD files I am out of ideas how to make this work.
+So now I ask here: where and how exactly is the correct inclusion of Python defined in Tensorflow (and its Bazel files?).
+Some clues seem to be in the definitions in util/python/BUILD and tensorflow/tensorflow.bzl.
+There seems to be quite a bit of Bazel magic going on there.

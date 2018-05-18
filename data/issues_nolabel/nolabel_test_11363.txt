@@ -1,0 +1,344 @@
+tf.parse_single_example parses labels incorrectly
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes, but only slightly--I'm using the Inception v3 framework but made some minor modifications to the inception_eval.py code (none around the image processing script)
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux 16.04
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): 1.1.0
+Python version: 3.5
+Bazel version (if compiling from source): 0.5.1
+CUDA/cuDNN version: 8.0.61
+GPU model and memory: Cirrus Logic GD 5446, 16GB
+Exact command to reproduce: bazel-bin/inception/imagenet_eval --checkpoint_dir=$HOME/train --eval_dir=$HOME/eval
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+The parse_single_example function in parsing_ops.py seems to be incorrectly parsing encoded protobufs written into a TFRecord. Specifically, I have been trying to classify images into categories labelled "1", "2", "3", and "4". Up until the point in my neural network where the images and associated label are turned into a protobuf serialized image, the labels associated with the images are correct--tf.train.Feature successfully turns each label into an associated integer consistently matching the label. However, after being serialized and then written to a TFRecord and compressed, and then decoded through tf.parse_single_example, the label for each image becomes some random integer between 1 and 9 and no longer matches the label number, with no discernable pattern.
+I've traced the issue through the Inception code, and this problem is not happening in Inception--the bug is somewhere between my images are converted from a jpeg with labels to a serialized protobuf through tf.train.Example(features=tf.train.Features(features)) and when the protobuf is decoded through tf.parse_single_example. The label in outputs created by outputs = _parse_single_example_raw within tf.parse_single_example is already incorrect, and the int64 object for each label, created by passing label values into tf.train.Feature(int64_list=tf.train.Int64List(value=label)), that is passed into tf.train.Example(features=tf.train.Features(features)) to create the serialized protobuf that is parsed by tf.parse_single_example still correctly matches the original labels. Therefore, the problem must be happening somewhere between the serialization and the parsing, both of which occur within tensorflow.
+EDIT/UPDATE: Upon further examination, the bug seems to occur in some combination of when the image is serialized and when it is written to a TFRecord. I used protoc to manually compile example.proto and used that to manually parse parse the protobufs created by calling tf.train.Example on a Features tensor and encoding them with the SerializeToString method of the example.proto, and while the image/class/text and filename seemed to be correct, the label was missing. After the encoded protobufs are written to a TFRecord, compressed, and then parsed from the TFRecord through, tf.parse_single_example, and they are incorrect--the image/class/label seems to be missing, the image/class/text is no longer correct either, even though it was correct before being passed in, and the beginning of the protobuf has some really wonky encoding going on that example.proto's ParseFromString doesn't seem to be able to read and convert into a string. Additionally, I tried decoding the protobufs parsed from the TFRecord with tf.parse_single_example from latin1 manually, and the labels were still incorrect and matched the incorrect labels from using example.proto's ParseFromString, indicating that the problem isn't happening in the decoding. The parsed protobufs created by image_processing.py have been attached below.
+FURTHER EDIT: Issue has been updated to reflect new information
+Source code / logs
+The relevant inception code that calls the aformentioned tensorflow functions is shown below:
+For serializing images+labels into a protobuf:
+def _convert_to_example(filename, image_buffer, label, text, height, width):
+  """Build an Example proto for an example.
+
+  Args:
+    filename: string, path to an image file, e.g., '/path/to/example.JPG'
+    image_buffer: string, JPEG encoding of RGB image
+    label: integer, identifier for the ground truth for the network
+    text: string, unique human-readable, e.g. 'dog'
+    height: integer, image height in pixels
+    width: integer, image width in pixels
+  Returns:
+    Example proto
+  """
+
+  colorspace = 'RGB'
+  channels = 3
+  image_format = 'JPEG'
+
+  example = tf.train.Example(features=tf.train.Features(feature={
+      'image/height': _int64_feature(height),
+      'image/width': _int64_feature(width),
+      'image/colorspace': _bytes_feature(tf.compat.as_bytes(colorspace)),
+      'image/channels': _int64_feature(channels),
+      'image/class/label': _int64_feature(label),
+      'image/class/text': _bytes_feature(tf.compat.as_bytes(text)),
+      'image/format': _bytes_feature(tf.compat.as_bytes(image_format)),
+      'image/filename': _bytes_feature(tf.compat.as_bytes(os.path.basename(filename))),
+      'image/encoded': _bytes_feature(tf.compat.as_bytes(image_buffer))}))
+  return example
+
+def _int64_feature(value):
+  """Wrapper for inserting int64 features into Example proto."""
+  if not isinstance(value, list):
+    value = [value]
+  return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
+
+For parsing a protobuf
+
+def parse_example_proto(example_serialized):
+  """Parses an Example proto containing a training example of an image.
+
+  The output of the build_image_data.py image preprocessing script is a dataset
+  containing serialized Example protocol buffers. Each Example proto contains
+  the following fields:
+
+    image/height: 462
+    image/width: 581
+    image/colorspace: 'RGB'
+    image/channels: 3
+    image/class/label: 615
+    image/class/synset: 'n03623198'
+    image/class/text: 'knee pad'
+    image/object/bbox/xmin: 0.1
+    image/object/bbox/xmax: 0.9
+    image/object/bbox/ymin: 0.2
+    image/object/bbox/ymax: 0.6
+    image/object/bbox/label: 615
+    image/format: 'JPEG'
+    image/filename: 'ILSVRC2012_val_00041207.JPEG'
+    image/encoded: <JPEG encoded string>
+
+   Args:
+     example_serialized: scalar Tensor tf.string containing a serialized
+       Example protocol buffer.
+
+   Returns:
+     image_buffer: Tensor tf.string containing the contents of a JPEG file.
+     label: Tensor tf.int32 containing the label.
+     bbox: 3-D float Tensor of bounding boxes arranged [1, num_boxes, coords]
+       where each coordinate is [0, 1) and the coordinates are arranged as
+       [ymin, xmin, ymax, xmax].
+     text: Tensor tf.string containing the human-readable label.
+   """
+   # Dense features in Example proto.
+   feature_map = {
+       'image/encoded': tf.FixedLenFeature([], dtype=tf.string,
+                                           default_value=''),
+       'image/class/label': tf.FixedLenFeature([1], dtype=tf.int64,
+                                               default_value=-1),
+       'image/class/text': tf.FixedLenFeature([], dtype=tf.string,
+                                              default_value=''),
+   }
+   sparse_float32 = tf.VarLenFeature(dtype=tf.float32)
+  # Sparse features in Example proto.
+   feature_map.update(
+       {k: sparse_float32 for k in ['image/object/bbox/xmin',
+                                    'image/object/bbox/ymin',
+                                    'image/object/bbox/xmax',
+                                    'image/object/bbox/ymax']})
+
+   features = tf.parse_single_example(example_serialized, feature_map)
+   label = tf.cast(features['image/class/label'], dtype=tf.int32)
+
+   xmin = tf.expand_dims(features['image/object/bbox/xmin'].values, 0)
+   ymin = tf.expand_dims(features['image/object/bbox/ymin'].values, 0)
+   xmax = tf.expand_dims(features['image/object/bbox/xmax'].values, 0)
+   ymax = tf.expand_dims(features['image/object/bbox/ymax'].values, 0)
+
+   # Note that we impose an ordering of (y, x) just to make life difficult.
+   bbox = tf.concat(axis=0, values=[ymin, xmin, ymax, xmax])
+
+   # Force the variable number of bounding boxes into the shape
+   # [1, num_boxes, coords].
+   bbox = tf.expand_dims(bbox, 0)
+   bbox = tf.transpose(bbox, [0, 2, 1])
+
+   return features['image/encoded'], label, bbox, features['image/class/text']
+
+Protobufs created by parsing from byte-encoded protobufs compressed and written to a TFRecord and then uncompressed and read with tf.parse_single_example, and decoded with example.proto's ParseFromString:
+��
+�	
+image/encoded��	
+�	
+�	������JFIF�����,�,�����C��������������������������������������������������������������������C��������������������������������������������������������������������������"�����������������������������������	
+���������������������}��������!1A��Qa�"q�2��#B���R��$3br�	
+�����%&'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz�����������������������������������������������������������������������������������������������������	
+���������������������w�������!1��AQ�aq�"2�B����	#3R��br�
+�%������n_�����ߋ��~;|��
+<g�����!�_�����W�Zo���o
+�[x������)�����>)|I�-�k~)���[_�^(�m�����/������b���F����uۛ�}4Y�]k�k�٭M�����P���
+�
+image/height����
+��
+�
+�image/class/label����
+��
+�
+�image/class/text��
+�
+�6
+�
+�image/channels����
+��
+�
+�image/width����
+��
+�
+�image/filename��
+	
+�368.png
+�
+image/format
+�
+�JPEG
+�
+�image/colorspace��
+�
+�RGB
+
+��
+�
+
+image/encoded��
+
+�	
+�	������JFIF�����,�,�����C��������������������������������������������������������������������C��������������������������������������������������������������������������"�����������������������������������	
+���������������������}��������!1A��Qa�"q�2��#B���R��$3br�	
+�����%&'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz�����������������������������������������������������������������������������������������������������	
+���������������������w�������!1��AQ�aq�"2�B����	#3R��br�
+#�2��?���,����,����N�����%|���S'���;ƿ��j/�~��n��ڏōF��W^��ׂ���wDգ��⏌-u�𶫫�6�h^���R��r��E�?��(����
+�
+�image/colorspace��
+�
+�RGB
+�
+�image/channels����
+��
+�
+�image/width����
+��
+�
+image/height����
+��
+�
+�image/class/label����
+��
+�
+�image/filename�
+
+
+
+5852.png
+�
+image/format
+�
+�JPEG
+�
+�image/class/text��
+�
+�5
+
+�
+�
+
+image/encoded��
+
+�
+
+�
+������JFIF�����,�,�����C��������������������������������������������������������������������C��������������������������������������������������������������������������"�����������������������������������	
+���������������������}��������!1A��Qa�"q�2��#B���R��$3br�	
+�����%&'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz�����������������������������������������������������������������������������������������������������	
+���������������������w�������!1��AQ�aq�"2�B����	#3R��br�
+]�Ck�Kq��;��������n�d��!����m_R{}J(��kv��?��(��S�
+�]oP�������
+�
+�image/colorspace��
+�
+�RGB
+�
+�image/channels����
+��
+�
+�image/width����
+��
+�
+image/height����
+��
+�
+�image/class/label����
+��
+�
+�image/filename�
+
+
+
+7602.png
+�
+image/format
+�
+�JPEG
+�
+�image/class/text��
+�
+�5
+
+�	
+��
+image/encoded���
+��
+��������JFIF�����,�,�����C��������������������������������������������������������������������C��������������������������������������������������������������������������"�����������������������������������	
+���������������������}��������!1A��Qa�"q�2��#B���R��$3br�	
+�����%&'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz�����������������������������������������������������������������������������������������������������	
+���������������������w�������!1��AQ�aq�"2�B����	#3R��br�
+�$4�%�����&'()*56789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz�����������������������������������������������������������������������������������?���?��O�	���x��
+��^|���<	�j~�Ծ(���z��l|����������^j:���G���L��(��Ū����Y��L&����.~,������_�Q����w���>��<t�K{r�To�|R�I�{n��[Aht�\�{�0���\��O��������>+�O�5�T���_	>!��ᗋc�n��NO���Ě��u䰽EE��]WJ�[[�E[��s*�p��Ws�?�z��/����&��,���_����z�"C�x�_�<A}�����ȱ�j���[[���`�H�xj�+�����A�C�h?�S�+�kv�5�����s��jZ�����Տ�~�k2A���(�t�WUx�I%��a�_0Kk[�c�Wh���(����
+�
+�image/colorspace��
+�
+�RGB
+�
+�image/channels����
+��
+�
+�image/width����
+��
+�
+image/height����
+��
+�
+�image/class/label����
+��
+�
+�image/filename��
+	
+�663.png
+�
+image/format
+�
+�JPEG
+�
+�image/class/text��
+�
+�1
+
+�
+��
+image/encoded���
+��
+�
+������JFIF�����,�,�����C��������������������������������������������������������������������C��������������������������������������������������������������������������"�����������������������������������	
+���������������������}��������!1A��Qa�"q�2��#B���R��$3br�	
+�����%&'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz�����������������������������������������������������������������������������������������������������	
+���������������������w�������!1��AQ�aq�"2�B����	#3R��br�
+�$4�%�����&'()*56789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz�����������������������������������������������������������������������������������?���?����a��6#�
+�վ��+7�M���&����[���[���[���?�G���cP�K��)i������qk�j��ϭM࿆:u�� �������>'��i�[���u��\��{���_�N_�{�	�������M����~+ռ'a�	����������O�j:���A���X����=gA����#��F����-#�������*����:��F?�:��O���m?�3��������������7����:��4=3��ď����%^Z����#����>![��Mk������j���߇�Y�m����������P������	����
+������v�VW�����u�h��6�P2K���b����?����jW����_���?�Y�������?e�����rXx{�O�u����bXɨ�k������kC��h��;+Y4���:мK���O{w�����u[+I�����=��Íhx���<Y�/��Y�F�������օ�ь�Y�SC�����&(����&c�fDm��������C~�W�j���<|f�ݩ[I��ڏ���7��}o,�}����]��\֮"��*��L��Z=>�����4���?��/�-���ۿ¿���a��kÚ����bo���K��U�tk�
+������tMC�����~��ڞk�����uï��|W�i�)������^��u����-�P���
+�
+�image/class/text��
+�
+�3
+�
+image/height����
+��
+�
+�image/class/label����
+��
+�
+�image/colorspace��
+�
+�RGB
+�
+�image/filename�
+
+
+
+7763.png
+�
+image/format
+�
+�JPEG
+�
+�image/channels����
+��
+�
+�image/width����
+��

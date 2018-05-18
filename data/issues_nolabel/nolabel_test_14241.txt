@@ -1,0 +1,108 @@
+`Network` behaviour inconsistent with `Layer` w.r.t `build`
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes (provided below)
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary, pip install tf-nightly-gpu
+TensorFlow version (use command below): git: v1.3.0-rc1-4090-g4e75ae1, tf: 1.5.0-dev20171103
+Python version:  2.7.12
+Bazel version (if compiling from source): -
+GCC/Compiler version (if compiling from source): -
+CUDA/cuDNN version: 8.0
+GPU model and memory: GTX-1070 8GB
+
+Describe the problem
+The tf.layers.Layer class exposes a build method which can optionally be called prior to first __call__ e.g. to construct variables in a different scope to where the call is made. The documentation does not explicitly promise that layers are built during build and not elsewhere, but this seems to be the pattern with the implemented layers and is very useful in a narrow set of circumstances.
+The tensorflow.python.layers.base.Network class implements tf.layers.Layer and exposes the same method, but there is no way to construct the constructor arguments without building constituent layers. This is unexpected and misleading, and prevents use of Networks where unbuilt Layers are expected/required.
+A lazily-built Network implementation would be greatly appreciated, as would clarity on whether it is the intention that all classes implementing Layer should be build separately from their constructor.
+Illustrative example/ basic lazy implementation below.
+Source code
+from tensorflow.python.layers import base
+import tensorflow as tf
+
+n_features = 16
+n_hidden = 8
+n_out = 3
+
+
+def n_vars():
+    return len(tf.trainable_variables())
+
+
+# Layers, variable created on build
+x = tf.placeholder(shape=(None, n_features), dtype=tf.float32)
+l0 = tf.layers.Dense(n_hidden)
+l1 = tf.layers.Dense(n_out)
+print(n_vars())  # 0
+l0.build((n_features,))
+l1.build((n_hidden,))
+print(n_vars())  # 4
+
+
+print('---------')
+# Network, variables must be created prior to Network construction.
+tf.reset_default_graph()
+x = tf.placeholder(shape=(None, n_features), dtype=tf.float32)
+
+l0 = tf.layers.Dense(n_hidden)
+l1 = tf.layers.Dense(n_out)
+
+inp = base.Input((n_features,))
+outputs = l1(l0(inp))
+print(n_vars())  # 4
+network = base.Network(inp, outputs)
+
+print(network.built)  # Already true: no way around with constructor signature
+network.build(None)
+print(network.built)  # True as expected
+
+
+def _transform_inputs(inputs):
+    if isinstance(inputs, base.InputSpec):
+        return inputs
+    elif isinstance(inputs, (tuple, tf.TensorShape)):
+        return base.Input(shape=inputs[1:], batch_size=inputs[0])
+    elif isinstance(inputs, tf.Tensor):
+        return base.Input(tensor=inputs)
+    elif isinstance(inputs, list):
+        return [_transform_inputs(inp) for inp in inputs]
+    else:
+        raise NotImplementedError(
+            'Unrecognized type for _transform_inputs: %s' % type(inputs))
+
+
+class LazyNetwork(base.Network):
+    def __init__(self, outputs_fn, **kwargs):
+        self._outputs_fn = outputs_fn
+        self._kwargs = kwargs
+        self.built = False
+
+    def build(self, inputs):
+        if self.built:
+            return
+        inputs = _transform_inputs(inputs)
+        outputs = self._outputs_fn(inputs)
+        super(LazyNetwork, self).__init__(
+            inputs, outputs, **self._kwargs)
+
+    def __call__(self, inputs):
+        if not self.built:
+            self.build(_transform_inputs(inputs))
+        return super(LazyNetwork, self).__call__(inputs)
+
+
+print('---------')
+# LazyNetwork, variables created on build
+tf.reset_default_graph()
+x = tf.placeholder(shape=(None, n_features), dtype=tf.float32)
+
+l0 = tf.layers.Dense(n_hidden)
+l1 = tf.layers.Dense(n_out)
+network = LazyNetwork(lambda x: l1(l0(x)))
+
+print(n_vars())  # 0
+print(network.built)  # False
+network.build(base.Input((n_features,)))
+print(n_vars())  # 4
+print(network.built)  # True

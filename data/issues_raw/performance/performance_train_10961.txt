@@ -1,0 +1,73 @@
+cudaCheckError() failed on any gpu apart from gpu:0
+
+I am experiencing a strange issue (similar to  #9489) on both a 4 GPUs and a 2 GPUs machine.
+Basically I have a tensorflow model that trains and performs very well on one GPU, I now want to distribute the training phase by using multiple GPUs at once. I followed the CIFAR10 example to parallelize the model but keep getting errors a few iterations into the training process. I get
+"cudaCheckError() failed : invalid resource handle
+2017-06-21 19:50:28.168726: E tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:639] failed to record completion event; therefore, failed to create inter-stream dependency" 
+
+most times but I have also seen shape errors on reshape tensors (while the graph is already running) and segmentation errors.
+I have been playing around with configurations and so far I have noticed that the crash only happens if gpu:1 is being called. I tried using only gpu:1 and encountered the same problem. On the other end, the same script using with tf.device('gpu:0') and only this gpu works fine.
+What I tried.
+I reinstalled tensorflow from sources, set up and tested another machine with more GPUs to no avail.
+test_out.txt
+other errors that have occurred :
+iter: 1 / 70000, total loss: 2.5591 / 2.5591, rpn_loss_cls: 0.6961, rpn_loss_box: 0.0025, loss_cls: 1.8603, loss_box: 0.0003, lr: 0.001000 speed: 4.586s / iter iter: 2 / 70000, total loss: 1.3976 / 1.3976, rpn_loss_cls: 0.6869, rpn_loss_box: 0.0078, loss_cls: 0.7021, loss_box: 0.0007, lr: 0.001000 speed: 2.638s / iter iter: 3 / 70000, total loss: 1.0764 / 1.0764, rpn_loss_cls: 0.6849, rpn_loss_box: 0.0251, loss_cls: 0.2764, loss_box: 0.0900, lr: 0.001000 speed: 1.999s / iter iter: 4 / 70000, total loss: 0.9941 / 0.9941, rpn_loss_cls: 0.6804, rpn_loss_box: 0.0118, loss_cls: 0.2407, loss_box: 0.0611, lr: 0.001000 speed: 1.673s / iter cudaCheckError() failed : invalid resource handle 2017-06-22 10:07:47.528133: F tensorflow/stream_executor/cuda/cuda_driver.cc:312] Check failed: CUDA_SUCCESS == cuCtxSetCurrent(cuda_context->context()) (0 vs. 4) ./experiments/scripts/faster_rcnn_end2end.sh: line 58: 30171 Aborted (core dumped) python ./tools/train_net.py --device ${DEV} --number_of_devices ${NUM_DEVICES} --weights data/pretrain_model/VGG_imagenet.npy --imdb ${TRAIN_IMDB} --iters ${ITERS} --cfg experiments/cfgs/faster_rcnn_end2end.yml --network VGGnet_train ${EXTRA_ARGS}
+2017-06-22 10:10:04.886367: W tensorflow/core/common_runtime/bfc_allocator.cc:217] Allocator (GPU_1_bfc) ran out of memory trying to allocate 3.51GiB. The caller indicates that this is not a failure, but may mean that there could be performance gains if more memory is available. cudaCheckError() failed : invalid resource handle 2017-06-22 10:10:06.489802: E tensorflow/stream_executor/cuda/cuda_event.cc:49] Error polling for event status: failed to query event: CUDA_ERROR_DEINITIALIZED 2017-06-22 10:10:06.489835: F tensorflow/core/common_runtime/gpu/gpu_event_mgr.cc:203] Unexpected Event status: 1
+`2017-06-22 10:10:58.935801: W tensorflow/core/common_runtime/bfc_allocator.cc:217] Allocator (GPU_1_bfc) ran out of memory trying to allocate 3.51GiB. The caller indicates that this is not a failure, but may mean that there could be performance gains if more memory is available.
+iter: 1 / 70000, total loss: 2.8609 / 2.8609, rpn_loss_cls: 0.6944, rpn_loss_box: 0.0092, loss_cls: 2.1569, loss_box: 0.0004, lr: 0.001000
+speed: 4.461s / iter
+iter: 2 / 70000, total loss: 1.4497 / 1.4497, rpn_loss_cls: 0.6778, rpn_loss_box: 0.0152, loss_cls: 0.7555, loss_box: 0.0012, lr: 0.001000
+speed: 2.556s / iter
+iter: 3 / 70000, total loss: 1.5660 / 1.5660, rpn_loss_cls: 0.7197, rpn_loss_box: 0.0325, loss_cls: 0.6074, loss_box: 0.2063, lr: 0.001000
+speed: 1.921s / iter
+2017-06-22 10:11:03.655654: W tensorflow/core/framework/op_kernel.cc:1165] Invalid argument: Input to reshape is a tensor with 178500 values, but the requested shape has 365072219990
+[[Node: tower_1/Reshape = Reshape[T=DT_FLOAT, Tshape=DT_INT32, _device="/job:localhost/replica:0/task:0/gpu:1"](tower_1/transpose, tower_1/Reshape/shape)]]
+2017-06-22 10:11:03.655654: W tensorflow/core/framework/op_kernel.cc:1165] Invalid argument: Input to reshape is a tensor with 178500 values, but the requested shape has 365072219990
+[[Node: tower_1/Reshape = Reshape[T=DT_FLOAT, Tshape=DT_INT32, _device="/job:localhost/replica:0/task:0/gpu:1"](tower_1/transpose, tower_1/Reshape/shape)]]
+2017-06-22 10:11:03.655687: W tensorflow/core/framework/op_kernel.cc:1165] Invalid argument: Input to reshape is a tensor with 178500 values, but the requested shape has 365072219990
+[[Node: tower_1/Reshape = Reshape[T=DT_FLOAT, Tshape=DT_INT32, _device="/job:localhost/replica:0/task:0/gpu:1"](tower_1/transpose, tower_1/Reshape/shape)]]
+2017-06-22 10:11:03.655692: W tensorflow/core/framework/op_kernel.cc:1165] Invalid argument: Input to reshape is a tensor with 178500 values, but the requested shape has 365072219990
+[[Node: tower_1/Reshape = Reshape[T=DT_FLOAT, Tshape=DT_INT32, _device="/job:localhost/replica:0/task:0/gpu:1"](tower_1/transpose, tower_1/Reshape/shape)]]
+Traceback (most recent call last):
+File "./tools/train_net.py", line 100, in 
+max_iters=args.max_iters)
+File "/home/SERILOCAL/a.larreche/Faster-RCNN_TF/tools/../lib/fast_rcnn/train.py", line 375, in train_net
+sw.train_model(sess, max_iters)
+File "/home/SERILOCAL/a.larreche/Faster-RCNN_TF/tools/../lib/fast_rcnn/train.py", line 281, in train_model
+run_metadata=run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 896, in run
+run_metadata_ptr)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1108, in _run
+feed_dict_tensor, options, run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1261, in _do_run
+options, run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1280, in _do_call
+raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Input to reshape is a tensor with 178500 values, but the requested shape has 365072219990
+[[Node: tower_1/Reshape = Reshape[T=DT_FLOAT, Tshape=DT_INT32, _device="/job:localhost/replica:0/task:0/gpu:1"](tower_1/transpose, tower_1/Reshape/shape)]]
+Caused by op u'tower_1/Reshape', defined at:
+File "./tools/train_net.py", line 100, in 
+max_iters=args.max_iters)
+File "/home/SERILOCAL/a.larreche/Faster-RCNN_TF/tools/../lib/fast_rcnn/train.py", line 375, in train_net
+sw.train_model(sess, max_iters)
+File "/home/SERILOCAL/a.larreche/Faster-RCNN_TF/tools/../lib/fast_rcnn/train.py", line 208, in train_model
+cross_entropy_t, loss_box_t, rpn_cross_entropy_t, rpn_loss_box_t = self.tower_loss(i)
+File "/home/SERILOCAL/a.larreche/Faster-RCNN_TF/tools/../lib/fast_rcnn/train.py", line 148, in tower_loss
+outputs_roi_data, outputs_cls_score, outputs_bbox_pred = self.net.inference(gpu_id)
+File "/home/SERILOCAL/a.larreche/Faster-RCNN_TF/tools/../lib/networks/VGGnet_train.py", line 89, in inference
+.reshape_layer(2, name='rpn_cls_score_reshape'.format(i))
+File "/home/SERILOCAL/a.larreche/Faster-RCNN_TF/tools/../lib/networks/network.py", line 26, in layer_decorated
+layer_output = op(self, layer_input, args, **kwargs)
+File "/home/SERILOCAL/a.larreche/Faster-RCNN_TF/tools/../lib/networks/network.py", line 217, in reshape_layer
+int(d),tf.cast(tf.cast(input_shape[1],tf.float32)(tf.cast(input_shape[3],tf.float32)/tf.cast(d,tf.float32)),tf.int32),input_shape[2]]),[0,2,3,1],name=name))
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_array_ops.py", line 2472, in reshape
+name=name)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+op_def=op_def)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2528, in create_op
+original_op=self._default_original_op, op_def=op_def)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1203, in init
+self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+InvalidArgumentError (see above for traceback): Input to reshape is a tensor with 178500 values, but the requested shape has 365072219990
+[[Node: tower_1/Reshape = Reshape[T=DT_FLOAT, Tshape=DT_INT32, _device="/job:localhost/replica:0/task:0/gpu:1"](tower_1/transpose, tower_1/Reshape/shape)]]
+`

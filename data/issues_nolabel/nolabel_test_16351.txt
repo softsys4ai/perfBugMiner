@@ -1,0 +1,65 @@
+TfLiteCameraDemo failed to work with NNAPI after commit e6ff665dbe4888aa5fdff8f34c44405acca2ddd1
+
+I am testing NNAPI by forcing TfLiteCameraDemo to invoking libneuralnetworks.so. It worked correctly though slower. But since commit e6ff665, TfLiteCameraDemo crashes with error message like,
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: FATAL EXCEPTION: CameraBackground
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: Process: com.example.android.tflitecamerademo, PID: 19136
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: java.lang.IllegalArgumentException: Failed to run on the given Interpreter: NNAPI was requested, but dependent sized tensors being used.
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at org.tensorflow.lite.NativeInterpreterWrapper.run(Native Method)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at org.tensorflow.lite.NativeInterpreterWrapper.run(NativeInterpreterWrapper.java:95)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at org.tensorflow.lite.Interpreter.runForMultipleInputsOutputs(Interpreter.java:123)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at org.tensorflow.lite.Interpreter.run(Interpreter.java:104)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at com.example.android.tflitecamerademo.ImageClassifier.classifyFrame(ImageClassifier.java:114)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at com.example.android.tflitecamerademo.Camera2BasicFragment.classifyFrame(Camera2BasicFragment.java:663)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at com.example.android.tflitecamerademo.Camera2BasicFragment.access$900(Camera2BasicFragment.java:69)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at com.example.android.tflitecamerademo.Camera2BasicFragment$5.run(Camera2BasicFragment.java:558)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at android.os.Handler.handleCallback(Handler.java:790)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at android.os.Handler.dispatchMessage(Handler.java:99)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at android.os.Looper.loop(Looper.java:164)
+01-24 03:39:36.393 19136 19153 E AndroidRuntime: 	at android.os.HandlerThread.run(HandlerThread.java:65)
+01-24 03:39:36.396   626   871 W ActivityManager:   Force finishing activity com.example.android.tflitecamerademo/.CameraActivity
+
+Here is my patch
+ index e44c5ae..1ed88eb 100644
+ ---a/tensorflow/contrib/lite/java/demo/app/src/main/java/com/example/android/tflitecamerademo/ImageClassifier.java
+ +++b/tensorflow/contrib/lite/java/demo/app/src/main/java/com/example/android/tflitecamerademo/ImageClassifier.java
+ @@ -91,7 +91,7 @@ public class ImageClassifier {
+	
+   /** Initializes an {@code ImageClassifier}. */
+   ImageClassifier(Activity activity) throws IOException {
+-    tflite = new Interpreter(loadModelFile(activity));
++    tflite = new Interpreter(loadModelFile(activity), true);
+     labelList = loadLabelList(activity);
+     imgData =
+         ByteBuffer.allocateDirect(
+diff --git a/tensorflow/contrib/lite/java/demo/build.gradle b/tensorflow/contrib/lite/java/demo/build.gradle
+index dd883d6..9361c71 100644
+--- a/tensorflow/contrib/lite/java/src/main/java/org/tensorflow/lite/Interpreter.java
++++ b/tensorflow/contrib/lite/java/src/main/java/org/tensorflow/lite/Interpreter.java
+@@ -66,6 +66,13 @@ public final class Interpreter implements AutoCloseable {
+     }
+     wrapper = new NativeInterpreterWrapper(modelFile.getAbsolutePath());
+   }
++  public Interpreter(@NotNull File modelFile, boolean nn) {
++    if (modelFile == null) {
++      return;
++    }
++    wrapper = new NativeInterpreterWrapper(modelFile.getAbsolutePath());
++    wrapper.setUseNNAPI(nn);
++  }
+
+   /**
+    * Initializes a {@code Interpreter} with a {@code MappedByteBuffer} to the model file.
+@@ -76,6 +83,10 @@ public final class Interpreter implements AutoCloseable {
+   public Interpreter(@NotNull MappedByteBuffer mappedByteBuffer) {
+     wrapper = new NativeInterpreterWrapper(mappedByteBuffer);
+   }
++  public Interpreter(@NotNull MappedByteBuffer mappedByteBuffer,  boolean nn) {
++    wrapper = new NativeInterpreterWrapper(mappedByteBuffer);
++    wrapper.setUseNNAPI(nn);
++  }
+ 
+   /**
+    * Runs model inference if the model takes only one input, and provides only one output.
+   /**
+    * Runs model inference if the model takes only one input, and provides only one output.

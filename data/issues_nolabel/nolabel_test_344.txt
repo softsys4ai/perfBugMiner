@@ -1,0 +1,62 @@
+Dropout Appears to Lose Tensor Shape
+
+While training a model, I encountered a strange issue around dropout.  I can't yet rule out user error and haven't yet produced the minimum viable product, but I wanted to get this on the board before I forgot.
+# With dropout...
+        wc1 = tf.Variable(tf.random_normal([1, sample_vec_len, 1, 64]))
+        bc1 = tf.Variable(tf.random_normal([64,]))
+        conv1 = tf.nn.conv2d(inputs, wc1, strides=[1, 1, 1, 1], padding='SAME') + bc1
+        act1 = tf.nn.relu(conv1)
+        drop1 = tf.nn.dropout(act1, keep_prob=dropout_toggle)
+        # TensorShape([Dimension(None), Dimension(1), Dimension(4620), Dimension(64)])
+
+        wc2 = tf.Variable(tf.random_normal([1, char_sample_size, 64, 32]))
+        bc2 = tf.Variable(tf.random_normal([32,]))
+        conv2 = tf.nn.conv2d(drop1, wc2, strides=[1, 1, 1, 1], padding='SAME') + bc2
+        act2 = tf.nn.relu(conv2)
+        norm2 = tf.nn.lrn(act2, bitreader.get_sentence_vector_length(1), bias=1.0, alpha=0.001, beta=0.75)
+        # TensorShape([Dimension(None), Dimension(1), Dimension(4620), Dimension(32)])
+
+        # Conv -> FC
+        dims = act2.get_shape()
+        shape = [dims[0].value, dims[1].value, dims[2].value, dims[3].value] # dims[0].value -> None
+        c_fc = tf.reshape(act2, [-1, shape[1]*shape[2]*shape[3]])
+
+(venv)jcatrambone-osx:nlp jcatrambone$ python ./nlp_tensorflow.py ../wikipedia_utf8_filtered_20pageviews.csv.gz 1
+Building model.
+Traceback (most recent call last):
+File "./nlp_tensorflow.py", line 92, in 
+encoder, decoder, weights, biases = build_model("ConvNLP", x, keep_prob)
+File "./nlp_tensorflow.py", line 56, in build_model
+c_fc = tf.reshape(act2, [-1, shape[1]_shape[2]_shape[3]])
+TypeError: unsupported operand type(s) for *: 'NoneType' and 'NoneType'
+# Remove dropout...
+        wc1 = tf.Variable(tf.random_normal([1, sample_vec_len, 1, 64]))
+        bc1 = tf.Variable(tf.random_normal([64,]))
+        conv1 = tf.nn.conv2d(inputs, wc1, strides=[1, 1, 1, 1], padding='SAME') + bc1
+        act1 = tf.nn.relu(conv1)
+        # TensorShape([Dimension(None), Dimension(1), Dimension(4620), Dimension(64)])
+
+        wc2 = tf.Variable(tf.random_normal([1, char_sample_size, 64, 32]))
+        bc2 = tf.Variable(tf.random_normal([32,]))
+        conv2 = tf.nn.conv2d(act1, wc2, strides=[1, 1, 1, 1], padding='SAME') + bc2
+        act2 = tf.nn.relu(conv2)
+        norm2 = tf.nn.lrn(act2, bitreader.get_sentence_vector_length(1), bias=1.0, alpha=0.001, beta=0.75)
+        # TensorShape([Dimension(None), Dimension(1), Dimension(4620), Dimension(32)])
+
+        # Conv -> FC
+        dims = act2.get_shape()
+        shape = [dims[0].value, dims[1].value, dims[2].value, dims[3].value] # dims[0].value -> None
+        c_fc = tf.reshape(act2, [-1, shape[1]*shape[2]*shape[3]])
+
+(venv)jcatrambone-osx:nlp jcatrambone$ python ./nlp_tensorflow.py ../wikipedia_utf8_filtered_20pageviews.csv.gz 1
+Building model.
+Defining loss functions and optimizer.
+Gathering variables.
+Beginning training session.
+can't determine number of CPU cores: assuming 4
+I tensorflow/core/common_runtime/local_device.cc:25] Local device intra op parallelism threads: 4
+can't determine number of CPU cores: assuming 4
+I tensorflow/core/common_runtime/local_session.cc:45] Local session inter op parallelism threads: 4
+Initializing variables.
+Session, variables, and generator initialized.  Training.
+Runs fine...

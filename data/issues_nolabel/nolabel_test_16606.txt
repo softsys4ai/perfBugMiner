@@ -1,0 +1,65 @@
+tf.contrib.data.rejection_resample not balancing class/freq on random crops
+
+randomly sampling / cropping data seems to break rejection_resample ==> meaning it won't do any re balancing of the class probability -- see these two simple feeders as example:
+The first randomly samples data with tf.random_uniform and breaks rejection_resample -- the second with static random data having  the same distribution is correctly resampled (output has p(class=0)=0)
+This creates issues when trying to real-time sample/crop/data-augment and at the same time rebalance classes with on the same pipeline
+def get_data_breaks(self, batch_size, iihook, this_set='train'):
+    def sample(data, label): # sample detection window inside chunk
+        xx = tf.cast(tf.random_uniform([1])*self.class_num, tf.int32)[0]
+        with tf.control_dependencies([xx]): tf.Print(xx , [xx], 'xx>>')
+        return xx, xx
+
+    initial_dist=[1.0/self.class_num for cc in range(self.class_num)]
+    classes = np.random.choice(self.class_num,20000,p=initial_dist)
+
+    data_ph = tf.placeholder(classes.dtype, classes.shape)
+    labels_ph = tf.placeholder(classes.dtype, classes.shape)
+    dataset = tf.data.Dataset.from_tensor_slices((data_ph, labels_ph))
+
+    dataset = dataset.map(sample, num_parallel_calls=1)
+
+    target_dist=[1.0/self.class_num for cc in range(self.class_num)]
+    target_dist[1]+=target_dist[0] ; target_dist[0]=0
+    print('target-dist>>', target_dist)
+    initial_dist = None
+
+    dataset = dataset.apply(tf.contrib.data.rejection_resample(
+                class_func=lambda c, _: c,
+                target_dist=target_dist,
+                initial_dist=initial_dist,
+                seed=42)).map(lambda a,b: b)
+
+    dataset = dataset.repeat(None)
+    iterator = dataset.make_initializable_iterator()
+    iihook.iterator_initializer_func = lambda sess: sess.run(iterator.initializer,
+                    feed_dict={data_ph: classes, labels_ph: classes})
+
+    return iterator.get_next()
+
+
+def get_data_works(self, batch_size, iihook, this_set='train'):
+
+    initial_dist=[1.0/self.class_num for cc in range(self.class_num)]
+    classes = np.random.choice(self.class_num,20000,p=initial_dist)
+
+    data_ph = tf.placeholder(classes.dtype, classes.shape)
+    labels_ph = tf.placeholder(classes.dtype, classes.shape)
+    dataset = tf.data.Dataset.from_tensor_slices((data_ph, labels_ph))
+
+    target_dist=[1.0/self.class_num for cc in range(self.class_num)]
+    target_dist[1]+=target_dist[0] ; target_dist[0]=0
+    print('target-dist>>', target_dist)
+    initial_dist = None
+
+    dataset = dataset.apply(tf.contrib.data.rejection_resample(
+                class_func=lambda c, _: c,
+                target_dist=target_dist,
+                initial_dist=initial_dist,
+                seed=42)).map(lambda a,b: b)
+
+    dataset = dataset.repeat(None)
+    iterator = dataset.make_initializable_iterator()
+    iihook.iterator_initializer_func = lambda sess: sess.run(iterator.initializer,
+                    feed_dict={data_ph: classes, labels_ph: classes})
+
+    return iterator.get_next()

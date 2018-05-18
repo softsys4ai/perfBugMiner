@@ -1,0 +1,83 @@
+Type Serialization in as_graph_def function
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): OSX
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below):  v1.3.0-rc2-20-g0787eee
+Python version: 2.7.14
+Bazel version (if compiling from source): 0.7
+GCC/Compiler version (if compiling from source): Apple LLVM version 8.1.0 (clang-802.0.42)
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+Problem is that as_graph_def sometimes serialize the type information and sometimes doesn't.
+Source code / logs
+import tensorflow as tf
+
+# bool typed Op, no type serialized
+x = tf.placeholder(tf.bool)
+y = tf.placeholder(tf.bool)
+op = tf.logical_or(x, y)
+print op.graph.as_graph_def(add_shapes=True)
+
+# float typed Op, type serialized
+x = tf.placeholder(tf.float32)
+y = tf.placeholder(tf.float32)
+op = tf.add(x, y)
+print op.graph.as_graph_def(add_shapes=True)
+
+node for logical_or is, note no T in attr:
+node {
+  name: "LogicalOr"
+  op: "LogicalOr"
+  input: "Placeholder"
+  input: "Placeholder_1"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          unknown_rank: true
+        }
+      }
+    }
+  }
+}
+
+node for add is, note with T in attr:
+node {
+  name: "Add"
+  op: "Add"
+  input: "Placeholder_2"
+  input: "Placeholder_3"
+  attr {
+    key: "T"
+    value {
+      type: DT_FLOAT
+    }
+  }
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          unknown_rank: true
+        }
+      }
+    }
+  }
+}
+
+If you print out print tf.logical_or(x, y), the output is
+Tensor("LogicalOr_1:0", dtype=bool)
+
+So problem might be with the serialization?
+This seems like a bug to me.

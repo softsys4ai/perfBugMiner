@@ -1,0 +1,50 @@
+Different timelines on QueueDequeManyV2 in cpu and gpu installations
+
+OS Platform and Distribution: Ubuntu 14.04
+TensorFlow version:
+cpu: ('v1.1.0-rc0-61-g1ec6ed5', '1.1.0')
+gpu:  ('v1.1.0-rc0-61-g1ec6ed5', '1.1.0')
+CUDA/cuDNN: 8.0/5.0
+env: https://pastebin.com/f70fQ9Mw
+I'm trying to fill queue of input data in additional thread in python, but obtain very strange timings for this operation, different for cpu and gpu version in 20 times. as you can see in full script, i forced device to cpu
+full script i'm using to fill queue: https://pastebin.com/Ny1QVZh2
+key part:
+    enqueue_op = queue.enqueue_many([queue_input_data, queue_input_target])
+    dequeue_op = queue.dequeue()
+ 
+    data_batch, target_batch = tf.train.batch(dequeue_op, batch_size=batch_size, capacity=10 * batch_size)
+ 
+    def enqueue(sess):
+        while True:
+            sess.run(enqueue_op, feed_dict={queue_input_data: data, queue_input_target: target})
+
+...
+
+    run_options = tf.RunOptions(timeout_in_ms=4000, trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+    sess.run(
+        target_batch,
+        options=run_options,
+        run_metadata=run_metadata)
+ 
+    tl = timeline.Timeline(run_metadata.step_stats)
+    ctf = tl.generate_chrome_trace_format()
+    with open('timeline.json', 'w') as f:
+        f.write(ctf)
+
+Steps to reproduce:
+# cpu only version
+pip install https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-1.1.0-cp27-none-linux_x86_64.whl
+python read_feed_dict.py
+mv timeline.json timeline_cpu_version.json
+
+pip uninstall tensorflow
+
+# gpu version
+pip install https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-1.1.0-cp27-none-linux_x86_64.whl
+python read_feed_dict.py
+mv timeline.json timeline_gpu_version.json
+
+cpu timeline:
+
+gpu timeline:

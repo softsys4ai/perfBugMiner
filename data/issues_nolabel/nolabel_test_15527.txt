@@ -1,0 +1,35 @@
+[Bug] Tensorflow serving loads incorrect model weights when using saved model main_op
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Debian 3.16.36 x86_64
+TensorFlow installed from (source or binary): Binary (pip)
+TensorFlow version (use command below): Git version 1.4.0-19-ga52c8d9 Release version 1.4.1
+Python version: 2.7.9
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce: See attached gist
+
+Hey there,
+I've documented a lot of this bug over on this issue on the tensorflow serving repository, which was closed with the direction to open an issue here.
+Essentially, the bug is as follows: I have an embedding layer in Keras that uses some pre-initialized weights. When I export the model for use by TF serving, I note the following behavior:
+
+The keras model itself has no issue outputting the correct results
+The exported model itself (upon inspection) has the correct weights
+The result values from TF serving are incorrect.
+
+I've narrowed it down to an issue with tensorflow.python.ops.variables.global_variables_initializer, as follows:
+When specifying the main_op argument in tensorflow.saved_model.builder.SavedModelBuilder.add_meta_graph_and_variables, if I use tensorflow.saved_model.main_op.main_op() I encounter this issue.
+If instead, I use a control flow group that excludes the global variables initializer as follows:
+main_op_new = control_flow_ops.group(                 
+            lookup_ops.tables_initializer(),          
+            variables.local_variables_initializer(),  
+)                                                     
+
+I do not encounter this issue. I've attached the full code for reproducing this issue (with the caveat of needing tensorflow_model_server running) here
+Here's the example output with the global variables initializer: https://gist.github.com/zmjjmz/d739cdfa52148eb814450e48cbf8ddb6
+If you comment out line 83 of the repro code and uncomment line 84, you should get the correct output as shown here: https://gist.github.com/zmjjmz/9edee5b4eeff94f383122545d80ee55f
+Thanks for helpin out

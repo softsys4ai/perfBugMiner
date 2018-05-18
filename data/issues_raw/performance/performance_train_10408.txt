@@ -1,0 +1,62 @@
+Memory leak
+
+I have a memory leak with TensorFlow. I refered to https://stackoverflow.com/questions/35695183/tensorflow-memory-leak-even-while-closing-session to address my issue, and I followed the advices of the answer, that seemed to have solved the problem. However it does not work here.
+In order to recreate the memory leak, I have created a simple example. First, I use this function (that I got here : https://stackoverflow.com/questions/276052/how-to-get-current-cpu-and-ram-usage-in-python) to check the memory use of the python process :
+def memory():
+    import os
+    import psutil
+    pid = os.getpid()
+    py = psutil.Process(pid)
+    memoryUse = py.memory_info()[0]/2.**30  # memory use in GB...I think
+    print('memory use:', memoryUse)
+
+Then, everytime I call the build_model function, the use of memory increases.
+Here is the build_model function that has a memory leak :
+def build_model():
+
+    '''Model'''
+
+    tf.reset_default_graph()
+
+
+    with tf.Graph().as_default(), tf.Session() as sess:
+        tf.contrib.keras.backend.set_session(sess)
+
+        labels = tf.placeholder(tf.float32, shape=(None, 1))
+        input = tf.placeholder(tf.float32, shape=(None, 1))
+
+        x = tf.contrib.keras.layers.Dense(30, activation='relu', name='dense1')(input)
+        x1 = tf.contrib.keras.layers.Dropout(0.5)(x)
+        x2 = tf.contrib.keras.layers.Dense(30, activation='relu', name='dense2')(x1)
+        y = tf.contrib.keras.layers.Dense(1, activation='sigmoid', name='dense3')(x2)
+
+
+        loss = tf.reduce_mean(tf.contrib.keras.losses.binary_crossentropy(labels, y))
+
+        train_step = tf.train.AdamOptimizer(0.004).minimize(loss)
+
+        #Initialize all variables
+        init_op = tf.global_variables_initializer()
+        sess.run(init_op)
+
+        sess.close()
+
+    tf.reset_default_graph()
+
+    return 
+
+I would have thought that using the block with tf.Graph().as_default(), tf.Session() as sess: and then closing the session and calling tf.reset_default_graph would clear all the memory used by TensorFlow. Apparently it does not.
+The memory leak can be recreated as following :
+memory()
+build_model()
+memory()
+build_model()
+memory()
+
+The output of this is (for my computer) :
+memory use: 0.1794891357421875
+memory use: 0.184417724609375
+memory use: 0.18923568725585938
+
+Clearly we can see that all the memory used by TensorFlow is not freed afterwards. Why?
+I hope I made myself clear.

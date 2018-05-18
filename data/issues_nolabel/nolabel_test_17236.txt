@@ -1,0 +1,133 @@
+Error in variable_scope initialization, via estimator api, due to a panda.DataFrame without column headers
+
+The variable_scope initialization generates an error when a panda.DataFrame object without any column headers is passed via the estimator api.
+To replicate this issue, please execute the below-specified code -
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import tensorflow as tf
+import pandas as pd
+
+
+def main(argv):
+    # Fetch the data
+    (train_x, train_y), (test_x, test_y) = load_data()
+
+    # Feature columns describe how to use the input.
+    my_feature_columns = []
+    for key in train_x.keys():
+        my_feature_columns.append(tf.feature_column.numeric_column(key=key))
+
+    # Build 2 hidden layer DNN with 10, 10 units respectively.
+    classifier = tf.estimator.DNNClassifier(
+        feature_columns=my_feature_columns,
+        # Two hidden layers of 10 nodes each.
+        hidden_units=[10, 10],
+        # The model must choose between 3 classes.
+        n_classes=3)
+
+    # Train the Model.
+    classifier.train(
+        input_fn=lambda: train_input_fn(train_x, train_y,
+                                        100),
+        steps=1000)
+
+    # Evaluate the model.
+    eval_result = classifier.evaluate(
+        input_fn=lambda: eval_input_fn(test_x, test_y,
+                                       10))
+
+    print('\nTest set accuracy: {accuracy:0.3f}\n'.format(**eval_result))
+
+
+def load_data():
+
+    # Note that there are no column names specified during the
+    # DataFrame initialization
+    train_x = pd.DataFrame([[6.4, 2.8, 5.6, 2.2],
+                            [5,	2.3, 3.3, 1],
+                            [4.9, 2.5, 4.5, 1.7],
+                            [4.9, 3.1, 1.5, 0.1]], dtype=float)
+    train_y = pd.DataFrame([[2], [1], [2], [0]], dtype=float)
+
+    test_x = pd.DataFrame([[4.4, 3.2, 1.3, 0.2]], dtype=float)
+    test_y = pd.DataFrame([[2]], dtype=float)
+
+    print(train_x)
+
+    return (train_x, train_y), (test_x, test_y)
+
+
+def train_input_fn(features, labels, batch_size):
+    """An input function for training"""
+    # Convert the inputs to a Dataset.
+    dataset = tf.data.Dataset.from_tensor_slices((dict(features), labels))
+
+    # Shuffle, repeat, and batch the examples.
+    dataset = dataset.shuffle(1000).repeat().batch(batch_size)
+
+    # Return the dataset.
+    return dataset
+
+
+def eval_input_fn(features, labels, batch_size):
+    """An input function for evaluation or prediction"""
+    features = dict(features)
+    if labels is None:
+        # No labels, use only features.
+        inputs = features
+    else:
+        inputs = (features, labels)
+
+    # Convert the inputs to a Dataset.
+    dataset = tf.data.Dataset.from_tensor_slices(inputs)
+
+    # Batch the examples
+    assert batch_size is not None, "batch_size must not be None"
+    dataset = dataset.batch(batch_size)
+
+    # Return the dataset.
+    return dataset
+
+
+if __name__ == '__main__':
+    tf.logging.set_verbosity(tf.logging.INFO)
+    tf.app.run(main)
+
+Output, printing the 'train_x' dataframe, before the error -
+     0    1    2    3
+0  6.4  2.8  5.6  2.2
+1  5.0  2.3  3.3  1.0
+2  4.9  2.5  4.5  1.7
+3  4.9  3.1  1.5  0.1
+Note that there are no column headers provided, the respective index appears as the column header for the data frame which is of type integer.
+Traceback -
+Traceback (most recent call last):
+  File "tf_bug.py", line 90, in <module>
+    tf.app.run(main)
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\platform\app.py", line 124, in run
+    _sys.exit(main(argv))
+  File "tf_bug.py", line 30, in main
+    steps=1000)
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\estimator\estimator.py", line 314, in train
+    loss = self._train_model(input_fn, hooks, saving_listeners)
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\estimator\estimator.py", line 743, in _train_model
+    features, labels, model_fn_lib.ModeKeys.TRAIN, self.config)
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\estimator\estimator.py", line 725, in _call_model_fn
+    model_fn_results = self._model_fn(features=features, **kwargs)
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\estimator\canned\dnn.py", line 324, in _model_fn
+    config=config)
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\estimator\canned\dnn.py", line 176, in _dnn_model_fn
+    logits = logit_fn(features=features, mode=mode)
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\estimator\canned\dnn.py", line 90, in dnn_logit_fn
+    features=features, feature_columns=feature_columns)
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\feature_column\feature_column.py", line 280, in input_layer
+    trainable, cols_to_vars)
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\feature_column\feature_column.py", line 193, in _internal_input_layer
+    None, default_name=column._var_scope_name):  # pylint: disable=protected-access
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 1929, in __enter__
+    unique_default_name = _get_unique_variable_scope(self._default_name)
+  File "C:\Users\Sagar_Jadhav03\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 1656, in _get_unique_variable_scope
+    name = current_scope.name + "/" + prefix if current_scope.name else prefix
+TypeError: must be str, not int

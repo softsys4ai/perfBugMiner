@@ -1,0 +1,56 @@
+Computing gradients within tf.while_loop
+
+I am posting this here because a similar question on stackoverflow is still unanswered, so I suspect it might be a bug.
+Adding gradient ops within a tf.while_loop for computing gradients of loop variables w.r.t external variables results in an error.
+Program reproducing the error:
+import numpy as np
+import tensorflow as tf
+tf.reset_default_graph()
+F = lambda x: tf.cumsum(x)
+G = lambda x: x[-1]
+H = lambda x: x
+encoder_emb_inp = tf.placeholder(dtype=tf.float32, shape=[4])
+encoder_outputs = F(encoder_emb_inp)
+decoder_initial_state = G(encoder_outputs)
+decoder_initial_output = H(decoder_initial_state)
+def cond(time, unused_state, unused_output):
+    return tf.less(time, 3)
+
+def body(time, state, inputs):
+    step = lambda s, i: (tf.multiply(s,s), tf.multiply(s,i))
+    (next_state, next_output) = step(state, inputs)
+    next_grads = tf.gradients(next_output, decoder_initial_state)
+    tf.Print(next_grads, next_grads)
+    return (time + 1, next_state, next_output)
+
+initial_time = tf.constant(0, dtype=tf.int32)
+
+
+final_time, final_state, final_outputs = tf.while_loop(cond, body, loop_vars = [initial_time, decoder_initial_state, decoder_initial_output])
+
+Error message:
+<ipython-input-126-5205901211cc> in body(time, state, inputs)
+      6     (next_state, next_output) = step(state, inputs)
+      7 #    next_grads = tf.gradients(next_output, state)
+----> 8     next_grads = tf.gradients(next_output, decoder_initial_state)
+      9     tf.Print(next_grads, next_grads)
+     10     return (time + 1, next_state, next_output)
+
+/home/pramodkm/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/ops/gradients_impl.pyc in gradients(ys, xs, grad_ys, name, colocate_gradients_with_ops, gate_gradients, aggregation_method, stop_gradients)
+    591                 out_grads[i] = loop_state.ZerosLike(op, i)
+    592               else:
+--> 593                 out_grads[i] = control_flow_ops.ZerosLikeOutsideLoop(op, i)
+    594           with ops.name_scope(op.name + "_grad"):
+    595             # pylint: disable=protected-access
+
+/home/pramodkm/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.pyc in ZerosLikeOutsideLoop(op, index)
+   1342     if op_ctxt:
+   1343       # We are in a cond context. Use a switch to create zeros only when needed.
+-> 1344       pred = op_ctxt.pred
+   1345       branch = op_ctxt.branch
+   1346       switch_val = switch(op.inputs[0], pred)[1 - branch]
+
+AttributeError: 'WhileContext' object has no attribute 'pred'
+
+I am using tf-nightly-gpu 1.5.0-dev20171026
+Thanks!

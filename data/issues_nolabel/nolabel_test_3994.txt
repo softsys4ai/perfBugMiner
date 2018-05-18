@@ -1,0 +1,29 @@
+Cannot use Variables as gradients in apply_gradients
+
+https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/training/optimizer.py#L287 prevents the user from using a variable as a gradient when calling apply_gradients.
+I'd like to do this to accumulate gradients over multiple minibatches, and then do a single gradient update.
+The current code I have is
+opt = tf.train.AdamOptimizer()                                                                                                   
+
+tvs = tf.trainable_variables()
+accum_vars = [tf.Variable(tf.zeros_like(tv.initialized_value()), trainable=False) for tv in tvs]                                        
+zero_ops = [tv.assign(tf.zeros_like(tv)) for tv in accum_vars]
+
+gvs = opt.compute_gradients(rmse, tvs)
+accum_ops = [accum_vars[i].assign_add(gv[0]) for i, gv in enumerate(gvs)]
+
+train_step = opt.apply_gradients([(accum_vars[i], gv[1]) for i, gv in enumerate(gvs)])  
+that I'd like to run with logic like
+while True:
+    sess.run(zero_ops)
+
+    for i in xrange(n_minibatches):
+        sess.run(accum_ops, feed_dict=dict(X: Xs[i], y: ys[i]))
+
+    sess.run(train_step)
+
+Is there any reason variables cannot be used as arguments to apply_gradients? It seems to me that they should be able to be used as gradients. If there is a good reason, is there a recommended way to have the pattern I desire? I'm currently using the ugly hack of replacing the train_step definition with
+train_step = opt.apply_gradients([(accum_vars[i].assign(accum_vars[i]), gv[1]) 
+                                  for i, gv in enumerate(gvs)])
+
+because Variable.assign returns a tensor.

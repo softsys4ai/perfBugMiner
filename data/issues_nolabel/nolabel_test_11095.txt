@@ -1,0 +1,132 @@
+Symbol not found with adding new op
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Mac Sierra
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.1.0
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 8.0
+GPU model and memory:
+Exact command to reproduce: python test.py
+
+Describe the problem
+Created a custom op, but cannot import it from python. Error at command line:
+tensorflow.python.framework.errors_impl.NotFoundError: dlopen(src/./ops/build/preprocessing.so, 6): Symbol not found: __ZN10tensorflow14AugmentFunctorIN5Eigen9GpuDeviceEEclERKS2_iiiiiiiPKfPfS7_
+  Referenced from: src/./ops/build/preprocessing.so
+  Expected in: flat namespace
+ in src/./ops/build/preprocessing.so
+
+
+Source code / logs
+Makefile
+TF_INC = `python -c "import tensorflow; print(tensorflow.sysconfig.get_include())"`
+
+ifndef CUDA_HOME
+    CUDA_HOME := /usr/local/cuda
+endif
+
+CC        = gcc -O2 -pthread
+CXX       = g++
+GPUCC     = nvcc
+CFLAGS    = -std=c++11 -I$(TF_INC) -I"$(CUDA_HOME)/include" -DGOOGLE_CUDA=1
+GPUCFLAGS = -c
+LFLAGS    = -pthread -shared -fPIC
+GPULFLAGS = -x cu -Xcompiler -fPIC
+CGPUFLAGS = -L$(CUDA_HOME)/lib -L$(CUDA_HOME)/lib64 -lcudart -undefined dynamic_lookup
+
+OUT_DIR   = src/ops/build
+PREPROCESSING_SRC = "src/ops/preprocessing/preprocessing.cc" "src/ops/preprocessing/kernels/data_augmentation.cc"
+GPU_SRC_DATA_AUG  	= "src/ops/preprocessing/kernels/data_augmentation.cu.cc"
+GPU_PROD_DATA_AUG 	= $(OUT_DIR)/data_augmentation.o
+PREPROCESSING_PROD	= $(OUT_DIR)/preprocessing.so
+
+preprocessing:
+	$(GPUCC) -g $(CFLAGS) $(GPUCFLAGS) $(GPU_SRC_DATA_AUG) $(GPULFLAGS) $(GPUDEF) -o $(GPU_PROD_DATA_AUG)
+	$(CXX) -g $(CFLAGS)  $(PREPROCESSING_SRC) $(GPU_PROD_DATA_AUG) $(LFLAGS) $(CGPUFLAGS) -o $(PREPROCESSING_PROD)
+
+
+test.py
+import tensorflow as tf
+_preprocessing_ops = tf.load_op_library(
+    tf.resource_loader.get_path_to_datafile("./ops/build/preprocessing.so"))
+
+data_augmentation.h
+#ifndef FLOWNET_DATA_AUGMENTATION_H_
+#define FLOWNET_DATA_AUGMENTATION_H_
+
+namespace tensorflow {
+template<typename Device>
+struct AugmentFunctor {
+  void operator()(const Device& d);
+};
+} // namespace tensorflow
+#endif // FLOWNET_DATA_AUGMENTATION_H_
+
+data_augmentation.cc
+#define EIGEN_USE_THREADS
+
+#include "data_augmentation.h"
+#include "tensorflow/core/framework/op_kernel.h"
+
+namespace tensorflow {
+typedef Eigen::ThreadPoolDevice CPUDevice;
+typedef Eigen::GpuDevice        GPUDevice;
+
+template<>
+struct AugmentFunctor<CPUDevice>{
+  void operator()(const CPUDevice& d) {
+    // CPU implementation here
+  }
+};
+
+template<typename Device>
+class DataAugmentation : public OpKernel {
+  public:
+    explicit DataAugmentation(OpKernelConstruction *ctx) : OpKernel(ctx) {}
+
+    void Compute(OpKernelContext *ctx) override {
+      // Perform augmentation either on CPU or GPU
+      AugmentFunctor<Device>()(ctx->eigen_device<Device>());
+    }
+};
+
+REGISTER_KERNEL_BUILDER(Name("DataAugmentation")
+                        .Device(DEVICE_CPU),
+                        DataAugmentation<CPUDevice>)
+
+#if GOOGLE_CUDA
+
+REGISTER_KERNEL_BUILDER(Name("DataAugmentation")
+                        .Device(DEVICE_GPU),
+                        DataAugmentation<GPUDevice>)
+#endif // GOOGLE_CUDA
+} // namespace tensorflow
+
+data_augmentation.cu.cc
+#if GOOGLE_CUDA
+
+#define EIGEN_USE_GPU
+
+#include "augmentation_base.h"
+#include "data_augmentation.h"
+#include "tensorflow/core/util/cuda_kernel_helper.h"
+
+namespace tensorflow {
+__global__ void SpatialAugmentation() {
+   // CUDA kernel code goes here
+}
+
+template<>
+struct AugmentFunctor<GPUDevice>{
+  void operator()(const GPUDevice& d) {
+    // GPU implementation goes here
+    CudaLaunchConfig config = GetCudaLaunchConfig(10, d);
+    SpatialAugmentation<<<config.block_count, config.thread_per_block, 0, d.stream()>>>(config.virtual_thread_count);
+  }
+};
+
+typedef Eigen::GpuDevice GPUDevice;
+template struct AugmentFunctor<GPUDevice>;
+} // namespace tensorflow

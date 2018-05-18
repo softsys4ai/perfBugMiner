@@ -1,0 +1,69 @@
+compile failure with --config=mkl
+
+Building from git 27767d8 with TF_NEED_MKL=1 and TF_DOWNLOAD_MKL=1. It seems d835d67 introduced a compile failure:
+ERROR: /build/tensorflow-git/src/tensorflow-mkl/tensorflow/core/kernels/BUILD:819:1: C++ compilation of rule '//tensorflow/core/kernels:transpose_op' failed (Exit 1).
+tensorflow/core/kernels/mkl_transpose_op.cc:53:10: error: template-id 'MKLTranspose2D<float>' for 'tensorflow::Status tensorflow::MKLTranspose2D(char, const tensorflow::Tensor&, tensorflow::Tensor*)' does not match any template declaration
+   Status MKLTranspose2D<T>(const char trans, const Tensor& in, Tensor* out) { \
+          ^~~~~~~~~~~~~~~~~
+tensorflow/core/kernels/mkl_transpose_op.cc:53:10: note: in definition of macro 'INSTANTIATE'
+   Status MKLTranspose2D<T>(const char trans, const Tensor& in, Tensor* out) { \
+          ^~~~~~~~~~~~~~
+tensorflow/core/kernels/mkl_transpose_op.cc:44:6: note: candidate is: template<class T> void tensorflow::{anonymous}::MKLTranspose2D(char, const tensorflow::Tensor&, tensorflow::Tensor*)
+ void MKLTranspose2D(const char trans, const Tensor& in, Tensor* out) {}
+      ^~~~~~~~~~~~~~
+tensorflow/core/kernels/mkl_transpose_op.cc:122:1: error: expected '}' at end of input
+ }  // namespace tensorflow
+ ^
+
+There are multiple problems in there. This patch gets it closer to compiling (correcting return type of MKLTranspose2D base template, adding missing line-continuation escape):
+diff --git a/tensorflow/core/kernels/mkl_transpose_op.cc b/tensorflow/core/kernels/mkl_transpose_op.cc
+index 89a1d5e8a..93da2a6ea 100644
+--- a/tensorflow/core/kernels/mkl_transpose_op.cc
++++ b/tensorflow/core/kernels/mkl_transpose_op.cc
+@@ -41,7 +41,7 @@ namespace tensorflow {
+ 
+ namespace {
+ template <typename T>
+-void MKLTranspose2D(const char trans, const Tensor& in, Tensor* out) {}
++Status MKLTranspose2D(const char trans, const Tensor& in, Tensor* out);
+ 
+ // Documentation here: https://software.intel.com/en-us/node/520863
+ // Parameters: (ordering:row-major, operation:transpose, num_rows, num_cols,
+@@ -54,7 +54,7 @@ void MKLTranspose2D(const char trans, const Tensor& in, Tensor* out) {}
+     mkl_##PREFIX##omatcopy('R', trans, in.dim_size(0), in.dim_size(1), 1,     \
+                            in.flat<T>().data(), in.dim_size(1),               \
+                            out->flat<T>().data(), in.dim_size(0));            \
+-    return Status::OK();
++    return Status::OK();                                                      \
+   }
+ 
+   INSTANTIATE(float, s)
+@@ -66,7 +66,7 @@ void MKLTranspose2D(const char trans, const Tensor& in, Tensor* out) {}
+   static const char kMKLTranspose = 'T';
+   static const char kMKLConjugateTranspose = 'C';
+ 
+-  }  // namespace tensorflow
++  }  // anonymous namespace
+ 
+   Status MklTransposeCpuOp::DoTranspose(OpKernelContext* ctx, const Tensor& in,
+                                         gtl::ArraySlice<int32> perm,
+But I'm not sure how to handle this issue (conversion of the alpha argument into float/double/MKL_Complex8/MKL_Complex16):
+ERROR: /home/steven/Development/misc-packages/tensorflow-git/src/tensorflow-mkl/tensorflow/core/kernels/BUILD:819:1: C++ compilation of rule '//tensorflow/core/kernels:transpose_op' failed (Exit 1).
+tensorflow/core/kernels/mkl_transpose_op.cc: In function 'tensorflow::Status tensorflow::{anonymous}::MKLTranspose2D(char, const tensorflow::Tensor&, tensorflow::Tensor*) [with T = std::complex<float>]':
+tensorflow/core/kernels/mkl_transpose_op.cc:57:69: error: could not convert '1' from 'int' to 'MKL_Complex8 {aka _MKL_Complex8}'
+                                out->flat<T>().data(), in.dim_size(0));            \
+                                                                     ^
+tensorflow/core/kernels/mkl_transpose_op.cc:63:5: note: in expansion of macro 'INSTANTIATE'
+     INSTANTIATE(complex64, c)
+     ^
+tensorflow/core/kernels/mkl_transpose_op.cc: In function 'tensorflow::Status tensorflow::{anonymous}::MKLTranspose2D(char, const tensorflow::Tensor&, tensorflow::Tensor*) [with T = std::complex<double>]':
+tensorflow/core/kernels/mkl_transpose_op.cc:57:69: error: could not convert '1' from 'int' to 'MKL_Complex16 {aka _MKL_Complex16}'
+                                out->flat<T>().data(), in.dim_size(0));            \
+                                                                     ^
+tensorflow/core/kernels/mkl_transpose_op.cc:64:5: note: in expansion of macro 'INSTANTIATE'
+     INSTANTIATE(complex128, z)
+     ^
+tensorflow/core/kernels/mkl_transpose_op.cc: At global scope:
+tensorflow/core/kernels/mkl_transpose_op.cc:95:10: error: 'template<bool conjugate> class tensorflow::MklConjugateTransposeCpuOp' used without template parameters
+   Status MklConjugateTransposeCpuOp::DoTranspose(OpKernelContext* ctx,
+          ^~~~~~~~~~~~~~~~~~~~~~~~~~

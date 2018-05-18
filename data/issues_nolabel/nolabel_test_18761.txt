@@ -1,0 +1,143 @@
+Tensor Hub generated model- Coreml conversions issue
+
+I am trying to convert a tensor flow model created using tensor flow hub using the following code. Base model used for the model was inceptionv3
+`
+import tensorflow as tf
+tf_model_path = 'Inception_v3_US_output_graph.pb'
+with open(tf_model_path, 'rb') as f:
+serialized = f.read()
+tf.reset_default_graph()
+original_gdef = tf.GraphDef()
+original_gdef.ParseFromString(serialized)
+with tf.Graph().as_default() as g:
+tf.import_graph_def(original_gdef, name='')
+ops = g.get_operations()
+N = len(ops)
+for i in [0,1,2,N-3,N-2,N-1]:
+print('\n\nop id {} : op type: "{}"'.format(str(i), ops[i].type));
+print('input(s):'),
+for x in ops[i].inputs:
+print("name = {}, shape: {}, ".format(x.name, x.get_shape())),
+print('\noutput(s):'),
+for x in ops[i].outputs:
+print("name = {}, shape: {},".format(x.name, x.get_shape())),`
+This generated following output
+
+op id 0 : op type: "Placeholder"
+input(s):
+
+
+output(s):
+name = Placeholder:0, shape: (?, 224, 224, 3),
+
+
+op id 1 : op type: "Const"
+input(s):
+
+
+output(s):
+name = module/conv0/weights:0, shape: (3, 3, 3, 32),
+
+
+op id 2 : op type: "Const"
+input(s):
+
+
+output(s):
+name = module/conv0_bn/gamma:0, shape: (32,),
+
+
+op id 3236 : op type: "MatMul"
+input(s):
+name = input/BottleneckInputPlaceholder:0, shape: (?, 1056),
+name = final_retrain_ops/weights/final_weights/read:0, shape: (1056, 2),
+
+
+output(s):
+name = final_retrain_ops/Wx_plus_b/MatMul:0, shape: (?, 2),
+
+
+op id 3237 : op type: "Add"
+input(s):
+name = final_retrain_ops/Wx_plus_b/MatMul:0, shape: (?, 2),
+name = final_retrain_ops/biases/final_biases/read:0, shape: (2,),
+
+
+output(s):
+name = final_retrain_ops/Wx_plus_b/add:0, shape: (?, 2),
+
+
+op id 3238 : op type: "Softmax"
+input(s):
+name = final_retrain_ops/Wx_plus_b/add:0, shape: (?, 2),
+
+
+output(s):
+name = final_result:0, shape: (?, 2),
+
+Then I tried to convert this to a coreml model using the following code
+`import tfcoreml
+input_tensor_shapes = {"Placeholder:0":[1,224,224,3]} # batch size is 1
+image_input_name = ['Placeholder:0']
+coreml_model_file = 'Inception_v3_US_output_graph.pb'
+output_tensor_names = ['final_result:0']
+class_labels = 'Inception_v3_US_output_labels.txt'
+coreml_model = tfcoreml.convert(
+tf_model_path=tf_model_path,
+mlmodel_path=coreml_model_file,
+input_name_shape_dict=input_tensor_shapes,
+output_feature_names=output_tensor_names,
+image_input_names = image_input_name,
+class_labels = class_labels)`
+But ended up getting the following error. Following are the last few lines of the error message
+
+2308/3239: Converting op name: Placeholder ( type:  Placeholder )
+Skipping name of placeholder
+2309/3239: Converting op name: module_apply_default/hub_input/Mul ( type:  Mul )
+2310/3239: Converting op name: module_apply_default/hub_input/Sub ( type:  Sub )
+2311/3239: Converting op name: module_apply_default/conv0/Conv2D ( type:  Conv2D )
+2312/3239: Converting op name: module_apply_default/conv0_bn/FusedBatchNorm ( type:  FusedBatchNorm )
+2313/3239: Converting op name: module_apply_default/cell_stem_1/Relu ( type:  Relu )
+2314/3239: Converting op name: module_apply_default/cell_stem_1/Pad ( type:  Pad )
+2315/3239: Converting op name: module_apply_default/cell_stem_1/strided_slice ( type:  StridedSlice )
+
+
+
+AssertionError                            Traceback (most recent call last)
+ in ()
+18         output_feature_names=output_tensor_names,
+19         image_input_names = image_input_name,
+---> 20         class_labels = class_labels)
+
+
+~/tfcoreml/tf-coreml/tfcoreml/_tf_coreml_converter.py in convert(tf_model_path, mlmodel_path, output_feature_names, input_name_shape_dict, image_input_names, is_bgr, red_bias, green_bias, blue_bias, gray_bias, image_scale, class_labels, predicted_feature_name, predicted_probabilities_output)
+491       class_labels=class_labels,
+492       predicted_feature_name=predicted_feature_name,
+--> 493       predicted_probabilities_output=predicted_probabilities_output)
+
+
+~/tfcoreml/tf-coreml/tfcoreml/_tf_coreml_converter.py in _convert_pb_to_mlmodel(tf_model_path, mlmodel_path, output_feature_names, input_name_shape_dict, image_input_names, is_bgr, red_bias, green_bias, blue_bias, gray_bias, image_scale, class_labels, predicted_feature_name, predicted_probabilities_output)
+289   context.input_feed_dict = input_feed_dict
+290   context.skip_ops = skip_ops
+--> 291   convert_ops_to_layers(context)
+292   sess.close()
+293
+
+
+~/tfcoreml/tf-coreml/tfcoreml/_ops_to_layers.py in convert_ops_to_layers(context)
+146         print('%d/%d: Converting op name: %s ( type:  %s )' % (
+147             i+1, len(context.all_ops), op.name, op.type))
+--> 148         translator(op, context)
+149       connect_skipped_ops(context)
+
+
+~/tfcoreml/tf-coreml/tfcoreml/_layers.py in strided_slice(op, context)
+1184     skip(op,context)
+1185   else:
+-> 1186     assert False, 'Strided Slice case not handled'
+1187   context.translated[output_name] = True
+1188
+
+AssertionError: Strided Slice case not handled
+How can I fix this?
+@aseemw

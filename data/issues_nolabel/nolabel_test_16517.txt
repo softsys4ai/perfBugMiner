@@ -1,0 +1,147 @@
+ou must feed a value for placeholder tensor 'import/Placeholder when i test my frozen model
+
+Hello , I trying create mobile app for object recognition for my own created model. I fallow this tutorial https://codelabs.developers.google.com/codelabs/tensorflow-for-poets-2/#2
+But when i even get a testing model from step 3 i get error
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'import/Placeholder' with dtype float
+	 [[Node: import/Placeholder = Placeholder[dtype=DT_FLOAT, shape=<unknown>, _device="/job:localhost/replica:0/task:0/device:CPU:0"]()]]
+
+I'm aware that is wrong node problem, but i trying with other and always i get failure
+My code for model creation
+
+x = tf.placeholder(tf.float32,
+                   shape=[None, cons.IMAGE_SIZE, cons.IMAGE_SIZE, 3], name="x")
+y_ = tf.placeholder(tf.float32, shape=[None, cons.LABELS_NUMB], name="labels")
+
+K = 4
+L = 8
+M = 12
+N = 200
+
+x_image = tf.reshape(x, [-1, cons.IMAGE_SIZE, cons.IMAGE_SIZE, 3])
+tf.summary.image('input', x_image, 3)
+print("X image ")
+print(tf.shape(x_image))
+
+################## first ##############
+
+W_conv1 = weight_variable([5, 5, 3, 32], "weight1")
+b_conv1 = bias_variable([32], "bias1")
+
+h_conv1 = tf.nn.relu(conv2d(x_image, W_conv1) + b_conv1)
+h_pool1 = max_pool_2x2(h_conv1)
+print("W_conv1 ")
+print(tf.shape(W_conv1))
+print("b_conv1 ")
+print(tf.shape(b_conv1))
+print("h_conv1 ")
+print(tf.shape(h_conv1))
+print("h_pool1 ")
+print(tf.shape(h_pool1))
+
+################## second ##############
+
+W_conv2 = weight_variable([5, 5, 32, 64], "weight2")
+b_conv2 = bias_variable([64], "bias2")
+
+h_conv2 = tf.nn.relu(conv2d(h_pool1, W_conv2) + b_conv2)
+tf.summary.histogram("activations", h_conv2)
+
+
+h_pool2 = max_pool_2x2(h_conv2)
+
+print("W_conv2 ")
+print(tf.shape(W_conv2))
+print("b_conv2 ")
+print(tf.shape(b_conv2))
+print("h_conv2 ")
+print(tf.shape(h_conv2))
+print("h_pool2 ")
+print(tf.shape(h_pool2))
+
+################## fully connected 3 ##############
+
+W_fc1 = weight_variable([8 * 8 * 64, 1024], "Weight3")
+b_fc1 = bias_variable([1024], "bias3")
+
+h_pool2_flat = tf.reshape(h_pool2, [-1, 8 * 8 * 64])
+h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
+
+print("W_fc1 ")
+print(tf.shape(W_fc1))
+print("b_fc1 ")
+print(tf.shape(b_fc1))
+print("h_pool2_flat ")
+print(tf.shape(h_pool2_flat))
+print("h_fc1 ")
+print(tf.shape(h_fc1))
+
+################ dropout  4 #################
+
+keep_prob = tf.placeholder(tf.float32)
+h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
+
+################## fully connected 5 ##############
+
+W_fc2 = weight_variable([1024, cons.LABELS_NUMB], "weight5")
+b_fc2 = bias_variable([cons.LABELS_NUMB], "bias5")
+
+Y = tf.matmul(h_fc1_drop, W_fc2) + b_fc2
+tf.summary.histogram("final", Y)
+
+
+print("W_fc2 ")
+print(tf.shape(W_fc2))
+print("b_fc2 ")
+print(tf.shape(b_fc2))
+print("Y ")
+print(tf.shape(Y))
+
+with tf.name_scope("cross_entropy"):
+    cross_entropy = tf.reduce_mean(
+        tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=Y))
+    tf.summary.scalar("xent", cross_entropy)
+
+with tf.name_scope("train_step"):
+    train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
+
+with tf.name_scope("Acuracy"):
+    correct_prediction = tf.equal(tf.argmax(Y, 1), tf.argmax(y_, 1))
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+    tf.summary.scalar("accuracy", accuracy)
+
+summ = tf.summary.merge_all()
+saver = tf.train.Saver()
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+
+    writer = tf.summary.FileWriter("/home/damian/api/mnist_demo/10")
+    writer.add_graph(sess.graph)
+    for i in range(1000):
+        img, lb = fileCreation.next_batch(100, images32, labels)
+        if i % 5 == 0:
+            [train_accuracy, s] = sess.run([accuracy, summ], feed_dict={x: img, y_: fileCreation.dense_to_one_hot(lb, cons.LABELS_NUMB), keep_prob: 1.0})
+        writer.add_summary(s, i)
+        if i % 100 == 0:
+            saver.save(sess, '/home/damian/api/checkpoint/my_test_model', global_step=i)
+            train_accuracy = accuracy.eval(feed_dict={
+                x: img, y_: fileCreation.dense_to_one_hot(lb, cons.LABELS_NUMB), keep_prob: 1.0})
+            print('step %d, training accuracy %g' % (i, train_accuracy))
+        train_step.run(feed_dict={x: img, y_: fileCreation.dense_to_one_hot(lb, cons.LABELS_NUMB), keep_prob: 0.5})
+
+    print('test accuracy %g' % accuracy.eval(feed_dict={x: test_images32,
+                                                        y_: fileCreation.dense_to_one_hot(test_labels,
+                                                                                          cons.LABELS_NUMB),
+                                                        keep_prob: 0.1}))
+
+I'm freeze this model with and i point output_node to 'final'
+next i call script from tutorial
+python -m scripts.label_image \
+  --graph=tf_files/frozen_model3.pb  \
+  --input_layer=x \
+  --output_layer=final \
+  --image=tf_files/stop.png  \
+  --input_height=32 \
+  --input_width=32 \
+  --input_mean=16  \
+  --input_std=16

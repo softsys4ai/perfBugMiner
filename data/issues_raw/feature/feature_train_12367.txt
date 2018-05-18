@@ -1,0 +1,114 @@
+Estimator classification export feature request: input single string Tensor input limitation.
+
+Within class ClassificationOutput contains the as_signature_def method. I was wondering why there is a limitation that this method only allows recievor_tensors of length 1.
+
+  
+    
+      tensorflow/tensorflow/python/estimator/export/export_output.py
+    
+    
+        Lines 109 to 118
+      in
+      53aef8a
+    
+    
+    
+    
+
+        
+          
+           def as_signature_def(self, receiver_tensors): 
+        
+
+        
+          
+             if len(receiver_tensors) != 1: 
+        
+
+        
+          
+               raise ValueError('Classification input must be a single string Tensor; ' 
+        
+
+        
+          
+                                'got {}'.format(receiver_tensors)) 
+        
+
+        
+          
+             (_, examples), = receiver_tensors.items() 
+        
+
+        
+          
+             if dtypes.as_dtype(examples.dtype) != dtypes.string: 
+        
+
+        
+          
+               raise ValueError('Classification input must be a single string Tensor; ' 
+        
+
+        
+          
+                                'got {}'.format(receiver_tensors)) 
+        
+
+        
+          
+             return signature_def_utils.classification_signature_def( 
+        
+
+        
+          
+                 examples, self.classes, self.scores) 
+        
+    
+  
+
+
+For example the following code should seemingly just "work" for the model created from the wide and deep model tutorial.
+
+feature_inputs = {
+        'age': tf.placeholder(dtype=tf.float32, shape=[1,1], name='age'),
+        'capital_gain': tf.placeholder(dtype=tf.float32, shape=[1,1], name='age'),
+        'capital_loss': tf.placeholder(dtype=tf.float32, shape=[1,1], name='capital_loss'),
+        'education': tf.placeholder(dtype=tf.string, shape=[1,1], name='education'),
+        'education_num': tf.placeholder(dtype=tf.float32, shape=[1,1], name='education_num'),
+        'gender': tf.placeholder(dtype=tf.string, shape=[1,1], name='gender'),
+        'hours_per_week': tf.placeholder(dtype=tf.float32, shape=[1,1], name='hours_per_week'),
+        'native_country': tf.placeholder(dtype=tf.string, shape=[1,1], name='native_country'),
+        'occupation': tf.placeholder(dtype=tf.string, shape=[1,1], name='occupation'),
+        'relationship': tf.placeholder(dtype=tf.string, shape=[1,1], name='relationship'),
+        'workclass': tf.placeholder(dtype=tf.string, shape=[1,1], name='workclass') 
+    }
+
+serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_inputs)
+
+# model is the loaded wide and deep model produced
+model.export_savedmodel("./my_dir",  serving_input_receiver_fn)
+
+However there is an error here:
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/export/export.pyc in build_all_signature_defs(receiver_tensors, export_outputs)
+    158       '{}'.format(output_key or 'None'):
+    159       export_output.as_signature_def(receiver_tensors)
+--> 160       for output_key, export_output in export_outputs.items()}
+    161 
+    162   return signature_def_map
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/export/export.pyc in <dictcomp>((output_key, export_output))
+    158       '{}'.format(output_key or 'None'):
+    159       export_output.as_signature_def(receiver_tensors)
+--> 160       for output_key, export_output in export_outputs.items()}
+    161 
+    162   return signature_def_map
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/export/export_output.pyc in as_signature_def(self, receiver_tensors)
+    110     if len(receiver_tensors) != 1:
+    111       raise ValueError('Classification input must be a single string Tensor; '
+--> 112                        'got {}'.format(receiver_tensors))
+    113     (_, examples), = receiver_tensors.items()
+    114     if dtypes.as_dtype(examples.dtype) != dtypes.string:
+
+ValueError: Classification input must be a single string Tensor; got {'hours_per_week': <tf.Tensor 'hours_per_week_14_1:0' shape=(?, 1) dtype=float32>, 'native_country': <tf.Tensor 'native_country_14_1:0' shape=(?, 1) dtype=string>, 'relationship': <tf.Tensor 'relationship_14_1:0' shape=(?, 1) dtype=string>, 'gender': <tf.Tensor 'gender_14_1:0' shape=(?, 1) dtype=string>, 'age': <tf.Tensor 'age_14_1:0' shape=(?, 1) dtype=float32>, 'capital_gain': <tf.Tensor 'capital_gain_14_1:0' shape=(?, 1) dtype=float32>, 'workclass': <tf.Tensor 'workclass_14_1:0' shape=(?, 1) dtype=string>, 'capital_loss': <tf.Tensor 'capital_loss_14_1:0' shape=(?, 1) dtype=float32>, 'education': <tf.Tensor 'education_14_1:0' shape=(?, 1) dtype=string>, 'education_num': <tf.Tensor 'education_num_14_1:0' shape=(?, 1) dtype=float32>, 'occupation': <tf.Tensor 'occupation_14_1:0' shape=(?, 1) dtype=string>}

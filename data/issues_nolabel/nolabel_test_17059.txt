@@ -1,0 +1,116 @@
+Dataset API does not pass dimensionality information for its output tensor
+
+SYSTEM INFO
+python version: Python 2.7.12
+tensorflow version: 1.4.0
+CUDA version: 8.0
+Ubuntu version: Ubuntu 16.04 LTS
+----------------------------------------------------------------UPDATE-------------------------------------------------------------------
+Please directly go to my third post which reproduces my issue with the minimum amount of code
+----------------------------------------------------------UPDATE FINISHED----------------------------------------------------------
+https://github.com/tensorflow/tensorflow/issues/13348
+My problem is very similar to the issue above but I did not find solution in that post.
+def image_parser(image_name):
+    im_file = os.path.join(cfg.DATA_DIR, 'demo', image_name)
+    im = cv2.imread(im_file)
+    blobs, im_scales = _get_blobs(im)
+    assert len(im_scales) == 1, "Only single-image batch implemented"
+    im_blob = blobs['data']
+    blobs['im_info'] = np.array([im_blob.shape[1], im_blob.shape[2], im_scales[0]], dtype=np.float32)
+    return blobs['data'], blobs['im_info'], im_scales, im
+
+def _get_blobs(im):
+  """Convert an image and RoIs within that image into network inputs."""
+  blobs = {}
+  blobs['data'], im_scale_factors = _get_image_blob(im)
+
+  return blobs, im_scale_factors
+
+def _get_image_blob(im):
+  """Converts an image into a network input.
+  Arguments:
+    im (ndarray): a color image in BGR order
+  Returns:
+    blob (ndarray): a data blob holding an image pyramid
+    im_scale_factors (list): list of image scales (relative to im) used
+      in the image pyramid
+  """
+  im_orig = im.astype(np.float32, copy=True)
+  im_orig -= cfg.PIXEL_MEANS
+
+  im_shape = im_orig.shape
+  im_size_min = np.min(im_shape[0:2])
+  im_size_max = np.max(im_shape[0:2])
+
+  processed_ims = []
+  im_scale_factors = []
+
+  for target_size in cfg.TEST.SCALES:
+    im_scale = float(target_size) / float(im_size_min)
+    # Prevent the biggest axis from being more than MAX_SIZE
+    if np.round(im_scale * im_size_max) > cfg.TEST.MAX_SIZE:
+      im_scale = float(cfg.TEST.MAX_SIZE) / float(im_size_max)
+    im = cv2.resize(im_orig, None, None, fx=im_scale, fy=im_scale,
+            interpolation=cv2.INTER_LINEAR)
+    im_scale_factors.append(im_scale)
+    processed_ims.append(im)
+
+  # Create a blob to hold the input images
+  blob = im_list_to_blob(processed_ims)
+  return blob, np.array(im_scale_factors)
+
+
+def im_list_to_blob(ims):
+  """Convert a list of images into a network input.
+
+  Assumes images are already prepared (means subtracted, BGR order, ...).
+  """
+  max_shape = np.array([im.shape for im in ims]).max(axis=0)
+  num_images = len(ims)
+  blob = np.zeros((num_images, max_shape[0], max_shape[1], 3),
+                  dtype=np.float32)
+  for i in range(num_images):
+    im = ims[i]
+    blob[i, 0:im.shape[0], 0:im.shape[1], :] = im
+
+  return blob
+
+I defined a function image_parser which will parse image file name into 4 numpy arrays (it has three subsequent function calls,  _get_blobs, _get_image_blob,  im_list_to_blob)
+Then I construct a dataset with py_func mapping to form the input pipeline:
+ images = []
+ for root, dirs, files in os.walk('./data/demo/'):
+     for file in files:
+         if file.endswith('jpg'):
+             images.append(file)
+
+ # dataset construction
+ im_dataset = tf.data.Dataset.from_tensor_slices(images)
+ im_dataset = im_dataset.map(lambda image:
+                             tuple(tf.py_func(image_parser, [image], [tf.float32, tf.float32, tf.float64, tf.uint8])),
+                             num_parallel_calls = 2)
+ im_dataset = im_dataset.prefetch(4)
+ print("output data type is ", im_dataset.output_types)
+ print("output data shape is ", im_dataset.output_shapes)
+ iterator = im_dataset.make_initializable_iterator()
+ with tf.Session() as sess:
+     sess.run(iterator.initializer)
+     a = sess.run(iterator.get_next())
+ print("shape of the run results are: ")
+ print(a[0].shape)
+ print(a[1].shape)
+ print(a[2].shape)
+ print(a[3].shape)
+
+When I print the shape of my output tensors from dataset right after my dataset construction, the print is:
+output data type is  (tf.float32, tf.float32, tf.float64, tf.uint8)
+output data shape is  (TensorShape(None), TensorShape(None), TensorShape(None), TensorShape(None))
+
+the shape of tensors is None.
+However I could print out the output tensor shape after my sess.run.
+shape of the run results are: 
+(1, 600, 800, 3)
+(3,)
+(1,)
+(375, 500, 3)
+
+I need the shape of the output tensor from dataset to be defined to feed into my graph. Thanks!

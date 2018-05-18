@@ -1,0 +1,72 @@
+Feature tf.image : scale image and keep aspect/ratio
+
+Hi, I'm working on a FCN (Fully Convolutional Network) and use Tensorflow for this work. I have a lot of images in input, and they have very different dimensions, like 2340x4160 or 512x512. So my input need to be dynamic. It's why I search a way to resize images for having the greater dimension to a specific value, with respect to the aspect/ratio.
+Unfortunatly, Tensorflow doesn't provide this feature or, if I'm wrong, please just ignore this issue.
+So I write my own code. (It's probably not the most beautiful way to write this, sorry if this code seems ugly!)
+#!/usr/bin/env python
+import tensorflow as tf
+
+MAX_SIZE = 512
+
+# Image (for example: 2340x4160)
+image_path = "your_image.jpg"
+
+# Open image
+image_string = tf.read_file(image_path)
+image        = tf.image.decode_jpeg(image_string, channels=3)
+
+# Take width/height
+initial_width = tf.shape(image)[0]
+initial_height = tf.shape(image)[1]
+
+# Function for resizing 
+def _resize(x, y):
+  # Take the greater value, and use it for the ratio 
+  max_ = tf.maximum(initial_width, initial_height)
+  ratio = tf.to_float(max_) / tf.constant(MAX_SIZE, dtype=tf.float32)
+
+  new_width = tf.to_float(initial_width) / ratio
+  new_height = tf.to_float(initial_height) / ratio
+
+  return tf.to_int32(new_width), tf.to_int32(new_height)
+
+# Useless function for the next condition
+def _useless(x, y):
+  return x, y
+
+new_w, new_h = tf.cond(tf.logical_or(
+                         tf.greater(initial_width, tf.constant(MAX_SIZE)),
+                         tf.greater(initial_height, tf.constant(MAX_SIZE))
+                       ),
+        lambda: _resize(initial_width, initial_height),
+        lambda: _useless(initial_width, initial_height))
+
+resized_image = tf.image.resize_images(image, [new_w, new_h])
+image_int     = tf.cast(resized_image, tf.uint8)
+image_enc     = tf.image.encode_jpeg(image_int)
+fwrite        = tf.write_file("my_resized_image.jpeg", image_enc)
+
+sess = tf.Session()
+sess.run([fwrite])
+I think this feature could be very useful when working with image input to have a function (here: "tf.image.resize_image_keep_aspect") which allow us to do the operation more quickly (and I hope more efficiently!)
+#!/usr/bin/env python
+import tensorflow as tf
+
+MAX_SIZE = 512
+
+# Image (for example: 2340x4160)
+image_path = "your_image.jpg"
+
+# Open image
+image_string  = tf.read_file(image_path)
+image         = tf.image.decode_jpeg(image_string, channels=3)
+resized_image = tf.image.resize_image_keep_aspect(image, MAX_SIZE)
+image_enc     = tf.image.encode_jpeg(resized_image)
+fwrite        = tf.write_file("my_resized_image.jpeg", image_enc)
+
+sess = tf.Session()
+sess.run([fwrite])
+
+If the feature already exist, sorry but I search on git/stackoverflow/google and didn't find any viable solution.
+If you have any question or if I'm not clear, ask to me.
+Have a nice day :)

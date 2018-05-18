@@ -1,0 +1,95 @@
+Create Simple DNNClassifier
+
+Hi, I'm beginner in Machine Learning and Tensorflow.
+I edited this to adapt it to my dataset (102 features-input and 4 classes-output).
+Question:
+This simple approach is correct for a simple classifier?
+Why can't I change the number of nodes and levels (compilier gives errors)?
+Code:
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+import os
+from six.moves.urllib.request import urlopen
+import numpy as np
+import tensorflow as tf
+import EstraiFeature as ef
+from pyAudioAnalysis import audioBasicIO
+# Datasets (Training and Testing set doesn't refer to iris)
+IRIS_TRAINING = "/Users/giuseppeaccardo/Documents/python/Depressione/TrainingSet.csv" 
+IRIS_TEST = "/Users/giuseppeaccardo/Documents/python/Depressione/TestingSet.csv" 
+
+def main():
+    # Load datasets.
+    training_set = tf.contrib.learn.datasets.base.load_csv_with_header(
+        filename=IRIS_TRAINING,
+        target_dtype=np.int,
+        features_dtype=np.float32)
+    test_set = tf.contrib.learn.datasets.base.load_csv_with_header(
+        filename=IRIS_TEST,
+        target_dtype=np.int,
+        features_dtype=np.float32)
+
+    # Specify that all features have real-value data
+    feature_columns = [tf.feature_column.numeric_column("x", shape=[102])]
+    
+    # Build 3 layer DNN with 10, 20, 10 units respectively. How can I change this values? 
+    classifier = tf.estimator.DNNClassifier(feature_columns=feature_columns,
+                                          hidden_units=[10,20, 10],
+                                          n_classes=4,
+                                          model_dir="/tmp/depres_model")
+    
+   # Define the TRAINING inputs, includes both the feature (DNN input end) and target (DNN output end)
+    train_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={"x": np.array(training_set.data)}, #training_set.data
+        y=np.array(training_set.target), #training_set.target
+        num_epochs=None,
+        shuffle=True)
+    
+    # Fit model.
+    print("Training classfier...")
+    classifier.train(
+        input_fn = train_input_fn,
+        steps = 2000)
+
+    #Define the TEST inputs, both feature and target
+    test_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={"x":np.array(test_set.data)},
+        y=np.array(test_set.target),
+        num_epochs=1,
+        shuffle=False)
+
+    #Evaluate accuracy after training
+    accuracy_score = classifier.evaluate(
+        input_fn=test_input_fn)["accuracy"]
+
+    print("\nTest Accuracy: {0:f}\n".format(accuracy_score))
+    # Bag of words  approach -> Conta le label più ripetute per ogni mid range
+    # PREDIZIONE
+    #Predict with new data
+    filename = "/Users/giuseppeaccardo/Documents/python/Depressione/dataset/audio/426_AUDIO.wav"
+    [Fs, signal] = audioBasicIO.readAudioFile(filename)  # read audio signal
+    [mtFeatures, _] = ef.estraiFeatureMt(signal, Fs)
+    mtF = mtFeatures.T       
+    new_samples = np.array(
+        mtF, dtype=np.float32
+    )        
+
+    predict_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={"x":new_samples},
+        num_epochs=1,
+        shuffle=False
+    )
+
+    predictions = list(classifier.predict(input_fn=predict_input_fn))
+    countLabel = [0,0,0,0]
+    classPredict = 0
+    
+    for p in predictions:
+        countLabel[int(p["class_ids"])] +=1
+        
+    print(countLabel)
+    print("Prevision is "+ str(countLabel.index(max(countLabel))) ) 
+    
+if __name__ == "__main__":
+    main()

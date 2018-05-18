@@ -1,0 +1,93 @@
+timeout breaks FIFOQueue
+
+System information
+
+Linux Ubuntu 14.04
+TensorFlow installed from https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-1.2.1-cp27-none-linux_x86_64.whl
+Tensorflow-gpu 1.2.1
+Python version 2.7
+CUDA 8.0 /cuDNN 5.1.10
+GPU - Nvidia GTX 1080
+
+Describe the problem
+I use thread to add my training data to a FIFO Queue. There is always an thread error occurring in the process of my training.
+Source code / logs
+Here is my source code relevant to the error:
+with tf.Session() as sess:
+    self.q = tf.FIFOQueue(self.queue_capacity, [tf.float32, tf.float32, train_label_dtype], shapes=[(self.train_batch_size, self.im_height, self.im_width, self.num_tensor_channels), (self.train_batch_size, self.pose_dim), (self.train_batch_size,)])
+    self.enqueue_op = self.q.enqueue([self.train_data_batch, self.train_poses_batch, self.train_labels_batch])
+    self.train_labels_node = tf.placeholder(train_label_dtype, (self.train_batch_size,))
+    self.input_im_node, self.input_pose_node, self.train_labels_node = self.q.dequeue()
+
+    self.queue_thread = threading.Thread(target=self._load_and_enqueue)
+    self.queue_thread.start()
+
+    for step in training_range:
+    	self._check_dead_queue()
+    	"""run optimization"""
+    	_, l, lr, predictions, batch_labels, output, train_images, conv1_1W, conv1_1b, pose_node = self.sess.run(
+    		[optimizer, loss, learning_rate, train_predictions, self.train_labels_node, self.train_net_output, self.input_im_node, self.weights.conv1_1W, self.weights.conv1_1b, self.input_pose_node], options=GeneralConstants.timeout_option)
+
+def _load_and_enqueue(self):
+        """ Loads and Enqueues a batch of images for training """
+
+        train_data = np.zeros(
+            [self.train_batch_size, self.im_height, self.im_width, self.num_tensor_channels]).astype(np.float32)
+        train_poses = np.zeros([self.train_batch_size, self.pose_dim]).astype(np.float32)
+        label_data = np.zeros(self.train_batch_size).astype(self.numpy_dtype)
+
+        while not self.term_event.is_set():
+            time.sleep(self.cfg['queue_sleep'])
+
+            # Omit the code for geeting data
+
+            # send data to queue
+            if not self.term_event.is_set():
+                try:
+                    self.sess.run(self.enqueue_op, feed_dict={self.train_data_batch: train_data,
+                                                              self.train_poses_batch: train_poses,
+                                                              self.train_labels_batch: label_data})
+                except:
+                    pass
+        del train_data
+        del train_poses
+        del label_data
+        self.dead_event.set()
+        logging.info('Queue Thread Exiting')
+        self.queue_thread_exited = True
+
+When I train the model for some time, there will be an error:
+INFO:root:Step 41817 (epoch 3.35), 0.1 s
+INFO:root:Minibatch loss: 1.256, learning rate: 0.000857
+INFO:root:Minibatch error: 26.562%
+INFO:root:Step 41818 (epoch 3.35), 0.1 s
+INFO:root:Minibatch loss: 1.790, learning rate: 0.000857
+INFO:root:Minibatch error: 59.375%
+INFO:root:Step 41819 (epoch 3.35), 0.1 s
+INFO:root:Minibatch loss: 0.868, learning rate: 0.000857
+INFO:root:Minibatch error: 3.125%
+2017-08-02 07:26:54.769345: W tensorflow/core/kernels/queue_base.cc:302] _0_data_queue/fifo_queue: Skipping cancelled dequeue attempt with queue not closed
+2017-08-02 07:26:54.769537: W tensorflow/core/framework/op_kernel.cc:1158] Cancelled: Dequeue operation was cancelled
+	 [[Node: data_queue/fifo_queue_Dequeue = QueueDequeueV2[component_types=[DT_FLOAT, DT_FLOAT, DT_INT64], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](data_queue/fifo_queue)]]
+2017-08-02 07:26:54.769608: W tensorflow/core/framework/op_kernel.cc:1158] Cancelled: Dequeue operation was cancelled
+	 [[Node: data_queue/fifo_queue_Dequeue = QueueDequeueV2[component_types=[DT_FLOAT, DT_FLOAT, DT_INT64], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](data_queue/fifo_queue)]]
+2017-08-02 07:26:54.769715: W tensorflow/core/framework/op_kernel.cc:1158] Cancelled: Dequeue operation was cancelled
+	 [[Node: data_queue/fifo_queue_Dequeue = QueueDequeueV2[component_types=[DT_FLOAT, DT_FLOAT, DT_INT64], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](data_queue/fifo_queue)]]
+2017-08-02 07:26:54.769747: W tensorflow/core/framework/op_kernel.cc:1158] Cancelled: Dequeue operation was cancelled
+	 [[Node: data_queue/fifo_queue_Dequeue = QueueDequeueV2[component_types=[DT_FLOAT, DT_FLOAT, DT_INT64], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](data_queue/fifo_queue)]]
+Traceback (most recent call last):
+  File "training.py", line 269, in <module>
+    sgdOptimizer.optimize()
+  File "/home/liuquande/Desktop/SenceTime/gqcnn/test/gqcnn/sgd_optimizer.py", line 254, in optimize
+    [optimizer, loss, learning_rate, train_predictions, self.train_labels_node, self.train_net_output, self.input_im_node, self.weights.conv1_1W, self.weights.conv1_1b, self.input_pose_node], options=GeneralConstants.timeout_option)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 789, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 997, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1132, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1152, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.DeadlineExceededError: Timed out waiting for notification
+INFO:root:Queue Thread Exiting
+INFO:rospy.core:signal_shutdown [atexit]

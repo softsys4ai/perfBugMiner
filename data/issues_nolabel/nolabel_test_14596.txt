@@ -1,0 +1,56 @@
+Bug: tf.data.Dataset.map computes unrequested graph parts
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): See code example at the bottom
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version: Python 3.6.1 :: Anaconda custom (64-bit)
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+Short: tf.Session.run does not compute unnecessary things that are not requested, except for the case the tensorflow code in inside a tf.data.Dataset.map.
+So is it possible to add this feature to tf.data.Dataset.map?
+Maybe the problem is in tensorflow.python.framework.function.Defun.
+Long: I want to build a fully featured input pipeline that provides everything. Than should tensorflow determine what is necessary to compute. When I tried to figure out if this is possible I found that the dataset has some code for parallel execution. So preprocessing should be inside the Dataset pipeline.
+When I looked at the source code I think the reason may be connected to tensorflow.python.framework.function.Defun, but I can not find the motivation to use Defun and the initial commit (2017-05-17) under contrib had already Defun used.
+With my knowledge as a tensorflow beginner, I can only fix this when I ignore parallel execution (i.e. remove all Defuns), but then I can also do the transform after Iterator.get_next().
+Maybe @mrry knows more about this?
+Source code / logs
+Here a small example that demonstrates this behavior. (Node the tf_sleep(idx, 0.1) is a open end in the graph and the print should never be executed.)
+import tensorflow as tf
+import functools
+
+# -----------------simple print when this is executed------------------------------------
+def sleep(tensor, seconds):
+    time.sleep(seconds)
+    print(f'Sleeped for {seconds}s')
+    return tensor
+
+def tf_sleep(tensor, seconds):
+    return tf.py_func(sleep, [tensor, seconds], tensor.dtype, name='speep')
+# ------------------------------------------------------------------------------------------------
+def transform(idx):    
+    tf_sleep(idx, 0.1)  # Dead graph end, should never be executed
+    return tf_sleep(idx, 0.2)
+    
+ds = tf.data.Dataset.range(20)
+ds = ds.map(transform)  # will produce "Sleeped for 0.1s"
+
+iterator = ds.make_one_shot_iterator()
+entry = iterator.get_next()
+
+entry = transform(entry)  # does not produce "Sleeped for 0.1s"
+
+with tf.Session() as sess:
+    print(sess.run(entry))
+# Output: 
+# Sleeped for 0.20000000298023224s
+# Sleeped for 0.10000000149011612s  # <-- this should not be printed
+# Sleeped for 0.20000000298023224s
+# 0

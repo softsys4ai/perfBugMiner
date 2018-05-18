@@ -1,0 +1,80 @@
+'Tensor' object has no attribute 'initializer' after import from meta graph
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution: Darwin Austins-MBP 16.5.0 Darwin Kernel Version 16.5.0: Fri Mar  3 16:52:33 PST 2017; root:xnu-3789.51.2~3/RELEASE_X86_64 x86_64
+Mac OS X 10.12.4
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below):v1.1.0-rc0-61-g1ec6ed5 1.1.0
+Bazel version (if compiling from source):0.4.5
+CUDA/cuDNN version:None
+GPU model and memory:None
+Exact command to reproduce: Ref to Codes
+
+tensorflow import
+tf.VERSION = 1.1.0
+tf.GIT_VERSION = v1.1.0-rc0-61-g1ec6ed5
+tf.COMPILER_VERSION = v1.1.0-rc0-61-g1ec6ed5
+Sanity check: array([1], dtype=int32)
+
+Describe the problem
+After export and import a meta graph with uninitialized local variables,
+You can not inittialize them with sess.run(tf. local_variables_initializer()), cause
+TF do not register variable's proto function with key 'LOCAL_VARIABLES' and when
+export meta graph to protobuf, source code can not find to_proto function from repository.
+Source code / logs
+import tensorflow as tf
+
+graph = tf.Graph()
+with graph.as_default():
+    x = tf.Variable(1, collections=[tf.GraphKeys.LOCAL_VARIABLES])
+    y = tf.Variable(1)
+    z = x + y
+origin_meta_graph = tf.train.export_meta_graph(graph=graph)
+new_graph = tf.Graph()
+with new_graph.as_default():
+    tf.train.import_meta_graph(origin_meta_graph)
+    init = tf.local_variables_initializer()
+with tf.Session() as sess:
+    sess.run(init)
+Traceback (most recent call last):
+  File "/Users/austin/workspace/aip/3rd/tensorflow/tensorflow/test.py", line 12, in <module>
+    init = tf.local_variables_initializer()
+  File "/Users/austin/workspace/aip/3rd/tensorflow/venv/lib/python3.6/site-packages/tensorflow/python/ops/variables.py", line 1184, in local_variables_initializer
+    return variables_initializer(local_variables())
+  File "/Users/austin/workspace/aip/3rd/tensorflow/venv/lib/python3.6/site-packages/tensorflow/python/ops/variables.py", line 1149, in variables_initializer
+    return control_flow_ops.group(*[v.initializer for v in var_list], name=name)
+  File "/Users/austin/workspace/aip/3rd/tensorflow/venv/lib/python3.6/site-packages/tensorflow/python/ops/variables.py", line 1149, in <listcomp>
+    return control_flow_ops.group(*[v.initializer for v in var_list], name=name)
+AttributeError: 'Tensor' object has no attribute 'initializer'
+import tensorflow as tf
+
+graph = tf.Graph()
+with graph.as_default():
+    x = tf.Variable(1, collections=[tf.GraphKeys.LOCAL_VARIABLES])
+    y = tf.Variable(1)
+    z = x + y
+origin_meta_graph = tf.train.export_meta_graph(graph=graph)
+new_graph = tf.Graph()
+with new_graph.as_default():
+    tf.train.import_meta_graph(origin_meta_graph)
+print(graph.get_collection(tf.GraphKeys.LOCAL_VARIABLES))
+print(new_graph.get_collection(tf.GraphKeys.LOCAL_VARIABLES))
+[<tf.Variable 'Variable:0' shape=() dtype=int32_ref>]
+[<tf.Tensor 'Variable:0' shape=() dtype=int32_ref>]
+As it show above, in origin graph local_variable collection is a list of tf.Variable
+but in the new graph, is a list of tf.Tensor
+Work around
+Add following registration in your model core
+OR Ref to this PR
+from tensorflow.core.framework import variable_pb2
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import variables
+from tensorflow.python.framework.ops import register_proto_function
+
+register_proto_function(
+    ops.GraphKeys.LOCAL_VARIABLES,
+    proto_type=variable_pb2.VariableDef,
+    to_proto=variables.Variable.to_proto,
+    from_proto=variables.Variable.from_proto)

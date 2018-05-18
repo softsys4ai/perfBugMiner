@@ -1,0 +1,43 @@
+LinearClassifier feature_columns overwritten in LinearClassifier.fit
+
+tensorflow.contrib.learn.python.learn.estimators.linear.LinearClassifier.fit
+effectively returns
+tensorflow.contrib.learn.python.learn.estimators.estimator.Estimator.fit
+Estimator.fit calls:
+tensorflow.contrib.learn.python.learn.estimators.estimator.Estimator._train_model
+which has these lines:
+      features, targets = input_fn()
+      self._check_inputs(features, targets)
+      train_op, loss_op = self._get_train_ops(features, targets)
+
+tensorflow.contrib.learn.python.learn.estimators.estimator.Estimator._check_inputs
+    if self._features_info is not None:
+      ...
+    else:
+      self._features_info = tensor_signature.create_signatures(features)
+
+So we get to a point where features, as derived from the input_fn, is treated as our feature columns set.
+In pseudo code:
+def input_function()
+    return [foo, bar, baz], quux
+
+lc=LinearClassifier(feature_columns=[foo]) # We pass in what we want our feature column to be
+lc.fit(input_function) # run fit on out input function
+lc._feature_columns # repr _feature_columns on the instantiated classifier
+    [foo]
+lc.estimator._features_info # _features_info on the instantiated classifiers instantiated estimator
+    [foo, bar, baz]
+
+The issue is:
+Although this line appears to indicate that we will be making an estimation based on the feature columns supplied:
+lc=LinearClassifier(feature_columns=[foo]) # We pass in what we want our feature column to be
+What happens is that the passed in feature_columns is unused and instead the return from the input_function supplied to fit are used.
+Am I correct in thinking that if the feature_columns arg is supplied that only those columns should be used by the classifiers estimator?
+That when we instantiate the classifier we are setting the feature_columns we expect to be used?
+The work around for this is simply to only return the columns you need from your input function however I found this misleading.
+Point in the tutorial:
+Either the code or the tutorial need to be changed.
+https://www.tensorflow.org/versions/r0.10/tutorials/wide/index.html#defining-the-logistic-regression-model
+Error raised:
+WARNING:tensorflow:Setting feature info to
+as per tensorflow/contrib/learn/python/learn/estimators/estimator.py:613

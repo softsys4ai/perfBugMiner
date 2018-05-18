@@ -1,0 +1,39 @@
+Better support for breaking up too-large operations
+
+Unless I'm missing something, the ability to automatically break up calculations that don't fit on a device does not seem to be part of the TensorFlow API. This surprises me since one of the very first things users (at least naive ones like me) encounter in readily accessible GPU machines (e.g. AWS EC2 instances) are memory crashes on GPUs.
+To avoid these errors users have to either give up on GPUs for large parts of their calculations (again, unless I'm missing something) or hand code some form of batching to avoid the crashes (if they can figure out where they're happening, which isn't always easy with such errors).
+Shouldn't TensorFlow do this automatically "under the hood", breaking up too-large calculations and merging them, to avoid code like that below?
+
+From a related question asked on SO:
+I'm puzzled about how to efficiently assign my TensorFlow operations and variables to devices. It's clear that, at least for my implementation of a basic convolutional neural network, placing as many operations as possible on a GPU is desirable. But the GPU I currently have access to has limited memory and results in many warnings of the form
+
+Ran out of memory trying to allocate 2.60GiB. The caller indicates that this is not a failure, but may mean that there could be performance gains if more memory is available.
+
+and occasional crashes for certain specific operations, like
+
+Ran out of memory trying to allocate 83.74MiB.  See logs for memory state.
+Resource exhausted: OOM when allocating tensor with shape[28000,1,28,28]
+
+
+These can be avoided by placing variables on CPUs, but in my implementation, this results in training epochs taking 10 times as long to compute.
+Clearly the ideal policy is to identify specific chunks of code that generate errors, and attempt to place only those on CPUs. But it is unclear to me how to do this, because those calculations can't be isolated from others that require GPU placement to achieve efficiencies.
+For example, simply generating predictions on a test set with something like
+evals = sess.run(tf.argmax(y, 1), feed_dict={x: use_x_all})
+
+where x is a tf.placeholder of inputs to my model, and y are the output activations of my network, produces the above error when use_x_all is a large array (here with 28000 examples). Attempting to put this calculation alone on a CPU fails, presumably because the network evaluation producing y is on the GPU.
+Because of this I (seem to) need to resort to approaches like
+use_x_all, _ = data_loader.stack_data(use_data, as_cols=False)
+use_x_split = np.split(use_x_all, splits)
+for use_x in use_x_split:
+    # ...
+    evals_part = sess.run(tf.argmax(y, 1), feed_dict={x: use_x})
+    # accumulate evals
+
+which clearly doesn't scale.
+Is there a better way? Specifically:
+
+Is there a way to place calculations like the one above on a CPU and still have those calculations for the same graph (e.g. training) run on a GPU?
+
+or, alternatively
+
+Is there an idiom (like batching) that can be more easily applied in such situations to reduce the memory demands of such calculations?

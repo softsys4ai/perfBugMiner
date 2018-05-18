@@ -1,0 +1,38 @@
+How to control the number of threads on Tensorflow and TF-Slim?
+
+Do we have any options to control the number of threads in TF-Slim both in training and evaluation processes?
+Specifically, I use this network for my classification problem. I changed the evaluation part in a way that runs train and evaluation in parallel like this code. I can run it on my own CPU without any problem. But I can't execute them on a supercomputer. It seems that it is related to the very large number of threads which are being created by Tensorflow. If the number of threads exceeds the maximum number of threads pre-set in SLURM (= 28) then the job will fail. Since it's unable to create new threads it will end up with error "resource temporarily unavailable".
+This error provided when the code tries to restore parameters from checkpoints. If there is no limitation on the number of threads (like on my pc) it works fine:
+INFO:tensorflow:Restoring parameters from ./model.ckpt-0
+INFO:tensorflow:Starting evaluation at
+I tensorflow/core/kernels/logging_ops.cc:79] eval/Accuracy[0]
+I tensorflow/core/kernels/logging_ops.cc:79] eval/Recall_5[0]
+INFO:tensorflow:Evaluation [1/60]
+
+However, when there is a limitation on the number of threads (like SLURM job submission on supercomputers) we get:
+INFO:tensorflow:Restoring parameters from ./model.ckpt-0
+terminate called after throwing an instance of 'std::system_error'
+what():  Resource temporarily unavailable
+
+I tried to limit the number of CPU threads used by Tensorflow to 1 by creating config like:
+  FLAGS.num_preprocessing_threads=1
+
+  config = tf.ConfigProto()
+  config.intra_op_parallelism_threads = FLAGS.num_preprocessing_threads
+  config.inter_op_parallelism_threads = FLAGS.num_preprocessing_threads
+
+    slim.evaluation.evaluation_loop(
+        master=FLAGS.master,
+        checkpoint_path=each_ckpt,
+        logdir=FLAGS.eval_dir,
+        num_evals=num_batches,
+        eval_op=list(names_to_updates.values()) + print_ops,
+        variables_to_restore=variables_to_restore,
+        session_config=config)
+
+But unfortunately, that didn't help. In my opinion, the main problem we are having here is the fact that we are not able to control the number of threads here. Although we set it to 1 with various TF options you can actually see that this job is creating many more threads on the node:
+slurm_script─┬─python───128*[{python}]
+             └─python───8*[{python}]
+
+Training script is creating 128 threads and evaluation script is creating 8 (both numbers vary over time).
+P.S. I'm using Python 2.7.13 and Tensorflow 1.3.0.

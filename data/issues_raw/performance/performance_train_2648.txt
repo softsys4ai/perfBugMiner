@@ -1,0 +1,46 @@
+Saver.restore() causes segfault in distributed mode
+
+I use a custom saver object in distributed mode that operates over a subset of the parameters in my model so that I can perform transfer learning between my models. I'm running into a situation where loading weights for one of my models causes a segfault, and I can't seem to figure out why. I'm running this code:
+...
+supervisor = tf.train.Supervisor(is_chief=(task_index == 0),
+                                 logdir=log_dir,
+                                 init_op=init_op,
+                                 saver=None,
+                                 summary_op=training_summary_op,
+                                 global_step=global_step,
+                                 summary_writer=summary_writer)
+
+if task_index != 0:
+    logger.info('waiting for session.')
+else:
+    logger.info('starting session.')
+with supervisor.prepare_or_wait_for_session(
+        server.target, config=tf.ConfigProto(allow_soft_placement=True)) as sesh:
+    if task_index != 0:
+        while True:
+            if supervisor.should_stop():
+                logger.info('training completed')
+                return
+            if ready.eval(sesh):
+                break
+            sleep(0.01)
+    logger.info('session started.')
+
+    if task_index == 0:
+        if isfile(save_file):
+            logger.info('loading from save file: %s' % save_file.split('/')[-1])
+            saver.restore(sesh, save_file)
+        elif transfer_file is not None and isfile(transfer_file):
+            logger.info('transfering weights from file: %s' % transfer_file.split('/')[-1])
+            loader.restore(sesh, transfer_file)
+            logger.info('executing post transfer ops')
+            sesh.run(post_transfer_ops)
+        sesh.run(is_ready)
+...
+The transfer file exists on both the parameter servers and the chief worker and running the code results in this output:
+INFO: starting session.
+INFO: session started.
+INFO: transfering weights from file: test_train5.0.ckpt
+Segmentation fault (core dumped)
+
+The graph I'm using is identical to one that I can deploy on a single machine without error, I can even load the weights into the local version, but even if an issue with parameter names were the issue I would still hope that it would give me an error instead of a segfault. Note that this issue does not appear for every model, though it is deterministic.

@@ -1,0 +1,301 @@
+Tensorflow gradients are always zero!
+
+Tensorflow gradients are always zero with respect to conv layers that are after first conv layer. I've tried different ways to check that but gradients are always zero! Here is the small reproducible code that can be run to check that.
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import tensorflow as tf
+import numpy as np
+import math
+import os
+import random
+import tflearn
+batch_size = 100
+start = 0
+end = batch_size
+learning_rate = 0.000001
+num_classes = 4
+time_steps = 4
+embedding = 2
+step = 1
+_units = 500
+num_of_filters = 1000
+
+train_set_x = [[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]]]
+train_set_y = [0,1]
+
+X = tf.placeholder(tf.float32, [None,time_steps,embedding])
+Y = tf.placeholder(tf.int32, [None])
+
+
+x = tf.expand_dims(X,3)
+
+filter_shape = [1, embedding, 1, num_of_filters]
+conv_weights = tf.get_variable("conv_weights1" , filter_shape, tf.float32, tf.contrib.layers.xavier_initializer())
+conv_biases = tf.Variable(tf.constant(0.1, shape=[num_of_filters]))
+conv = tf.nn.conv2d(x, conv_weights, strides=[1,1,1,1], padding = "VALID")
+normalize = conv + conv_biases
+tf_normalize = tflearn.layers.normalization.batch_normalization(normalize)
+relu = tf.nn.elu(tf_normalize)
+pooling = tf.reduce_max(relu, reduction_indices = 3, keep_dims = True)
+outputs_fed_lstm = pooling
+
+filter_shape2 = [1, 1, 1, num_of_filters]
+conv_weights2 = tf.get_variable("conv_weights2" , filter_shape2, tf.float32, tf.contrib.layers.xavier_initializer())
+conv_biases2 = tf.Variable(tf.constant(0.1, shape=[num_of_filters]))
+conv2 = tf.nn.conv2d(outputs_fed_lstm, conv_weights2, strides=[1,1,1,1], padding = "VALID")
+normalize2 = conv2 + conv_biases2
+tf_normalize2 = tflearn.layers.normalization.batch_normalization(normalize2)
+relu2 = tf.nn.elu(tf_normalize2)
+pooling2 = tf.reduce_max(relu2, reduction_indices = 3, keep_dims = True)
+outputs_fed_lstm2 = pooling2
+
+x = tf.squeeze(outputs_fed_lstm2, [2])     
+x = tf.transpose(x, [1, 0, 2])
+x = tf.reshape(x, [-1, 1])
+x = tf.split(0, time_steps, x)
+
+lstm = tf.nn.rnn_cell.LSTMCell(num_units = _units)
+
+# multi_lstm = tf.nn.rnn_cell.MultiRNNCell([lstm] * lstm_layers, state_is_tuple = True)
+
+outputs , state = tf.nn.rnn(lstm,x, dtype = tf.float32)     
+
+weights = tf.Variable(tf.random_normal([_units,num_classes]))
+biases  = tf.Variable(tf.random_normal([num_classes]))
+
+logits = tf.matmul(outputs[-1], weights) + biases
+
+
+
+c_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits,Y)
+loss = tf.reduce_mean(c_loss)
+
+
+global_step = tf.Variable(0, name="global_step", trainable=False)
+# decayed_learning_rate = tf.train.exponential_decay(learning_rate,0,10000,0.9)
+optimizer= tf.train.AdamOptimizer(learning_rate)
+minimize_loss = optimizer.minimize(loss, global_step=global_step)   
+grads_and_vars = optimizer.compute_gradients(loss,[conv_weights2]) 
+correct_predict = tf.nn.in_top_k(logits, Y, 1)
+accuracy = tf.reduce_mean(tf.cast(correct_predict, tf.float32))
+
+
+init = tf.initialize_all_variables()
+
+with tf.Session() as sess:
+     sess.run(init)
+     for i in range(1):
+         for j in range(1):
+             x = train_set_x
+             y = train_set_y
+             sess.run(minimize_loss,feed_dict={X : x, Y : y})
+             step += 1  
+             gr_print = sess.run([grad for grad, _ in grads_and_vars], feed_dict={X : x, Y : y})
+             print (gr_print)
+             cost = sess.run(loss,feed_dict = {X: x,Y: y})
+             accu = sess.run(accuracy,feed_dict = {X: x, Y: y})
+             print ("Loss after one Epoch(Training) = " + "{:.6f}".format(cost) + ", Training Accuracy= " + "{:.5f}".format(accu))
+
+And here is the output
+[array([[[[ 0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  5.21326828,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ]]]], dtype=float32)]

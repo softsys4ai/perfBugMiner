@@ -1,0 +1,71 @@
+Custom OP Reader AttributeError: 'module' object has no attribute 'read'
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Custom Code
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):
+Source
+TensorFlow version (use command below):
+1.4.0
+Python version:
+2.7
+Bazel version (if compiling from source):
+0.6.1
+CUDA/cuDNN version:
+Laptop CPU
+GPU model and memory:
+Laptop CPU
+Exact command to reproduce:
+
+import tensorflow as tf
+filename_queue = tf.train.string_input_producer(["test.csv"])
+reader = tf.load_op_library('./tensorflow/bazel-bin/tensorflow/core/user_ops/redis_reader.so')
+key, value = reader.read(filename_queue) 
+
+Describe the problem
+For my custom op reader, I am getting AttributeError: 'module' object has no attribute 'read'. This is most puzzling to me because I thought the python wrapper would inherit read from /tensorflow/python/ops/io_ops.py. Furthermore, gen_user_ops.py in my bazel-genfiles doesn't seem to have code that reflects my custom op reader. Is it suppose to show in that file?
+Source code / logs
+Here I have registed the OP:
+REGISTER_OP("RedisReader")
+    .Output("reader_handle: resource")                            
+    .Attr("container: string = ''")                               
+    .Attr("shared_name: string = ''")                             
+    .SetIsStateful()                                              
+    .SetShapeFn(TwoElementOutput)
+    .Doc(R"doc(Description Goes Here)doc");
+
+Here is my kernel and kernel registration:
+class RedisReaderOp : public ReaderOpKernel {
+    public:
+        explicit RedisReaderOp(OpKernelConstruction* context) : ReaderOpKernel(context) {
+            
+            Env* env = context->env();
+
+            SetReaderFactory([this, env]() {
+                return new RedisReader(name(), env);
+            });
+        }
+};
+
+REGISTER_KERNEL_BUILDER(Name("RedisReader").Device(DEVICE_CPU), RedisReaderOp);
+
+And here is my python wrapper located in user_ops.py:
+from tensorflow.python.ops import gen_user_ops as _gen_user_ops
+
+# go/tf-wildcard-import
+from tensorflow.python.ops.gen_user_ops import *  # pylint: disable=wildcard-import
+
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import common_shapes
+from tensorflow.python.ops import io_ops
+
+class RedisReader(io_ops.ReaderBase) :
+
+	def __init__(self, name=None):
+        	rr = _gen_user_ops.redis_reader(name=name)
+        	super(RedisReader, self).__init__(rr)	
+
+ops.NotDifferentiable("RedisReader")

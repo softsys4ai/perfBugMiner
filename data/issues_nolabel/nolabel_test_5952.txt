@@ -1,0 +1,31 @@
+pthread cond_wait deadlock on assignment via tf.while_loop
+
+State:
+
+tf 0.12RC0 (installed via pip URL)
+Ubuntu 16.04
+cuda 8.0 w/cudnn 5.1
+
+Ran python through gdb and it looks like there is a deadlock?
+import tensorflow as tf
+
+with tf.Session() as sess:
+    index = tf.constant(0)
+    values_0 = [tf.constant(0, dtype=tf.int32), tf.zeros([10, 100])]
+    cond = lambda i, val: tf.less(i, 10)
+    def _update(i, val):
+        row = tf.random_normal([1, 100])
+        update = val + tf.concat(0, [tf.zeros([i, 100]),
+                                     row,
+                                     tf.zeros([10-1-i, 100])])
+       # Just to verify sizing
+        print 'update = ', update.get_shape().as_list(), \
+            ' | values_0 = ', values_0[1].get_shape().as_list()
+
+        return [i+i, update]
+
+    _, values_t = tf.while_loop(cond, _update, values_0,
+                                parallel_iterations=10)
+
+    print sess.run(values_t)
+Is this expected behavior? I want to update different rows of the matrix in parallel and this seemed somewhat logical to me. Since each row is independent it "shouldn't" really collide even if it is in parallel.

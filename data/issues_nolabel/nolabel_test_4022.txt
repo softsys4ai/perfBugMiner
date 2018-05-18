@@ -1,0 +1,221 @@
+train.batch with dynamic_pad=True and input as list of tensors not working as expected
+
+Environment info
+Operating System:
+Ubuntu 14.04.4 LTS (running in Virtual Box 5.0.22 r108108)
+Installed version of CUDA and cuDNN:
+None
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+pip 8.1.2
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.10.0rc0
+
+Preface
+This issue arose from attempting to expand on an example using dynamic padding as written in: http://www.wildml.com/2016/08/rnns-in-tensorflow-a-practical-guide-and-undocumented-features/
+the necessary code is copied below.
+Steps to reproduce
+Run the following minimal example:
+import tensorflow as tf
+
+# [0, 1, 2, 3, 4 ,...]
+x = tf.range(1, 10, name="x")
+
+# A queue that outputs 0,1,2,3,...
+range_q = tf.train.range_input_producer(limit=5, shuffle=False)
+slice_end = range_q.dequeue()
+
+# Slice x to variable length, i.e. [0], [0, 1], [0, 1, 2], ....
+y = tf.slice(x, [0], [slice_end], name="y")
+
+batched_data = tf.train.batch(
+    tensors=[y],
+    batch_size=5,
+    dynamic_pad=True,
+    name="y_batch"
+)
+
+# Run the graph
+# tf.contrib.learn takes care of starting the queues for us
+res = tf.contrib.learn.run_n({"y": batched_data}, n=1, feed_dict=None)
+
+# Print the result
+print("Batch shape: {}".format(res[0]["y"].shape))
+print(res[0]["y"])
+Output (correct behavior):
+Batch shape: (5, 4)
+[[0 0 0 0]
+ [1 0 0 0]
+ [1 2 0 0]
+ [1 2 3 0]
+ [1 2 3 4]]
+
+When attempted with different input (list of tensors of different lengths)
+import tensorflow as tf
+
+y = [tf.constant(range(n)) for n in range(1,10)]
+
+batched_data = tf.train.batch(
+    tensors=[y],
+    batch_size=5,
+    dynamic_pad=True,
+    name="y_batch"
+)
+
+# Run the graph
+# tf.contrib.learn takes care of starting the queues for us
+res = tf.contrib.learn.run_n({"y": batched_data}, n=1, feed_dict=None)
+
+# Print the result
+print("Batch shape: {}".format(res[0]["y"].shape))
+print(res[0]["y"])
+Output:
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-12-8b4d52a4df68> in <module>()
+     19     batch_size=5,
+     20     dynamic_pad=True,
+---> 21     name="y_batch"
+     22 )
+     23 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/input.pyc in batch(tensors, batch_size, num_threads, capacity, enqueue_many, shapes, dynamic_pad, allow_smaller_final_batch, shared_name, name)
+    577   tensor_list = _as_tensor_list(tensors)
+    578   with ops.op_scope(tensor_list, name, "batch") as name:
+--> 579     tensor_list = _validate(tensor_list)
+    580     (tensor_list, sparse_info) = _serialize_sparse_tensors(
+    581         tensor_list, enqueue_many)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/input.pyc in _validate(tensor_list)
+    411 
+    412 def _validate(tensor_list):
+--> 413   tensor_list = ops.convert_n_to_tensor_or_indexed_slices(tensor_list)
+    414   if not tensor_list:
+    415     raise ValueError("Expected at least one tensor in batch().")
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.pyc in convert_n_to_tensor_or_indexed_slices(values, dtype, name, as_ref)
+    735       ret.append(
+    736           convert_to_tensor_or_indexed_slices(value, dtype=dtype, name=n,
+--> 737                                               as_ref=as_ref))
+    738   return ret
+    739 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.pyc in convert_to_tensor_or_indexed_slices(value, dtype, name, as_ref)
+    696     return value
+    697   else:
+--> 698     return convert_to_tensor(value, dtype=dtype, name=name, as_ref=as_ref)
+    699 
+    700 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.pyc in convert_to_tensor(value, dtype, name, as_ref)
+    619     for base_type, conversion_func in funcs_at_priority:
+    620       if isinstance(value, base_type):
+--> 621         ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+    622         if ret is NotImplemented:
+    623           continue
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_ops.pyc in _autopacking_conversion_function(v, dtype, name, as_ref)
+    628   if dtype is not None and dtype != inferred_dtype:
+    629     return NotImplemented
+--> 630   return _autopacking_helper(v, inferred_dtype, name or "packed")
+    631 # pylint: enable=invalid-name
+    632 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_ops.pyc in _autopacking_helper(list_or_tuple, dtype, name)
+    591           elems_as_tensors.append(
+    592               constant_op.constant(elem, dtype=dtype, name=str(i)))
+--> 593       return gen_array_ops._pack(elems_as_tensors, name=scope)
+    594     else:
+    595       return converted_elems
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_array_ops.pyc in _pack(values, axis, name)
+   1452     A `Tensor`. Has the same type as `values`. The packed tensor.
+   1453   """
+-> 1454   result = _op_def_lib.apply_op("Pack", values=values, axis=axis, name=name)
+   1455   return result
+   1456 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.pyc in apply_op(self, op_type_name, name, **keywords)
+    701           op = g.create_op(op_type_name, inputs, output_types, name=scope,
+    702                            input_types=input_types, attrs=attr_protos,
+--> 703                            op_def=op_def)
+    704           outputs = op.outputs
+    705           return _Restructure(ops.convert_n_to_tensor(outputs),
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.pyc in create_op(self, op_type, inputs, dtypes, input_types, name, attrs, op_def, compute_shapes, compute_device)
+   2310                     original_op=self._default_original_op, op_def=op_def)
+   2311     if compute_shapes:
+-> 2312       set_shapes_for_outputs(ret)
+   2313     self._add_op(ret)
+   2314     self._record_op_seen_by_control_dependencies(ret)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.pyc in set_shapes_for_outputs(op)
+   1702       raise RuntimeError("No shape function registered for standard op: %s"
+   1703                          % op.type)
+-> 1704   shapes = shape_func(op)
+   1705   if shapes is None:
+   1706     raise RuntimeError(
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_ops.pyc in _PackShape(op)
+    767 
+    768   for inp in op.inputs[1:]:
+--> 769     input_shape = input_shape.merge_with(inp.get_shape())
+    770 
+    771   input_shape = input_shape.as_list()
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_shape.pyc in merge_with(self, other)
+    568       except ValueError:
+    569         raise ValueError("Shapes %s and %s are not compatible" %
+--> 570                          (self, other))
+    571 
+    572   def concatenate(self, other):
+
+ValueError: Shapes (1,) and (2,) are not compatible
+
+Expected same result as previous script.
+What have you tried?
+
+Attempted transforming y into a tensor but have not found a way. Given the first example, it appears possible to construct tensors with variable size in some dimension, but given a dataset in the form of List of List of primitive (with inner lists being of varying lengths), I don't know how to transform this into a tensor without padding the entire dataset.
+
+import tensorflow as tf
+
+# [0, 1, 2, 3, 4 ,...]
+x = tf.range(1, 10, name="x")
+
+# A queue that outputs 0,1,2,3,...
+range_q = tf.train.range_input_producer(limit=5, shuffle=False)
+slice_end = range_q.dequeue()
+
+# Slice x to variable length, i.e. [0], [0, 1], [0, 1, 2], ....
+y = tf.slice(x, [0], [slice_end], name="y")
+
+print 'Dynamic shape of y:', tf.shape(y)
+print 'Static shape of y:', y.get_shape()
+Output:
+Dynamic shape of y: Tensor("Shape_16:0", shape=(1,), dtype=int32)
+Static shape of y: (?,)
+
+
+Attempted replacing tf.train.batch line with the tf.PaddingFIFOQueue as follows
+
+# Creating a new queue
+padding_q = tf.PaddingFIFOQueue(
+    capacity=10,
+    dtypes=tf.int32,
+    shapes=[[None]])
+
+# Enqueue the examples
+enqueue_op = padding_q.enqueue([y])
+
+# Add the queue runner to the graph
+qr = tf.train.QueueRunner(padding_q, [enqueue_op])
+tf.train.add_queue_runner(qr)
+
+# Dequeue padded data
+batched_data = padding_q.dequeue_many(5)
+Output: identical to above
+
+Using placeholders: tried replacing y with a placeholder of shape [None] and feeding it the data, cannot seem to get this to work either.
+Padding entire dataset: this works, but defeats the purpose of dynamic padding
+Todo: am going to try passing dataset through tf.train.SequenceExample(), constructing an example for each sequence, but I would rather this not be necessary.

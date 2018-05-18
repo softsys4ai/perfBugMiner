@@ -1,0 +1,40 @@
+After quantized ssd_mobilenet_v1_coco model, loaded error on Android
+
+System information
+
+OS Platform and Distribution : Linux Ubuntu 14.04.5 LTS
+TensorFlow installed from : binary
+TensorFlow version : 1.2.1
+Python version: 2.7
+Bazel version: 0.70
+GCC/Compiler version (if compiling from source): 4.8.4
+CUDA/cuDNN version: 8.0
+GPU model and memory: Tesla P100-PCIE
+Exact command to reproduce:
+
+Describe the problem
+Load a quantized ssd_mobilenet_v1 model on Android meet error
+Caused by: java.io.IOException: Not a valid TensorFlow Graph serialization: NodeDef mentions attr 'T' not in Op<name=Where; signature=input:bool -> index:int64>;
+I quantize the ssd_mobilenet_v1 model o ubuntu 14,  using the below command
+bazel-bin/tensorflow/tools/graph_transforms/transform_graph 
+--in_graph=/data5/zxt/coco_log/export/frozen_inference_graph.pb  
+--out_graph=/home/zxt/git/ssd_optimized.pb --inputs='image_tensor'
+ --outputs='detection_boxes,detection_scores,num_detections,detection_classes' --transforms='
+  add_default_attributes
+  strip_unused_nodes(type=float, shape="-1,-1,-1,3")
+  remove_nodes(op=Identity, op=CheckNumerics)
+  fold_batch_norms
+  fold_old_batch_norms
+  quantize_weights
+  strip_unused_nodes
+  sort_by_execution_order'
+
+I also have tried some other parameters，but all failed with same issue.
+the  frozen_inference_graph.pb   is ok on Android, but the quantized pb is can NOT load.
+When run the quantized pb on android phone, met errors
+      at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:799)
+   at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:689)
+    Caused by: java.io.IOException: Not a valid TensorFlow Graph serialization: NodeDef mentions attr 'T' not in Op<name=Where; signature=input:bool -> index:int64>; 
+NodeDef: Postprocessor/BatchMultiClassNonMaxSuppression/map/while/MultiClassNonMaxSuppression/FilterGreaterThan/Where = Where[T=DT_BOOL](Postprocessor/BatchMultiClassNonMaxSuppression/map/while/MultiClassNonMaxSuppression/FilterGreaterThan/Greater). 
+(Check whether your GraphDef-interpreting binary is up to date with your GraphDef-generating binary.).
+           at org.tensorflow.contrib.android.TensorFlowInferenceInterface.loadGraph(TensorFlowInferenceInterface.java:535)

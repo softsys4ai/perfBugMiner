@@ -1,0 +1,84 @@
+Error in table.lookup from tf.contrib.lookup when using dataset api
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): All platforms
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below):1.2.1
+Python version: 3.6, 2.7
+
+I try the following code:
+vocab =tf.contrib.lookup.index_table_from_file('./vocab.txt', num_oov_buckets=1)
+dataset = tf.contrib.data.Dataset.from_tensor_slices(tf.constant(['./test1.txt']))
+dataset = dataset.flat_map(lambda filename: tf.contrib.data.TextLineDataset(filename))
+dataset = dataset.map(lambda line: tf.string_split([line]).values)
+dataset = dataset.map(lambda words: table.lookup(words))
+
+gives me the following errors. This is different from the stack overflow issue:
+https://stackoverflow.com/questions/44519045/new-dataset-map-transformation-and-lookup-table-incompatible-string-type and appears before referencing the iterator
+----> 1 dataset.map(lambda x: table.lookup(x))
+
+/Users/xxx/anaconda/envs/py27/lib/python2.7/site-packages/tensorflow/contrib/lookup/lookup_ops.pyc in lookup(self, keys, name)
+    803             name="hash_bucket")
+    804         if self._table:
+--> 805           ids = self._table.lookup(values)
+    806           buckets = math_ops.add(buckets, self._table.size())
+    807           is_id_non_default = math_ops.not_equal(ids, self._table.default_value)
+
+/Users/xxx/anaconda/envs/py27/lib/python2.7/site-packages/tensorflow/contrib/lookup/lookup_ops.pyc in lookup(self, keys, name)
+    184       # pylint: disable=protected-access
+    185       values = gen_lookup_ops._lookup_table_find(
+--> 186           self._table_ref, key_tensor, self._default_value, name=scope)
+    187       # pylint: enable=protected-access
+    188 
+
+/Users/xxx/anaconda/envs/py27/lib/python2.7/site-packages/tensorflow/python/ops/gen_lookup_ops.pyc in _lookup_table_find(table_handle, keys, default_value, name)
+    286   result = _op_def_lib.apply_op("LookupTableFind", table_handle=table_handle,
+    287                                 keys=keys, default_value=default_value,
+--> 288                                 name=name)
+    289   return result
+    290 
+
+/Users/xxx/anaconda/envs/py27/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.pyc in apply_op(self, op_type_name, name, **keywords)
+    765         op = g.create_op(op_type_name, inputs, output_types, name=scope,
+    766                          input_types=input_types, attrs=attr_protos,
+--> 767                          op_def=op_def)
+    768         if output_structure:
+    769           outputs = op.outputs
+
+/Users/xxx/anaconda/envs/py27/lib/python2.7/site-packages/tensorflow/contrib/data/python/framework/function.pyc in create_op(self, op_type, inputs, data_types, **kwargs)
+     79           self.extra_args.append(ph)
+     80     return super(_ExperimentalFuncGraph, self).create_op(op_type, inputs,
+---> 81                                                          data_types, **kwargs)
+     82 
+     83   def _add_tensor_and_parents(self, tensor):
+
+/Users/xxx/anaconda/envs/py27/lib/python2.7/site-packages/tensorflow/python/framework/function.pyc in create_op(self, op_type, inputs, data_types, **kwargs)
+    359           self.extra_args.append(ph)
+    360     return super(_FuncGraph, self).create_op(op_type, inputs, data_types,
+--> 361                                              **kwargs)
+    362 
+    363 
+
+/Users/xxx/anaconda/envs/py27/lib/python2.7/site-packages/tensorflow/python/framework/ops.pyc in create_op(self, op_type, inputs, dtypes, input_types, name, attrs, op_def, compute_shapes, compute_device)
+   2504     ret = Operation(node_def, self, inputs=inputs, output_types=dtypes,
+   2505                     control_inputs=control_inputs, input_types=input_types,
+-> 2506                     original_op=self._default_original_op, op_def=op_def)
+   2507     if compute_shapes:
+   2508       set_shapes_for_outputs(ret)
+
+/Users/xxx/anaconda/envs/py27/lib/python2.7/site-packages/tensorflow/python/framework/ops.pyc in __init__(self, node_def, g, inputs, output_types, control_inputs, input_types, original_op, op_def)
+   1248                             self.node_def.name,
+   1249                             [i.dtype for i in self._inputs],
+-> 1250                             input_types))
+   1251     self._input_types = input_types
+   1252 
+
+TypeError: In op 'string_to_index_Lookup/hash_table_Lookup', 
+input types ([tf.string, tf.string, tf.int64]) are not compatible with expected types
+ ([tf.string_ref, tf.string, tf.int64])
+
+However if I use the following referencing python_lookup_ops as outline in NMT, there is no issue..
+Why is this?
+from tensorflow.python.ops import lookup_ops
+table = lookup_ops.index_table_from_file('./vocab.txt', num_oov_buckets=1)

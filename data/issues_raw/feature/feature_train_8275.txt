@@ -1,0 +1,46 @@
+make sparse_tensor (SparseTensor) serializable in meta graph
+
+tf.sparse_placeholder Sparse tensors aren't serialized in meta graphs, one has to serialize tf.placeholder tensors for the indices and values individually.
+At present add_collection_def (called by create_meta_graph_def, which is typically called by export_scoped_meta_graph, found in /tensorflow/python/framework/meta_graph.py, ) fails when a key resolves to a SparseTensor as SparseTensors do not have name attribute: here is the specific line.
+Suggested solutions:
+
+give SparseTensor a name attribute and any other methods and properties necessary
+
+or
+
+Enable SparseTensor or sparse_placeholder to be added to _proto_function_registry so that ops.get_to_proto_function works in add_collection_def, perhaps using the SAVEABLE_OBJECTS key, something like the following being found in the SparseTensor file:
+
+ops.register_proto_function(
+    ops.GraphKeys.SAVERS,
+    proto_type=saver_pb2.SaverDef,
+    to_proto=Saver.to_proto,
+    from_proto=Saver.from_proto)
+
+speculative, I don't know the best implementation:
+Could do something similar to the _as_graph_def method of Graph and loop through graph._nodes_by_id, compare the SparseTensor's _indices to an op (node) _outputs from _nodes_by_id.
+Small Test
+g = tf.Graph()
+with g.as_default(), tf.Session(graph=g).as_default() as sess:
+  st = tf.sparse_placeholder(tf.string)
+  ops.add_to_collection('_sparse_test', st)
+  ops.add_to_collection('_test', tf.placeholder(tf.string))
+  # FORMERLY GAVE A WARNING WHEN EXCEPTION THROWN
+  tf.train.export_meta_graph('tmp_model/test-model.meta', as_text=True, graph=g,
+                             collection_list=['_sparse_test', '_test']) 
+  # WORKS
+  print(sess.run(st, feed_dict={ st: ([[i,0] for i in range(10)],
+                                      list(map(str,range(10))),
+                                      [10,1]) }))
+    
+g2 = tf.Graph()
+with g2.as_default(), tf.Session(graph=g2).as_default() as sess2:
+  tf.train.import_meta_graph('tmp_model/test-model.meta')
+  t = tf.get_collection('_test')[0]
+  # FAILS
+  st = tf.get_collection('_sparse_test')[0]
+  print(sess2.run(st, feed_dict={ st: ([[i,0] for i in range(10)],
+                                      list(map(str,range(20,30))),
+                                      [10,1]) }))
+
+
+Sometimes I get a segfault with this

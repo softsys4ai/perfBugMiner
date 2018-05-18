@@ -1,0 +1,151 @@
+Python crashes with "Check failed" error when fitting TensorForestEstimator
+
+Problem
+I am experiencing an issue trying to use TensorForestEstimator. I am trying to predict 7 output labels by inputting 7 features. That is, my num_classes=7 and num_features=7 in my hyperparameters. The shape of features and labels is (484876, 7).
+Here is an example of the format of my input data:
+f1       f2     f3    f4      f5    f6    f7   l1       l2       l3       l4       l5       l6       l7
+39000.0  120.0  65.0  1000.0  25.0  0.69  3.94 39000.0  39959.0  42099.0  46153.0  49969.0  54127.0  55911.0
+32000.0  185.0  65.0  1000.0  75.0  0.46  2.19 32000.0  37813.0  43074.0  48528.0  54273.0  60885.0  63810.0 
+30000.0  185.0  65.0  1000.0  25.0  0.41  1.80 30000.0  32481.0  35409.0  39145.0  42750.0  46678.0  48595.0
+
+When calling fit(),  each of the trees get properly trained (see logs below), but when it goes to theCheckpointSaverHook phase, Python crashes with the following error:
+2017-08-02 22:55:00.690746: F tensorflow/contrib/tensor_forest/kernels/count_extremely_random_stats_op.cc:404] 
+Check failed: column < num_classes_ (39001 vs. 7)
+
+Process finished with exit code 134 (interrupted by signal 6: SIGABRT)
+
+I might be wrong, but this seems like a bug since TensorFlow is training each the TensorForestEstimator trees, but crashing upon saving. Also the number 39001 is not related to my data since the  shape for both feature and label is (484876, 7).
+Here is the code to reproduce:
+import tensorflow as tf
+import os
+
+from tensorflow.contrib.tensor_forest.client.random_forest import TensorForestEstimator, TensorForestLossHook
+from tensorflow.contrib.tensor_forest.python.tensor_forest import ForestHParams, RandomForestGraphs
+
+tf.logging.set_verbosity('INFO')
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+
+def get_training_data():
+    training_file = "data.txt"
+    data = pd.read_csv(training_file, sep='\t')
+
+    X = np.array(data.drop('Result', axis=1), dtype=np.float32)
+
+    y = []
+    # All 7 labels are stored in a string initially, so we parse each label to float and store in an array
+    for e in data.ResultStr:
+        y.append(list(np.array(str(e).replace('[', '').replace(']', '').split(','))))
+
+    y = np.array(y, dtype=np.float32)
+
+    features = tf.constant(X) # Also tried with tf.Variable
+    labels = tf.constant(y) # Also tried with tf.Variable
+
+    return features, labels
+
+# Main
+hyperparameters = ForestHParams(
+    num_trees=100,
+    max_nodes=10000,
+    bagging_fraction=1.0,
+    num_splits_to_consider=7,
+    feature_bagging_fraction=1.0,
+    max_fertile_nodes=0,
+    split_after_samples=250,
+    min_split_samples=5,
+    valid_leaf_threshold=1,
+    dominate_method='bootstrap',
+    dominate_fraction=0.99,
+    num_classes=7, 
+    num_features=7
+)
+
+estimator = TensorForestEstimator(
+    params=hyperparameters,
+    device_assigner=None,
+    model_dir=None,
+    graph_builder_class=RandomForestGraphs,
+    config=None,
+    weights_name=None,
+    keys_name=None,
+    feature_engineering_fn=None,
+    early_stopping_rounds=100,
+    num_trainers=1,
+    trainer_id=0,
+    report_feature_importances=False,
+    local_eval=False
+)
+
+estimator.fit(
+    input_fn=lambda: get_training_data(),
+    max_steps=100,
+    monitors=[
+        TensorForestLossHook(
+            early_stopping_rounds=30
+        )
+    ]
+)
+
+Here is the verbose logging output:
+INFO:tensorflow:Using default config.
+WARNING:tensorflow:Using temporary folder as model directory: /var/folders/s3/k08tc0v94j10xn6fk3wz79zh0000gn/T/tmp2RnVSx
+INFO:tensorflow:Using config: {'_save_checkpoints_secs': 600, '_num_ps_replicas': 0, '_keep_checkpoint_max': 5, '_task_type': None, '_is_chief': True, '_cluster_spec': <tensorflow.python.training.server_lib.ClusterSpec object at 0x1121fe390>, '_model_dir': '/var/folders/s3/k08tc0v94j10xn6fk3wz79zh0000gn/T/tmp2RnVSx', '_save_checkpoints_steps': None, '_keep_checkpoint_every_n_hours': 10000, '_session_config': None, '_tf_random_seed': None, '_environment': 'local', '_num_worker_replicas': 0, '_task_id': 0, '_save_summary_steps': 100, '_tf_config': gpu_options {
+  per_process_gpu_memory_fraction: 1
+}
+, '_evaluation_master': '', '_master': ''}
+INFO:tensorflow:Constructing forest with params = 
+INFO:tensorflow:{'valid_leaf_threshold': 1, 'split_after_samples': 250, 'num_output_columns': 7, 'feature_bagging_fraction': 1.0, 'split_initializations_per_input': 1, 'bagged_features': None, 'min_split_samples': 5, 'max_nodes': 10000, 'num_features': 7, 'num_trees': 100, 'num_splits_to_consider': 7, 'base_random_seed': 0, 'num_outputs': 1, 'dominate_fraction': 0.99, 'max_fertile_nodes': 5000, 'bagged_num_features': 7, 'dominate_method': 'bootstrap', 'bagging_fraction': 1.0, 'regression': False, 'num_classes': 6}
+INFO:tensorflow:training graph for tree: 0
+INFO:tensorflow:training graph for tree: 1
+...
+INFO:tensorflow:training graph for tree: 98
+INFO:tensorflow:training graph for tree: 99
+INFO:tensorflow:Create CheckpointSaverHook.
+2017-08-02 22:53:25.218258: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-02 22:53:25.218298: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-02 22:53:25.218304: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-02 22:53:25.218308: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-02 22:55:00.690746: F tensorflow/contrib/tensor_forest/kernels/count_extremely_random_stats_op.cc:404] Check failed: column < num_classes_ (39001 vs. 7)
+
+Process finished with exit code 134 (interrupted by signal 6: SIGABRT)
+
+System information: tf_env.txt
+
+== cat /etc/issue ===============================================
+Darwin 127001.local 16.6.0 Darwin Kernel Version 16.6.0: Fri Apr 14 16:21:16 PDT 2017; root:xnu-3789.60.24~6/RELEASE_X86_64 x86_64
+Mac OS X 10.12.5
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+Apple LLVM version 8.1.0 (clang-802.0.42)
+Target: x86_64-apple-darwin16.6.0
+Thread model: posix
+InstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+
+== uname -a =====================================================
+Darwin 127001.local 16.6.0 Darwin Kernel Version 16.6.0: Fri Apr 14 16:21:16 PDT 2017; root:xnu-3789.60.24~6/RELEASE_X86_64 x86_64
+
+== check pips ===================================================
+numpy (1.12.1)
+protobuf (3.3.0)
+tensorflow (1.2.1)
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.2.1
+tf.GIT_VERSION = v1.2.0-5-g435cdfc
+tf.COMPILER_VERSION = v1.2.0-5-g435cdfc
+Sanity check: array([1], dtype=int32)
+
+== env ==========================================================
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+./tf.sh: line 105: nvidia-smi: command not found
+
+== cuda libs  ===================================================

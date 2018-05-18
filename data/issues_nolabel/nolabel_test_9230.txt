@@ -1,0 +1,81 @@
+random ops across iterations of while loops execute in nondeterministic order
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes.  See below.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): ('0.12.1-2106-gf7d07f5-dirty', '0.12.head')
+Bazel version (if compiling from source): (not a build issue)
+CUDA/cuDNN version: CuDNN5, CUDA8 (though this runs on CPU)
+GPU model and memory: 1x Titan X Pascal, 1x Titan X (though this runs on CPU)
+Exact command to reproduce: ../virtualenv/bin/python nnrandom.py --broken; ../virtualenv/bin/python nnrandom.py --broken
+
+Describe the problem, source code, and logs
+When using augmentation primitives, sometimes, they create run-to-run non-determinism by ignoring the system random seed.  This makes reproducing a run impossible, even when using tf.set_random_seed.  One case in which they seem to do this is inside a tf.device() block.  Consider the following snippet:
+import tensorflow as tf
+import numpy as np
+
+tf.app.flags.DEFINE_integer("seed", 1, "RNG seed")
+FLAGS = tf.app.flags.FLAGS
+
+tf.app.flags.DEFINE_float("augment_hue", 0.5, "hue augment factor")
+tf.app.flags.DEFINE_boolean("no_augment", False, "whether to disable augmentation entirely")
+def mk_input():
+  np.random.seed(0)
+  a1s = np.random.uniform(size = [32, 128, 128, 3]).astype(np.float32)
+
+  if not FLAGS.no_augment:
+    def aug(img):
+      img = tf.image.random_hue(img, FLAGS.augment_hue, seed = 50001)
+
+      return img
+    a1s = tf.map_fn(aug, a1s)
+
+  return a1s
+
+tf.app.flags.DEFINE_boolean('broken', False, '')
+def main(argv=None):
+  if len(argv) != 1:
+    print "argv was",argv
+    raise RuntimeError('unknown argument')
+  print('nn: building graph')
+
+  tf.set_random_seed(FLAGS.seed)
+
+  with tf.Session(config=tf.ConfigProto(allow_soft_placement = True)) as sess:
+    if FLAGS.broken:
+      with tf.device('/cpu:0'):
+        input = mk_input()
+    else:
+      input = mk_input()
+
+    a = tf.reduce_mean(input)
+
+    tf.global_variables_initializer().run()
+    tf.train.start_queue_runners(sess = sess)
+    print('nn: TF session initialized')
+
+    for step in xrange(10):
+      res = sess.run(a)
+      print(res)
+
+if __name__ == '__main__':
+  tf.app.run()
+If you run this without --broken, then you'll get the same result every time.  On my machine, the result without --broken starts 0.500045.  But if you run this with --broken, then you'll get a different result each time.  For instance:
+jwise@jwise-dt:/home/scratch.jwise_dl$ ../virtualenv/bin/python nnrandom.py  --broken 2>&1 | tail -n5
+0.500318
+0.500236
+0.500246
+0.500185
+0.500303
+jwise@jwise-dt:/home/scratch.jwise_dl$ ../virtualenv/bin/python nnrandom.py  --broken 2>&1 | tail -n5
+0.500279
+0.500218
+0.500164
+0.500178
+0.500106
+
+I have not dug any deeper yet as to where, exactly, the nondeterminism is coming from, but I figured that this is pretty close to a minimal repro case based on TF primitives.
+Thanks,
+joshua

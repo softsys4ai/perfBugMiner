@@ -1,0 +1,50 @@
+Size of TFRecord is much more larger than CSV format
+
+Testing Data:
+adult.data in https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/learn/wide_n_deep_tutorial.py
+Problem:
+To use a tf.contrib.data.TFRecordDataset, i tried to convert adult.data in CSV into a TFRecord, but i just found that the TFRecord after converted is about 12MB, while the original CSV is only about 3MB, oops, why the storage efficiency for TFRecord is so poor？
+Source code for converting CSV to TFRecord:
+def _int64_feature(value):
+    return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
+
+def _bytes_feature(value):
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=value))
+
+def csv2proto(
+        data_source,
+        all_cols,
+        categorical_cols=[],
+        continuous_cols=[],
+        multi_values_cols=[],
+        inner_delimiter=';'):
+    if not os.path.isfile(data_source):
+        raise ValueError('data file passed do not exist or not a file')
+
+    file_name = os.path.splitext(data_source)[0] + '.tfrecords'
+    writer = tf.python_io.TFRecordWriter(file_name)
+    with open(data_source) as f:
+        reader = csv.DictReader(f, fieldnames=all_cols)
+        for row in reader:
+            feature = dict()
+            for col in categorical_cols:
+                feature.update({col: _bytes_feature([row[col]])})
+            for col in continuous_cols:
+                feature.update({col: _int64_feature([int(row[col])])})
+            for col in multi_values_cols:
+                feature.update({col: _bytes_feature(row[col].split(inner_delimiter))})
+
+            example = tf.train.Example(features=tf.train.Features(feature=feature))
+            writer.write(example.SerializeToString())
+
+        writer.close()
+
+System information:
+
+OS Platform:  Mac OS X 10.12.5
+TensorFlow installed from (source or binary): pip install
+TensorFlow version (use command below): 1.3.0
+Python version:  2.7
+Bazel version (if compiling from source): None
+CUDA/cuDNN version: None
+GPU model and memory: None

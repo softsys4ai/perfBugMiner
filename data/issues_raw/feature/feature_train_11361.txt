@@ -1,0 +1,61 @@
+Feature Request: Change REGISTER_OP macro to facilitate customization on static initialization sequence
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): iOS
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.0
+Python version: N/A
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: iPhone series
+Exact command to reproduce: N/A
+
+REGISTER_OP current syntax is not friendly for customization
+REGISTER_OP in its current implementation, which leverages C++ macro trick to do method-chaining is not friendly for customization. For example, a typical REGISTER_OP macro call looks like this:
+REGISTER_OP("DynamicPartition")
+    .Input("data: T")
+    .Input("partitions: int32")
+    .Output("outputs: num_partitions * T")
+    .Attr("num_partitions: int")
+    .Attr("T: type")
+    ....;
+
+When implementing lazy initialization, this macro, comparing with others from TensorFlow (REGISTER_KERNEL_BUILDER for example) is more difficult to customize. The reason is that the macro doesn't capture subsequent method calls, therefore, cannot scope these method calls into a function unit. But, this is easy to solve if we change the REGISTER_OP syntax a bit:
+REGISTER_OP(Op("DynamicPartition")
+    .Input("data: T")
+    .Input("partitions: int32")
+    .Output("outputs: num_partitions * T")
+    .Attr("num_partitions: int")
+    .Attr("T: type")
+    ....);
+
+The above example is very close to how REGISTER_KERNEL_BUILDER works:
+REGISTER_KERNEL_BUILDER(Name("NoOp").Device(DEVICE_CPU), NoOp);
+
+so we have some consistencies there.
+A hypothetic change to the REGISTER_OP macro could look like this:
+static inline OpDefBuilderWrapper<true> Op(const char name[]) {
+    return OpDefBuilderWrapper<true>(name);
+}
+}  // namespace register_op
+
+#define REGISTER_OP(op) REGISTER_OP_UNIQ_HELPER(__COUNTER__, op)
+#define REGISTER_OP_UNIQ_HELPER(ctr, op) REGISTER_OP_UNIQ(ctr, op)
+#define REGISTER_OP_UNIQ(ctr, op)                                            \
+  static ::tensorflow::register_op::OpDefBuilderReceiver register_op##ctr    \
+      TF_ATTRIBUTE_UNUSED =                                                  \
+          ::tensorflow::register_op::op;
+
+More importantly, this small change enabled some lazy initialization opportunities regarding ops registration, you can imagine a platform-specific change (not likely to get upstreamed) to this macro:
+#define REGISTER_OP_UNIQ(ctr, op)                                            \
+__attribute__((used)) static void register_op_init##ctr(void) {              \
+  static ::tensorflow::register_op::OpDefBuilderReceiver register_op##ctr    \
+      TF_ATTRIBUTE_UNUSED =                                                  \
+          ::tensorflow::register_op::op;                                     \
+}                                                                            \
+__attribute__((used)) __attribute__((section ("__DATA,tf_reg_op"))) static void *register_op_func##ctr = (void *)&register_op_init##ctr
+
+Which put the static initializers into a function and a lazy initializer can call op registrations by scanning the data section and invoke these functions one by one.
+Please let me know if this will violate some core assumptions TensorFlow is making and your concerns.

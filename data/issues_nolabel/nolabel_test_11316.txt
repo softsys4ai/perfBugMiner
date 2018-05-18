@@ -1,0 +1,65 @@
+order of execution of functions in cond statement is inconsistent
+
+Inconsistency and/or feature request.
+Tensorflows control flow method
+tf.cond(condition, fn1, fn2)
+executes both functions fn1 and fn2 and returns only one depending on the evaluation of condition. In addition, the order in which the two functions are evaluated varies or is undefined as the following code shows:
+var1 = tf.Variable(tf.zeros(1), trainable=False, name='var1')
+var2 = tf.Variable(tf.zeros(1), trainable=False, name='var2')
+update_var1 = tf.assign(var1,var1 +1)
+update_var2 = tf.assign(var2,var2 +1)
+training = tf.placeholder(tf.bool)
+def f1():
+  with tf.control_dependencies([update_var1]):
+    return var1 + 10*var2
+def f2():
+  with tf.control_dependencies([update_var2]):
+    return var1 + 10*var2
+
+final = tf.cond(training, f1, f2)
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+for i in range(10):
+  print(sess.run(final, feed_dict={training: False}))
+
+The output of this varies from run to run, but a typical example is:
+[ 10.] 
+[ 22.] 
+[ 33.]
+[ 44.]
+[ 55.]
+[ 66.]
+[ 77.]
+[ 87.]
+[ 98.]
+[ 110.]
+
+For the lines with 10, 87 and 98 the order of execution apparently was:
+
+update var1
+evaluate and return var1 * 10*var2
+update var2
+
+while for the lines with 22, 33, 44, 55, 66, 77 and 110 the order of execution must have been:
+
+update var1
+update var2
+evaluate and return var1 * 10*var2
+
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+See code in description
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux
+TensorFlow installed from (source or binary):
+from binary
+TensorFlow version (use command below):
+('v1.2.0-rc2-21-g12f033d', '1.2.0')
+Python version:
+Python 2.7.13 |Anaconda 4.3.1 (64-bit)
+Bazel version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:

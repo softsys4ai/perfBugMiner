@@ -1,0 +1,46 @@
+Android TF Error: Not found: Op type not registered 'Const'
+
+Hello,
+I'm trying to run a dummy inference model I built in TF with python.
+The model takes an input vector (size 3x200) and multiply (component-wise) it with a variable vector of the same size whose values were randomized. so output_node = input_node * variable_node
+Then there is a reduce_sum to a final value.
+The model was generated with this procedure:
+`
+checkpoint_prefix = "mygraph.ckpt"
+checkpoint_state_name = "mygraph.ckpt"
+input_graph_name = "input_graph.pb"
+output_graph_name = "output_graph.pb"
+def dummy_model(input):
+    with tf.Graph().as_default():
+        sess = tf.Session()
+        with sess.as_default():
+
+        variable_node = tf.Variable(tf.random_normal([3, 200], stddev=0.35), name="variable_node")
+        input_node = tf.Variable(input, name="input_node")
+        output_node = tf.reduce_sum(tf.mul(variable_node, input_node, name="output_node"), axis=1)
+        init_op = tf.global_variables_initializer()
+
+        #init = tf.global_variables_initializer()
+        sess.run(init_op)
+
+        saver = tf.train.Saver(write_version=2)
+        checkpoint_path = saver.save(sess, checkpoint_prefix, global_step=0, latest_filename=checkpoint_state_name)
+        tf.train.write_graph(sess.graph, "./", input_graph_name)`
+
+After generating the model files (and renaming them) I made the process of freezing and optimizing the graph for inference on android using the script in the python\tools folder (freeze_graph.py, optimize_for_inference.py, print_selective_registration_header.py). In the end of this process I get the optimized graph 'my_optimized_graph.pb' and the ops_to_register.h' header which is used to tell tensorflow (bazel) what kernels to register when you add the "SELECTIVE_REGISTRATION" flag to the build rule.
+My problem is, when I load the model in android I get the following errors occurred after the session->create() call:
+
+E/native: op_kernel.cc:925 OpKernel ('op: "_Send" device_type: "GPU"') for unknown op: _Send
+E/native: op_kernel.cc:925 OpKernel ('op: "_Recv" device_type: "GPU"') for unknown op: _Recv
+E/native: op_kernel.cc:925 OpKernel ('op: "_Send" device_type: "CPU"') for unknown op: _Send
+E/native: op_kernel.cc:925 OpKernel ('op: "NoOp" device_type: "GPU"') for unknown op: NoOp
+E/native: op_kernel.cc:925 OpKernel ('op: "_Recv" device_type: "CPU"') for unknown op: _Recv
+E/native: op_kernel.cc:925 OpKernel ('op: "NoOp" device_type: "CPU"') for unknown op: NoOp
+E/native: op_kernel.cc:925 OpKernel ('op: "Placeholder" device_type: "GPU"') for unknown op: Placeholder
+E/native: op_kernel.cc:925 OpKernel ('op: "Placeholder" device_type: "CPU"') for unknown op: Placeholder
+E/native: op_kernel.cc:925 OpKernel ('op: "Const" device_type: "CPU"') for unknown op: Const
+E/native: tensorflow_inference_jni.cc:138 Could not create Tensorflow Graph: Not found: Op type not registered 'Const'
+
+It seems like the kernels did registered but the ops are unknown.
+I searched a lot the forum and couldn't find solution for this issue.
+Did anyone succeed in compiling TF on Android with SELECTIVE_REGISTRATION and running a custom graph model other than the "inception" model which used in the demo?

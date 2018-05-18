@@ -1,0 +1,25 @@
+opt.compute_gradients() returns values different from the weight difference of opt.apply_gradients()
+
+This isn't a bug, bug I wasn't sure where to ask for help on this one, so I'm sorry to just throw in another issue here on github.  I've tried searching, but haven't found answers to my questions yet.
+My question is what is the most efficient way to get the delta of my weights when training?  I assume it's related to gradients, but the optimizer (I think) does a lot more than just apply the raw gradients returned from opt.compute_gradients().
+Where I'm at: I've got the operators hooked up as follows (thanks to this SO question):
+self.cost = `the rest of the network`
+self.rmsprop = tf.train.RMSPropOptimizer(lr,rms_decay,0.0,rms_eps)
+self.comp_grads = self.rmsprop.compute_gradients(self.cost)
+self.grad_placeholder = [(tf.placeholder("float", shape=grad[1].get_shape(), name="grad_placeholder"), grad[1]) for grad in self.comp_grads]
+self.apply_grads = self.rmsprop.apply_gradients(self.grad_placeholder)
+
+Now, to feed in information, I run the following:
+feed_dict = `training variables`
+start_weights = self.sess.run([self.w1,self.b1, etc])
+grad_vals = self.sess.run([grad[0] for grad in self.comp_grads], feed_dict=feed_dict)
+
+feed_dict2 = `feed_dict plus gradient values added to self.grad_placeholder`
+self.sess.run(self.apply_grads, feed_dict=feed_dict2) # Updates the weights
+end_weights = self.sess.run([self.w1,self.b1, etc])
+delta_weights = [end_weights[i]-start_weights[i] for i in range(len(start_weights))]
+# Note: delta_weights != grad_vals...
+
+The command of run(self.apply_grads) will update the network weights, but when I compute the differences in the starting and ending weights (run(self.w1)), those numbers are different than what is stored in grad_vals[0].  I figure this is because the RMSPropOptimizer does more to the raw gradients, but I'm not sure what, or where to find out what it does.  I could go to the paper and write it myself, but I don't want to hardcode things in like that where TF already does it somewhere else.  I'll admit I'm still new to TF, but I tried to figure out what happens by looking at the source, but it's still confusing for me.
+So back to the question: Is there a way to get the delta's for the weights in a more efficient way than calculating the difference?  Am I stuck running self.w1.eval(sess) multiple times to get the weights and calculate the difference?  Is there something that I'm missing with the tf.RMSPropOptimizer (or any other Optimizer for that matter) function that I haven't seen or heard about
+Thanks!  And sorry again for adding to the issues list.

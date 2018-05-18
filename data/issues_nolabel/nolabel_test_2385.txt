@@ -1,0 +1,36 @@
+Hard to understand error message
+
+x is a list of list of tensors, and im passing in one list at a time to the rnn but I get this hard to understand error message
+Traceback (most recent call last):
+File "autoencoder_m.py", line 60, in 
+outputs, state = rnn.rnn(cell=dropout_cell, inputs = x[i], initial_state=initial_state, sequence_length=s[i], scope = scope)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.py", line 127, in rnn
+array_ops.pack([batch_size, cell.output_size]), inputs[0].dtype)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_ops.py", line 241, in pack
+return gen_array_ops._pack(values, name=name)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_array_ops.py", line 916, in _pack
+return _op_def_lib.apply_op("Pack", values=values, name=name)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 379, in apply_op
+assert dtype is not None, "Should not fail if dtype is None"
+AssertionError: Should not fail if dtype is None
+Does this mean that x[i][0] is of type None? I already checked that it is <dtype: 'float32'>
+This is the code I am trying to run, basically trying to run rnn on multiple gpu in the following manner.
+x = [[tf.placeholder(tf.float32, shape=[batch_size, input_width]) for _ in xrange(max_sequence_length)] for _ in xrange(num_gpu)]
+y = [[tf.placeholder(tf.float32, shape=[batch_size, input_width]) for _ in xrange(max_sequence_length)] for _ in xrange(num_gpu)]
+s = [tf.placeholder(tf.int32, shape=[batch_size]) for _ in xrange(num_gpu)]
+cell = BasicLSTMCell(num_units = hidden_neurons, input_size = [batch_size, input_width])
+initial_state = tf.zeros([batch_size, hidden_neurons * 2]) 
+dropout_cell = DropoutWrapper(cell, input_keep_prob=0.9, output_keep_prob=1.0)
+initial_state = tf.zeros([batch_size, cell.state_size])
+
+gpu_grads = []  
+losses = []
+opt = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.99, beta2=0.97)
+
+for i in xrange(num_gpu):
+        gpu_id = '/gpu:'+str(i)
+        with tf.device(gpu_id), tf.name_scope(gpu_id) as scope:
+                print x[i][0].dtype
+                outputs, state = rnn.rnn(cell=dropout_cell, inputs = x[i], initial_state=initial_state, sequence_length=s[i], scope = scope)
+
+After this I get average of gradients similar to cifar10 multi gpu tutorial example.

@@ -1,0 +1,75 @@
+Tensorflow hooks do not properly write events to HDFS
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Alpine Linux 3.6.2 (running with Docker)
+TensorFlow installed from (source or binary): Binary (conda-forge)
+TensorFlow version (use command below): 1.3.0
+Python version: 3.6.3
+Bazel version (if compiling from source): -
+CUDA/cuDNN version: -
+GPU model and memory: using CPU
+Exact command to reproduce: CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob) jupyter notebook
+
+Describe the problem
+I am reading files from hdfs and also want to use hdfs as model_dir to store the tensorflow output. Reading and writing of the checkpoints works fine. However, the the events file just gets created, but it does not get updated with the evaluation events.
+When I kill the notebook then the output is written, but not in between. Changing the model directory to a local one solves this. Also adding an extra SummarySaverHook which points to a local directory did not help.
+I am running my code using the instructions here: https://www.tensorflow.org/deploy/hadoop
+Source code / logs
+I normally use an Estimator with a custom model function, but I reduced it to the following:
+import tensorflow as tf
+import numpy
+
+hdfs_namenode = 'hdfs://xx.xx.xx.xx:8020'
+files = ['{}/data/part-00000-2a4cdbb2-f152-4503-9da8-cba63c7648fc-c000.csv'.format(hdfs_namenode)]
+
+output_directory = '{}/tresults/'.format(hdfs_namenode)
+
+feature_columns = [tf.feature_column.numeric_column("x", shape=[70])]
+
+def input_function_training:
+  ...
+def input_function_evaluation:
+  ...
+
+def experiment_fn(run_config, hparams):
+    estimator = tf.estimator.DNNClassifier(hidden_units=[4], 
+        feature_columns=feature_columns,
+        model_dir=output_directory, 
+        n_classes=2,
+        config=run_config)
+    
+    return tf.contrib.learn.Experiment(estimator=estimator, 
+        train_input_fn=input_function_training, 
+        eval_input_fn=input_function_evaluation)
+
+tf.contrib.learn.learn_runner.run(experiment_fn,
+    run_config=tf.contrib.learn.RunConfig(model_dir=output_directory,
+        save_checkpoints_steps=10,
+        save_checkpoints_secs=None,
+        save_summary_steps=1))
+The logs do not show any problems:
+WARNING:tensorflow:RunConfig.uid (from tensorflow.contrib.learn.python.learn.estimators.run_config) is experimental and may change or be removed at any time, and without warning.
+INFO:tensorflow:Using config: {'_task_type': None, '_task_id': 0, '_cluster_spec': <tensorflow.python.training.server_lib.ClusterSpec object at 0x7fb30e032780>, '_master': '', '_num_ps_replicas': 0, '_num_worker_replicas': 0, '_environment': 'local', '_is_chief': True, '_evaluation_master': '', '_tf_config': gpu_options {
+  per_process_gpu_memory_fraction: 1.0
+}
+, '_tf_random_seed': None, '_save_summary_steps': 1, '_save_checkpoints_secs': None, '_log_step_count_steps': 100, '_session_config': None, '_save_checkpoints_steps': 10, '_keep_checkpoint_max': 5, '_keep_checkpoint_every_n_hours': 10000, '_model_dir': 'hdfs://xx.xx.xx.xx:8020/tresults/'}
+WARNING:tensorflow:RunConfig.uid (from tensorflow.contrib.learn.python.learn.estimators.run_config) is experimental and may change or be removed at any time, and without warning.
+WARNING:tensorflow:From /opt/conda/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/monitors.py:269: BaseMonitor.__init__ (from tensorflow.contrib.learn.python.learn.monitors) is deprecated and will be removed after 2016-12-05.
+Instructions for updating:
+Monitors are deprecated. Please use tf.train.SessionRunHook.
+INFO:tensorflow:Create CheckpointSaverHook.
+INFO:tensorflow:Saving checkpoints for 1 into hdfs://xx.xx.xx.xx:8020/tresults/model.ckpt.
+WARNING:tensorflow:Casting <dtype: 'float32'> labels to bool.
+WARNING:tensorflow:Casting <dtype: 'float32'> labels to bool.
+INFO:tensorflow:Starting evaluation at 2017-10-30-05:41:22
+INFO:tensorflow:Restoring parameters fromhdfs://xx.xx.xx.xx:8020/tresults/model.ckpt-1
+INFO:tensorflow:Evaluation [1/100]
+...
+INFO:tensorflow:Evaluation [100/100]
+INFO:tensorflow:Finished evaluation at 2017-10-30-05:42:24
+INFO:tensorflow:Saving dict for global step 1: accuracy = 0.46836, accuracy_baseline = 0.75205, auc = 0.697368, auc_precision_recall = 0.591545, average_loss = 0.692944, global_step = 1, label/mean = 0.24795, loss = 692.944, prediction/mean = 0.524391
+INFO:tensorflow:Validation (step 1): accuracy = 0.46836, accuracy_baseline = 0.75205, auc = 0.697368, auc_precision_recall = 0.591545, average_loss = 0.692944, label/mean = 0.24795, loss = 692.944, prediction/mean = 0.524391, global_step = 1
+INFO:tensorflow:loss = 42.1861, step = 1
+INFO:tensorflow:Saving checkpoints for 11 into hdfs://xx.xx.xx.xx:8020/tresults/model.ckpt.

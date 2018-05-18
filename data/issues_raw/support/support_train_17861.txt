@@ -1,0 +1,45 @@
+RNN no learning when operation as node as opposed to fed as calculated values
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS Sierra 10.12.6
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.4.0-19-ga52c8d9 1.4.1
+Python version: 3.6.3
+Bazel version (if compiling from source): na
+GCC/Compiler version (if compiling from source): na
+CUDA/cuDNN version: na
+GPU model and memory: na
+Exact command to reproduce:
+
+Describe the problem
+I have a RNN with variable sequence lengths. To get the last non-zero output i.e. the relevant output for each sample I have a function last.relevant() (see below). I define a node for this operation: rel_output = self.last_relevant(outputs, seq_lengths). The odd thing is, I have to evaluate this node, save the results of it in a variable and feed it to the next operation which has a placeholder for the results of the rel_output node. Actually, I would expect the exactly same behaviour when I use the rel_output node to define a new node. But when I do, the training gets stuck after the second iteration and all gradients go to zero.
+This is really hard to track as no exceptions are raised, just the training getting stuck. I spent a couple of hours finding that bug.
+Source code / logs
+def last_relevant(self, output, seq_length):
+    # the RNN returns outputs for every input unit, but we are just
+    # interested in the last one that is not zero
+    # author: Danijar Hafner
+    # (https://danijar.com/variable-sequence-lengths-in-tensorflow/)
+    batch_size = tf.shape(output)[0]
+    max_length = tf.shape(output)[1]
+    out_size = int(output.get_shape()[2])
+    index = tf.range(0, batch_size) * max_length + (seq_length - 1)
+    flat = tf.reshape(output, [-1, out_size])
+    relevant = tf.gather(flat, index)
+    return relevant
+
+Training working fine
+    rel_output = self.last_relevant(outputs, seq_lengths)
+    last_nonzero_output = tf.placeholder("float", [n_samples, self.n_hidden])
+    pred = tf.nn.softmax(tf.tanh(tf.matmul(last_nonzero_output, self.weights['out']) + self.biases['out']))
+
+    ro = session.run(rel_output, feed_dict={x: data})
+    _ = session.run([optimizer], feed_dict={last_nonzero_output: ro, y: labels_oh})
+
+Training getting stuck
+    rel_output = self.last_relevant(outputs, seq_lengths)        
+    pred = tf.nn.softmax(tf.tanh(tf.matmul(rel_output, self.weights['out']) + self.biases['out']))
+
+   _ = session.run([optimizer], feed_dict={x: data, y: labels_oh})

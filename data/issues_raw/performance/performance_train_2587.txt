@@ -1,0 +1,28 @@
+session_ops should not place Placeholder(<string>) onto GPU
+
+TLDR; session ops should be changed to always place string handle Placeholder on CPU. Currently it places it on the same device as corresponding GetSessionTensor op, which fails when data lives on GPU.
+Session ops like get_session_tensor consist of string Placeholder and GetSessionTensor ops. They are created with tf.device(None), and then moved to the same device as the input handle. If input_handle represents tensor on GPU, it will try to move both Placeholder and GetSessionTensor on the GPU.
+However, since there's no implementation of string Placeholder on GPU, this fails with Could not satisfy explicit device specification. Since Placeholder is meant for reading string through feed_dict, the data comes from CPU originally, and there's no performance benefit in using GPU implementation of string placeholder, so it should be pinned to CPU.
+Test below fails with InvalidArgumentError: Cannot assign a device to node 'Placeholder_1': Could not satisfy explicit device specification '/job:localhost/replica:0/task:0/device:GPU:0' because no supported kernel for GPU devices is available.
+import tensorflow as tf
+
+class HandleTest(tf.test.TestCase):
+
+  def testHandle(self):
+    config = tf.ConfigProto(log_device_placement=True)
+    with self.test_session(config=config) as sess:
+      dtype=tf.float32
+      with tf.device("/gpu:0"):
+        a = tf.constant(1, dtype)
+
+      a_handle = sess.run(tf.get_session_handle(a))
+      b_holder, b_tensor = tf.get_session_tensor(dtype)
+      print(sess.run(b_tensor, feed_dict={b_holder:
+                                          a_handle.handle}))
+
+
+if __name__ == "__main__":
+  tf.test.main()
+
+
+@yuanbyu

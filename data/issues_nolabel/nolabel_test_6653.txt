@@ -1,0 +1,66 @@
+Initialize variable failure when importing graph_def
+
+In r0.12, I'm trying to write a graph_def at local and import it in another server. But when I session.run(a) after session.run(global_variables_initializer()), it raises a FailedPreconditionError: Attempting to use uninitialized value a .
+Write graph
+import tensorflow as tf
+
+a = tf.Variable(1, name='a', dtype=tf.int32)
+b = tf.Variable(2, name='b', dtype=tf.int32)
+c = a + b
+d = tf.Variable(c, name='d', dtype=tf.int32)
+sess = tf.Session()
+tf.train.write_graph(sess.graph, /tmp/PJT', 'test.pb', as_text=False)
+Import graph
+import tensorflow as tf
+from tensorflow.core.framework import graph_pb2
+
+graph_pb = '/home/mind/PJT/test.pb'
+graph_def = graph_pb2.GraphDef()
+
+with open(graph_pb, 'rb') as f:
+    graph_def.ParseFromString(f.read())
+
+tf.import_graph_def(graph_def, name='')
+sess = tf.Session()
+a = sess.graph.get_tensor_by_name('a:0')
+sess.run(tf.global_variables_initializer())
+sess.run(a)
+Error log
+FailedPreconditionErrorTraceback (most recent call last)
+<ipython-input-43-574ff7291e3a> in <module>()
+      2 a = sess.graph.get_tensor_by_name('a:0')
+      3 sess.run(tf.global_variables_initializer())
+----> 4 sess.run(a)
+
+/home/mind/anaconda2/envs/tf_0.12/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    764     try:
+    765       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 766                          run_metadata_ptr)
+    767       if run_metadata:
+    768         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/home/mind/anaconda2/envs/tf_0.12/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    962     if final_fetches or final_targets:
+    963       results = self._do_run(handle, final_targets, final_fetches,
+--> 964                              feed_dict_string, options, run_metadata)
+    965     else:
+    966       results = []
+
+/home/mind/anaconda2/envs/tf_0.12/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+   1012     if handle is None:
+   1013       return self._do_call(_run_fn, self._session, feed_dict, fetch_list,
+-> 1014                            target_list, options, run_metadata)
+   1015     else:
+   1016       return self._do_call(_prun_fn, self._session, handle, feed_dict,
+
+/home/mind/anaconda2/envs/tf_0.12/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _do_call(self, fn, *args)
+   1032         except KeyError:
+   1033           pass
+-> 1034       raise type(e)(node_def, op, message)
+   1035 
+   1036   def _extend_graph(self):
+
+FailedPreconditionError: Attempting to use uninitialized value a
+	 [[Node: _send_a_0 = _Send[T=DT_INT32, client_terminated=true, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=784291433964173963, tensor_name="a:0", _device="/job:localhost/replica:0/task:0/cpu:0"](a)]]
+
+@mrry Could you have a look?

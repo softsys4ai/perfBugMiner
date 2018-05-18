@@ -1,0 +1,135 @@
+Eager: Incompatible rnn model shapes inferred when using more than one CudnnGRU/LSTM
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Win10
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below):1.5.0dev20171230
+Python version: 3.6
+
+Describe the problem
+When I use more than one CudnnGRU in eager, I got an error:
+---------------------------------------------------------------------------
+InvalidArgumentError                      Traceback (most recent call last)
+<ipython-input-1-f618cd483215> in <module>()
+     26 with tf.device(device):
+     27     images = tf.constant(toy_data)
+---> 28     logits = net(images)
+
+~\Anaconda3\lib\site-packages\tensorflow\python\layers\base.py in __call__(self, inputs, *args, **kwargs)
+    651 
+    652         if not in_deferred_mode:
+--> 653           outputs = self.call(inputs, *args, **kwargs)
+    654           if outputs is None:
+    655             raise ValueError('A layer\'s `call` method should return a Tensor '
+
+<ipython-input-1-f618cd483215> in call(self, x)
+     17         x = tf.transpose(x, [1, 0, 2])
+     18         x, s = self.gru1(x)
+---> 19         x, s = self.gru2(x)
+     20         x = tf.transpose(x, [1, 0, 2])
+     21         x = self.fc(x)
+
+~\Anaconda3\lib\site-packages\tensorflow\python\layers\base.py in __call__(self, inputs, *args, **kwargs)
+    651 
+    652         if not in_deferred_mode:
+--> 653           outputs = self.call(inputs, *args, **kwargs)
+    654           if outputs is None:
+    655             raise ValueError('A layer\'s `call` method should return a Tensor '
+
+~\Anaconda3\lib\site-packages\tensorflow\contrib\cudnn_rnn\python\layers\cudnn_rnn.py in call(self, inputs, initial_state, training)
+    400       c = array_ops.constant([], dtype=dtype)
+    401     outputs, (output_h, output_c) = self._forward(inputs, h, c, self.kernel,
+--> 402                                                   training)
+    403     if self._rnn_mode == CUDNN_LSTM:
+    404       return outputs, (output_h, output_c)
+
+~\Anaconda3\lib\site-packages\tensorflow\contrib\cudnn_rnn\python\layers\cudnn_rnn.py in _forward(self, inputs, h, c, opaque_params, training)
+    475         direction=self._direction,
+    476         dropout=self._dropout,
+--> 477         seed=self._seed)
+    478     return output, (output_h, output_c)
+    479 
+
+~\Anaconda3\lib\site-packages\tensorflow\contrib\cudnn_rnn\python\ops\cudnn_rnn_ops.py in _cudnn_rnn(inputs, input_h, input_c, params, is_training, rnn_mode, input_mode, direction, dropout, seed, name)
+    858       seed=seed,
+    859       seed2=seed2,
+--> 860       name=name)
+    861   return (outputs, output_h, output_c)
+    862 
+
+~\Anaconda3\lib\site-packages\tensorflow\contrib\cudnn_rnn\ops\gen_cudnn_rnn_ops.py in cudnn_rnn(input, input_h, input_c, params, rnn_mode, input_mode, direction, dropout, seed, seed2, is_training, name)
+    120               "seed2", seed2, "is_training", is_training)
+    121     _result = _execute.execute(b"CudnnRNN", 4, inputs=_inputs_flat,
+--> 122                                attrs=_attrs, ctx=_ctx, name=name)
+    123   _execute.record_gradient(
+    124       "CudnnRNN", _inputs_flat, _attrs, _result, name)
+
+~\Anaconda3\lib\site-packages\tensorflow\python\eager\execute.py in quick_execute(op_name, num_outputs, inputs, attrs, ctx, name)
+     64     else:
+     65       message = e.message
+---> 66     six.raise_from(core._status_to_exception(e.code, message), None)
+     67   # pylint: enable=protected-access
+     68   return tensors
+
+~\Anaconda3\lib\site-packages\six.py in raise_from(value, from_value)
+
+InvalidArgumentError: Incompatible rnn model shapes inferred: expecting [num_layers, input_size, num_units, dir_count]: [1, 28, 100, 1], getting [num_layers, input_size, num_units, dir_count]: [1, 100, 100, 1]. [Op:CudnnRNN]
+If I use same network in graph mode, there is no problem.
+reproduce error code:
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+import numpy as np
+config = tf.ConfigProto()
+config.gpu_options.allow_growth=True
+tfe.enable_eager_execution(config=config)
+class CudnnCrashNet(tfe.Network):
+    def __init__(self, name):
+        super(CudnnCrashNet, self).__init__(name)
+        self.gru1 = tf.contrib.cudnn_rnn.CudnnGRU(1, 100)
+        self.track_layer(self.gru1)
+        self.gru2 = tf.contrib.cudnn_rnn.CudnnGRU(1, 100)
+        self.track_layer(self.gru2)
+        self.fc = self.track_layer(tf.layers.Dense(10))
+    def call(self, x):
+        x = tf.reshape(x, [-1, 28, 28])
+        x = tf.transpose(x, [1, 0, 2])
+        x, s = self.gru1(x)
+        x, s = self.gru2(x)
+        x = tf.transpose(x, [1, 0, 2])
+        x = self.fc(x)
+        return x
+toy_data = np.ones((100, 784)).astype(np.float32)
+device = "gpu:0" if tfe.num_gpus() else "cpu:0"
+net = CudnnCrashNet('net')
+with tf.device(device):
+    images = tf.constant(toy_data)
+    logits = net(images)
+normal graph-mode code:
+import tensorflow as tf
+import numpy as np
+class CudnnNormalNet(tf.layers.Layer):
+    def __init__(self, name):
+        super(CudnnNormalNet, self).__init__(name)
+        self.gru1 = tf.contrib.cudnn_rnn.CudnnGRU(1, 100)
+        self.gru2 = tf.contrib.cudnn_rnn.CudnnGRU(1, 100)
+        self.fc = tf.layers.Dense(10)
+    def call(self, x):
+        x = tf.reshape(x, [-1, 28, 28])
+        x = tf.transpose(x, [1, 0, 2])
+        x, s = self.gru1(x)
+        x, s = self.gru2(x)
+        x = tf.transpose(x, [1, 0, 2])
+        x = self.fc(x)
+        return x
+config = tf.ConfigProto()
+config.gpu_options.allow_growth=True
+toy_data = np.ones((100, 784)).astype(np.float32)
+with tf.Graph().as_default():
+    net = CudnnNormalNet('net')
+    x_p = tf.placeholder(tf.float32, [None, 784])
+    logits = net(x_p)
+    with tf.Session(config=config) as sess:
+        sess.run(tf.global_variables_initializer())
+        sess.run(logits, feed_dict={x_p: toy_data})

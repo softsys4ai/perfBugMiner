@@ -1,0 +1,92 @@
+'InputFnOps' object has no attribute 'receiver_tensors'
+
+System information
+==TensorFlow installed from (source or binary)==
+Source
+== Python version ==
+Python 2.7.13
+== cat /etc/issue ==
+Linux orion 4.9.0-3-amd64 #1 SMP Debian 4.9.30-2+deb9u5 (2017-09-19) x86_64 GNU/Linux
+VERSION_ID="9"
+VERSION="9 (stretch)"
+== are we in docker ==
+No
+== compiler ==
+c++ (Debian 6.3.0-18) 6.3.0 20170516
+Copyright (C) 2016 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+== uname -a ==
+Linux orion 4.9.0-3-amd64 #1 SMP Debian 4.9.30-2+deb9u5 (2017-09-19) x86_64 GNU/Linux
+== check pips ==
+numpy (1.12.1)
+protobuf (3.5.1)
+tensorflow (1.3.0)
+tensorflow-tensorboard (0.1.8)
+tensorflow-transform (0.3.1)
+== check for virtualenv ==
+True
+== tensorflow import ==
+tf.VERSION = 1.3.0
+tf.GIT_VERSION = v1.3.0-rc2-20-g0787eee
+tf.COMPILER_VERSION = v1.3.0-rc2-20-g0787eee
+Sanity check: array([1], dtype=int32)
+== env ==
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+Describe the problem
+I ran into some incompatibility issues running tf.estimator.DNNClassifier with tf.contrib.learn.InputFnOps and tf.contrib.learn.Experiment.
+There has been a separate solved issue:
+I have tried the bundle version, but it doesn't work for me:
+tensorflow==1.3
+tensorflow_transform==0.3.1
+six==1.10.0
+However, if I switch to tf.contrib.learn.DNNClassifier, the issue go away.
+It is also suggested to use tf.estimator.DNNClassifier rather than tf.contrib.learn.DNNClassifier.  I would like to get tf.estimator.DNNClassifier work.
+Source code / logs
+def build_estimator(config):
+    m = tf.estimator.DNNClassifier(
+   # m = tf.contrib.learn.DNNClassifier(
+    					config=config,
+    					feature_columns=deep_columns,
+                        hidden_units=[100, 100, 100],
+                        n_classes=2,
+                        optimizer=tf.train.GradientDescentOptimizer(learning_rate=0.01)
+                        )
+    return m
+
+def json_serving_input_fn():
+	"""Build the serving inputs."""
+	inputs = {}
+	for feat in INPUT_COLUMNS:
+		inputs[feat.name] = tf.placeholder(shape=[None], dtype=feat.dtype)
+
+	features = {
+	  key: tf.expand_dims(tensor, -1)
+	  for key, tensor in inputs.iteritems()
+	}
+	return tf.contrib.learn.InputFnOps(features, None, inputs)
+
+def _experiment_fn(run_config, hparams):
+    # num_epochs can control duration if train_steps isn't
+    # passed to Experiment
+    train_input = lambda: model.generate_input_fn(
+        hparams.train_files,
+        num_epochs=hparams.num_epochs,
+        batch_size=hparams.train_batch_size,
+    )
+    # Don't shuffle evaluation data
+    eval_input = lambda: model.generate_input_fn(
+        hparams.eval_files,
+        batch_size=hparams.eval_batch_size,
+        shuffle=False
+    )
+    return tf.contrib.learn.Experiment(
+        model.build_estimator(
+            config=run_config
+        )
+
+Error message:
+local/lib/python2.7/site-packages/tensorflow/python/estimator/estimator.py", line 440, in export_savedmodel
+serving_input_receiver.receiver_tensors,
+AttributeError: 'InputFnOps' object has no attribute 'receiver_tensors'

@@ -1,0 +1,27 @@
+Build error under Python 3: error: void function 'InitIfNeeded' should not return a value
+
+Fresh clone with up to date bazel and swig from homebrew.
+tensorflow/python/lib/core/py_func.cc:47:5: error: void function 'InitIfNeeded' should not return a value [-Wreturn-type]
+    import_array();
+    ^~~~~~~~~~~~~~
+third_party/py/numpy/numpy_include/numpy/__multiarray_api.h:1532:144: note: expanded from macro 'import_array'
+#define import_array() {if (_import_array() < 0) {PyErr_Print(); PyErr_SetString(PyExc_ImportError, "numpy.core.multiarray failed to import"); return NUMPY_IMPORT_ARRAY_RETVAL; } }
+
+The following seems to fix the build issue:
+diff --git a/tensorflow/python/lib/core/py_func.cc b/tensorflow/python/lib/core/py_func.cc
+index 5da997e..8f9221b 100644
+--- a/tensorflow/python/lib/core/py_func.cc
++++ b/tensorflow/python/lib/core/py_func.cc
+@@ -39,7 +39,7 @@ PyObject* GetPyTrampoline() {
+ }
+
+ // Module initialization (mainly import numpy) if needed.
+-void InitIfNeeded() {
++int InitIfNeeded() {
+   mutex_lock l(mu);
+   if (!initialized) {
+     PyGILState_STATE py_threadstate;
+but:
+
+I am not sure this is the correct fix: should we check for NUMPY_IMPORT_ARRAY_RETVAL instead?
+Why does this break now? Was it just a warning previously?

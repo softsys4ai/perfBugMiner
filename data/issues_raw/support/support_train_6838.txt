@@ -1,0 +1,77 @@
+Saver fails to restore on GCloud
+
+You can demonstrate this with the distributed MNIST example code: https://cloud.google.com/ml/docs/quickstarts/training#train_on_the_cloud_distributed
+Running it on gcloud produces:
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/usr/lib/python2.7/runpy.py", line 162, in _run_module_as_main
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    "__main__", fname, loader, pkg_name)
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/usr/lib/python2.7/runpy.py", line 72, in _run_code
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    exec code in run_globals
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/root/.local/lib/python2.7/site-packages/trainer/task.py", line 537, in <module>
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    tf.app.run()
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 43, in run
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    sys.exit(main(sys.argv[:1] + flags_passthrough))
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/root/.local/lib/python2.7/site-packages/trainer/task.py", line 307, in main
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    run(model, argv)
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/root/.local/lib/python2.7/site-packages/trainer/task.py", line 431, in run
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    dispatch(args, model, cluster, task)
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/root/.local/lib/python2.7/site-packages/trainer/task.py", line 472, in dispatch
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    Trainer(args, model, cluster, task).run_training()
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/root/.local/lib/python2.7/site-packages/trainer/task.py", line 243, in run_training
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    self.eval(session)
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/root/.local/lib/python2.7/site-packages/trainer/task.py", line 284, in eval
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    self.model.format_metric_values(self.train_evaluator.evaluate()),
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/root/.local/lib/python2.7/site-packages/trainer/task.py", line 75, in evaluate
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    self.sv.saver.restore(session, last_checkpoint)
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 1388, in restore
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    {self.saver_def.filename_tensor_name: save_path})
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 766, in run
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    run_metadata_ptr)
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 964, in _run
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    feed_dict_string, options, run_metadata)
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    target_list, options, run_metadata)
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		    raise type(e)(node_def, op, message)
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		InternalError: Unable to get element from the feed as bytes.
+INFO	2017-01-13 10:56:52 -0500	worker-replica-0		Train [worker/0], step 3195 (6.213 sec) 485.6 global steps/s, 170.5 local steps/s
+ERROR	2017-01-13 10:56:52 -0500	master-replica-0		Module raised an exception Command '['python', '-m', u'trainer.task', u'--train_data_paths=gs://cloud-ml-data/mnist/train.tfr.gz', u'--eval_data_paths=gs://cloud-ml-data/mnist/eval.tfr/gz', u'--output_path=<output path>']' returned non-zero exit status 1.```
+
+A fairly minimal test case follows:
+
+```#!/usr/bin/python
+import argparse
+import json
+import os
+import tensorflow as tf
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--output_path', type=str, default='/tmp/matrix_multiply')
+flags = parser.parse_args()
+
+matrix1 = tf.placeholder_with_default([[3., 3.]], shape=(1, 2))
+matrix2 = tf.placeholder_with_default([[2.], [2.]], shape=(2, 1))
+product = tf.Variable(tf.matmul(matrix1, matrix2))
+
+inputs = {'matrix1': matrix1.name, 'matrix2': matrix2.name}
+tf.add_to_collection('inputs', json.dumps(inputs))
+
+outputs = {'product': product.name}
+tf.add_to_collection('outputs', json.dumps(outputs))
+
+saver = tf.train.Saver()
+
+with tf.Session() as sess:
+	sess.run(tf.global_variables_initializer())
+	result = sess.run(product)
+	if not os.path.isdir(flags.output_path):
+		os.makedirs(flags.output_path)
+	saver.save(sess, os.path.join(flags.output_path, "export"))
+	print result
+
+with tf.Session() as sess:
+	checkpoint = tf.train.latest_checkpoint(flags.output_path)
+	print checkpoint
+	saver.restore(sess, checkpoint)
+
+	for v in tf.global_variables():
+		print(v.name, v.eval())```

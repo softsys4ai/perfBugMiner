@@ -1,0 +1,56 @@
+Redundant Computation of tf.cond()
+
+System information (Runs all right)
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS: Linux Ubuntu 14.04.01
+**TensorFlow installed from pip:
+TensorFlow version (use command below):'v1.0.0-65-g4763edf-dirty', '1.0.1
+**CUDA/cuDNN version: CUDA8.0/cuDNN5.1
+GPU model and memory: GTX1060 6GB
+
+Describe the problem
+tf.cond(pred, fn1, fn2) have redundant computation when fn1 and fn2 have dependencies on other tensors. See the example code, you'll know.
+Source code / logs
+import tensorflow as tf
+def tf_fun1(a):
+    def func1(a):
+        print 'a1 %s\n'% a
+        return a
+    r = tf.py_func(func1, [a], tf.int32)
+    return r
+
+def tf_fun2(a):
+    def func2(a):
+        print 'a2 %s\n'% a
+        return a
+    r = tf.py_func(func2, [a], tf.int32)
+    return r
+
+def test():
+    is_training = tf.placeholder(tf.bool)
+    tensor_a = tf_fun1(1)
+    tensor_b = tf_fun2(2)
+    cond_tensor = tf.cond(is_training, lambda: tensor_a, lambda: tensor_b)
+    cond_func = tf.cond(is_training, lambda: tf_fun1(1),lambda: tf_fun2(2))
+    cond_func_with_tensor = tf.cond(is_training, lambda: tf_fun1(tensor_a),lambda: tf_fun2(tensor_b))
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        print 'run cond_tensor'
+        value = sess.run(cond_tensor,feed_dict={is_training:True})
+        print 'run cond_func'
+        value = sess.run(cond_func,feed_dict={is_training:True})
+        print 'run cond_func_with_tensor'
+        value = sess.run(cond_func_with_tensor,feed_dict={is_training:True})
+
+
+The result of running:
+run cond_tensor
+a2 2
+a1 1
+run cond_func
+a1 1
+run cond_func_with_tensor
+a2 2
+a1 1
+a1 1

@@ -1,0 +1,217 @@
+`control_dependencies` unexpected behavior with tensorflow>=1.3
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 14.04
+TensorFlow installed from (source or binary): from binary
+TensorFlow version (use command below): 1.1.0, 1.3.0, 1.5.0
+Python version:  2.7.6
+Bazel version (if compiling from source): None
+GCC/Compiler version (if compiling from source):
+gcc version 4.9.4 (Ubuntu 4.9.4-2ubuntu1~14.04.1) for compiling custom ops.
+CUDA/cuDNN version: do not matter
+GPU model and memory: do not matter
+Exact command to reproduce: As following
+
+Describe the problem
+For the code below: (the complete sample follows later)
+first_op = custom_ops_module.custom_first(features_v)
+with tf.control_dependencies([first_op]):
+    second_op = tf.reshape(custom_ops_module.custom_second(), [480, 220, 220, 1])
+
+for i in range(5):
+    sess.run(second_op)
+According to the doc of control dependencies, second_op will only run after first_op has executed.
+However, this is not true for tensorflow 1.3+ when the ops are customized cpp codes.
+
+tensorflow 1.1
+The code runs exactly what I want: a first_op-second_op loop.
+tensorflow 1.3
+second_op runs first, followed the first_op-second_op loop.
+tensorflow 1.5
+second_op runs first and only once globally, then first_op runs again and again...
+
+Source code / logs
+To reproduce, a customized op is need (C++ source and compile script attached). The Python part loads the compiled custom_ops.so and behaves as described above, for TensorFlow 1.1, 1.3 and 1.5, each with log provided.
+#!/usr/bin/env python2
+# -*- coding: utf-8 -*-
+
+from __future__ import print_function
+
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
+import tensorflow as tf
+custom_ops_module = tf.load_op_library('./custom_ops.so')
+
+def run():
+    features_v = tf.Variable(
+            tf.zeros(shape=[480, 256]), 
+            name='features_v',
+            trainable=False,
+            collections=[tf.GraphKeys.LOCAL_VARIABLES])
+    first_op = custom_ops_module.custom_first(features_v)
+    with tf.control_dependencies([first_op]):
+        second_op = tf.reshape(custom_ops_module.custom_second(), [480, 220, 220, 1])
+
+    sess_config = tf.ConfigProto()
+    sess_config.allow_soft_placement = True 
+
+    sess = tf.Session(config=sess_config)
+
+    sess.run(tf.global_variables_initializer())
+    sess.run(tf.local_variables_initializer())
+    print('init vars done')
+
+    print('start loop')
+    for i in range(5):
+        print('loop: ', i)
+        sess.run(second_op)
+
+if __name__ == '__main__':
+    print("tensorflow", tf.__version__)
+    run()
+
+The custom ops
+#include "tensorflow/core/framework/op.h"
+#include "tensorflow/core/framework/shape_inference.h"
+#include "tensorflow/core/framework/op_kernel.h"
+
+#include <glog/logging.h>
+
+///////////////////////////////////////// NameSpace ////////////////////////////////////////////
+
+using tensorflow::DEVICE_CPU;
+using tensorflow::Tensor;
+
+///////////////////////////////////////// CustomFirstOp ////////////////////////////////////////
+REGISTER_OP("CustomFirst")
+    .Input("features: float32")
+    ;
+class CustomFirstOp : public tensorflow::OpKernel {
+ public:
+  explicit CustomFirstOp(tensorflow::OpKernelConstruction* context) : tensorflow::OpKernel(context) {}
+
+  void Compute(tensorflow::OpKernelContext* context) override {
+      const Tensor& input_tensor = context->input(0);
+      LOG(INFO) << "FirstOp enter with " << input_tensor.DebugString(); 
+      LOG(INFO) << "FirstOp leave";
+  }
+};
+REGISTER_KERNEL_BUILDER(Name("CustomFirst").Device(DEVICE_CPU), CustomFirstOp);
+///////////////////////////////////////// CustomSecondOp ///////////////////////////////////////
+REGISTER_OP("CustomSecond")
+    .Output("images: uint8")
+    ;
+class CustomSecondOp : public tensorflow::OpKernel {
+ public:
+  explicit CustomSecondOp(tensorflow::OpKernelConstruction* context) : tensorflow::OpKernel(context) {}
+
+  void Compute(tensorflow::OpKernelContext* context) override {
+      LOG(INFO) << "SecondOp enter";
+      tensorflow::Tensor* output_tensor = nullptr;
+      OP_REQUIRES_OK(context, context->allocate_output(0, tensorflow::TensorShape({480, 220, 220, 1}), &output_tensor));
+      auto output_tensor_buffer = output_tensor->shaped<tensorflow::uint8, 4>({480, 220, 220, 1});
+      LOG(INFO) << "SecondOp leave with " << output_tensor->DebugString();
+  }
+};
+REGISTER_KERNEL_BUILDER(Name("CustomSecond").Device(DEVICE_CPU), CustomSecondOp);
+//////////////////////////////////////// Op End //////////////////////////////////////////////////////
+
+Compile scripts for tensorflow 1.1 and 1.3
+#!/bin/bash
+TF_INC=( $(python -c 'import tensorflow as tf; print(tf.sysconfig.get_include())') )
+g++ -std=c++11 -shared custom_ops.cc -o custom_ops.so -fPIC -I $TF_INC -lglog
+
+Compile scripts for tensorflow 1.5
+#!/bin/bash
+TF_CFLAGS=( $(python -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_compile_flags()))') )
+TF_LFLAGS=( $(python -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_link_flags()))') )
+g++ -std=c++11 -shared custom_ops.cc -o custom_ops.so -fPIC ${TF_CFLAGS[@]} ${TF_LFLAGS[@]} -lglog
+
+Log with tensorflow 1.1
+tensorflow 1.1.0
+init vars done
+start loop
+loop:  0
+WARNING: Logging before InitGoogleLogging() is written to STDERR
+I0210 00:04:19.464854 31270 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:04:19.464900 31270 custom_ops.cc:23] FirstOp leave
+I0210 00:04:19.464946 31268 custom_ops.cc:36] SecondOp enter
+I0210 00:04:19.486101 31268 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+loop:  1
+I0210 00:04:19.507359 31266 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:04:19.507411 31266 custom_ops.cc:23] FirstOp leave
+I0210 00:04:19.507489 31269 custom_ops.cc:36] SecondOp enter
+I0210 00:04:19.507637 31269 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+loop:  2
+I0210 00:04:19.547608 31269 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:04:19.547644 31269 custom_ops.cc:23] FirstOp leave
+I0210 00:04:19.547683 31268 custom_ops.cc:36] SecondOp enter
+I0210 00:04:19.547745 31268 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+loop:  3
+I0210 00:04:19.579887 31267 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:04:19.579923 31267 custom_ops.cc:23] FirstOp leave
+I0210 00:04:19.579952 31270 custom_ops.cc:36] SecondOp enter
+I0210 00:04:19.580021 31270 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+loop:  4
+I0210 00:04:19.874367 31270 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:04:19.874406 31270 custom_ops.cc:23] FirstOp leave
+I0210 00:04:19.874454 31267 custom_ops.cc:36] SecondOp enter
+I0210 00:04:19.874563 31267 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+
+Log with tensorflow 1.3
+tensorflow 1.3.0
+init vars done
+start loop
+loop:  0
+WARNING: Logging before InitGoogleLogging() is written to STDERR
+I0210 00:03:34.893167 28884 custom_ops.cc:36] SecondOp enter
+I0210 00:03:34.893406 28884 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+I0210 00:03:35.004695 29283 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:03:35.004729 29283 custom_ops.cc:23] FirstOp leave
+I0210 00:03:35.004763 29283 custom_ops.cc:36] SecondOp enter
+I0210 00:03:35.025548 29283 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+loop:  1
+I0210 00:03:35.031692 29281 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:03:35.031735 29281 custom_ops.cc:23] FirstOp leave
+I0210 00:03:35.031818 29280 custom_ops.cc:36] SecondOp enter
+I0210 00:03:35.051908 29280 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+loop:  2
+I0210 00:03:35.056428 29281 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:03:35.056473 29281 custom_ops.cc:23] FirstOp leave
+I0210 00:03:35.056516 29280 custom_ops.cc:36] SecondOp enter
+I0210 00:03:35.056560 29280 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+loop:  3
+I0210 00:03:35.061014 29281 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:03:35.061050 29281 custom_ops.cc:23] FirstOp leave
+I0210 00:03:35.061085 29283 custom_ops.cc:36] SecondOp enter
+I0210 00:03:35.061139 29283 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+loop:  4
+I0210 00:03:35.065387 29282 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:03:35.065429 29282 custom_ops.cc:23] FirstOp leave
+I0210 00:03:35.065500 29281 custom_ops.cc:36] SecondOp enter
+I0210 00:03:35.065654 29281 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+
+Log with tensorflow 1.5
+tensorflow 1.5.0
+init vars done
+start loop
+loop:  0
+WARNING: Logging before InitGoogleLogging() is written to STDERR
+I0210 00:39:03.166337 27046 custom_ops.cc:36] SecondOp enter
+I0210 00:39:03.166424 27046 custom_ops.cc:40] SecondOp leave with Tensor<type: uint8 shape: [480,220,220,1] values: [[[0][0][0]]]...>
+I0210 00:39:03.868782 27965 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:39:03.868820 27965 custom_ops.cc:23] FirstOp leave
+loop:  1
+I0210 00:39:03.879077 27964 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:39:03.879094 27964 custom_ops.cc:23] FirstOp leave
+loop:  2
+I0210 00:39:03.893448 27962 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:39:03.893474 27962 custom_ops.cc:23] FirstOp leave
+loop:  3
+I0210 00:39:03.906409 27963 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:39:03.906440 27963 custom_ops.cc:23] FirstOp leave
+loop:  4
+I0210 00:39:03.917815 27963 custom_ops.cc:22] FirstOp enter with Tensor<type: float shape: [480,256] values: [0 0 0]...>
+I0210 00:39:03.917836 27963 custom_ops.cc:23] FirstOp leave

@@ -1,0 +1,59 @@
+GPU Allocation and Results Unexpected for Simple Test codes
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary):
+TensorFlow version (use command below): 1.3.0
+Python version: 3.6
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 8.0/ 6.0
+GPU model and memory:two of Nvidia Quadro M4000
+Exact command to reproduce:
+
+Describe the problem
+I have two Nvidia Quadro M4000 GPUs; each has a 8G Memory. My regular memory has 64G space.
+I tested a simple GPU memory allocation for tensorflow and found that the allocation seems larger than the GPU memory. My test codes are as below:
+GPU_MEMORY_BYTES = 8 * 2**30 # Assuming your GPU has 8GB of memory, adjust accordingly
+
+# Number of float32 elements (4 bytes) that consume 7/8 of GPU memory
+NUM_ELEMS = int((7 * GPU_MEMORY_BYTES / 8) / 4)
+
+def Test1():
+  with tf.device("/gpu:0"):
+	t = tf.ones([2, NUM_ELEMS])
+  s = tf.reduce_sum(t)
+  config = tf.ConfigProto(gpu_options=tf.GPUOptions(visible_device_list='0'),
+						  allow_soft_placement=False)
+  with tf.Session(config=config) as sess:
+	print(sess.run(s)) # This should fail since it consumes more memory than exists in the GPU
+
+def Test2():
+  with tf.device("/gpu:0"):
+	t0 = tf.ones([NUM_ELEMS])  # Tensor that consumes 80% of GPU0's memory
+	s0 = tf.reduce_sum(t0)
+  with tf.device("/gpu:1"):
+	t1 = tf.ones([NUM_ELEMS])  # Tensor that consumes 80% of GPU1's memory
+	s1 = tf.reduce_sum(t1)
+  s = tf.add(s0, s1)
+  config = tf.ConfigProto(gpu_options=tf.GPUOptions(visible_device_list='0,1'),
+						  allow_soft_placement=False)
+  with tf.Session(config=config) as sess:
+	print(sess.run(s))
+
+I expect the Test2() should work well but Test1() should fail as one GPU only has 8G memory. However, both test functions succeeded but the results are incorrect!
+NUM_ELEMS is about 1.879*e+9, and I expected that it should be half of the output of Test2() (Test1() should fail).
+However, I got Test1's output as 1.07374e+09, and Test2's output as 2.14748e+09.
+It seems that Both Test1 and Test2 clip the number of elements to 2^30! As NUM_ELEMS is int32, even clipping should be clipped to 2^31 but not 2^30.
+In Test1(), if I change the first dimension in (tf.ones([2, NUM_ELEMS])) from 2 to 15, the outputs are always 1.07374e+09; if the first dimension is no less than 16, it starts to crash showing out of GPU memory.
+My questions are:
+
+
+Why the GPU allocation did not crash for larger than 8G for single GPU?
+
+
+Why the output results are clipped to 2^30 for single GPU and 2^31 for two GPUs
+
+
+How could I get the correct outputs?

@@ -1,0 +1,77 @@
+import meta graph bug reading model with scope name changed
+
+Same issue for tf 0.10 and 0.11.rc0.
+The problem is if you read one model, change the top scope name, write a new model, then you read the new model, but still you got the old top scope name.
+How to reproduce
+
+
+create model
+python create-model.py
+import tensorflow as tf  
+
+sess = tf.InteractiveSession()  
+
+with tf.variable_scope('old'):  
+
+    w = tf.get_variable('w', shape=[1], initializer=tf.constant_initializer(1.0))  
+
+sess.run(tf.initialize_all_variables())  
+
+tf.train.Saver().save(sess, '/tmp/old.model')  
+
+
+
+read this model (using import meta graph), then rename top scope and save to one new model
+python rename-scope.py
+old_vars: [u'old/w:0']
+new_vars: [u'new/w']
+import tensorflow as tf  
+
+sess = tf.InteractiveSession()  
+
+saver = tf.train.import_meta_graph('/tmp/old.model.meta')  
+
+saver.restore(sess, '/tmp/old.model')  
+
+src_vars = [v for v in tf.all_variables() if v.name.startswith('old')]  
+
+print('old_vars:', [v.name for v in src_vars])
+
+out_vars = {v.name[:v.name.rfind(':')].replace('old', 'new', 1): v for v in src_vars}  
+
+print('new_vars:', [key for key in out_vars])  
+
+tf.train.Saver(var_list=out_vars).save(sess, '/tmp/new.model') 
+
+
+
+read new model(It is ok if you buid graph from scratch with new scope, but not ok if using import meta graph again)
+-------------------this is ok
+python read-renamed-buildgraph.py
+tf.all_variables: [u'new/w:0']
+w val: [ 1.]
+import tensorflow as tf  
+
+sess = tf.InteractiveSession()
+
+with tf.variable_scope('new'):
+    w = tf.get_variable('w', shape=[1], initializer=tf.constant_initializer(2.0))  
+
+tf.train.Saver().restore(sess, '/tmp/new.model')  
+
+print('tf.all_variables:', [v.name for v in tf.all_variables()])  
+
+print('w val:',  w.eval())
+
+---------------this is wrong
+python read-renamed-metagraph.py
+tf.all_variables: [u'old/w:0']
+ import tensorflow as tf  
+
+ sess = tf.InteractiveSession()  
+
+ saver = tf.train.import_meta_graph('/tmp/new.model.meta')
+
+ saver.restore(sess, '/tmp/new.model')
+
+ print('tf.all_variables:', [v.name for v in tf.all_variables()])

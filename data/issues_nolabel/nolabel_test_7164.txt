@@ -1,0 +1,119 @@
+contrib.batch_norm fails on float16 input
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+I have found a bunch of old issues dated from the initial implementation of float16, but nothing relevant.
+Environment info
+Operating System: FC21
+Installed version of CUDA and cuDNN: CUDA8, CuDNN 5.1
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+/cuda8_cudnn5_1/lib64/libcudadevrt.a
+/cuda8_cudnn5_1/lib64/libcudart.so -> libcudart.so.8.0
+/cuda8_cudnn5_1/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+/cuda8_cudnn5_1/lib64/libcudart.so.8.0.44
+/cuda8_cudnn5_1/lib64/libcudart_static.a
+/cuda8_cudnn5_1/lib64/libcudnn.so -> libcudnn.so.5
+/cuda8_cudnn5_1/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+/cuda8_cudnn5_1/lib64/libcudnn.so.5.1.5
+/cuda8_cudnn5_1/lib64/libcudnn_static.a
+
+If installed from binary pip package, provide:
+
+A link to the pip package you installed: today nightly build
+https://ci.tensorflow.org/view/Nightly/job/nightly-matrix-linux-gpu/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON3,label=gpu-linux/lastSuccessfulBuild/artifact/pip_test/whl/tensorflow_gpu-0.12.1-cp34-cp34m-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+>tf.__version__
+'0.12.head'
+>tf.__git_version__
+'0.12.1-2263-g4cc0d1e-dirty'
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+p16 = tf.placeholder(tf.float16, (4, 16, 16, 3))
+bn16 = tf.contrib.layers.batch_norm(p16)
+
+It fails with float32 to float16 conversion error deep inside BN op. Traceback is below.
+What other attempted solutions have you tried?
+For now working with float32. I tried to track where exactly it fails, but I couldn't. It looks like computed mean value is float32 by default although the variable itself should be inputs.dtype.base_dtype and tf.nn.moments returns float16 with corresponding input.
+Logs or other output that would be helpful
+ValueError                                Traceback (most recent call last)
+<ipython-input-5-e659548f8d6c> in <module>()
+----> 1 bn16 = tf.contrib.layers.batch_norm(p16)
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/contrib/framework/python/ops/arg_scope.py in func_with_args(*args, **kwargs)
+    175       current_args = current_scope[key_func].copy()
+    176       current_args.update(kwargs)
+--> 177     return func(*args, **current_args)
+    178   _add_op(func)
+    179   setattr(func_with_args, '_key_op', _key_op(func))
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/contrib/layers/python/layers/layers.py in batch_norm(inputs, decay, center, scale, epsilon, activation_fn, param_initializers, updates_collections, is_training, reuse, variables_collections, outputs_collections, trainable, batch_weights, fused, data_format, zero_debias_moving_mean, scope)
+    516           _scope=sc,
+    517           _reuse=reuse)
+--> 518       outputs = layer.apply(inputs, training=is_training)
+    519
+    520       # Add variables to collections.
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/python/layers/base.py in apply(self, inputs, **kwargs)
+    301       Output tensor(s).
+    302     """
+--> 303     return self.__call__(inputs, **kwargs)
+    304
+    305
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/python/layers/base.py in __call__(self, inputs, **kwargs)
+    271             self.build(input_shapes)
+    272           self._built = True
+--> 273         outputs = self.call(inputs, **kwargs)
+    274
+    275         # Apply activity regularization.
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/python/layers/normalization.py in call(self, inputs, training)
+    191       if not self.updates:
+    192         mean_update = moving_averages.assign_moving_average(
+--> 193             self.moving_mean, mean, self.momentum, zero_debias=False)
+    194         variance_update = moving_averages.assign_moving_average(
+    195             self.moving_variance, variance, self.momentum, zero_debias=False)
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/python/training/moving_averages.py in assign_moving_average(variable, value, decay, zero_debias, name)
+     70         update_delta = _zero_debias(variable, value, decay)
+     71       else:
+---> 72         update_delta = (variable - value) * decay
+     73       return state_ops.assign_sub(variable, update_delta, name=scope)
+     74
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/python/ops/variables.py in _run_op(a, *args)
+    704     def _run_op(a, *args):
+    705       # pylint: disable=protected-access
+--> 706       return getattr(ops.Tensor, operator)(a._AsTensor(), *args)
+    707     # Propagate __doc__ to wrapper
+    708     try:
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/python/ops/math_ops.py in binary_op_wrapper(x, y)
+    885     with ops.name_scope(None, op_name, [x, y]) as name:
+    886       if not isinstance(y, sparse_tensor.SparseTensor):
+--> 887         y = ops.convert_to_tensor(y, dtype=x.dtype.base_dtype, name="y")
+    888       return func(x, y, name=name)
+    889
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/python/framework/ops.py in convert_to_tensor(value, dtype, name, preferred_dtype)
+    649       name=name,
+    650       preferred_dtype=preferred_dtype,
+--> 651       as_ref=False)
+    652
+    653
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/python/framework/ops.py in internal_convert_to_tensor(value, dtype, name, as_ref, preferred_dtype)
+    714
+    715         if ret is None:
+--> 716           ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+    717
+    718         if ret is NotImplemented:
+
+/home/konstantin/.local/lib/python3.4/site-packages/tensorflow/python/framework/ops.py in _TensorTensorConversionFunction(t, dtype, name, as_ref)
+    587     raise ValueError(
+    588         "Tensor conversion requested dtype %s for Tensor with dtype %s: %r"
+--> 589         % (dtype.name, t.dtype.name, str(t)))
+    590   return t
+    591
+
+ValueError: Tensor conversion requested dtype float32 for Tensor with dtype float16: 'Tensor("BatchNorm/Reshape_1:0", shape=(3,), dtype=float16)'

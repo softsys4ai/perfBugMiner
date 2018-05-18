@@ -1,0 +1,337 @@
+process blocked in session.run
+
+when i use a process to read a frame from queue what an other process put the frame in from video stream。 but process blocked in session.run。 but the issue doesn't occurred when i used just one process。
+below is my code：
+process of handle frame
+def parse_origin_video_frame(origin_frame, session, detection_graph, category_index):
+    image_np_expanded = np.expand_dims(origin_frame, axis=0)
+    image_tensor = detection_graph.get_tensor_by_name('image_tensor:0')
+
+    # Each box represents a part of the image where a particular object was detected.
+    boxes = detection_graph.get_tensor_by_name('detection_boxes:0')
+
+    # Each score represent how level of confidence for each of the objects.
+    # Score is shown on the result image, together with the class label.
+    scores = detection_graph.get_tensor_by_name('detection_scores:0')
+    classes = detection_graph.get_tensor_by_name('detection_classes:0')
+    num_detections = detection_graph.get_tensor_by_name('num_detections:0')
+
+    # Actual detection.
+    (boxes, scores, classes, num_detections) = session.run(
+        [boxes, scores, classes, num_detections],
+        feed_dict={image_tensor: image_np_expanded})
+
+    # Visualization of the results of a detection.
+    vis_util.visualize_boxes_and_labels_on_image_array(
+        origin_frame,
+        np.squeeze(boxes),
+        np.squeeze(classes).astype(np.int32),
+        np.squeeze(scores),
+        category_index,
+        use_normalized_coordinates=True,
+        line_thickness=2)
+
+    return origin_frame, scores, classes, boxes
+
+ def run(self):
+        # Load a (frozen) Tensorflow model into memory.
+        detection_graph = tf.Graph()
+        with detection_graph.as_default():
+            od_graph_def = tf.GraphDef()
+            with tf.gfile.GFile(PathManager.get_ckpt_path(), 'rb') as fid:
+                serialized_graph = fid.read()
+                od_graph_def.ParseFromString(serialized_graph)
+                tf.import_graph_def(od_graph_def, name='')
+
+            sess = tf.Session(graph=detection_graph)
+
+        n = 0
+        t = time.time()
+        while True:
+            operation_id, frame_id, origin_frame = self.__in_queue.get()
+            # try:
+            #     operation_id, frame_id, origin_frame = self.__in_queue.get(False, 0.1)
+            # except Empty:
+            #     print 'video parser queue is empty'
+            #     time.sleep(1)
+            #     continue
+
+            n += 1
+            now = time.time()
+            if now - t > 1:
+                print "parse FPS: ", n, " time: ", now - t,
+                print " __in_queue: ", self.__in_queue.qsize(), " __detected_queue: ", self.__detected_queue.qsize()
+                t = now
+                n = 0
+
+            updated_frame, score, classes, boxes = parse_origin_video_frame(origin_frame,
+                                                                            sess,
+                                                                            detection_graph,
+                                                                            self.__category_index)
+
+process of read video capture：
+ def run(self):
+        thread.start_new_thread(self.__recv_msg_from_main,("recv_main_process", "11"))
+        # thread.start_new_thread(self.__get_out_queue,("get_out_queue", "11"))
+
+        video_capture = WebcamVideoStream(ConfigManager.get_sources(),
+                                          ConfigManager.get_width(),
+                                          ConfigManager.get_height()).start()
+        fps = FPS().start()
+        n = 0
+        t = time.time()
+        while True:
+            if self.__gate_open:
+                origin_frame = video_capture.read()
+                time.sleep(0.1)
+                n += 1
+                now = time.time()
+                if now - t > 1:
+                    print "read FPS: ", n, " time: ", now - t,
+                    print " __in_queue: ", self.__in_queue.qsize(), " output_q: ", self.__out_queue.qsize()
+                    t = now
+                    n = 0
+
+                frame_rgb = cv2.cvtColor(origin_frame, cv2.COLOR_BGR2RGB)
+                self.__in_queue.put((self.__operation_id, self.__frame_id, frame_rgb))
+                self.__frame_id += 1
+            else:
+                time.sleep(0.1)
+
+below is the stack：
+(gdb) thread apply all bt
+
+Thread 17 (Thread 0x7fa347eba700 (LWP 31711)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa348579218 in th_worker (tidptr=<optimized out>) at numexpr/module.cpp:58
+#2  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#3  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 16 (Thread 0x7fa3476b9700 (LWP 31712)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa348579218 in th_worker (tidptr=<optimized out>) at numexpr/module.cpp:58
+#2  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#3  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 15 (Thread 0x7fa346eb8700 (LWP 31713)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa348579218 in th_worker (tidptr=<optimized out>) at numexpr/module.cpp:58
+#2  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#3  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 14 (Thread 0x7fa3466b7700 (LWP 31714)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa348579218 in th_worker (tidptr=<optimized out>) at numexpr/module.cpp:58
+#2  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#3  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 13 (Thread 0x7fa32d393700 (LWP 31715)):
+#0  0x00007fa3710e5a0b in do_futex_wait.constprop.1 () from /lib64/libpthread.so.0
+#1  0x00007fa3710e5a9f in __new_sem_wait_slow.constprop.0 () from /lib64/libpthread.so.0
+#2  0x00007fa3710e5b3b in sem_wait@@GLIBC_2.2.5 () from /lib64/libpthread.so.0
+#3  0x00007fa371403856 in PyThread_acquire_lock () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#4  0x00007fa371407941 in lock_PyThread_acquire_lock () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#5  0x00007fa3713d6615 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#6  0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#7  0x00007fa3713d5482 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#8  0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#9  0x00007fa3713d5482 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#10 0x00007fa3713d6dac in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#11 0x00007fa3713d6dac in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#12 0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#13 0x00007fa371360fda in function_call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#14 0x00007fa37133c773 in PyObject_Call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#15 0x00007fa37134b50d in instancemethod_call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#16 0x00007fa37133c773 in PyObject_Call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#17 0x00007fa3713ce6d8 in PyEval_CallObjectWithKeywords () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#18 0x00007fa371407d46 in t_bootstrap () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#19 0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#20 0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 12 (Thread 0x7fa32cb92700 (LWP 31716)):
+#0  0x00007fa3710e6a9b in recv () from /lib64/libpthread.so.0
+#1  0x00007fa35afee3b6 in sock_recv_guts () from /root/anaconda2/lib/python2.7/lib-dynload/_socket.so
+#2  0x00007fa35afee5c1 in sock_recv () from /root/anaconda2/lib/python2.7/lib-dynload/_socket.so
+#3  0x00007fa3713d6615 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#4  0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#5  0x00007fa3713610c7 in function_call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#6  0x00007fa37133c773 in PyObject_Call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#7  0x00007fa3713d14d0 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#8  0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#9  0x00007fa3713d5482 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#10 0x00007fa3713d6dac in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#11 0x00007fa3713d6dac in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#12 0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#13 0x00007fa371360fda in function_call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#14 0x00007fa37133c773 in PyObject_Call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#15 0x00007fa37134b50d in instancemethod_call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#16 0x00007fa37133c773 in PyObject_Call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#17 0x00007fa3713ce6d8 in PyEval_CallObjectWithKeywords () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#18 0x00007fa371407d46 in t_bootstrap () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+---Type <return> to continue, or q <return> to quit---
+#19 0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#20 0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 11 (Thread 0x7fa327fff700 (LWP 31717)):
+#0  0x00007fa3710e670d in read () from /lib64/libpthread.so.0
+#1  0x00007fa3680e247f in conn_recv_string.isra.2 () from /root/anaconda2/lib/python2.7/lib-dynload/_multiprocessing.so
+#2  0x00007fa3680e26f0 in connection_recv_obj () from /root/anaconda2/lib/python2.7/lib-dynload/_multiprocessing.so
+#3  0x00007fa3713d6192 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#4  0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#5  0x00007fa3713d5482 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#6  0x00007fa3713d6dac in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#7  0x00007fa3713d6dac in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#8  0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#9  0x00007fa371360fda in function_call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#10 0x00007fa37133c773 in PyObject_Call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#11 0x00007fa37134b50d in instancemethod_call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#12 0x00007fa37133c773 in PyObject_Call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#13 0x00007fa3713ce6d8 in PyEval_CallObjectWithKeywords () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#14 0x00007fa371407d46 in t_bootstrap () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#15 0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#16 0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 10 (Thread 0x7fa324c14700 (LWP 31720)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa35b678a6c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib64/libstdc++.so.6
+#2  0x00007fa35bf9e727 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#3  0x00007fa35bf9f19e in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#4  0x00007fa35bf9ded2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#5  0x00007fa35b67c2b0 in ?? () from /lib64/libstdc++.so.6
+#6  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#7  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 9 (Thread 0x7fa31bfff700 (LWP 31721)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa35b678a6c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib64/libstdc++.so.6
+#2  0x00007fa35bf9e727 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#3  0x00007fa35bf9f19e in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#4  0x00007fa35bf9ded2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#5  0x00007fa35b67c2b0 in ?? () from /lib64/libstdc++.so.6
+#6  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#7  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 8 (Thread 0x7fa31b7fe700 (LWP 31722)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa35b678a6c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib64/libstdc++.so.6
+#2  0x00007fa35bf9e727 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#3  0x00007fa35bf9f19e in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#4  0x00007fa35bf9ded2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#5  0x00007fa35b67c2b0 in ?? () from /lib64/libstdc++.so.6
+#6  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#7  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 7 (Thread 0x7fa31affd700 (LWP 31723)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa35b678a6c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib64/libstdc++.so.6
+#2  0x00007fa35bf9e727 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#3  0x00007fa35bf9f19e in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+---Type <return> to continue, or q <return> to quit---
+#4  0x00007fa35bf9ded2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#5  0x00007fa35b67c2b0 in ?? () from /lib64/libstdc++.so.6
+#6  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#7  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 6 (Thread 0x7fa31a7fc700 (LWP 31724)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa35b678a6c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib64/libstdc++.so.6
+#2  0x00007fa35bf9e727 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#3  0x00007fa35bf9f19e in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#4  0x00007fa35bf9ded2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#5  0x00007fa35b67c2b0 in ?? () from /lib64/libstdc++.so.6
+#6  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#7  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 5 (Thread 0x7fa319ffb700 (LWP 31725)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa35b678a6c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib64/libstdc++.so.6
+#2  0x00007fa35bf9e727 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#3  0x00007fa35bf9f19e in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#4  0x00007fa35bf9ded2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#5  0x00007fa35b67c2b0 in ?? () from /lib64/libstdc++.so.6
+#6  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#7  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 4 (Thread 0x7fa3197fa700 (LWP 31726)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa35b678a6c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib64/libstdc++.so.6
+#2  0x00007fa35bf9e727 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#3  0x00007fa35bf9f19e in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#4  0x00007fa35bf9ded2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#5  0x00007fa35b67c2b0 in ?? () from /lib64/libstdc++.so.6
+#6  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#7  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 3 (Thread 0x7fa318ff9700 (LWP 31727)):
+#0  0x00007fa3710e3945 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fa35b678a6c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib64/libstdc++.so.6
+#2  0x00007fa35bf9e727 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#3  0x00007fa35bf9f19e in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#4  0x00007fa35bf9ded2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) ()
+   from /root/anaconda2/lib/python2.7/site-packages/tensorflow/python/../libtensorflow_framework.so
+#5  0x00007fa35b67c2b0 in ?? () from /lib64/libstdc++.so.6
+#6  0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#7  0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 2 (Thread 0x7fa3269fe700 (LWP 31731)):
+#0  0x00007fa3710e5a0b in do_futex_wait.constprop.1 () from /lib64/libpthread.so.0
+#1  0x00007fa3710e5a9f in __new_sem_wait_slow.constprop.0 () from /lib64/libpthread.so.0
+#2  0x00007fa3710e5b3b in sem_wait@@GLIBC_2.2.5 () from /lib64/libpthread.so.0
+#3  0x00007fa371403856 in PyThread_acquire_lock () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#4  0x00007fa371407941 in lock_PyThread_acquire_lock () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#5  0x00007fa3713d6615 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#6  0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#7  0x00007fa3713d5482 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#8  0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+---Type <return> to continue, or q <return> to quit---
+#9  0x00007fa3713610c7 in function_call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#10 0x00007fa37133c773 in PyObject_Call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#11 0x00007fa3713d14d0 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#12 0x00007fa3713d6dac in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#13 0x00007fa3713d6dac in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#14 0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#15 0x00007fa371360fda in function_call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#16 0x00007fa37133c773 in PyObject_Call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#17 0x00007fa37134b50d in instancemethod_call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#18 0x00007fa37133c773 in PyObject_Call () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#19 0x00007fa3713ce6d8 in PyEval_CallObjectWithKeywords () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#20 0x00007fa371407d46 in t_bootstrap () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#21 0x00007fa3710dfe25 in start_thread () from /lib64/libpthread.so.0
+#22 0x00007fa37070434d in clone () from /lib64/libc.so.6
+
+Thread 1 (Thread 0x7fa3718d7740 (LWP 31705)):
+#0  0x00007fa3706fb7a3 in select () from /lib64/libc.so.6
+#1  0x00007fa369cda144 in time_sleep () from /root/anaconda2/lib/python2.7/lib-dynload/time.so
+#2  0x00007fa3713d6615 in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#3  0x00007fa3713d6dac in PyEval_EvalFrameEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#4  0x00007fa3713d84e9 in PyEval_EvalCodeEx () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#5  0x00007fa3713d870a in PyEval_EvalCode () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#6  0x00007fa3713f193d in run_mod () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#7  0x00007fa3713f2ab8 in PyRun_FileExFlags () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#8  0x00007fa3713f3cd8 in PyRun_SimpleFileExFlags () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#9  0x00007fa371405d3c in Py_Main () from /root/anaconda2/bin/../lib/libpython2.7.so.1.0
+#10 0x00007fa37062dc05 in __libc_start_main () from /lib64/libc.so.6
+#11 0x000055e5ed1a387f in _start ()

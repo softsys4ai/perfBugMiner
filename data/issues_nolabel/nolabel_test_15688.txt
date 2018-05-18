@@ -1,0 +1,58 @@
+Reduced accuracy with retrained Inception v3 model on Android
+
+I have follow instructions on TensorFlow website and the source code from examples on Github to retrain my own image classifier model which is basing on Inception v3.
+The result is, for same picture, if I use python script for prediction I got the right category with confidence 93.3%. But I use Android Inference interface can only get the right category with 81.3% confidence.
+I think the problem comes from the way that how to use the model.
+In Github code, https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/android/src/org/tensorflow/demo/ClassifierActivity.java
+Here is a snippet of comments to indicate how to user Inception v3 model:
+  // These are the settings for the original v1 Inception model. If you want to
+  // use a model that's been produced from the TensorFlow for Poets codelab,
+  // you'll need to set IMAGE_SIZE = 299, IMAGE_MEAN = 128, IMAGE_STD = 128,
+  // INPUT_NAME = "Mul", and OUTPUT_NAME = "final_result".
+  // You'll also need to update the MODEL_FILE and LABEL_FILE paths to point to
+  // the ones you produced.
+  //
+  // To use v3 Inception model, strip the DecodeJpeg Op from your retrained
+  // model first:
+  //
+  // python strip_unused.py \
+  // --input_graph=<retrained-pb-file> \
+  // --output_graph=<your-stripped-pb-file> \
+  // --input_node_names="Mul" \
+  // --output_node_names="final_result" \
+  // --input_binary=true
+We start from Input named "Mul" because DecodeJpeg is NOT supported in Android. So, we need to decode bitmap and resize it to 299 x 299 and flatten it with Android way.  I think that is the difference between python script and Android Inference interface. In python script, we use tf.gFile to get the content of image and direct pass to the start node "DecodeJpeg"
+I review the graph of retrained model, node "Mul" is not the direct successor of DecodeJpeg. There are four nodes "Cast", "ExpandDims", "ResizeBilinear", "Sub" between "Mul" and "DecodeJpeg". I think it does the same thing I mentioned to preprocess the image. I think may be we could pass input data a little bit earlier than "Mul".
+First, I strip the mode with follow command:
+strip_unused \
+--input_graph=tf_files/retrained_graph.pb \
+--output_graph=tf_files/stripped_retrained_graph..pb \
+--input_node_names="Cast" \
+--output_node_names="final_result" \
+--input_binary=true
+Then I change the recognizeImage() to pass input to node Cast
+  @Override
+  public List<Recognition> recognizeImage(final Bitmap bitmap) {
+    // Log this method so that it can be analyzed with systrace.
+    Trace.beginSection("recognizeImage");
+
+    Trace.beginSection("preprocessBitmap");
+    // Preprocess the image data from 0-255 int to normalized float based
+    // on the provided parameters.
+    int[] origIntValues = new int[bitmap.getWidth() * bitmap.getHeight()];
+    float[] flatValues = new float[bitmap.getWidth() * bitmap.getHeight() * 3];
+    bitmap.getPixels(origIntValues, 0, bitmap.getWidth(), 0, 0, bitmap.getWidth(), bitmap.getHeight());
+    for (int i = 0; i < origIntValues.length; ++i) {
+        final int val = origIntValues[i];
+        flatValues[i * 3 + 0] = ((val >> 16) & 0xFF);
+        flatValues[i * 3 + 1] = ((val >> 8) & 0xFF) ;
+        flatValues[i * 3 + 2] = (val & 0xFF);
+     }
+    Trace.endSection();
+
+    // Copy the input data into TensorFlow.
+    Trace.beginSection("feed");
+    inferenceInterface.feed(inputName, flatValues, new long[] { bitmap.getHeight(), bitmap.getWidth() , 3  });
+    Trace.endSection();
+Here the inputNames is "Cast", not "Mul". After that I get the exact the same result as python script.
+Conclusion, I think the way currently we used on Android side to preprocess image is NOT doing the same tasks as the nodes "Cast", "ExpandDims", "ResizeBilinear", "Sub" do. I suggest to update the code of Android example to fix this problem.

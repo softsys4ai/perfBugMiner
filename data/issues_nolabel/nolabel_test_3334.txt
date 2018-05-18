@@ -1,0 +1,89 @@
+tf.case doesn't preserve shape information
+
+tf.case is a python implementation of a case statement using tf.cond, but unlike cond it doesn't preserve shape information when executing. This is because of this little snippet:
+...
+    # preds = [p1, p2, p3]
+    # fns = [f1, f2, f3]
+    # not_preds = [~p1, ~p2, ~p3]
+    # and_not_preds = [True, ~p1, ~p1 & ~p2, ~p1 & ~p2 & ~p3]
+    # case_preds = [p1,
+    #               p2 & ~p1,
+    #               p3 & ~p2 & ~p1,
+    #              ~p3 & ~p2 & ~p1]
+
+    case_preds = []
+    for i, (p, and_not_p_prev) in enumerate(zip(preds, and_not_preds[:-1])):
+      with ops.name_scope("case_%d" % i):
+        case_preds.append(math_ops.logical_and(p, and_not_p_prev))
+    with ops.name_scope("case_none_are_true"):
+      case_preds.append(and_not_preds[-1])
+
+    # Create an empty tensor, or list, with the right type and shape
+    with ops.name_scope("case_create_empty"):
+      dummy_value = default()
+      def _correct_empty(v):
+        if isinstance(v, ops.Operation):
+          return no_op()
+        elif v.dtype == dtypes.string:
+          return array_ops.constant("")
+        else:
+          return array_ops.constant(v.dtype.as_numpy_dtype())
+
+      if isinstance(dummy_value, collections.Sequence):
+        dummy_type = type(dummy_value)
+        empty = lambda: dummy_type(_correct_empty(v) for v in dummy_value)
+      else:
+        empty = lambda: _correct_empty(dummy_value)
+
+    # case_sequence = [
+    #   cond(~p3 & ~p2 & ~p1, default, empty),
+    #   cond(p3 & ~p2 & ~p1, f3, lambda: case_sequence[0]),
+    #   cond(p2 & ~p1, f2, lambda: case_sequence[1]),
+    #   cond(p1, f1, lambda: case_sequence[2])
+    # ]
+    #
+    # And the return value will be case_sequence[-1]
+    def _build_case():
+      all_fns = [fn for fn in fns]
+      all_fns.append(default)
+      prev_case = None
+      for i, (cp, fn) in enumerate(list(zip(case_preds, all_fns))[::-1]):
+        prev_case = cond(
+            cp, fn,
+            empty if i == 0 else lambda: prev_case,
+            name="If_%d" % i)
+      return prev_case
+...
+The op works by evaluating a series of predicates (including a predicate for the default value) but it starts off with an empty object. The empty object seems to be designed to pass on correct shape and type information but it fails to do so in my use case. I recommend changing this code to read:
+...
+    # preds = [p1, p2, p3]
+    # fns = [f1, f2, f3]
+    # not_preds = [~p1, ~p2, ~p3]
+    # and_not_preds = [True, ~p1, ~p1 & ~p2, ~p1 & ~p2 & ~p3]
+    # case_preds = [p1,
+    #               p2 & ~p1,
+    #               p3 & ~p2 & ~p1]
+
+    case_preds = []
+    for i, (p, and_not_p_prev) in enumerate(zip(preds, and_not_preds[:-1])):
+      with ops.name_scope("case_%d" % i):
+        case_preds.append(math_ops.logical_and(p, and_not_p_prev))
+
+    # case_sequence = [
+    #   cond(p3 & ~p2 & ~p1, f3, default),
+    #   cond(p2 & ~p1, f2, lambda: case_sequence[0]),
+    #   cond(p1, f1, lambda: case_sequence[1])
+    # ]
+    #
+    # And the return value will be case_sequence[-1]
+    def _build_case():
+      all_fns = [fn for fn in fns]
+      prev_case = None
+      for i, (cp, fn) in enumerate(list(zip(case_preds, all_fns))[::-1]):
+        prev_case = cond(
+            cp, fn,
+            default if prev_case is None else lambda: prev_case,
+            name="If_%d" % i)
+      return prev_case
+...
+This removes the need not only for creating a dummy empty op, but also removes the need to create a separate predicate for the default op, simplifying the whole op by about 18 lines of code.

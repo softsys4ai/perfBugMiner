@@ -1,0 +1,126 @@
+tf.nn.avg_pool NaN bug with pool size 7 and stride 1
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): pip install tensorflow-gpu
+TensorFlow version (use command below):  1.2.1
+Python version: Python 3.6.1 :: Anaconda custom (64-bit)
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 8.0 / libcudnn.so.5.1.10
+GPU model and memory: titan x (pascal) 12gb
+Exact command to reproduce:
+
+Describe the problem
+When performing tf.nn.avg_pool over a large binary image, containing a few small blobs (diameter ~ 100px), I get NaN errors and all-zero outputs depending on stride and poolsize option. I've added a test script below, which results in the following output on my setup. The results for strides 1 and pool >= 7 are incorrect:
+strides (1, 1, 1, 1)
+Pool: 5 len where: 7955
+min: 0.0 max: 1.0
+Pool: 6 len where: 7997
+min: 0.0 max: 1.0
+Pool: 7 len where: 0
+min: 0.0 max: 0.0
+Pool: 8 len where: 0
+min: 0.0 max: 0.0
+Pool: 9 len where: 49939008
+min: nan max: nan
+Pool: 10 len where: 33141389
+min: nan max: nan
+
+strides (1, 2, 2, 1)
+Pool: 5 len where: 12045
+min: 0.0 max: 1.0
+Pool: 6 len where: 12584
+min: 0.0 max: 1.0
+Pool: 7 len where: 13093
+min: 0.0 max: 1.0
+Pool: 8 len where: 13608
+min: 0.0 max: 1.0
+Pool: 9 len where: 10588
+min: 0.0 max: 1.0
+Pool: 10 len where: 2707
+min: 0.0 max: 1.0
+
+Source code / logs
+import numpy as np
+import tensorflow as tf
+
+maps = np.load('/tmp/test.npy')
+in_shape = (9, 4096, 4096, 2)
+padding = 'VALID'
+sess = tf.Session()
+input = tf.placeholder('float32', in_shape)
+
+for strides in [(1, 1, 1, 1), (1, 2, 2, 1)]:
+    print('strides', strides)
+    for pool in range(5, 11):
+        pool_size = (1, pool, pool, 1)
+        x = tf.nn.avg_pool(input, pool_size, strides, padding=padding)
+        pooled_maps = sess.run(x, {input: maps.astype('float32')})
+        print('Pool:', pool, 'len where:', len(np.where(pooled_maps[..., 1] != 0)[0]))
+        print('min:', pooled_maps[..., 1].min(), 'max:', pooled_maps[..., 1].max())
+maps is too large to upload for me, but can be replaced with maps = np.random.binomial(1, 0.0000001, in_shape) to reproduce the NaNs for pool >= 8
+
+== cat /etc/issue ===============================================
+Linux DTA-160200 4.4.0-91-generic #114-Ubuntu SMP Tue Aug 8 11:56:56 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="16.04.3 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+c++ (Ubuntu 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+== uname -a =====================================================
+Linux DTA-160200 4.4.0-91-generic #114-Ubuntu SMP Tue Aug 8 11:56:56 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+
+== check pips ===================================================
+numpy (1.13.1)
+numpydoc (0.6.0)
+protobuf (3.3.0)
+tensorflow-gpu (1.2.1)
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.2.1
+tf.GIT_VERSION = v1.2.0-5-g435cdfc
+tf.COMPILER_VERSION = v1.2.0-5-g435cdfc
+Sanity check: array([1], dtype=int32)
+
+== env ==========================================================
+LD_LIBRARY_PATH /home/basv/.local/lib/cuda:/usr/local/cuda-8.0/lib64:
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+Tue Aug 15 11:50:59 2017       
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 375.82                 Driver Version: 375.82                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  TITAN X (Pascal)    Off  | 0000:02:00.0     Off |                  N/A |
+|  0%   44C    P0    58W / 250W |      0MiB / 12189MiB |      2%      Default |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+
+== cuda libs  ===================================================
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart_static.a
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart.so.8.0.61

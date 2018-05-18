@@ -1,0 +1,166 @@
+Bazel fail to resolve submodule tensorflow
+
+It does not seem possible to build an Android application where TensorFlow r0.9 is a submodule.
+The trick should have been to set the correct path prefix and give a repository name, but it does not work:
+tf_workspace( path_prefix = tensorflow_path, tf_repo_name = "@caloric_lab" )
+Bazel: 0.2.1-homebrew
+OSX El Capitan
+WORKSPACE file:
+tensorflow_path = “path/to/tensorflow"
+
+local_repository(
+    name = "org_tensorflow",
+    path = tensorflow_path
+)
+
+android_sdk_repository(
+    name = "androidsdk",
+    api_level = 23,
+    build_tools_version = "23.0.3",
+    # Replace with path to Android SDK on your system
+    path = "/Users/<user>/Library/Android/sdk/",
+)
+
+android_ndk_repository(
+    name="androidndk",
+    path="/Users/<user>/workspace/android/android-ndk-r10e/",
+    api_level=21)
+
+# Please add all new TensorFlow dependencies in workspace.bzl.
+load("@org_tensorflow//tensorflow:workspace.bzl", "tf_workspace")
+tf_workspace(
+  path_prefix = tensorflow_path,
+  tf_repo_name = "@caloric_lab"
+ )
+
+# Specify the minimum required bazel version.
+load("@org_tensorflow//tensorflow:tensorflow.bzl", "check_version")
+check_version("0.2.0")
+
+bind(
+ name   = "android_tensorflow_lib",
+ actual = "@org_tensorflow//tensorflow/core:android_tensorflow_lib"
+)
+
+BUILD file:
+# Description:
+#   Tensorflow camera demo app for Android.
+
+
+#package(default_visibility = ["//visibility:public"])
+
+#licenses(["notice"])  # Apache 2.0
+
+load("@org_tensorflow//tensorflow:tensorflow.bzl", "tf_copts")
+
+#exports_files(["LICENSE"])
+
+cc_binary(
+    name = "caloric_lab.so",
+    srcs = glob([
+        "jni/**/*.cc",
+        "jni/**/*.h",
+    ]) + [":libpthread.so"],
+    copts = tf_copts(),
+    linkopts = [
+        "-landroid",
+        "-ljnigraphics",
+        "-llog",
+        "-lm",
+        "-z defs",
+        "-s",
+        "-Wl,--icf=all",           # Identical Code Folding
+        "-Wl,--exclude-libs,ALL",  # Exclude syms in all libs from auto export
+    ],
+    linkshared = 1,
+    linkstatic = 1,
+    tags = [
+        "manual",
+        "notap",
+    ],
+    deps = [
+    ]
+    #"@org_tensorflow//tensorflow/core:android_tensorflow_lib"
+)
+
+# This library only exists as a workaround to satisfy dependencies
+# that declare -lpthread in their linkopts. Although Android supports
+# pthreads, it does not provide it as a separate library.
+cc_binary(
+    name = "libpthread.so",
+    srcs = [],
+    linkopts = ["-shared"],
+    tags = [
+        "manual",
+        "notap",
+    ],
+)
+
+cc_library(
+    name = "caloric_lab_native_libs",
+    srcs = [
+        ":libpthread.so",
+        ":caloric_lab.so"
+    ],
+    tags = [
+        "manual",
+        "notap",
+    ],
+)
+
+android_binary(
+    name = "caloric_lab",
+    srcs = glob([
+        "src/**/*.java",
+    ]),
+    assets = glob(["assets/**"]),
+    assets_dir = "assets",
+    custom_package = "org.tensorflow.demo",
+    inline_constants = 1,
+    manifest = "AndroidManifest.xml",
+    resource_files = glob(["res/**"]),
+    tags = [
+        "manual",
+        "notap",
+    ],
+    deps = [
+      ":caloric_lab_native_libs",
+    ],
+)
+#"@org_tensorflow//tensorflow/core:android_tensorflow_lib"
+
+filegroup(
+    name = "all_files",
+    srcs = glob(
+        ["**/*"],
+        exclude = [
+            "**/METADATA",
+            "**/OWNERS",
+            "bin/**",
+            "gen/**",
+        ],
+    ),
+    visibility = ["@org_tensorflow//tensorflow:__subpackages__"],
+)
+
+filegroup(
+    name = "java_files",
+    srcs = glob(["src/**/*.java"]),
+)
+
+filegroup(
+    name = "jni_files",
+    srcs = glob([
+        "jni/**/*.cc",
+        "jni/**/*.h",
+    ]),
+)
+
+filegroup(
+    name = "resource_files",
+    srcs = glob(["res/**"]),
+)
+
+exports_files(["AndroidManifest.xml"])
+Thanks for your attention
+Victor

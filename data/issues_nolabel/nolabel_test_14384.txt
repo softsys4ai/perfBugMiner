@@ -1,0 +1,88 @@
+Cannot make an input layer that takes scalars with the keras functional api
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): source (branch 1.4)
+TensorFlow version (use command below): 1.4.0-dev
+Python version: 3.5
+Bazel version (if compiling from source): 5.4.0
+CUDA/cuDNN version: 8.0/6.0
+GPU model and memory: nVidia 1080Ti 11G
+Exact command to reproduce: run the script below
+
+Describe the problem
+The following is an attempt to use the keras functional api to make a model that accepts scalars as input:
+import tensorflow as tf
+from tensorflow.contrib.keras.api.keras.models import Model
+from tensorflow.contrib.keras.api.keras.layers import Input
+i = Input(batch_shape=(None, ), dtype=tf.uint8, name="input")
+m = Model(inputs=i, outputs=i)
+
+which fails like so:
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-54-dd00bec66757> in <module>()
+----> 1 i = Input(batch_shape=(None, ), dtype=tf.uint8, name="input")
+      2 m = Model(inputs=i, outputs=i)
+
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/keras/_impl/keras/engine/topology.py in Input(shape, batch_size, name, dtype, sparse, tensor, **kwargs)
+    611     dtype = K.floatx()
+    612   if not shape and tensor is None:
+--> 613     raise ValueError('Please provide to Input either a `shape`'
+    614                      ' or a `tensor` argument. Note that '
+    615                      '`shape` does not include the batch '
+
+ValueError: Please provide to Input either a `shape` or a `tensor` argument. Note that `shape` does not include the batch dimension.
+
+Using a sequential model instead works fine:
+import tensorflow as tf
+from tensorflow.contrib.keras.api.keras.models import Sequential
+from tensorflow.contrib.keras.api.keras.layers import InputLayer
+m = Sequential()
+m.add(InputLayer(batch_input_shape=(None, ), dtype=tf.uint8, name="input"))
+
+Additionally using the external keras works fine:
+import tensorflow as tf
+from keras.models import Model
+from keras.layers import Input
+i = Input(batch_shape=(None, ), dtype=tf.uint8, name="input")
+m = Model(inputs=i, outputs=i)
+
+It appears that this broke when the tensor and batch_size arguments were added to the internal version.
+Here is one possible way to fix it which I can propose if people are ok with it:
+diff --git a/tensorflow/python/keras/_impl/keras/engine/topology.py b/tensorflow/python/keras/_impl/keras/engine/topology.py
+index f9be782..74df725 100644
+--- a/tensorflow/python/keras/_impl/keras/engine/topology.py
++++ b/tensorflow/python/keras/_impl/keras/engine/topology.py
+@@ -605,21 +605,20 @@ def Input(  # pylint: disable=invalid-name
+       raise ValueError('Only provide the shape OR '
+                        'batch_shape argument to '
+                        'Input, not both at the same time.')
+-    batch_size = batch_shape[0]
+-    shape = batch_shape[1:]
++  else:
++    if not shape and tensor is None:
++      raise ValueError('Please provide to Input either a `shape`'
++                       ' or a `batch_shape` or a `tensor` argument.'
++                       ' Note that `shape` does not include the batch '
++                       'dimension.')
++    batch_shape = (batch_size,) + tuple(shape)
+   if kwargs:
+     raise ValueError('Unrecognized keyword arguments:', kwargs.keys())
+ 
+   if dtype is None:
+     dtype = K.floatx()
+-  if not shape and tensor is None:
+-    raise ValueError('Please provide to Input either a `shape`'
+-                     ' or a `tensor` argument. Note that '
+-                     '`shape` does not include the batch '
+-                     'dimension.')
+   input_layer = InputLayer(
+-      input_shape=shape,
+-      batch_size=batch_size,
++      batch_input_shape=batch_shape,
+       name=name,
+       dtype=dtype,
+       sparse=sparse,

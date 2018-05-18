@@ -1,0 +1,32 @@
+Bug with tensorflow.random_normal() when using placeholders and last dimension is 1
+
+tensorflow.shape(x) gives ? for the last dimension when the last dimension is 1.
+This is a problem if you have layers or inputs which are only one dimensional.
+Environment info
+Operating System: OSX
+Tensorflow 0.9.0
+Installed version of CUDA and cuDNN:
+problem not related to CUDA or cuDNN
+Edit: thanks to @cwhipkey I noticed I mischaracterized the problem, edited version below.
+Steps to reproduce
+import tensorflow as tf
+n=1
+x = tf.placeholder(tf.float32, shape=(None, None, n), name='x')
+shp = tf.shape(x)
+shp is (?,?,n)  as it should be.
+But then if I use shp to create a random_normal tensor of the same shape, it will fail if n==1.
+noise = tf.random_normal(shp,mean=0,stddev=1)
+print(noise.get_shape(noise))
+has output (?,?,n) if n>1 but output (?,?,?) if n==1.
+This is a problem, because if I then do
+xtilde= x+noise
+this will give me an error if n==1.
+Specifically in my case:
+
+File "/anaconda/envs/hrnn/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 630, in _dynamic_rnn_loop
+"Input size (depth of inputs) must be accessible via shape inference, "
+ValueError: Input size (depth of inputs) must be accessible via shape inference, but saw value None.
+
+when I feed this xtilde to dynamic_rnn
+rnn.dynamic_rnn(rnn, xtilde, initial_state=self.hhat_combined_init, scope='RNN')
+I get no such error if n>1.

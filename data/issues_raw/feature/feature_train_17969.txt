@@ -1,0 +1,37 @@
+Estimator not running custom init_op when loading from checkpoint
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Mint
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.6
+Python version: 3.5
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A
+
+Describe the problem
+tf.estimator does not initialize all model variables in the following scenario:
+The model function provides a custom Saver that restores a subset of the GLOBAL_VARIABLES,
+and a custom init_op that initializes the non-restored variables.
+In SessionManager.prepare_session there is the following code:
+    if not is_loaded_from_checkpoint:
+      if init_op is None and not init_fn and self._local_init_op is None:
+        raise RuntimeError("Model is not initialized and no init_op or "
+                           "init_fn or local_init_op was given")
+      if init_op is not None:
+        sess.run(init_op, feed_dict=init_feed_dict)
+      if init_fn:
+        init_fn(sess)
+
+    local_init_success, msg = self._try_run_local_init_op(sess)
+    if not local_init_success:
+      raise RuntimeError(
+          "Init operations did not make model ready for local_init.  "
+          "Init op: %s, init fn: %s, error: %s" % (_maybe_name(init_op),                                               init_fn, msg))
+
+The session manager does not run the init_op when loading from a checkpoint. It probabily would make sense to try the init_op at least in cases where local_init_success is False before aborting with an error.
+If you agree I can create a PR, otherwise it would make sense to update the documentation to explicitely state that init won't be run in these scenarios (that should probably go in https://www.tensorflow.org/api_docs/python/tf/train/Scaffold)

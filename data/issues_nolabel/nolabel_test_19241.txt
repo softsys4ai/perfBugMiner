@@ -1,0 +1,205 @@
+[Eager] Fix for determining input / output shape of the model prior to Model.fit()
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10 Home Edition
+TensorFlow installed from (source or binary): Windows binary
+TensorFlow version (use command below): Github version 'v1.8.0-0-g93bc2e2072' 1.8.0TF (GPU)
+Python version: 3.5
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: CUDA 9.0 / cuDNN 7.0.5
+GPU model and memory: NVIDIA GTX 980M
+Exact command to reproduce: Provided below as a standalone script
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+The issue is that in Eager mode, the two attributes of the Model subclass, inputs and outputs is undetermined until the first call to Model.fit(...).
+When attempting to determine this prior to fitting the model, in the script at location tensorflow/python/keras/_impl/keras/engine/training.py, the entire input dataset X (passed to .fit(...)) is provided as the input x in Line 684 if not self.inputs: self._set_inputs(x) inside _standardize_user_data.
+Due to this, in eager execution mode, this call is deferred to _eager_set_inputs(inputs). Here, inputs is the entire dataset numpy matrix / tensor, and a Model.call(inputs) is performed at line 909.
+Since the entire dataset is unable to fit in GPU memory for smaller GPU devices, it causes an OOM error.
+However, to determine the input / output shape/s of a model, a single sample tensor is sufficient.
+The below fix shows that the solution is adequate, and can be implemented by simply extracting a single sample of the entire dataset to determine the input / output shape/s of a model during eager execution.
+**Note : **
+In order to provide indicators to identify where the error occurs, I modified the above mentioned script to print 2 logs to the console, to describe the shape of the "inputs" parameter inside _eager_set_inputs(inputs). The lines Inside training._eager_set_inputs ... and ***** Providing entire dataset into call ***** are the above logs.
+Source code / logs
+import os
+import numpy as np
+
+import tensorflow as tf
+from tensorflow.python.keras.datasets import mnist
+from tensorflow.contrib.eager.python import tfe
+
+# enable eager mode
+tf.enable_eager_execution()
+tf.set_random_seed(0)
+np.random.seed(0)
+
+# constants
+batch_size = 128
+epochs = 10
+num_classes = 10
+
+# dataset loading
+(x_train, y_train), (x_test, y_test) = mnist.load_data()
+x_train = x_train.astype('float32') / 255.
+x_test = x_test.astype('float32') / 255.
+x_train = x_train.reshape((-1, 28, 28, 1))
+x_test = x_test.reshape((-1, 28, 28, 1))
+
+# one hot encode the labels. convert back to numpy as we cannot use a combination of numpy
+# and tensors as input to keras
+y_train_ohe = tf.one_hot(y_train, depth=num_classes).numpy()
+y_test_ohe = tf.one_hot(y_test, depth=num_classes).numpy()
+
+print('x train', x_train.shape)
+print('y train', y_train_ohe.shape)
+print('x test', x_test.shape)
+print('y test', y_test_ohe.shape)
+
+class CNN(tf.keras.Model):
+
+    def __init__(self, num_classes):
+        super(CNN, self).__init__()
+
+        self.cnn1 = tf.keras.layers.Conv2D(16, (5, 5), padding='same', strides=(2, 2))
+        self.bn1 = tf.keras.layers.BatchNormalization()
+        self.cnn2 = tf.keras.layers.Conv2D(32, (5, 5), padding='same', strides=(2, 2))
+        self.bn2 = tf.keras.layers.BatchNormalization()
+        self.pool = tf.keras.layers.GlobalAveragePooling2D()
+        self.classifier = tf.keras.layers.Dense(num_classes)
+
+    def call(self, inputs, training=None, mask=None):
+        # Used to print out the input shape of the entire dataset prior to training loop
+        print(inputs.shape)
+
+        x = self.cnn1(inputs)
+        x = self.bn1(x)
+        x = tf.nn.relu(x)  # layer 1
+        x = tf.nn.relu(self.bn2(self.cnn2(x))) # layer 2
+        x = self.pool(x)
+        output = self.classifier(x)
+
+        # softmax op does not exist on the gpu, so always use cpu
+        with tf.device('/cpu:0'):
+            output = tf.nn.softmax(output)
+
+        return output
+
+
+device = '/cpu:0' if tfe.num_gpus() == 0 else '/gpu:0'
+
+with tf.device(device):
+    # build model and optimizer
+    model = CNN(num_classes)
+    model.compile(optimizer=tf.train.AdamOptimizer(0.001), loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    
+    # suggested fix ; can be incorporated inside `_eager_set_inputs` or `_set_input`
+    # Fix = Use exactly one sample from the provided input dataset to determine 
+    # input/output shape/s for the model
+
+    # dummy_x = np.zeros((1, 28, 28, 1))
+    # model._set_inputs(dummy_x)
+
+    # train
+    model.fit(x_train, y_train_ohe, batch_size=batch_size, epochs=epochs,
+              validation_data=(x_test, y_test_ohe), verbose=2)
+
+    # evaluate on test set
+    scores = model.evaluate(x_test, y_test_ohe, batch_size, verbose=2)
+    print("Final test loss and accuracy :", scores)
+
+Truncated log without the fix : (Only tensor allocation summary dump after OOM is truncated)
+2018-05-12 00:22:44.208127: I T:\src\github\tensorflow\tensorflow\core\platform\cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX2
+2018-05-12 00:22:45.385242: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:1356] Found device 0 with properties: 
+name: GeForce GTX 980M major: 5 minor: 2 memoryClockRate(GHz): 1.1265
+pciBusID: 0000:01:00.0
+totalMemory: 4.00GiB freeMemory: 3.32GiB
+2018-05-12 00:22:45.385822: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:1435] Adding visible gpu devices: 0
+2018-05-12 00:22:45.838116: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:923] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-05-12 00:22:45.838626: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:929]      0 
+2018-05-12 00:22:45.838912: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:942] 0:   N 
+2018-05-12 00:22:45.839762: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:1053] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 3050 MB memory) -> physical GPU (device: 0, name: GeForce GTX 980M, pci bus id: 0000:01:00.0, compute capability: 5.2)
+x train (60000, 28, 28, 1)
+y train (60000, 10)
+x test (10000, 28, 28, 1)
+y test (10000, 10)
+
+Inside training._eager_set_inputs ip shape/s [(60000, 28, 28, 1)]  <= Here the input is the entire dataset
+***** Providing entire dataset into call *****
+(60000, 28, 28, 1)
+
+2018-05-12 00:22:58.125845: W T:\src\github\tensorflow\tensorflow\core\common_runtime\bfc_allocator.cc:275] Allocator (GPU_0_bfc) ran out of memory trying to allocate 717.77MiB.  Current allocation summary follows.
+
+<<< Truncated >>>
+
+2018-05-12 00:22:58.229153: W T:\src\github\tensorflow\tensorflow\core\framework\op_kernel.cc:1318] OP_REQUIRES failed at fused_batch_norm_op.cc:263 : Resource exhausted: OOM when allocating tensor with shape[60000,16,14,14] and type float on /job:localhost/replica:0/task:0/device:GPU:0 by allocator GPU_0_bfc
+Traceback (most recent call last):
+  File "D:/Users/Yue/PycharmProjects/eager-tutorials/tutorials/04_cnn.py", line 83, in <module>
+    validation_data=(x_test, y_test_ohe), verbose=2)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\engine\training.py", line 1147, in fit
+    batch_size=batch_size)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\engine\training.py", line 685, in _standardize_user_data
+    self._set_inputs(x)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\engine\training.py", line 871, in _set_inputs
+    self._eager_set_inputs(inputs)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\engine\training.py", line 914, in _eager_set_inputs
+    ops.convert_to_tensor(inputs, dtype=K.floatx()))
+  File "D:/Users/Yue/PycharmProjects/eager-tutorials/tutorials/04_cnn.py", line 55, in call
+    x = self.bn1(x)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\engine\base_layer.py", line 314, in __call__
+    output = super(Layer, self).__call__(inputs, *args, **kwargs)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\layers\base.py", line 717, in __call__
+    outputs = self.call(inputs, *args, **kwargs)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\layers\normalization.py", line 113, in call
+    output = super(BatchNormalization, self).call(inputs, training=training)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\layers\normalization.py", line 501, in call
+    outputs = self._fused_batch_norm(inputs, training=training)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\layers\normalization.py", line 396, in _fused_batch_norm
+    training, _fused_batch_norm_training, _fused_batch_norm_inference)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\layers\utils.py", line 206, in smart_cond
+    pred, true_fn=true_fn, false_fn=false_fn, name=name)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\framework\smart_cond.py", line 56, in smart_cond
+    return false_fn()
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\layers\normalization.py", line 393, in _fused_batch_norm_inference
+    data_format=self._data_format)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\ops\nn_impl.py", line 904, in fused_batch_norm
+    name=name)
+  File "D:\Users\Yue\Anaconda3\lib\site-packages\tensorflow\python\ops\gen_nn_ops.py", line 3804, in _fused_batch_norm
+    _six.raise_from(_core._status_to_exception(e.code, message), None)
+  File "<string>", line 3, in raise_from
+tensorflow.python.framework.errors_impl.ResourceExhaustedError: OOM when allocating tensor with shape[60000,16,14,14] and type float on /job:localhost/replica:0/task:0/device:GPU:0 by allocator GPU_0_bfc [Op:FusedBatchNorm]
+
+Partial log with the aforementioned fix
+2018-05-12 00:27:23.607020: I T:\src\github\tensorflow\tensorflow\core\platform\cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX2
+2018-05-12 00:27:24.748056: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:1356] Found device 0 with properties: 
+name: GeForce GTX 980M major: 5 minor: 2 memoryClockRate(GHz): 1.1265
+pciBusID: 0000:01:00.0
+totalMemory: 4.00GiB freeMemory: 3.32GiB
+2018-05-12 00:27:24.748771: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:1435] Adding visible gpu devices: 0
+2018-05-12 00:27:25.196921: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:923] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-05-12 00:27:25.197231: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:929]      0 
+2018-05-12 00:27:25.197570: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:942] 0:   N 
+2018-05-12 00:27:25.197993: I T:\src\github\tensorflow\tensorflow\core\common_runtime\gpu\gpu_device.cc:1053] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 3050 MB memory) -> physical GPU (device: 0, name: GeForce GTX 980M, pci bus id: 0000:01:00.0, compute capability: 5.2)
+x train (60000, 28, 28, 1)
+y train (60000, 10)
+x test (10000, 28, 28, 1)
+y test (10000, 10)
+
+Inside training._eager_set_inputs ip shape/s [(1, 28, 28, 1)]  <= Here the "dataset" is the dummy batch
+***** Providing entire dataset into call *****
+(1, 28, 28, 1)
+
+Train on 60000 samples, validate on 10000 samples
+Epoch 1/10
+(128, 28, 28, 1)
+(128, 28, 28, 1)
+(128, 28, 28, 1)
+(128, 28, 28, 1)
+(128, 28, 28, 1)
+... repeated for the entire training loop over the batch.

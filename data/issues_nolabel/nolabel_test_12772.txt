@@ -1,0 +1,43 @@
+Using Sparse tensors to apply gradients in BackPropogation.
+
+Hi All,
+I am trying to use sparse tensors while applying gradients and i see below error.
+Tensor conversion requested dtype int64 for Tensor with dtype float32: 'Tensor("Adam_1/update_conv1_1/weights/sub_2:0", shape=(), dtype=float32)'
+I am assuming this to be a bug as the dtype int64 must have been hardcoded for sparse tensors.
+Is there any workaround for this issue?
+Here is what I am trying to do:
+#################### this function multiplies gradients with prune weights so that gradient updation happens on pruned gradients.
+def apply_prune_on_grads(grads_and_vars, sess, dict_n):
+     print("im inside pply_prune_on_grads")
+     i=0
+     for k, v in dict_n.items():
+         count=0
+         for grad, var in grads_and_vars:
+             if var.name == k:
+                 op = (var.name).split("/")
+                 if op[1] != 'biases:0':
+                     v = tf.cast(tf.constant(v), tf.float32)
+                     mask_tensor = tf.multiply(v,grad)
+                     idx = tf.where(tf.not_equal(mask_tensor, 0))
+                     sparse = tf.IndexedSlices(idx,tf.gather_nd(mask_tensor, idx))
+                     grads_and_vars[count] = (sparse, var)
+             count = count+1
+         i=i+1
+     return grads_and_vars
+
+def prune_weights(weights_prune, sess,threshold = 0.01):
+         print("im inside prune weights")
+         sparse_weights = {}
+         for v in weights_prune:
+             value = sess.run(v) 
+             under_threshold = abs(value) < threshold
+             value[under_threshold] = 0
+             sess.run(v.assign(value))
+             sparse_weights[v.name] = np.logical_not(under_threshold)
+         return sparse_weights
+
+############################### The order in which i am calling the above functions in sess.run
+ sparse_weights = prune_weights(variables_to_restore, sess)
+ grads_and_vars = train_op.compute_gradients(loss, )
+ grads_and_vars =  apply_prune_on_grads(grads_and_vars,sess,  sparse_weights)
+ train_step = train_op.apply_gradients(grads_and_vars)

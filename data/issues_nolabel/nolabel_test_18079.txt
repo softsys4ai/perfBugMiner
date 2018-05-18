@@ -1,0 +1,57 @@
+Can't get the dim of input when the Dataset is from generator.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): pip
+TensorFlow version (use command below): 1.6
+Python version: 3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+When use from_generator way to get dataset, it can't get the output shape of it. And then pass the features of it to the layers, the layer can't get the rank of it.
+But it is wok well use from_tensor_slices way to get the dataset.
+I am not sure if it is a bug. The tutorial mainly use from_tensor_slices as emamples. But I think the action should be same when use these ways to get the dataset.
+Source code / logs
+    def csv_yield(csv_path):
+        with open(csv_path, newline='') as f:
+            next(f)  # skip the first line
+            reader = csv.reader(f)
+            features, labels = [], []
+            for line in reader:
+                feature, label = [float(i) for i in line[:-1]], int(line[-1])
+                yield feature, label
+
+
+    ds_train = tf.data.Dataset.from_generator(lambda: csv_yield(r"../data/iris/iris_training.csv"),
+                                              output_types=(tf.float32, tf.int32))
+    ds_train = ds_train.shuffle(1000).batch(16).repeat(5)
+    features, labels = ds_train.make_one_shot_iterator().get_next()
+
+    net = tf.layers.dense(features, units=10, activation=tf.nn.relu)
+
+ValueError: Input 0 of layer dense_1 is incompatible with the layer: its rank is undefined, but the layer requires a defined rank.
+But is is ok when use tf.data.Dataset.from_tensor_slices, The only difference between of them is the way of dataset. They shouldn't have different actions.
+    def read_csv(csv_path):
+        with open(csv_path, newline='') as f:
+            next(f)  # skip the first line
+            reader = csv.reader(f)
+            features, labels = [], []
+            for line in reader:
+                feature, label = [float(i) for i in line[:-1]], int(line[-1])
+                # yield feature, label
+                features.append(feature)
+                labels.append(label)
+            return features, labels
+
+
+    ds_train = tf.data.Dataset.from_tensor_slices(read_csv(r"../data/iris/iris_training.csv"))
+    ds_train = ds_train.shuffle(1000).batch(16).repeat(5)
+    features, labels = ds_train.make_one_shot_iterator().get_next()
+
+    net = tf.layers.dense(features, units=10, activation=tf.nn.relu)

@@ -1,0 +1,149 @@
+compute_gradients error, if there are unneeded variables
+
+I hope this hasn't been reported already. A Google and GitHub search came up empty.
+Minimum example
+tf.reset_default_graph()
+
+optimizer = tf.train.GradientDescentOptimizer(0.1)
+
+x1_var = tf.Variable([1, 2, 3], dtype=tf.float32)
+x2_var = tf.Variable([2, 3, 4], dtype=tf.float32)
+
+grad_op = optimizer.compute_gradients(x1_var)
+
+init = tf.initialize_all_variables()
+
+sess = tf.Session()
+
+sess.run(init)
+
+grads = sess.run(grad_op)
+
+print grads
+Expected Output
+A list of tuples containing all variables needed to compute the input, x1_var in this example, and their gradients. Alternativly, a list of all variables in the graph with zeros or None values for the gradients of those variables that are not needed to compute the input to compute_gradients.
+Actual Output
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+<ipython-input-9-868cc989ac50> in <module>()
+     15 
+     16 sess.run(init)
+---> 17 print sess.run(grad_op)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    715     try:
+    716       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 717                          run_metadata_ptr)
+    718       if run_metadata:
+    719         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    900 
+    901     # Create a fetch handler to take care of the structure of fetches.
+--> 902     fetch_handler = _FetchHandler(self._graph, fetches, feed_dict_string)
+    903 
+    904     # Run request and get response.
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in __init__(self, graph, fetches, feeds)
+    356     """
+    357     with graph.as_default():
+--> 358       self._fetch_mapper = _FetchMapper.for_fetch(fetches)
+    359     self._fetches = []
+    360     self._targets = []
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in for_fetch(fetch)
+    179     elif isinstance(fetch, (list, tuple)):
+    180       # NOTE(touts): This is also the code path for namedtuples.
+--> 181       return _ListFetchMapper(fetch)
+    182     elif isinstance(fetch, dict):
+    183       return _DictFetchMapper(fetch)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in __init__(self, fetches)
+    286     """
+    287     self._fetch_type = type(fetches)
+--> 288     self._mappers = [_FetchMapper.for_fetch(fetch) for fetch in fetches]
+    289     self._unique_fetches, self._value_indices = _uniquify_fetches(self._mappers)
+    290 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in for_fetch(fetch)
+    179     elif isinstance(fetch, (list, tuple)):
+    180       # NOTE(touts): This is also the code path for namedtuples.
+--> 181       return _ListFetchMapper(fetch)
+    182     elif isinstance(fetch, dict):
+    183       return _DictFetchMapper(fetch)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in __init__(self, fetches)
+    286     """
+    287     self._fetch_type = type(fetches)
+--> 288     self._mappers = [_FetchMapper.for_fetch(fetch) for fetch in fetches]
+    289     self._unique_fetches, self._value_indices = _uniquify_fetches(self._mappers)
+    290 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in for_fetch(fetch)
+    176     if fetch is None:
+    177       raise TypeError('Fetch argument %r has invalid type %r' %
+--> 178                       (fetch, type(fetch)))
+    179     elif isinstance(fetch, (list, tuple)):
+    180       # NOTE(touts): This is also the code path for namedtuples.
+
+TypeError: Fetch argument None has invalid type <type 'NoneType'>
+
+Further examples
+This works:
+# ...
+
+x1_var = tf.Variable([1, 2, 3], dtype=tf.float32)
+# x2_var = tf.Variable([2, 3, 4], dtype=tf.float32)
+
+grad_op = optimizer.compute_gradients(x1_var)
+
+# ...
+[(array([ 1.,  1.,  1.], dtype=float32), array([ 1.,  2.,  3.], dtype=float32))]
+
+This works:
+# ...
+
+x1_var = tf.Variable([1, 2, 3], dtype=tf.float32)
+x2_var = tf.Variable([2, 3, 4], dtype=tf.float32)
+
+combined_op = tf.concat(0, [x1_var, x2_var])
+
+grad_op = optimizer.compute_gradients(combined_op)
+
+# ...
+[(array([ 1.,  1.,  1.], dtype=float32), array([ 1.,  2.,  3.], dtype=float32)), (array([ 1.,  1.,  1.], dtype=float32), array([ 2.,  3.,  4.], dtype=float32))]
+
+This doesn't:
+# ...
+
+x1_var = tf.Variable([1, 2, 3], dtype=tf.float32)
+x2_var = tf.Variable([2, 3, 4], dtype=tf.float32)
+
+combined_op = tf.concat(0, [x1_var, x2_var])
+
+grad_op = optimizer.compute_gradients(x1_var)
+
+# ...
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+<ipython-input-18-23fbf6b769d2> in <module>()
+     16 sess.run(init)
+     17 
+---> 18 grads = sess.run(grad_op)
+     19 
+     20 print grads
+...
+
+Workaround
+Keep track of all variables needed to compute the input and pass them explicitly to compute_gradients.
+# ...
+
+x1_var = tf.Variable([1, 2, 3], dtype=tf.float32)
+x2_var = tf.Variable([2, 3, 4], dtype=tf.float32)
+
+grad_op = optimizer.compute_gradients(x1_var, [x1_var])
+
+# ...
+[(array([ 1.,  1.,  1.], dtype=float32), array([ 1.,  2.,  3.], dtype=float32))]
+
+Tensorflow version: 0.11.0rc0

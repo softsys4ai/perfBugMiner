@@ -1,0 +1,67 @@
+how to save model for tensroflwo serving for lstm in tensorflow/contrib/timeseries/examples/lstm.py
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug or a feature request.
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+TensorFlow installed from (source or binary):
+TensorFlow version (use command below):
+Python version:
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+when I run lstm in tensorflow/contrib/timeseries/examples/lstm.py, I tried to add methods to save model into savedModel, but it gives back errors.
+File "/Users/yang/.local/lib/python3.4/site-packages/tensorflow/python/estimator/estimator.py", line 504, in export_savedmodel
+serving_input_receiver = serving_input_receiver_fn()
+File "/Users/yang/.local/lib/python3.4/site-packages/tensorflow/contrib/timeseries/python/timeseries/estimators.py", line 133, in _serving_input_receiver_fn
+self._model.initialize_graph()
+TypeError: initialize_graph() missing 1 required positional argument: 'input_statistics'
+The issue I guess is that, in self._model.initialize_graph(), no parameters are given, but in
+def initialize_graph(self, input_statistics):
+    """Save templates for components, which can then be used repeatedly.
+    This method is called every time a new graph is created. It's safe to start
+    adding ops to the current default graph here, but the graph should be
+    constructed from scratch.
+    Args:
+      input_statistics: A math_utils.InputStatistics object.
+    """
+    super(_LSTMModel, self).initialize_graph(input_statistics=input_statistics)
+    with tf.variable_scope("", use_resource=True):
+      # Use ResourceVariables to avoid race conditions.
+      self._lstm_cell = tf.nn.rnn_cell.LSTMCell(num_units=self._num_units)
+      # Create templates so we don't have to worry about variable reuse.
+      self._lstm_cell_run = tf.make_template(
+          name_="lstm_cell",
+          func_=self._lstm_cell,
+          create_scope_now_=True)
+      # Transforms LSTM output into mean predictions.
+      self._predict_from_lstm_output = tf.make_template(
+          name_="predict_from_lstm_output",
+          func_=functools.partial(tf.layers.dense, units=self.num_features),
+          create_scope_now_=True)
+
+one param input_statistics is asked. But how to fix this issue
+Source code / logs
+serving_input_receiver_fn = estimator.build_raw_serving_input_receiver_fn()
+estimator.export_savedmodel(
+    "../model",
+    serving_input_receiver_fn
+)

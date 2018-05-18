@@ -1,0 +1,60 @@
+The sequence of session.run and control_dependencies?
+
+See three examples:
+import tensorflow as tf
+
+x = tf.constant(1.0)
+x = tf.Print(x, ['x'])
+y = tf.constant(2.0)
+y = tf.Print(y, ['y'])
+z = tf.constant(3.0)
+z = tf.Print(z, ['z'])
+
+with tf.Session() as sess:
+    print(sess.run([x,y,z]))
+The sequence of output of tf.Print is indeterminate, which means sess.run don't executes tensors from left to right.
+import tensorflow as tf
+
+x = tf.constant(1.0)
+x = tf.Print(x, ['x'])
+y = tf.constant(2.0)
+y = tf.Print(y, ['y'])
+with tf.control_dependencies([x, y]):
+    z = tf.constant(3.0)
+    z = tf.Print(z, ['z'])
+
+with tf.Session() as sess:
+    print(sess.run(z))
+The sequence  of x and y is indeterminate, which means control_dependencies don't executes tensors from left to right.
+import tensorflow as tf
+
+x = tf.constant(1.0)
+x = tf.Print(x, ['x'])
+y = tf.constant(2.0)
+y = tf.Print(y, ['y'])
+d = tf.constant(3.0)
+d = tf.Print(d, ['d'])
+with tf.control_dependencies([x, y]):
+    z = tf.add(d, 3.)
+    z = tf.Print(z, ['z'])
+
+with tf.Session() as sess:
+    print(sess.run(z))
+The sequence of x, y and d is indeterminate.
+Is it intentional behavior or bug?  I find that if the sequence is indeterminate, the program may get different result.
+Another example I can't explain:
+import tensorflow as tf
+
+x = tf.placeholder(tf.float32, [])
+y = tf.Variable(2.)
+op = tf.assign(y, x)
+op = tf.Print(op, ['op'])
+
+with tf.control_dependencies([op]):
+    q = tf.Print(y, [y])
+
+
+with tf.Session() as sess:
+    tf.global_variables_initializer().run()
+    print(sess.run([q], feed_dict={x: -1.0}))
+The [op] is printed before [y], but q=2.0, why? If op is executed before y, y will be assigned by x, which means y=-1.0, and q should be -1.0.

@@ -1,0 +1,76 @@
+contrib.layers and multigpu: variable scope issues
+
+I guess, issues regarding stuff in tf.contrib working nicely with tensorflow itself are also welcome here? Otherwise, I'll move it to the tflearn issue tracker.
+tl;dr: using contrib.layers in multigpu setting (multiple "towers" in separate name scopes) leads to scope errors; using ordinary tf.get_variable(..) works just fine
+tensorflow 0.10.0
+cuda 7.5
+basic fully connected network to classify mnist:
+def build_fc_dnn():
+    X = tf.placeholder(tf.float32, [None, 784])
+    y = tf.placeholder(tf.float32, [None, 10])
+
+    depth = 5
+
+    last_layer = X
+    argkw = dict(num_outputs=20, activation_fn=tf.nn.relu)
+    for _ in range(depth):
+        last_layer = tf.contrib.layers.fully_connected(last_layer, **argkw)
+    logits = tf.contrib.layers.fully_connected(last_layer, num_outputs=10)
+
+    loss = tf.nn.softmax_cross_entropy_with_logits(logits, y)
+    y_train_eq_pred = tf.equal(tf.argmax(y,1), tf.argmax(logits,1))
+    acc = tf.reduce_mean(tf.cast(y_train_eq_pred, tf.float32))
+
+    return X, y, loss, acc
+
+and the code that builds graph (analogues to cifar multigpu example):
+    ...
+    tower_vars = []
+    for tower_id in range(len(device_id_list)):
+        with tf.device('/gpu:%d' % tower_id):
+            with tf.name_scope('tower_%d' % tower_id) as scope:
+                X, y, loss, acc = build_model()
+                tower_vars.append([gd.compute_gradients(loss), loss, acc, (X, y)])
+                tf.get_variable_scope().reuse_variables()
+
+    tower_grads, tower_loss, tower_acc, xy_pairs = zip(*tower_vars)
+    train_op = gd.apply_gradients(average_gradients(tower_grads))
+    loss = tf.reduce_mean(tower_loss)
+    acc = tf.reduce_mean(tower_acc)
+    init_op = tf.initialize_all_variables()
+
+if I do that, I get an error: ValueError: Variable fully_connected_6/weights does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+If I look into tflearn docs (tf.contrib.layers is basically tflearn, right?), they suggest building multigpu code as follows:
+with tf.device('/gpu:0'):
+    # Force all Variables to reside on the CPU.
+    with tf.arg_ops([tflearn.variables.variable], device='/cpu:0'):
+        model1 = my_model(placeholder_X)
+# Reuse Variables for the next model
+tf.get_variable_scope().reuse_variables()
+with tf.device('/gpu:1'):
+    with tf.arg_ops([tflearn.variables.variable], device='/cpu:0'):
+        model2 = my_model(placeholder_X)
+
+those docs are probably somewhat outdated, because tf.arg_ops is not there anymore; the closest thing I could find is the following:
+    arg_scope = tf.contrib.framework.arg_scope
+    create_var_op = tf.contrib.framework.python.ops.variables.variable
+    ...
+    tower_vars = []
+    for tower_id in range(len(device_id_list)):
+        with tf.device('/gpu:%d' % tower_id):
+            with tf.name_scope('tower_%d' % tower_id) as scope:
+            variables_on_cpu = arg_scope([create_var_op], device='/cpu:0')
+            with variables_on_cpu:
+                 X, y, loss, acc = build_model()
+                 tower_vars.append([gd.compute_gradients(loss), loss, acc, (X, y)])
+                 tf.get_variable_scope().reuse_variables()
+
+    tower_grads, tower_loss, tower_acc, xy_pairs = zip(*tower_vars)
+    train_op = gd.apply_gradients(average_gradients(tower_grads))
+    loss = tf.reduce_mean(tower_loss)
+    acc = tf.reduce_mean(tower_acc)
+    init_op = tf.initialize_all_variables()
+
+but it also does not help (same error).
+issue with similar error message
+full code that reproduces error

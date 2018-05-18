@@ -1,0 +1,55 @@
+tf.contrib.distributions.NegativeBinomial numerical stability (inf)
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.2.1
+Python version: 3
+Bazel version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+I'm working on a negative binomial regression model and ran into inf/nan values during training. I was able to trace it back to the NegativeBinomial implementation, and specificially when dealing with relatively large probability logits.
+Example to demonstrate the issue:
+import tensorflow as tf
+
+logits = tf.constant([1.0, 5.0, 10.0, 15.0, 16.0, 17.0, 20.0, 50.0])
+nb = tf.contrib.distributions.NegativeBinomial(10.0, logits)
+
+sess = tf.Session()
+x = sess.run(nb.log_prob(10.0))
+print(x)
+Results in
+[  -4.83159161  -38.70070267  -88.56268311 -137.00408936 -147.99020386
+          -inf          -inf          -inf]
+
+Looking at the values before going to -inf (somewhere between 16.0 and 17.0) it doesn't seem to approaching any sort of limit, so I figured something else was going on.
+Inside the NegativeBinomial class, the provides logits are first transformed to real probabilities by passing them through a sigmoid, which is 1.0 / (exp(-x) + 1.0). Later, in _log_unnormalized_prob, these probabilities go through a log1p(-x) function. The problem is that for big values and limited floating point precision, sigmoid will output exactly 1.0, which results in taking the log of -1.0 + 1.0, and the log of 0 yields negative infinity.
+I first tried to fix it by simplifying the combination of functions and getting rid of the sigmoid.
+I replaced math_ops.log1p(-self.probs) with tf.log(1.0 / (tf.exp(self.logits) + 1.0)), which is equivalent (log((1 / (1 + exp(-x)) + 1) = log(1 / (exp(x) + 1)) but gives better numerical stability. For the same script but with higher values (1.0, 5.0, 10.0, 15.0, 16.0, 17.0, 20.0, 50.0, 70.0, 80.0, 90.0), the output now is:
+[  -4.8315897   -38.70066452  -88.567276   -138.56636047 -148.56636047
+ -158.56636047 -188.56636047 -488.56634521 -688.56634521 -788.56634521
+          -inf]
+
+This is better, but it still goes to -inf. Finally, I inspected the raw values of the function I changed, and noticed that it converges to -x somewhere after 15.0 as input, so my final solution looks like this:
+tf.where(self.logits <= 20.0, x=tf.log(1.0 / (tf.exp(self.logits) + 1.0)), y=-self.logits)
+So ultimately I changed from
+def _log_unnormalized_prob(self, x):
+    if self.validate_args:
+        x = distribution_util.embed_check_nonnegative_integer_form(x)
+    return (self.total_count * math_ops.log1p(-self.probs)
+            + x * math_ops.log(self.probs))
+to
+def _log_unnormalized_prob(self, x):
+    if self.validate_args:
+        x = distribution_util.embed_check_nonnegative_integer_form(x)
+    return (self.total_count
+            * tf.where(self.logits <= 20.0, x=tf.log(1.0 / (tf.exp(self.logits) + 1.0)), y=-self.logits)
+            + x * math_ops.log(self.probs))
+which gives the correct probabilities for arbitrarily large probability logits.
+I don't feel like creating a PR since I'm not convinced this is the most elegant solution, and not sure whether this problem might exist at other placed in the code base, for example other distribution types. For now, I made my own copy of BinomialDistribution with this fix included, and I'd like to invite you to verify the issue, check the math and perhaps come up with a better solution.
+Thanks.

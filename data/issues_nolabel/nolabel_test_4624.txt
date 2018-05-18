@@ -1,0 +1,76 @@
+Meta Graph Import not working when used with outputs_collections
+
+OS info
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=15.10
+DISTRIB_CODENAME=wily
+DISTRIB_DESCRIPTION="Ubuntu 15.10"
+NAME="Ubuntu"
+VERSION="15.10 (Wily Werewolf)"
+ID=ubuntu
+ID_LIKE=debian
+PRETTY_NAME="Ubuntu 15.10"
+VERSION_ID="15.10"
+
+KERNEL: Linux 4.2.0-16-generic x86_64
+
+Cuda Version:
+-rw-r--r-- 1 root root 189170 Nov 30  2015 /usr/local/cuda/lib/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Nov 30  2015 /usr/local/cuda/lib/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 Nov 30  2015 /usr/local/cuda/lib/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 311596 Nov 30  2015 /usr/local/cuda/lib/libcudart.so.7.5.18
+-rw-r--r-- 1 root root 558020 Nov 30  2015 /usr/local/cuda/lib/libcudart_static.a
+
+Tensorflow pip version:
+https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.10.0-cp34-cp34m-linux_x86_64.whl
+Python tensorflow.__version__ output
+0.10.0
+
+Minimal Reproducible code
+import tensorflow as tf
+from tensorflow.contrib import slim
+
+tf_chk = "model_ckpt-0"
+tf_meta = "model_ckpt-0.meta"
+
+images = tf.constant(1.2, tf.float32, shape=[100, 100])
+with slim.arg_scope(
+        [slim.fully_connected],
+        outputs_collections=[tf.GraphKeys.ACTIVATIONS]): ## NOT working
+        # outputs_collections=[]): ## This works
+    logits = slim.fully_connected(images, 100, scope='logits')
+
+init = tf.initialize_all_variables()
+
+with tf.Session() as sess:
+    sess.run(init)
+    saver = tf.train.Saver()
+    saver.save(sess, tf_chk)
+
+with tf.Graph().as_default():
+    with tf.Session() as sess:
+        new_saver = tf.train.import_meta_graph(tf_meta)
+        new_saver.restore(sess, tf_chk)
+
+Description
+Code above will crash the program with the following stack trace:
+Traceback (most recent call last):
+  File "test.py", line 24, in <module>
+    new_saver = tf.train.import_meta_graph(tf_meta)
+  File "/home/x/.local/lib/python3.4/site-packages/tensorflow/python/training/saver.py", line 1458, in import_m
+eta_graph
+    return _import_meta_graph_def(read_meta_graph_file(meta_graph_or_file))
+  File "/home/x/.local/lib/python3.4/site-packages/tensorflow/python/training/saver.py", line 1369, in _import_
+meta_graph_def
+    col_op = ops.get_default_graph().as_graph_element(value)
+  File "/home/x/.local/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 2392, in as_graph_
+element
+    return self._as_graph_element_locked(obj, allow_tensor, allow_operation)
+  File "/home/x/.local/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 2452, in _as_graph
+_element_locked
+    "graph." % repr(name))
+KeyError: "The name 'logits' refers to an Operation not in the graph."
+
+However, if I create outputs_collections with the empty list, the code will
+work. Also, the code will work if I don't specify the outputs_collections
+argument.

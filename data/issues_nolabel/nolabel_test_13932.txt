@@ -1,0 +1,94 @@
+Non-determinism from `tf.data.Dataset.map` with random ops
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes -- please see the minimal reproducible example script below.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS 10.12, Linux CentOS 7 (4.6.6-300.el7.centos.x86_64)
+TensorFlow installed from (source or binary): pip3 install tf-nightly (also happens when built from source)
+TensorFlow version (use command below): v1.3.0-rc1-3690-g9b9cbbe 1.5.0-dev20171023
+Python version: 3.6.3
+Bazel version (if compiling from source): N/A since nightly build reproduces the issue (but when built from source, I use 0.6.1-homebrew)
+CUDA/cuDNN version: a GPU is not needed to reproduce the issue (however, it has also been tested with CUDA 8.0.61 / cuDNN 7.0.1)
+GPU model and memory: N/A -- a GPU is not needed to reproduce the issue (however, it has also been tested with Tesla K80s)
+Exact command to reproduce: See minimal reproducible example below
+
+Describe the problem
+The new tf.data.Dataset API contains a map function with a num_parallel_calls parameter, which allows elements to be processed in parallel by multiple threads.  Although not explicitly mentioned in the API docs, prior discussions (such as a comment from today) have indicated that the map function should be deterministic (w.r.t. the graph seed) even if num_parallel_calls > 1.  I have observed that if the function being mapped contains only non-random ops, then this determinism is observed (see step 2 below).  However, if the the function being mapped contains a random op, the results become non-deterministic for all values of num_parallel_calls > 1.  This is unexpected, and prevents training experiments from being reproducible, unless num_parallel_calls == 1.  Also, please note that the example below serves as a minimal example to reproduce the issue.  The real scenario involves running data augmentation during training.
+Source code / logs
+
+pip3 install tf-nightly
+Run the following code to observe that map functions with only non-random ops are deterministic for all values of num_parallel_calls, which is the expected behavior:
+
+import numpy as np
+import tensorflow as tf
+
+def test(threads):
+  np.random.seed(42)
+  tf.set_random_seed(42)
+  images = np.random.rand(100, 64, 64, 3).astype(np.float32)
+
+  def get_data():
+    dataset = tf.data.Dataset.from_tensor_slices(images)  # some initial dataset
+    dataset = dataset.map(lambda x: x * 2, num_parallel_calls=threads)  # this works fine always
+    dataset = dataset.batch(32)
+    x = dataset.make_one_shot_iterator().get_next()
+    return x
+
+  # execution 1
+  x = get_data()
+  with tf.Session() as sess:
+    x_batch1 = sess.run(x)
+
+  # clear out everything
+  tf.reset_default_graph()
+
+  # execution 2
+  x = get_data()
+  with tf.Session() as sess:
+    x_batch2 = sess.run(x)
+
+  # results should be equivalent
+  assert np.allclose(x_batch1, x_batch2)
+
+test(1)  # works with 1 thread!
+test(15)  # works with >1 threads!
+
+Run the following code to observe that map functions with random ops are deterministic if num_parallel_calls == 1, but are non-deterministic for values of num_parallel_calls > 1, which seems to me to be an unexpected behavior:
+
+import numpy as np
+import tensorflow as tf
+
+def test(threads):
+  np.random.seed(42)
+  tf.set_random_seed(42)
+  images = np.random.rand(100, 64, 64, 3).astype(np.float32)
+
+  def get_data():
+    dataset = tf.data.Dataset.from_tensor_slices(images)  # some initial dataset
+    # ONLY DIFFERENCE IS THE BELOW LINE:
+    dataset = dataset.map(lambda image: tf.image.random_hue(image, 0.04, seed=42), num_parallel_calls=threads)
+    # ONLY DIFFERENCE IS THE ABOVE LINE ^^^:
+    dataset = dataset.batch(32)
+    x = dataset.make_one_shot_iterator().get_next()
+    return x
+
+  # execution 1
+  x = get_data()
+  with tf.Session() as sess:
+    x_batch1 = sess.run(x)
+
+  # clear out everything
+  tf.reset_default_graph()
+
+  # execution 2
+  x = get_data()
+  with tf.Session() as sess:
+    x_batch2 = sess.run(x)
+
+  # results should be equivalent
+  assert np.allclose(x_batch1, x_batch2)
+
+test(1)  # works with 1 thread!
+test(15)  # fails with >1 threads!
+
+Observe that swapping out the map line above with an entirely different random op such as dataset = dataset.map(lambda x: x * tf.random_normal([64, 64, 3], seed=42), num_parallel_calls=threads) is also non-deterministic for values of num_parallel_calls > 1.

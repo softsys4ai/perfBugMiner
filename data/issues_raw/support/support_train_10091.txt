@@ -1,0 +1,68 @@
+tf.assign does not change the shape of variables correctly
+
+Hi,
+I have discovered what I believe to be a bug with tf.assign. This occurs when I have a matrix with a shape, e.g. (2, 3), and assign it a new, larger matrix, e.g. with the shape (2, 4). When you get the shape of your updated variable, its shape has not changed i.e. (2, 3) is returned. Furthermore, if you use tf.add on your new matrix and a matrix with the same shape (2, 4) as the updated matrix an exception is thrown:
+ValueError: Dimensions must be equal, but are 3 and 4 for 'Add_2' (op: 'Add') with input shapes: [2,3], [2,4].
+Similar exceptions are also thrown when you try and use tf.matmult, tf.subtract, etc. on your updated variable.
+Below is an example of this issue.
+import tensorflow as tf
+
+import numpy as np
+
+# Initialise some variables
+sess = tf.Session()
+x = tf.Variable(tf.ones([2, 3]))
+y = tf.Variable(tf.ones([2, 3]))
+z = tf.Variable(tf.ones([2, 4]))
+sess.run(tf.variables_initializer([x, y, z]))
+
+# Print information about the original matrix
+print(x.get_shape())
+print(x.eval(session=sess))
+print(tf.add(x, y).eval(session=sess))
+print()
+
+# Enlarge the matrix by assigning it a new set of values
+sess.run(tf.assign(x, np.ones([2, 4]), validate_shape=False))
+
+# Print information about the new matrix
+print(x.get_shape())
+print(x.eval(session=sess))
+print()
+
+# Try add the updated matrix to a matrix with the same ORIGINAL shape
+# I would expect this to fail because I have changed the shape
+try:
+  print(tf.add(x, y).eval(session=sess))
+except:
+  print("Could not add x and y")
+print()
+
+# Try add the updated matrix to a matrix with the same shape
+# I would NOT expect this to fail because they both have the same shapes
+try:
+  print(tf.add(x, z).eval(session=sess))
+except:
+  print("Could not add x and z")
+print()
+
+# Try add the updated matrix to a matrix that had the same ORIGINAL
+# shape as it, but has been updated so their actual shapes are the same
+a = tf.Variable(tf.ones([2, 3]))
+sess.run(tf.variables_initializer([a,]))
+sess.run(tf.assign(a, np.ones([2, 4]), validate_shape=False))
+print(tf.add(x, a).eval(session=sess))
+
+The output of this code is:
+(2, 3)
+[[ 1.  1.  1.]
+[ 1.  1.  1.]]
+[[ 2.  2.  2.]
+[ 2.  2.  2.]]
+(2, 3)
+[[ 1.  1.  1.  1.]
+[ 1.  1.  1.  1.]]
+Could not add x and y
+Could not add x and z
+[[ 2.  2.  2.  2.]
+[ 2.  2.  2.  2.]]

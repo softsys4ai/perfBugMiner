@@ -1,0 +1,55 @@
+Strange behavior of tf.control_dependencies
+
+Consider the following code:
+import tensorflow as tf
+
+with tf.variable_scope('a'):
+    a = tf.get_variable('v', [], initializer=tf.constant_initializer(0), dtype=tf.int32)
+    a_assign = a.assign(a+100)
+
+with tf.variable_scope('a', reuse=True):
+    b = tf.get_variable('v', [], initializer=tf.constant_initializer(0), dtype=tf.int32)
+    b_assign = b.assign(b+1)
+
+with tf.control_dependencies([a_assign, b_assign]):
+    c = tf.constant(0)
+
+sess = tf.InteractiveSession()
+sess.run(tf.initialize_all_variables())
+print(sess.run([c, a, b]))
+
+
+I expected this piece of code to return [0, 101, 101], but instead it returns [0, 100, 100].
+Then I ran the "print(sess.run([c, a, b]))" line 10 times, the outputs were:
+[0, 100, 100]
+[0, 200, 200]
+[0, 201, 201]
+[0, 202, 202]
+[0, 303, 303]
+[0, 403, 403]
+[0, 404, 404]
+[0, 405, 405]
+[0, 406, 406]
+[0, 506, 506]
+Then I re-ran the program again and the outputs were:
+[0, 1, 1]
+[0, 2, 2]
+[0, 3, 3]
+[0, 4, 4]
+[0, 5, 5]
+[0, 6, 6]
+[0, 7, 7]
+[0, 8, 8]
+[0, 108, 108]
+[0, 208, 208]
+So it seems like in this case tf.control_dependencies randomly executes either a_assign or b_assign and not both at each sess.run. Could anyone explain this behavior?
+Environment info
+Operating System:
+Ubuntu 14.04
+Installed version of CUDA and cuDNN:
+-rw-r--r-- 1 root root 189170 Jun  6 15:17 /usr/local/cuda/lib/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Jun  6 15:17 /usr/local/cuda/lib/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 Jun  6 15:17 /usr/local/cuda/lib/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 311596 Jun  6 15:17 /usr/local/cuda/lib/libcudart.so.7.5.18
+-rw-r--r-- 1 root root 558020 Jun  6 15:17 /usr/local/cuda/lib/libcudart_static.a
+TensorFlow version 0.9.0

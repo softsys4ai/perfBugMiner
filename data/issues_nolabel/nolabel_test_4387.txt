@@ -1,0 +1,56 @@
+Significant performance overhead with gpu kernel launches in a while_loop
+
+Environment info
+Operating System:
+ubuntu 14.04
+GeForce GTX TITAN  Driver Version: 367.44
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+-rw-r--r-- 1 root root   322936 Aug 15  2015 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root       19 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root   383336 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root   720192 Aug 15  2015 /usr/local/cuda/lib64/libcudart_static.a
+-rwxr-xr-x 1 root root 61453024 Feb 23  2016 /usr/local/cuda/lib64/libcudnn.so
+-rwxr-xr-x 1 root root 61453024 Feb 23  2016 /usr/local/cuda/lib64/libcudnn.so.4
+-rwxr-xr-x 1 root root 61453024 Feb 23  2016 /usr/local/cuda/lib64/libcudnn.so.4.0.7
+-rw-r--r-- 1 root root 62025862 Feb 23  2016 /usr/local/cuda/lib64/libcudnn_static.a
+
+A link to the pip package you installed:
+https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.10.0rc0-cp27-none-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.10.0rc0
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+from tensorflow.python.client import timeline
+start = tf.constant(0, dtype=tf.float64)
+end = tf.constant(100, dtype=tf.float64)
+init = tf.ones([100], dtype=tf.float64)
+b = tf.ones([100], dtype=tf.float64)
+def condForWhile(i, a):
+return tf.less(i, end)
+def bodyForWhile(i, a):
+i = i + 1
+a = tf.mul(a, b)
+return [i, a]
+_, prod = tf.while_loop(condForWhile, bodyForWhile, [start, init])
+with tf.Session() as sess:
+tf.initialize_all_variables().run()
+# run once to eliminate start-up costs
+sess.run(prod)
+# now run with tracing
+run_metadata = tf.RunMetadata()
+result = sess.run(prod,
+options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
+run_metadata=run_metadata)
+trace = timeline.Timeline(step_stats=run_metadata.step_stats)
+trace_file = open('/tmp/timeline.tfwhile.json', 'w')
+trace_file.write(trace.generate_chrome_trace_format(show_dataflow=False, show_memory=False))
+This is a simple app that does a = a * b 100 times in a while_loop using the tf.mul() operator. I am using the timeline feature to profile it. Inspecting the timeline shows that for each iteration, the time in the gpu stream for the multiply is about .003ms, but the time between launches is .3ms-.5ms. This seems like a lot - is that expected?
+Note that my while condition uses floats in the less function. I see the less operation happening on the gpu stream and a memcpyDtoH time for each loop iteration presumably to copy the loop counter back and forth to the gpu, which seems kind of inefficient. If instead I use  type int64 in the loop conditions (start and end), then the gap between kernels goes down to .11 - .17ms and I no longer see the less on the gpu stream or the memcpy.
+Note that in the original case where we discovered this, our gpu operator was much more complicated (and uses floats in the condition) and the time between kernel launches was still relatively constant at around .4ms. In contrast, if I write this same app in straight cuda, and launch the kernel 100 times in cuda, the gap between launches is about .007ms (about 50x improvement). I would expect some overhead in the tensorflow conditional operators, but this really seems like a lot.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+Attaching the timeline traces for the above code for both floats and ints in the conditional.
+timelines.zip

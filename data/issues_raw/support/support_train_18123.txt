@@ -1,0 +1,196 @@
+No float16 batch matrix multiplication support for GPU
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): b'v1.6.0-rc1-1857-g67e2efa' 1.6.0
+Python version: 3.5.2
+Bazel version (if compiling from source): 0.10.0
+GCC/Compiler version (if compiling from source): 5.4.0
+CUDA/cuDNN version: 9.0/7.0
+GPU model and memory: not relevant
+Exact command to reproduce:
+
+import tensorflow as tf
+import numpy.random as npr
+
+with tf.device('/gpu:0'):
+    a = tf.constant(npr.rand(10, 5, 5).astype('float16'))
+    b = tf.constant(npr.rand(10, 5, 5).astype('float16'))
+    c = tf.matmul(a, b)
+
+sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=False))
+sess.run(c)
+
+Describe the problem
+The problem is the same as in issue #605, but for float16: there is no GPU support for batch matrix multiplication. There is a quick workaround of reshaping the tensors to 2D, multiplying and reshaping back, but that is not possible to do when this function is called inside some TensorFlow classes, like in attention_wrapper.py line 336. And this significantly slows down computation of RNNs with attention on float16.
+Source code / logs
+Traceback:
+---------------------------------------------------------------------------
+InvalidArgumentError                      Traceback (most recent call last)
+~/Documents/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+   1329     try:
+-> 1330       return fn(*args)
+   1331     except errors.OpError as e:
+
+~/Documents/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py in _run_fn(feed_dict, fetch_list, target_list, options, run_metadata)
+   1312       # Ensure any changes to the graph are reflected in the runtime.
+-> 1313       self._extend_graph()
+   1314       return self._call_tf_sessionrun(
+
+~/Documents/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py in _extend_graph(self)
+   1360             tf_session.TF_ExtendGraph(self._session,
+-> 1361                                       graph_def.SerializeToString(), status)
+   1362           self._opened = True
+
+~/Documents/venv/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py in __exit__(self, type_arg, value_arg, traceback_arg)
+    515             compat.as_text(c_api.TF_Message(self.status.status)),
+--> 516             c_api.TF_GetCode(self.status.status))
+    517     # Delete the underlying status object from memory otherwise it stays alive
+
+InvalidArgumentError: Cannot assign a device for operation 'MatMul': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+Registered kernels:
+  device='XLA_GPU'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+  device='XLA_CPU'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+  device='GPU'; T in [DT_DOUBLE]
+  device='GPU'; T in [DT_FLOAT]
+  device='GPU'; T in [DT_COMPLEX128]
+  device='GPU'; T in [DT_COMPLEX64]
+  device='CPU'; T in [DT_INT32]
+  device='CPU'; T in [DT_HALF]
+  device='CPU'; T in [DT_DOUBLE]
+  device='CPU'; T in [DT_FLOAT]
+  device='CPU'; T in [DT_COMPLEX128]
+  device='CPU'; T in [DT_COMPLEX64]
+  device='XLA_GPU_JIT'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+  device='XLA_CPU_JIT'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+
+	 [[Node: MatMul = BatchMatMul[T=DT_HALF, adj_x=false, adj_y=false, _device="/device:GPU:0"](Const, Const_1)]]
+
+During handling of the above exception, another exception occurred:
+
+InvalidArgumentError                      Traceback (most recent call last)
+<ipython-input-1-8739d1f2e967> in <module>()
+      8 
+      9 sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=False))
+---> 10 sess.run(c)
+
+~/Documents/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+    906     try:
+    907       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 908                          run_metadata_ptr)
+    909       if run_metadata:
+    910         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+~/Documents/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+   1141     if final_fetches or final_targets or (handle and feed_dict_tensor):
+   1142       results = self._do_run(handle, final_targets, final_fetches,
+-> 1143                              feed_dict_tensor, options, run_metadata)
+   1144     else:
+   1145       results = []
+
+~/Documents/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+   1322     if handle is None:
+   1323       return self._do_call(_run_fn, feeds, fetches, targets, options,
+-> 1324                            run_metadata)
+   1325     else:
+   1326       return self._do_call(_prun_fn, handle, feeds, fetches)
+
+~/Documents/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+   1341         except KeyError:
+   1342           pass
+-> 1343       raise type(e)(node_def, op, message)
+   1344 
+   1345   def _extend_graph(self):
+
+InvalidArgumentError: Cannot assign a device for operation 'MatMul': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+Registered kernels:
+  device='XLA_GPU'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+  device='XLA_CPU'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+  device='GPU'; T in [DT_DOUBLE]
+  device='GPU'; T in [DT_FLOAT]
+  device='GPU'; T in [DT_COMPLEX128]
+  device='GPU'; T in [DT_COMPLEX64]
+  device='CPU'; T in [DT_INT32]
+  device='CPU'; T in [DT_HALF]
+  device='CPU'; T in [DT_DOUBLE]
+  device='CPU'; T in [DT_FLOAT]
+  device='CPU'; T in [DT_COMPLEX128]
+  device='CPU'; T in [DT_COMPLEX64]
+  device='XLA_GPU_JIT'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+  device='XLA_CPU_JIT'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+
+	 [[Node: MatMul = BatchMatMul[T=DT_HALF, adj_x=false, adj_y=false, _device="/device:GPU:0"](Const, Const_1)]]
+
+Caused by op 'MatMul', defined at:
+  File "/usr/lib/python3.5/runpy.py", line 184, in _run_module_as_main
+    "__main__", mod_spec)
+  File "/usr/lib/python3.5/runpy.py", line 85, in _run_code
+    exec(code, run_globals)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/ipykernel_launcher.py", line 16, in <module>
+    app.launch_new_instance()
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/traitlets/config/application.py", line 658, in launch_instance
+    app.start()
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/ipykernel/kernelapp.py", line 486, in start
+    self.io_loop.start()
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/tornado/ioloop.py", line 888, in start
+    handler_func(fd_obj, events)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/tornado/stack_context.py", line 277, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/zmq/eventloop/zmqstream.py", line 450, in _handle_events
+    self._handle_recv()
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/zmq/eventloop/zmqstream.py", line 480, in _handle_recv
+    self._run_callback(callback, msg)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/zmq/eventloop/zmqstream.py", line 432, in _run_callback
+    callback(*args, **kwargs)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/tornado/stack_context.py", line 277, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/ipykernel/kernelbase.py", line 283, in dispatcher
+    return self.dispatch_shell(stream, msg)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/ipykernel/kernelbase.py", line 233, in dispatch_shell
+    handler(stream, idents, msg)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/ipykernel/kernelbase.py", line 399, in execute_request
+    user_expressions, allow_stdin)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/ipykernel/ipkernel.py", line 208, in do_execute
+    res = shell.run_cell(code, store_history=store_history, silent=silent)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/ipykernel/zmqshell.py", line 537, in run_cell
+    return super(ZMQInteractiveShell, self).run_cell(*args, **kwargs)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/IPython/core/interactiveshell.py", line 2728, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/IPython/core/interactiveshell.py", line 2850, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/IPython/core/interactiveshell.py", line 2910, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-1-8739d1f2e967>", line 7, in <module>
+    c = tf.matmul(a, b)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/tensorflow/python/ops/math_ops.py", line 2082, in matmul
+    a, b, adj_x=adjoint_a, adj_y=adjoint_b, name=name)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/tensorflow/python/ops/gen_math_ops.py", line 1236, in batch_mat_mul
+    "BatchMatMul", x=x, y=y, adj_x=adj_x, adj_y=adj_y, name=name)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 3306, in create_op
+    op_def=op_def)
+  File "/home/igitman/Documents/venv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1669, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): Cannot assign a device for operation 'MatMul': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+Registered kernels:
+  device='XLA_GPU'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+  device='XLA_CPU'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+  device='GPU'; T in [DT_DOUBLE]
+  device='GPU'; T in [DT_FLOAT]
+  device='GPU'; T in [DT_COMPLEX128]
+  device='GPU'; T in [DT_COMPLEX64]
+  device='CPU'; T in [DT_INT32]
+  device='CPU'; T in [DT_HALF]
+  device='CPU'; T in [DT_DOUBLE]
+  device='CPU'; T in [DT_FLOAT]
+  device='CPU'; T in [DT_COMPLEX128]
+  device='CPU'; T in [DT_COMPLEX64]
+  device='XLA_GPU_JIT'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+  device='XLA_CPU_JIT'; T in [DT_FLOAT, DT_DOUBLE, DT_INT32, DT_COMPLEX64]
+
+	 [[Node: MatMul = BatchMatMul[T=DT_HALF, adj_x=false, adj_y=false, _device="/device:GPU:0"](Const, Const_1)]]

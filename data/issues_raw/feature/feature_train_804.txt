@@ -1,0 +1,34 @@
+Applying batch normalization to a non-convolutional layer fails due to restriction of input to rank 4
+
+Starting from this top answer of stackoverflow, I tried to make batch normalization work for a fully connected layer. This is the relevant part of the code:
+            if self.convolutional:
+              mean, variance = tf.nn.moments(x, [0, 1, 2])
+            else:
+              mean, variance = tf.nn.moments(x, [0])
+            assign_mean = self.mean.assign(mean)
+            assign_variance = self.variance.assign(variance)
+            with tf.control_dependencies([assign_mean, assign_variance]):
+                return tf.nn.batch_norm_with_global_normalization(
+                    x, mean, variance, self.beta, self.gamma, self.epsilon,
+                    scale_after_normalization=self.scale_after_normalization)
+
+The call to tf.nn.batch_norm_with_global_normalization fails however:
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_nn_ops.py", line 104, in batch_norm_with_global_normalization
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 659, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1896, in create_op
+    set_shapes_for_outputs(ret)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1524, in set_shapes_for_outputs
+    shapes = shape_func(op)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/nn_ops.py", line 313, in _BatchNormShape
+    input_shape = op.inputs[0].get_shape().with_rank(4)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_shape.py", line 614, in with_rank
+    return self.merge_with(unknown_shape(ndims=rank))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_shape.py", line 542, in merge_with
+    self.assert_same_rank(other)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_shape.py", line 585, in assert_same_rank
+    "Shapes %s and %s must have the same rank" % (self, other))
+ValueError: Shapes (64, 512) and (?, ?, ?, ?) must have the same rank
+
+since, as far as I can tell, the input is constraint to have rank 4 in in nn_ops.py. Is this really a necessary constraint?

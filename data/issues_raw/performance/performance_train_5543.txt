@@ -1,0 +1,19 @@
+Constant folding doesn't remove control edges
+
+I believe that when constant folding takes place, and a section of a graph is replaced by a constant, that only the data output edge of the replaced node is removed.
+I believe that I can see that a graph of nodes ending up in a Div (part of the gradient generation bit) is replaced by a Const.  The output of the Div goes to a Mul, and this is changed to the new const correctly.
+However, there is a control output from the Div going to a Const (not sure why, but it is).  This is not changed to the Div replacement.  Consequently the dead node pruning doesn't remove the original Div.
+Here is some trace:
+During the constant folding:
+Graph Before #nodes 67 #edges 109
+Graph Constant graph #nodes 32 #edges 42
+Constant foldable 32 : 67
+Replacing {name:'gradients/Mean_grad/truediv' id:28 op device:{/job:localhost/replica:0/task:0/device:ipu:0} def:{gradients/Mean_grad/truediv = Div[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:ipu:0"](gradients/Mean_grad/Tile, gradients/Mean_grad/Cast)}} :: 0 with a constant
+Replacing edge to gradients/Square_grad/mul_1:0
+During the post constant folding pruning:
+PruneForReverseReachability: gradients/Square_grad/mul_1 <- gradients/Mean_grad/truediv/_0__cf__1
+PruneForReverseReachability: gradients/Square_grad/mul/x <- gradients/Mean_grad/truediv
+After the pruning:
+Graph ConstFolding #nodes 68 #edges 110
+When the graph is passed to the device, it contains:
+Node: gradients/Square_grad/mul/x = Constdtype=DT_FLOAT, value=Tensor<type: float shape: [] values: 2>, _device="/job:localhost/replica:0/task:0/device:ipu:0"

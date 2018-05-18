@@ -1,0 +1,84 @@
+estimator: allow export_outputs to be a Tensor
+
+When someone wants to use tf.estimator.Estimator.export_savedmodel to save the predictions of a model and tf.contrib.predictor.from_saved_model to load the prediction function, it is currently necessary to define boilerplate code. This PR reduces the amount of code.
+Currently:
+...
+ret['export_outputs'] = {
+        'predictions': tf.estimator.export.PredictOutput(
+            {'predictions': ret['predictions']}
+        )
+    }
+tf.estimator.EstimatorSpec(**ret)
+With this PR the following is enough:
+ret['export_outputs'] = {'predictions': ret['predictions']}
+ret['export_outputs'] = ret['predictions']
+The predictor repr for the first example is equal to the original code
+SavedModelPredictor with feed tensors {'x': <tf.Tensor 'Placeholder:0' shape=(1, 10) dtype=float32>} and fetch_tensors {'predictions': <tf.Tensor 'dense/Relu:0' shape=(1, 10) dtype=float32>}
+and for the second the output name changes
+SavedModelPredictor with feed tensors {'x': <tf.Tensor 'Placeholder:0' shape=(1, 10) dtype=float32>} and fetch_tensors {'output': <tf.Tensor 'dense/Relu:0' shape=(1, 10) dtype=float32>}
+When someone wants to verify the code, here a full example:
+from types import SimpleNamespace
+import numpy as np
+import tensorflow as tf
+from tensorflow.contrib import predictor
+
+def model_fn(features, labels, mode):
+    assert labels is None, labels
+    x = features['x']
+    y = features['y']
+    
+    y_hat = tf.layers.Dense(10, tf.nn.relu)(x)
+    loss = tf.losses.mean_squared_error(y, y_hat)
+    train_op = tf.train.AdamOptimizer(learning_rate=0.001).minimize(loss)
+    
+    ret = dict(
+        mode=mode,
+        loss=loss,
+        predictions=y_hat,
+        train_op=train_op,
+    )
+
+    # Boilderplate:
+    ret['export_outputs'] = {  # <------------------- old
+        'predictions': tf.estimator.export.PredictOutput(
+            {'predictions': ret['predictions']}
+        )
+    }
+    ret['export_outputs'] = {'predictions': ret['predictions']}  # <------------------- new
+    ret['export_outputs'] = ret['predictions']  # <------------------- new alternate
+    
+    return tf.estimator.EstimatorSpec(**ret)
+        
+estimator = tf.estimator.Estimator(
+    model_fn=model_fn
+)
+
+def generator():
+    x = np.random.randn(1, 10).astype(np.float32)
+    y = np.random.randn(1, 10).astype(np.float32)
+    yield {'x': x, 'y': y}
+
+def input_fn():
+    ds = tf.data.Dataset.from_generator(generator, {'x': tf.float32, 'y': tf.float32}, {'x': [1, 10], 'y': [1, 10]})
+    it = ds.make_one_shot_iterator()
+    element = it.get_next()
+    return element
+
+estimator.train(input_fn)
+
+def serving_input_receiver_fn():
+    x = tf.placeholder(tf.float32, [1, 10])
+    y = tf.placeholder(tf.float32, [1, 10])
+    
+    ret = SimpleNamespace()
+    ret.features = {'x': x, 'y': y}  # for graph def
+    ret.receiver_tensors = {'x': x}  # for serving
+    ret.receiver_tensors_alternatives = None
+    return ret
+
+
+model_path = estimator.export_savedmodel('tmp', serving_input_receiver_fn)
+
+predict_fn = predictor.from_saved_model(model_path)
+# predict_fn({'x': np.random.randn(1, 10)})
+predict_fn

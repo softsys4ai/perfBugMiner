@@ -1,0 +1,76 @@
+Incorrect Timing Stats Reported by tfprof
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): I have added profiling code as shown below to the cifar10 code ([https://github.com/tensorflow/models/tree/master/tutorials/image/cifar10]).
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+
+
+TensorFlow installed from (source or binary): Source
+
+
+TensorFlow version (use command below): ('v1.1.0-rc2-773-g7fa0cf3', '1.1.0-rc2')
+
+
+Bazel version (if compiling from source):
+
+
+CUDA/cuDNN version:8.0/6.0
+
+
+GPU model and memory:NVIDIA Quadra K1200 4GB
+
+
+Describe the problem
+While doing profiling by tfprof I get the following stats
+Timing and Memory
+conv1/weights (19.20KB/76.80KB, 8us/18us)
+conv1/weights/ExponentialMovingAverage (19.20KB/38.40KB, 6us/8us)
+conv1/weights/ExponentialMovingAverage/read (19.20KB/19.20KB, 2us/2us)
+conv1/weights/read (19.20KB/19.20KB, 2us/2us)
+conv2/BiasAdd (4.72MB/4.72MB, 225us/225us)
+conv2/Conv2D (4.72MB/4.72MB, 2.34ms/2.34ms)
+conv2/L2Loss (4B/4B, 21us/21us)
+conv2/biases (256B/1.02KB, 8us/58us)
+conv2/biases/ExponentialMovingAverage (256B/512B, 7us/49us)
+conv2/biases/ExponentialMovingAverage/read (256B/256B, 42us/42us)
+Floating Point Operations
+_TFProfRoot (0/5.23b flops)
+conv2/Conv2D (3.77b/3.77b flops)
+conv1/Conv2D (707.79m/707.79m flops)
+gradients/local3/MatMul_grad/MatMul (226.49m/226.49m flops)
+gradients/local3/MatMul_grad/MatMul_1 (226.49m/226.49m flops)
+local3/MatMul (226.49m/226.49m flops)
+gradients/local4/MatMul_grad/MatMul (18.87m/18.87m flops)
+gradients/local4/MatMul_grad/MatMul_1 (18.87m/18.87m flops)
+local4/MatMul (18.87m/18.87m flops)
+conv1/BiasAdd (4.72m/4.72m flops)
+conv2/BiasAdd (1.18m/1.18m flops)
+gradients/softmax_linear/MatMul_grad/MatMul (491.52k/491.52k flops)
+gradients/softmax_linear/MatMul_grad/MatMul_1 (491.52k/491.52k flops)
+softmax_linear/MatMul (491.52k/491.52k flops)
+Computing Floating Point Performance for Conv2D operation gives surprising results: It comes out to be 3.77b/2.34ms = 1618 GFLOPS which is more than the manufacturer prescribed peak performance of 1052 GFLOPS. The timing stats seem to be wrong. This is impossible.
+Source code / logs
+ run_metadata = tf.RunMetadata()
+    with tf.train.MonitoredTrainingSession(
+        checkpoint_dir=FLAGS.train_dir,
+        hooks=[tf.train.StopAtStepHook(last_step=FLAGS.max_steps),
+               tf.train.NanTensorHook(loss),
+               _LoggerHook()],
+        config=tf.ConfigProto(
+            log_device_placement=FLAGS.log_device_placement, 
+            graph_options=tf.GraphOptions(build_cost_model=1))) as mon_sess:
+      while not mon_sess.should_stop():
+        #Disable Profiling 
+        # mon_sess.run(train_op)
+
+        #Enable Profiling 
+        mon_sess.run(train_op, options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE), 
+        run_metadata=run_metadata)
+        analysis = tf.contrib.tfprof.model_analyzer.print_model_analysis(
+        tf.get_default_graph(),
+        run_meta=run_metadata,
+        tfprof_options=tf.contrib.tfprof.model_analyzer.PRINT_ALL_TIMING_MEMORY)``

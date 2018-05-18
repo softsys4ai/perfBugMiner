@@ -1,0 +1,41 @@
+tf.einsum not replicating np.einsum; struggles to read input with whitespace
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):  Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Not sure
+TensorFlow version (use command below): v1.5.0-0-g37aa430d84 1.5.0
+Python version:  3.5.2
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: 8.0.61
+GPU model and memory:  NVIDIA Corporation GK210GL [Tesla K80] (rev a1)
+Exact command to reproduce: See below.
+
+Problem
+Unlike np.einsum, I have found that tf.einsum struggles to parse input strings with spaces.
+Either it throws an error, or it produces varying results for the same syntax (e.g. ij,jk->ik gives different results than ij,jk-> ik).
+I believe the problem traces to the regular expressions match in line 164 (carried to line 178) of this file: tensorflow/tensorflow/python/ops/special_math_ops.py.
+Source code
+import tensorflow as tf
+import numpy as np
+
+import tensorflow.contrib.eager as tfe
+tfe.enable_eager_execution()
+
+x = tf.range(5,10,  dtype=tf.float64)
+y = tf.ones(shape=(2,6), dtype=tf.float64)
+
+# Each invocation of tf.einsum produces a different result
+tf.einsum("i,jk->ijk", x, y)    # shape = (5,2,6)
+tf.einsum("i,jk-> ijk", x, y)   # shape = ()
+tf.einsum("i, jk -> ijk", x, y) # Error
+
+x = np.arange(5,10,  dtype=np.float64)
+y = np.ones(shape=(2,6), dtype=np.float64)
+
+# In contrast, np.einsum produces consistent results
+np.einsum("i,jk->ijk", x, y)    # Array 5x2x6
+np.einsum("i,jk-> ijk", x, y)   # Array 5x2x6
+np.einsum("i, jk -> ijk", x, y) # Array 5x2x6

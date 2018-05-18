@@ -1,0 +1,92 @@
+tensorflow read tfrecord not synchronize
+
+i would like to read tfrecords with two feats, but when i read it from tfrecords, it not synchronize. my data is like
+a a_1
+b b_1
+c c_1
+d d_1
+e e_1
+f f_1
+g g_1
+
+my code write this file to tfrecord is like this:
+import numpy as np
+import tensorflow as tf
+import sys,os
+
+def _int64_feature(value):
+  return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+
+def _bytes_feature(value):
+  return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+def float32_feature(value):
+  return tf.train.Feature(float_list=tf.train.FloatList(value=value))
+
+def _parse_line(line, writer):
+  l = line.rstrip().split()
+  feat1=l[0].strip()
+  feat2=l[1].strip()
+
+  example = tf.train.Example(features=tf.train.Features(feature={
+      'feat1': _bytes_feature(feat1),
+      'feat2': _bytes_feature(feat2)
+    }))
+  writer.write(example.SerializeToString())
+
+
+def convert_to(feat_file,output_file):
+    f = open(feat_file).readlines()
+    writer = tf.python_io.TFRecordWriter(output_file)
+    for line in f:
+        _parse_line(line, writer)
+    return
+
+def main(argv):
+    convert_to(sys.argv[1],sys.argv[2])
+    
+
+if __name__ == '__main__':
+    tf.app.run()
+    pass
+
+my code is train.py is like this:
+import tensorflow as tf
+import numpy as np
+import sys,os
+def read_and_decode(filename_queue):
+  reader = tf.TFRecordReader()
+  _, serialized_example = reader.read(filename_queue)
+  features = tf.parse_single_example(
+      serialized_example,
+      features={
+          'feat1': tf.FixedLenFeature([], tf.string),
+          'feat2': tf.FixedLenFeature([], tf.string)
+      })
+  feat1=features['feat1']
+  feat2=features['feat2']
+  return feat1,feat2
+
+def batch_inputs():
+    tf_record_pattern = os.path.join('./', '%s*' % 'record')
+    data_files = tf.gfile.Glob(tf_record_pattern)
+    print data_files
+    filename_queue = tf.train.string_input_producer(data_files, num_epochs=1,shuffle=True)
+    feat1,feat2 = read_and_decode(filename_queue)
+    feats1,feats2 = tf.train.shuffle_batch([feat1,feat2],batch_size=1, num_threads=1,capacity=1090,min_after_dequeue=1000)
+    return feats1,feats2
+with tf.Session() as sess:
+    feat1,feat2=batch_inputs()
+    init = tf.group(tf.global_variables_initializer(),
+	       tf.local_variables_initializer())
+    sess.run(init)
+    coord = tf.train.Coordinator()  
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+    print sess.run(feat1)
+    print sess.run(feat2)
+
+when i run this train.py. it outputs
+['b']
+['d_1']
+which i suppose  it should output,the feat1 is always corresponding feat2 like
+['b']
+['b_1']

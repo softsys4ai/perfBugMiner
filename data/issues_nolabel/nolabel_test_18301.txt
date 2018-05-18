@@ -1,0 +1,137 @@
+tf.data.TFRecordDataset does not properly infer shape
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug, a feature request, or a significant problem with documentation (for small docs fixes please send a PR instead).
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.7.0
+Python version: 3.5.2
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 9.0/7.0.3.11
+GPU model and memory: TitanX 12Gb
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/data/ops/dataset_ops.py", line 1659, in _partial_shape_to_tensor
+    [dim if dim is not None else -1 for dim in shape_like.as_list()],
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/tensor_shape.py", line 820, in as_list
+    raise ValueError("as_list() is not defined on an unknown TensorShape.")
+ValueError: as_list() is not defined on an unknown TensorShape.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "trainer.py", line 70, in <module>
+    main(ARGS)
+  File "trainer.py", line 20, in main
+    train(source, meta, args.destination)
+  File "trainer.py", line 49, in train
+    dataset = dataset.padded_batch(batch_size, padded_shapes=(0, None, 0, None))
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/data/ops/dataset_ops.py", line 821, in padded_batch
+    return PaddedBatchDataset(self, batch_size, padded_shapes, padding_values)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/data/ops/dataset_ops.py", line 1721, in __init__
+    input_dataset.output_shapes, _partial_shape_to_tensor, padded_shapes)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/data/util/nest.py", line 538, in map_structure_up_to
+    results = [func(*tensors) for tensors in zip(*all_flattened_up_to)]
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/data/util/nest.py", line 538, in <listcomp>
+    results = [func(*tensors) for tensors in zip(*all_flattened_up_to)]
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/data/ops/dataset_ops.py", line 1665, in _partial_shape_to_tensor
+    return ops.convert_to_tensor(shape_like, dtype=dtypes.int64)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 950, in convert_to_tensor
+    as_ref=False)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 1040, in internal_convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/constant_op.py", line 256, in _tensor_shape_tensor_conversion_function
+    "Cannot convert a partially known TensorShape to a Tensor: %s" % s)
+ValueError: Cannot convert a partially known TensorShape to a Tensor: <unknown>
+
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+from argparse import ArgumentParser
+import pickle
+
+import tensorflow as tf
+
+def main(args):
+
+    # Generate the complete source and meta paths.
+    source = args.source
+    if not source.endswith('.tfrecords'):
+        source = '{}.tfrecords'.format(source)
+
+    meta = args.source
+    if not source.endswith('.tfrecords'):
+        meta = '{}.meta.pkl'.format(meta)
+    else:
+        meta = '{}.meta.pkl'.format(meta.rsplit('.', 1)[0])
+    
+    # Train the model.
+    train(source, meta, args.destination)
+
+def parse(example_proto):
+
+    features = {
+        'bucket': tf.FixedLenFeature([], tf.int64),
+        'coefficients': tf.FixedLenFeature([], tf.string),
+        'coefficients_length': tf.FixedLenFeature([], tf.int64),
+        'label': tf.FixedLenFeature([], tf.int64)
+    }
+    parsed_features = tf.parse_single_example(example_proto, features)
+
+    bucket = tf.cast(parsed_features['bucket'], tf.int32)
+    coefficients = tf.decode_raw(parsed_features['coefficients'], tf.float32)
+    coefficients_length = tf.cast(parsed_features['coefficients_length'], tf.int32)
+    label = tf.cast(parsed_features['label'], tf.int32)
+
+    return bucket, coefficients, coefficients_length, label
+
+def train(source, meta, destination, batch_size=64, epochs=1):
+
+    # Load the training meta data.
+    file = open(meta, 'rb')
+    meta = pickle.load(file)
+    file.close()
+
+    # Create a tf.data input pipe line.
+    dataset = tf.data.TFRecordDataset([source])
+    dataset = dataset.map(parse)
+    dataset = dataset.padded_batch(batch_size, padded_shapes=(0, None, 0, None))
+    dataset = dataset.repeat(epochs) 
+    iterator = dataset.make_initializable_iterator()
+
+    bucket, coefficients, coefficients_length, label = iterator.get_next()
+
+    with tf.Session() as session:
+        
+        session.run(iterator.initializer)
+        
+        print(session.run([bucket, coefficients, coefficients_length, label]))
+
+if __name__ == '__main__':
+    
+    PARSER = ArgumentParser(description='Trains a model.')
+    PARSER.add_argument('--destination', required=True, type=str,
+    					help='The path where the trained model should be stored.')
+    PARSER.add_argument('--source', required=True, type=str,
+    					help='The path to the training data.')
+    ARGS = PARSER.parse_args()
+
+    main(ARGS)

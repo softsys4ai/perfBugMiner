@@ -1,0 +1,95 @@
+Taking gradients after using SparseTensor in while_loop leads to TypeError
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Found various issues on SparseTensors, but nothing about while loops and gradients.
+Environment info
+Operating System:
+Ubuntu 14.04
+Installed version of CUDA and cuDNN:
+None
+If installed from binary pip package, provide:
+
+
+A link to the pip package you installed: https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-0.12.1-cp35-cp35m-linux_x86_64.whl
+
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)":
+0.12.1
+
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+This code leads to the error (when trying to compute the gradients) TypeError: Expected binary or unicode string, got <tensorflow.python.framework.sparse_tensor.SparseTensor object at 0x7fb966845f98>
+import tensorflow as tf
+
+
+def body(A, b, x, i):
+    i += 1
+    b = b + tf.sparse_tensor_dense_matmul(A, x)
+    return A, b, x, i
+
+
+def cond(A, b, x, i):
+    return i < 5
+
+
+sess = tf.InteractiveSession()
+indices = [[0, 0], [1, 1]]
+values = [1., 1.]
+A = tf.SparseTensor(indices, values, (100, 100))
+x = tf.ones((100, 1))
+b = tf.zeros_like(x)
+[_, b, _, _] = tf.while_loop(cond, body, [A, b, x, tf.constant(0)])
+grad = tf.gradients(b, x)
+print(sess.run([grad]))
+sess.close()
+
+What other attempted solutions have you tried?
+If A is removed as a loop variable everything works as expected:
+import tensorflow as tf
+
+
+def body(b, x, i):
+    i += 1
+    b = b + tf.sparse_tensor_dense_matmul(A, x)
+    return b, x, i
+
+
+def cond(b, x, i):
+    return i < 5
+
+
+sess = tf.InteractiveSession()
+indices = [[0, 0], [1, 1]]
+values = [1., 1.]
+A = tf.SparseTensor(indices, values, (100, 100))
+x = tf.ones((100, 1))
+b = tf.zeros_like(x)
+[b, _, _] = tf.while_loop(cond, body, [b, x, tf.constant(0)])
+grad = tf.gradients(b, x)
+print(sess.run([grad]))
+sess.close()
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+Traceback (most recent call last):
+  File "sparse_tensor_gradient_error.py", line 21, in <module>
+    grad = tf.gradients(b, x)
+  File "/home/y/anaconda3/lib/python3.5/site-packages/tensorflow/python/ops/gradients_impl.py", line 427, in gradients
+    _SetGrad(grads, y, loop_state.ZerosLikeForExit(y))
+  File "/home/y/anaconda3/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1165, in ZerosLikeForExit
+    result = array_ops.zeros_like(val, optimize=False)
+  File "/home/y/anaconda3/lib/python3.5/site-packages/tensorflow/python/ops/array_ops.py", line 1471, in zeros_like
+    tensor = ops.convert_to_tensor(tensor, name="tensor")
+  File "/home/y/anaconda3/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 669, in convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "/home/y/anaconda3/lib/python3.5/site-packages/tensorflow/python/framework/constant_op.py", line 176, in _constant_tensor_conversion_function
+    return constant(v, dtype=dtype, name=name)
+  File "/home/y/anaconda3/lib/python3.5/site-packages/tensorflow/python/framework/constant_op.py", line 165, in constant
+    tensor_util.make_tensor_proto(value, dtype=dtype, shape=shape, verify_shape=verify_shape))
+  File "/home/y/anaconda3/lib/python3.5/site-packages/tensorflow/python/framework/tensor_util.py", line 441, in make_tensor_proto
+    tensor_proto.string_val.extend([compat.as_bytes(x) for x in proto_values])
+  File "/home/y/anaconda3/lib/python3.5/site-packages/tensorflow/python/framework/tensor_util.py", line 441, in <listcomp>
+    tensor_proto.string_val.extend([compat.as_bytes(x) for x in proto_values])
+  File "/home/y/anaconda3/lib/python3.5/site-packages/tensorflow/python/util/compat.py", line 65, in as_bytes
+    (bytes_or_text,))
+TypeError: Expected binary or unicode string, got <tensorflow.python.framework.sparse_tensor.SparseTensor object at 0x7fb966845f98>

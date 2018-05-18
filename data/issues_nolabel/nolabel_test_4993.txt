@@ -1,0 +1,41 @@
+Uninitialized memory read on send_device_incarnation
+
+Running the following snippet several times shows random numbers in the send_device_incarnation of last device which looks like uninitialized memory read. @dave-andersen would know if it's still a priority to get rid of such reads
+import tensorflow as tf
+
+config = tf.ConfigProto(device_count={"CPU": 3},
+                    inter_op_parallelism_threads=3,
+                    intra_op_parallelism_threads=1)
+with tf.device("cpu:0"):
+    a = tf.ones(())
+with tf.device("cpu:1"):
+    b = tf.ones(())
+with tf.device("cpu:2"):
+    c = a+b
+
+sess = tf.Session(config=config)
+run_options = options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE,
+                                    output_partition_graphs=True)
+run_metadata = tf.RunMetadata()
+sess.run(c, options=run_options, run_metadata=run_metadata)
+print(str(run_metadata))
+
+
+This shows something like this
+    attr {
+      key: "send_device_incarnation"
+      value {
+        i: -1672352343731902606
+      }
+    }
+    attr {
+      key: "tensor_name"
+      value {
+        s: "add:0"
+      }
+    }
+  }
+  versions {
+    producer: 15
+  }
+}

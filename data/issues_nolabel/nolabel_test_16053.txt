@@ -1,0 +1,105 @@
+java.lang.IndexOutOfBoundsException: Invalid index 0, size is 0, TensorFlow on Android
+
+Hello,
+Updated the following info:
+Have I written custom code No its modification of the code from here https://github.com/MindorksOpenSource/AndroidTensorFlowMachineLearningExample
+OS Platform and Distribution: Windows 10
+TensorFlow installed from: anaconda
+TensorFlow version: 1.2.0
+Bazel version: N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A
+I created  my custom model in keras to recognize happy faces and loaded the model into android and ran into this issue of
+java.lang.IndexOutOfBoundsException: Invalid index 0, size is 0 at runtime and my app crashed. I have modified the code from here https://github.com/MindorksOpenSource/AndroidTensorFlowMachineLearningExample
+to suit my model. Is it the problem with protobuf file creation? I have tested my model and it works well in python. Below is the log file and the source code. Please help with this issue? Thanks!
+Source code / logs
+01-11 16:21:12.508 18038-18078/com.sridhar.deepak.objectdetection D/OpenGLRenderer: endAllStagingAnimators on 0xab6c06f0 (ListView) with handle 0xab7000d8
+01-11 16:21:18.135 18038-18038/com.sridhar.deepak.objectdetection E/TensorFlowInferenceInterface: Failed to run TensorFlow session: java.lang.IllegalArgumentException: No OpKernel was registered to support Op 'Switch' with these attrs.  Registered devices: [CPU], Registered kernels:
+device='GPU'; T in [DT_STRING]
+device='GPU'; T in [DT_BOOL]
+device='GPU'; T in [DT_INT32]
+device='GPU'; T in [DT_FLOAT]
+device='CPU'; T in [DT_FLOAT]
+device='CPU'; T in [DT_INT32]
+                                                                                              	 [[Node: bn0/cond/Switch = Switch[T=DT_BOOL](bn0/keras_learning_phase, bn0/keras_learning_phase)]]
+
+01-11 16:21:18.135 18038-18038/com.sridhar.deepak.objectdetection D/AndroidRuntime: Shutting down VM
+01-11 16:21:18.136 18038-18038/com.sridhar.deepak.objectdetection E/AndroidRuntime: FATAL EXCEPTION: main
+Process: com.sridhar.deepak.objectdetection, PID: 18038
+java.lang.IndexOutOfBoundsException: Invalid index 0, size is 0
+at java.util.ArrayList.throwIndexOutOfBoundsException(ArrayList.java:255)
+at java.util.ArrayList.get(ArrayList.java:308)
+at org.tensorflow.contrib.android.TensorFlowInferenceInterface.getTensor(TensorFlowInferenceInterface.java:473)
+at org.tensorflow.contrib.android.TensorFlowInferenceInterface.readNodeIntoFloatBuffer(TensorFlowInferenceInterface.java:320)
+at org.tensorflow.contrib.android.TensorFlowInferenceInterface.readNodeFloat(TensorFlowInferenceInterface.java:275)
+at com.sridhar.deepak.objectdetection.TensorFlowImageClassifier.recognizeImage(TensorFlowImageClassifier.java:161)
+at com.sridhar.deepak.objectdetection.HappyFaceDetector$2.onPictureTaken(HappyFaceDetector.java:82)
+at com.flurgle.camerakit.CameraView$CameraListenerMiddleWare.onPictureTaken(CameraView.java:296)
+at com.flurgle.camerakit.Camera1$2.onPictureTaken(Camera1.java:185)
+at android.hardware.Camera$EventHandler.handleMessage(Camera.java:1118)
+at android.os.Handler.dispatchMessage(Handler.java:102)
+at android.os.Looper.loop(Looper.java:154)
+at android.app.ActivityThread.main(ActivityThread.java:5527)
+at java.lang.reflect.Method.invoke(Native Method)
+at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:739)
+at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:629)
+01-11 16:21:18.136 18038-18038/com.sridhar.deepak.objectdetection E/MQSEventManagerDelegate: failed to get MQSService.
+01-11 16:21:19.470 18038-18038/com.sridhar.deepak.objectdetection I/Process: Sending signal. PID: 18038 SIG: 9
+TensorFlowImageClassifier file
+@Override
+public List<Recognition> recognizeImage(final Bitmap bitmap,int s) {
+    // Log this method so that it can be analyzed with systrace.
+    Trace.beginSection("recognizeImage");
+
+    Trace.beginSection("preprocessBitmap");
+    // Preprocess the image data from 0-255 int to normalized float based
+    // on the provided parameters.
+    if (s==1) {
+        bitmap.getPixels(intValues, 0, bitmap.getWidth(), 0, 0, bitmap.getWidth(), bitmap.getHeight());
+        for (int i = 0; i < intValues.length; ++i) {
+            final int val = intValues[i];
+            floatValues[i * 3 + 0] = (((val >> 16) & 0xFF) - imageMean) / imageStd;
+            floatValues[i * 3 + 1] = (((val >> 8) & 0xFF) - imageMean) / imageStd;
+            floatValues[i * 3 + 2] = ((val & 0xFF) - imageMean) / imageStd;
+        }
+    }else {
+        bitmap.getPixels(intValues, 0, bitmap.getWidth(), 0, 0, bitmap.getWidth(), bitmap.getHeight());
+        for (int i = 0; i < intValues.length; ++i) {
+            final int val = intValues[i];
+            floatValues[i * 3 + 0] = (((val >> 16) & 0xFF))/imageStd;
+            floatValues[i * 3 + 1] = (((val >> 8) & 0xFF))/imageStd;
+            floatValues[i * 3 + 2] = ((val & 0xFF))/imageStd;
+            floatValues[i * 3 + 0] = floatValues[i * 3 + 0] - 1;
+            floatValues[i * 3 + 1] = floatValues[i * 3 + 1] - 1;
+            floatValues[i * 3 + 2] = floatValues[i * 3 + 2] - 1;
+
+        }
+    }
+    Trace.endSection();
+
+    // Copy the input data into TensorFlow.
+    Trace.beginSection("fillNodeFloat");
+    inferenceInterface.fillNodeFloat(
+            inputName, new int[]{1, inputSize, inputSize, 3}, floatValues);
+    Trace.endSection();
+
+    // Run the inference call.
+    Trace.beginSection("runInference");
+    inferenceInterface.runInference(outputNames);
+    Trace.endSection();
+
+    // Copy the output Tensor back into the output array.
+    Trace.beginSection("readNodeFloat");
+    inferenceInterface.readNodeFloat(outputName, outputs);
+    Trace.endSection();
+
+MainActivity
+private static final int INPUT_SIZE = 64;
+private static final int IMAGE_MEAN = 128;
+private static final float IMAGE_STD = 128;
+private static final String INPUT_NAME = "input_1";
+private static final String OUTPUT_NAME = "fc/Sigmoid";
+private static final String MODEL_FILE = "file:///android_asset/happy_model.pb";
+private static final String LABEL_FILE =
+        "file:///android_asset/face_label.txt";

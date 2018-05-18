@@ -1,0 +1,184 @@
+Dynamic Bi-directional RNN vs Dynamic RNN.- Not working as expected.
+
+I am trying to use Bidirectional RNN and pass the output through a CNN for text classification. However, I am getting all sorts of shape errors with bidirectional RNN. Although, If I use two dynamic rnn with reverse op in the second layer, it appears to work fine:
+Here is bidirectional RNN code that DOES NOT work for me:
+    # Bidirectional LSTM layer
+    with tf.name_scope("bidirectional-lstm"):
+        lstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size, forget_bias=1.0)
+        lstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size, forget_bias=1.0)
+
+        self.lstm_outputs, _ = tf.nn.bidirectional_dynamic_rnn(
+            lstm_fw_cell, 
+            lstm_bw_cell, 
+            self.embedded_chars, 
+            sequence_length=self.seqlen, 
+            dtype=tf.float32)
+        self.lstm_outputs = tf.concat(self.lstm_outputs, axis=2)
+
+Here is the two layer dynamic rnn that DOES work for me:
+  # Bidirectional LSTM layer
+    with tf.name_scope("bidirectional-lstm"):
+        lstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size, forget_bias=1.0)
+        lstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size, forget_bias=1.0)
+    with tf.variable_scope("lstm-output-fw"):
+        self.lstm_outputs_fw, _ = tf.nn.dynamic_rnn(
+            lstm_fw_cell, 
+            self.embedded_chars, 
+            sequence_length=self.seqlen, 
+            dtype=tf.float32)
+
+    with tf.variable_scope("lstm-output-bw"):
+        self.embedded_chars_rev = array_ops.reverse_sequence(self.embedded_chars, seq_lengths=self.seqlen, seq_dim=1)
+        tmp, _ = tf.nn.dynamic_rnn(
+            lstm_bw_cell, 
+            self.embedded_chars_rev, 
+            sequence_length=self.seqlen, 
+            dtype=tf.float32)
+        self.lstm_outputs_bw = array_ops.reverse_sequence(tmp, seq_lengths=self.seqlen, seq_dim=1)
+
+    Concatenate outputs
+    self.lstm_outputs = tf.add(self.lstm_outputs_fw, self.lstm_outputs_bw, name="lstm_outputs")
+
+I am passing the output of this to CNN and error occurs when computing the
+Here is the rest of the code:
+Convolution + maxpool layer for each filter size
+    pooled_outputs = []
+    for i, filter_size in enumerate(filter_sizes):
+        with tf.name_scope("conv-maxpool-%s" % filter_size):
+            # Convolution Layer
+            filter_shape = [filter_size, hidden_size, 1, num_filters]
+            W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), name="W")
+            b = tf.Variable(tf.constant(0.1, shape=[num_filters]), name="b")
+
+            conv = tf.nn.conv2d(
+                self.lstm_outputs_expanded, 
+                W,
+                strides=[1, 1, 1, 1], 
+                padding="VALID",
+                name="conv")
+
+            # Apply nonlinearity
+            h = tf.nn.relu(tf.nn.bias_add(conv, b), name="relu")
+
+            # Maxpooling over the outputs
+            pooled = tf.nn.max_pool(
+                h, 
+                ksize=[1, sequence_length - filter_size + 1, 1, 1],
+                strides=[1, 1, 1, 1], 
+                padding='VALID',
+                name="pool")
+            pooled_outputs.append(pooled)
+
+    # Combine all the pooled features
+    num_filters_total = num_filters * len(filter_sizes)
+    self.h_pool = tf.concat(axis=3, values=pooled_outputs)
+    self.h_pool_flat = tf.reshape(self.h_pool, [-1, num_filters_total])
+
+
+    # Dropout layer
+    with tf.name_scope("dropout"):
+        self.h_drop = tf.nn.dropout(self.h_pool_flat, self.dropout_keep_prob)
+
+        # Final (unnormalized) scores and predictions
+        with tf.name_scope("output"):
+            # Standard output weights initialization
+            W = tf.get_variable(
+                "W", 
+                shape=[num_filters_total, num_classes], 
+                initializer=tf.contrib.layers.xavier_initializer())
+            b = tf.Variable(tf.constant(0.1, shape=[num_classes]), name="b")
+
+            # # Initialized output weights to 0.0, might improve accuracy
+            # W = tf.Variable(tf.constant(0.0, shape=[num_filters_total, num_classes]), name="W")
+            # b = tf.Variable(tf.constant(0.0, shape=[num_classes]), name="b")
+
+            l2_loss += tf.nn.l2_loss(W)
+            l2_loss += tf.nn.l2_loss(b)
+
+            self.scores = tf.nn.xw_plus_b(self.h_drop, W, b, name="scores")
+
+            self.predictions = tf.argmax(self.scores, 1, name="predictions")
+
+        # Calculate mean cross-entropy loss
+        with tf.name_scope("loss"):
+            losses = tf.nn.softmax_cross_entropy_with_logits(logits=self.scores, labels=self.input_y)
+            self.loss = tf.reduce_mean(losses) + l2_reg_lambda * l2_loss
+
+        # Accuracy
+        with tf.name_scope("accuracy"):
+            correct_predictions = tf.equal(self.predictions, tf.argmax(self.input_y, 1))
+            self.accuracy = tf.reduce_mean(tf.cast(correct_predictions, "float"), name="accuracy")
+
+here are the errors I am getting.
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "train_upgraded.py", line 209, in <module>
+    train_step(x_batch, seqlen_batch, y_batch)
+  File "train_upgraded.py", line 177, in train_step
+    feed_dict)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 889, in run
+    run_metadata_ptr)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1120, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1317, in _do_run
+    options, run_metadata)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1336, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: logits and labels must be same size: logits_size=[7550,2] labels_size=[50,2]
+         [[Node: loss/SoftmaxCrossEntropyWithLogits = SoftmaxCrossEntropyWithLogits[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"](loss/Reshape, loss/Reshape_1)]]
+
+Caused by op 'loss/SoftmaxCrossEntropyWithLogits', defined at:
+  File "train_upgraded.py", line 87, in <module>
+    l2_reg_lambda=FLAGS.l2_reg_lambda)
+  File "/media/hemant/MVV/MyValueVest-local/learning/Initial Embeddings/STEP 2 lstm-context-embeddings-master/model_upgraded.py", line 138, in __init__
+    losses = tf.nn.softmax_cross_entropy_with_logits(logits=self.scores, labels=self.input_y)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/ops/nn_ops.py", line 1783, in softmax_cross_entropy_with_logits
+    precise_logits, labels, name=name)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/ops/gen_nn_ops.py", line 4364, in _softmax_cross_entropy_with_logits
+    name=name)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): logits and labels must be same size: logits_size=[7550,2] labels_size=[50,2]
+         [[Node: loss/SoftmaxCrossEntropyWithLogits = SoftmaxCrossEntropyWithLogits[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"](loss/Reshape, loss/Reshape_1)]]
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "train_upgraded.py", line 209, in <module>
+    train_step(x_batch, seqlen_batch, y_batch)
+  File "train_upgraded.py", line 177, in train_step
+    feed_dict)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 889, in run
+    run_metadata_ptr)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1120, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1317, in _do_run
+    options, run_metadata)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1336, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: logits and labels must be same size: logits_size=[7550,2] labels_size=[50,2]
+         [[Node: loss/SoftmaxCrossEntropyWithLogits = SoftmaxCrossEntropyWithLogits[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"](loss/Reshape, loss/Reshape_1)]]
+
+Caused by op 'loss/SoftmaxCrossEntropyWithLogits', defined at:
+  File "train_upgraded.py", line 87, in <module>
+    l2_reg_lambda=FLAGS.l2_reg_lambda)
+  File "/media/hemant/MVV/MyValueVest-local/learning/Initial Embeddings/STEP 2 lstm-context-embeddings-master/model_upgraded.py", line 138, in __init__
+    losses = tf.nn.softmax_cross_entropy_with_logits(logits=self.scores, labels=self.input_y)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/ops/nn_ops.py", line 1783, in softmax_cross_entropy_with_logits
+    precise_logits, labels, name=name)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/ops/gen_nn_ops.py", line 4364, in _softmax_cross_entropy_with_logits
+    name=name)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "/home/hemant/anaconda3/envs/tf14/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): logits and labels must be same size: logits_size=[7550,2] labels_size=[50,2]
+         [[Node: loss/SoftmaxCrossEntropyWithLogits = SoftmaxCrossEntropyWithLogits[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"](loss/Reshape, loss/Reshape_1)]]

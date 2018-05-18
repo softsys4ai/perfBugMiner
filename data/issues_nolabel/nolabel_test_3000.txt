@@ -1,0 +1,58 @@
+Memory Leak Converting Numpy ndarry to Tensor
+
+I'm working on a small convolution network to identify faces which takes png images and loads them into numpy arrays through PIL.  Once all the images are loaded, they are passed into the tensorflow model through train_op.train(feed_dict={input:train_images}).  The problem is that each iteration of the training loop copies a new batch from the total loaded images before passing the batch into train_op and that memory is never released.
+I've looked and looked and found several related issues to memory not being released but nothing that I thought really fit my problem or had a working solution.  I am aware that this process of pre-loading images is not ideal, but I have other obstacles to using a queue structure to read the images directly to tensors and I would like to address this as a memory leak.
+Environment info
+Operating System: Ubuntu 14.04
+Python: 2.7.6
+Tensorflow: 0.8.0
+CUDA: 7.5
+cuDNN: 4.0.7
+Steps to reproduce
+Below is a short python script that replicates the problem by loading an image (pass a filepath as argument) and passing it to tf.image.random_flip_left_right() while printing out the memory in use by on the computer.
+import tensorflow as tf
+import psutil
+import numpy as np
+import Image
+import sys
+import gc
+
+def printMemUsed(discript):
+    print("%s:\t%d" % (discript, psutil.virtual_memory().used))
+
+def main(file):
+    sess = tf.InteractiveSession()
+    im = Image.open(file)
+    arr = np.array(im)
+    printMemUsed("After Array Creation")
+    arr = flipArr(arr)
+    printMemUsed("After Tensor Conversion")
+    del arr
+    printMemUsed("After Array Deletion")
+
+def flipArr(arr):
+    tensor = tf.image.random_flip_left_right(arr)
+    arr = tensor.eval()
+    return arr  
+
+if __name__ == '__main__':
+    main(sys.argv[1])
+    printMemUsed("After Scope Lost")
+    gc.collect()
+    printMemUsed("After gc Collect")
+
+For me this program prints:
+
+After Array Creation:   1196838912
+After Tensor Conversion:        1273106432
+After Array Deletion:   1273106432
+After Scope Lost:       1273106432
+After gc Collect:       1273106432
+
+What have you tried?
+
+As shown in the example, gc.collect() and del do nothing to free the memory, it is not released when the variables pass out of scope (loop or method), only when the program exits, or in my case when I run out of RAM causing the machine to hang until manually restarted.
+Again I recognize that there are other (perhaps better) ways to get images into tensorflow, but at least for the start I'd like to address why the memory is not released.
+
+Other Comments
+The plot below shows memory usage over the first 5 training rounds of my full model.  The orange points mark the top of each loop.  The first jump is the creation of the batch, which passes all the images through tf.image.random_flip_left_right() as in the example above, the second jump from calling train_op.train(feed_dict={input:train_images}), passing in the newly created batch.

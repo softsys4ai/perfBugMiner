@@ -1,0 +1,32 @@
+tf.layers uses wrong variable scope
+
+TF 1.4.
+import tensorflow as tf
+def f(x):
+    return tf.layers.conv2d(x, 30, 3)
+
+x = tf.zeros([3, 20, 20, 1])
+
+with tf.variable_scope('a'):
+    print(f(x))
+with tf.variable_scope('a', reuse=True):
+    print(f(x)) # works
+
+print(f(x))
+with tf.variable_scope(tf.get_variable_scope(), reuse=True):
+    print(f(x)) # failed with:
+"""
+ValueError: Variable conv2d_1/kernel does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+"""
+From what I can see, tf.layers is trying to create the variables under a wrong variable scope name, making variable sharing impossible if used under the root scope.
+I found that this works:
+with tf.variable_scope(tf.get_variable_scope()):
+    print(f(x))
+with tf.variable_scope(tf.get_variable_scope(), reuse=True):
+    print(f(x)) # works
+But the first line seems redundant and counter-intuitive.
+//UPDATE:
+It also works if I don't use tf.layers:
+def f(x):
+    W = tf.get_variable('w', shape=[1])
+    return x + W

@@ -1,0 +1,53 @@
+Android: build shared library using Makefile with r0.12, migrating from r0.11
+
+I've been successfully using r0.11 Makefile with couple of additions (see below) to build shared library for Android.
+Now trying to migrate to r0.12 with same Makefile modifications but getting a SIGSEGVs at model initialization.
+I followed contrib/makefile/README.md. I've checked #6166 as well.
+Comparing r0.12 changes with r0.11 I've noticed some things:
+
+both libtensorflow-core.a and lib.so decreased in size from ~200MB and ~100MB in r0.11 to ~40MB and ~40MB in r0.12
+trying to revert optimization from -O2 back to -O0 causing compilation error in downloads/gemmlowp/
+
+/Users/oleg/opt/ndk-bundle-r12e/toolchains/arm-linux-androideabi-4.9/prebuilt/darwin-x86_64/bin/arm-linux-androideabi-g++ --std=c++11 -DIS_SLIM_BUILD -fno-exceptions -DNDEBUG -DNOTFDBG -O0 --sysroot /Users/oleg/opt/ndk-bundle-r12e/platforms/android-14/arch-arm -Wno-narrowing -march=armv7-a -mfloat-abi=softfp -mfpu=neon -fPIE -fPIC -MT /Users/oleg/tensorflow/tensorflow/contrib/makefile/gen/obj/tensorflow/core/kernels/meta_support.o -MMD -MP -MF /Users/oleg/tensorflow/tensorflow/contrib/makefile/gen/dep//tensorflow/core/kernels/meta_support.Td -I/Users/oleg/opt/ndk-bundle-r12e/sources/android/support/include -I/Users/oleg/opt/ndk-bundle-r12e/sources/cxx-stl/gnu-libstdc++/4.9/include -I/Users/oleg/opt/ndk-bundle-r12e/sources/cxx-stl/gnu-libstdc++/4.9/libs/armeabi/include -I. -I/Users/oleg/tensorflow/tensorflow/contrib/makefile/downloads/ -I/Users/oleg/tensorflow/tensorflow/contrib/makefile/downloads/eigen -I/Users/oleg/tensorflow/tensorflow/contrib/makefile/downloads/gemmlowp -I/Users/oleg/tensorflow/tensorflow/contrib/makefile/gen/protobuf/include -I/Users/oleg/tensorflow/tensorflow/contrib/makefile/gen/proto/ -I/Users/oleg/tensorflow/tensorflow/contrib/makefile/gen/proto_text/ -c tensorflow/core/kernels/meta_support.cc -o /Users/oleg/tensorflow/tensorflow/contrib/makefile/gen/obj/tensorflow/core/kernels/meta_support.o
+In file included from /Users/oleg/tensorflow/tensorflow/contrib/makefile/downloads/gemmlowp/meta/transform_kernels.h:239:0,
+                 from ./tensorflow/core/kernels/meta_support.h:23,
+                 from tensorflow/core/kernels/meta_support.cc:18:
+/Users/oleg/tensorflow/tensorflow/contrib/makefile/downloads/gemmlowp/meta/transform_kernels_arm_32.h: In static member function 'static void gemmlowp::meta::Transform1DKernel<InType, OutType, gemmlowp::meta::BiasAdd<Type>, kernel_size, leftovers>::Transform(const InType*, const gemmlowp::meta::BiasAdd<Type>&, OutType*) [with InType = unsigned char; OutType = int; int kernel_size = 16; int leftovers = 0; Type = unsigned char]':
+/Users/oleg/tensorflow/tensorflow/contrib/makefile/downloads/gemmlowp/meta/transform_kernels_arm_32.h:5605:24: error: 'asm' operand has impossible constraints
+         "cc", "memory");
+                        ^
+make: *** [/Users/oleg/tensorflow/tensorflow/contrib/makefile/gen/obj/tensorflow/core/kernels/meta_support.o] Error 1
+
+gemmlowp was downloaded but never used for Android in headers search path (-I) in r0.11
+reverting new flags -mfloat-abi=softfp  and -mfpu=neon by commenting them out allows to build libtensorflow-core.a and libtensorflow.so artifacts with ~100MB in size using -O0
+
+After applying  all changes from above I'm still getting SIGSEGVs. What else could I try? Looks like I'm missing something. I might be wrong thinking Makefile is a good way to go, but it flexible and allows to add required kernels/*_op.cc straight to tf_op_files.txt. What is a right way to build lib.so for Android?
+Makefile additions
+ifeq ($(TARGET),ANDROID)
+...
+CXXFLAGS +=\
+...
+-fPIC
+
+SO_NAME  := libtensorflow.so
+SO_PATH  := $(LIBDIR)$(SO_NAME)
+
+$(SO_PATH): $(LIB_OBJS)
+	@echo "------->>>>>>>>>  SO PATH started ------>>>>>>>>>"
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) \
+	-shared -rdynamic -o $(SO_PATH)  $(LIB_OBJS) \
+	$(LIBFLAGS) $(LDFLAGS) $(LIBS)
+Environment:
+OS X: 10.12
+NDK: r12e
+CUDA: not installed
+SHA-1
+r0.12 4d924e796368163eff11a8151e8505715345f58d
+r0.11 e39376b6e9c9541e1bd8f15333b6994046a84d16
+................
+Build label: 0.4.1-homebrew
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Nov 30 13:26:35 2016 (1480512395)
+Build timestamp: 1480512395
+Build timestamp as int: 1480512395

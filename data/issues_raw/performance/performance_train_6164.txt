@@ -1,0 +1,106 @@
+TFRecords: DataLossError (see above for traceback): corrupted record at XXX
+
+I convert large data from csv to tfrecords using tf.python_io.TFRecordWriter in hadoop
+there're some error happens:
+
+BUG 1) if I use zlib or gzip when create tfrecord writer , I can convert the csv successfully. But when I  loop all files to read , it's  stuck at some lines without any error.  when use these tfrecords to train model ,  errors "TFRecords: DataLossError (see above for traceback): corrupted record at XXX"
+(I use writer.close() when write done. so I maybe it's  a bug )
+BUG 2) When I create tfrecord write without any compress option, the convert process goes well, and when I use the same program loop all the converted files , It all good . BUT when I use these tfrecords to train model in tensorflow , it's report "TFRecords: DataLossError (see above for traceback): corrupted record at XXX" again（some step after, not at the begining, so maybe some part of the tfrecords error） .
+
+my question:
+
+(if solve these bugs are diffcult ) how to skip the corruted records?
+OR
+how to solve these errors ?
+
+Environment info
+Operating System:
+centos 6 + hadoop
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+my convert code:
+          writer = tf.python_io.TFRecordWriter(pb_path)
+          example = tf.train.Example(features=tf.train.Features(feature={
+              "label":
+                  tf.train.Feature(float_list=tf.train.FloatList(value=[label])),
+              "ids":
+                  tf.train.Feature(int64_list=tf.train.Int64List(value=ids)),
+              "values":
+                  tf.train.Feature(float_list=tf.train.FloatList(value=values))
+          }))
+
+          writer.write(example.SerializeToString())
+          writer.close()
+
+my debug code (for loop all files):
+  for f in files:
+   for serialized_example in tf.python_io.tf_record_iterator(f):
+      example = tf.train.Example()
+      example.ParseFromString(serialized_example)
+
+      # Read data in specified format
+      label = example.features.feature["label"].float_list.value
+      ids = example.features.feature["ids"].int64_list.value
+      values = example.features.feature["values"].float_list.value
+
+my train code
+# Read TFRecords files for training
+filename_queue = tf.train.string_input_producer(
+    tf.train.match_filenames_once(FLAGS.train),
+    num_epochs=epoch_number)
+serialized_example = read_and_decode(filename_queue)
+batch_serialized_example = tf.train.shuffle_batch(
+    [serialized_example],
+    batch_size=batch_size,
+    num_threads=thread_number,
+    capacity=capacity,
+    min_after_dequeue=min_after_dequeue)
+features = tf.parse_example(
+    batch_serialized_example,
+    features={
+        "label": tf.FixedLenFeature([], tf.float32),
+        "ids": tf.VarLenFeature(tf.int64),
+        "values": tf.VarLenFeature(tf.float32),
+    })
+batch_labels = features["label"]
+batch_ids = features["ids"]
+batch_values = features["values"]
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+coord stopped
+Traceback (most recent call last):
+  File "deepcake.py", line 327, in <module>
+    coord.join(threads)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/coordinator.py", line 386, in join
+    six.reraise(*self._exc_info_to_raise)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/queue_runner_impl.py", line 234, in _run
+    sess.run(enqueue_op)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 766, in run
+    run_metadata_ptr)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 964, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+    target_list, options, run_metadata)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.DataLossError: corrupted record at 2863006
+         [[Node: ReaderRead = ReaderRead[_class=["loc:@TFRecordReader", "loc:@input_producer"], _device="/job:localhost/replica:0/task:0/cpu:0"](TFRecordReader, input_producer)]]
+
+Caused by op u'ReaderRead', defined at:
+  File "deepcake.py", line 99, in <module>
+    serialized_example = read_and_decode(filename_queue)
+  File "deepcake.py", line 92, in read_and_decode
+    _, serialized_example = reader.read(filename_queue)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/io_ops.py", line 265, in read
+    return gen_io_ops._reader_read(self._reader_ref, queue_ref, name=name)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/gen_io_ops.py", line 213, in _reader_read
+    queue_handle=queue_handle, name=name)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 759, in apply_op
+    op_def=op_def)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2240, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1128, in __init__
+    self._traceback = _extract_stack()
+
+DataLossError (see above for traceback): corrupted record at 2863006
+         [[Node: ReaderRead = ReaderRead[_class=["loc:@TFRecordReader", "loc:@input_producer"], _device="/job:localhost/replica:0/task:0/cpu:0"](TFRecordReader, input_producer)]]

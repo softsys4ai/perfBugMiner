@@ -1,0 +1,59 @@
+(feature request) batch results from tf.estimator.Estimator.predict
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+
+
+TensorFlow installed from (source or binary): Binary
+
+
+TensorFlow version (use command below): tensorflow-gpu 1.6.0
+
+
+Python version: 3.6.3 64-bit
+
+
+Bazel version (if compiling from source): N/A
+
+
+GCC/Compiler version (if compiling from source): N/A
+
+
+CUDA/cuDNN version: CUDA 9.0 / cuDNN 6
+
+
+GPU model and memory: Nvidia Geforce GTX 1060 6GB
+
+
+Exact command to reproduce:
+  import tensorflow as tf
+  import numpy as np
+  import itertools
+  
+  net_inputs = np.array(...)
+  estimator = tf.estimator.Estimator(...) # custom model_fn, not all that relevant
+  
+  # feed a large numpy array in as a single batch
+  my_input_fn = tf.estimator.inputs.numpy_input_fn(
+      x={"inputs": net_inputs},
+      y=None, shuffle=False, batch_size=net_inputs.shape[0])
+
+  # this generator only gives one result at a time
+  predictions_generator = estimator.predict(input_fn=my_input_fn, predict_keys=['raw_predictions'])
+  
+  # aggregate the whole batch back together again (slow!)
+  predictions = np.reshape(
+      np.fromiter(itertools.chain.from_iterable(x['raw_predictions'] for x in predictions_generator), input_vects.dtype),
+      [-1, net_inputs.shape[1]])
+
+
+
+Describe the problem
+The way the generator in tf.estimator.Estimator.predict() is currently implemented to yield individual predictions from batched predictions adds quite a bit of overhead. Specifically the loop here
+https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/estimator/estimator.py#L516
+I hacked together my own copy of predict() that directly yields preds_evaluated and the total time taken on my test-set of a few million examples with a batch size of 128k was 64% of the time taken when I used the method above to re-aggregate back to a numpy array. Is there any chance of adding an optional parameter to predict() to change the behaviour to this? I realise that estimators are more intended for ease-of-use but this would only be a few lines to change and by keeping it as an optional parameter backwards-compatibility would be maintained. Happy to prepare a PR if there's a chance it would be accepted.

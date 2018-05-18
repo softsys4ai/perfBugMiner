@@ -1,0 +1,47 @@
+Tensorflow does NOT utilize the memory from two GPUs in Windows 10
+
+Tensorflow Version 1.3.0
+OS: Windows 10
+GPUs: Nvidia Quadro M4000 * 2 with 8G GPU memory for each
+GPU modes: one for WDDM, one for TCC
+I tested the official codes at https://github.com/tensorflow/models/blob/master/official/resnet/imagenet_main.py
+I just add the GPU constraints in the main function as:
+def main(unused_argv):
+  os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
+
+      # For this line, visible_divice_list set to only "0" and "0, 1" can only support the same batch_size
+  config = tf.ConfigProto(gpu_options=tf.GPUOptions(visible_device_list='0, 1')) 
+
+  resnet_classifier = tf.estimator.Estimator(
+	  model_fn=imagenet_model_fn, model_dir=FLAGS.model_dir,
+	  config=tf.contrib.learn.RunConfig(session_config=config))
+
+  for cycle in range(FLAGS.train_steps // FLAGS.steps_per_eval):
+	tensors_to_log = {
+		'learning_rate': 'learning_rate',
+		'cross_entropy': 'cross_entropy',
+		'train_accuracy': 'train_accuracy'
+	}
+
+	logging_hook = tf.train.LoggingTensorHook(
+		tensors=tensors_to_log, every_n_iter=100)
+
+	print('Starting a training cycle.')
+	resnet_classifier.train(
+		input_fn=lambda: input_fn(tf.estimator.ModeKeys.TRAIN),
+		steps=FLAGS.first_cycle_steps or FLAGS.steps_per_eval,
+		hooks=[logging_hook])
+	FLAGS.first_cycle_steps = None
+
+	print('Starting to evaluate.')
+	eval_results = resnet_classifier.evaluate(
+	  input_fn=lambda: input_fn(tf.estimator.ModeKeys.EVAL))
+	print(eval_results)
+
+In the training process, if I set the visible device list to "0, 1" or "0" only, both can run successfully with batch_size=48, but BOTH failed with batch_size=49! This indicates that the second GPU's memory is not utilized, as batch size could not be bigger when using two GPUs. I have use Nvidia-smi to confirm that only one or two GPUs are used in the above experiments.
+My questions are:
+
+Is there any way that I can use bigger batch_size when using two GPUs?
+If the answer for Q1 is No in Windows, is there any way to do it in Linux? I am not familiar with Linux. In Linux, can I set all GPUs to TCC mode? Will the batch size be bigger when two GPUs are both in TCC mode?
+
+Thank you.

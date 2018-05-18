@@ -1,0 +1,69 @@
+Getting "Dst tensor is not initialized." when really the problem is out of GPU memory
+
+This is the stack trace we sometimes get when trying to use TensorFlow on a GPU that's occupied by another process. It would help debugging if the error said something about memory.
+@zheng-xq
+tf.version: '0.12.1-1934-g27fca7d-dirty'
+(nightly from last week)
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties: 
+name: TITAN X (Pascal)
+major: 6 minor: 1 memoryClockRate (GHz) 1.531
+pciBusID 0000:04:00.0
+Total memory: 11.90GiB
+Free memory: 381.44MiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: TITAN X (Pascal), pci bus id: 0000:04:00.0)
+Traceback (most recent call last):
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1022, in _do_call
+    return fn(*args)
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1004, in _run_fn
+    status, run_metadata)
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py", line 469, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InternalError: Dst tensor is not initialized.
+	 [[Node: zeros_1266 = Const[dtype=DT_FLOAT, value=Tensor<type: float shape: [160] values: 0 0 0...>, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "memory_test.py", line 87, in <module>
+    profile_densenet(False)
+  File "memory_test.py", line 65, in profile_densenet
+    sess.run(net.initializer, {net.x_init: trainx[:init_batch_size]})
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1035, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InternalError: Dst tensor is not initialized.
+	 [[Node: zeros_1266 = Const[dtype=DT_FLOAT, value=Tensor<type: float shape: [160] values: 0 0 0...>, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+Caused by op 'zeros_1266', defined at:
+  File "memory_test.py", line 87, in <module>
+    profile_densenet(False)
+  File "memory_test.py", line 59, in profile_densenet
+    net = densenet_lib.densenet(init_batch_size, batch_size, layers_per_block, filters_per_layer, save_memory=save_memory)
+  File "/home/yaroslav/openai.git/densenet/densenet.py", line 183, in densenet
+    optimizer = nn.adamax_updates(all_params, loss, lr=tf_lr)
+  File "/home/yaroslav/openai.git/densenet/nn.py", line 41, in adamax_updates
+    mg = tf.Variable(tf.zeros(int_shape(p)), p.name + '_adamax_mg')
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/ops/array_ops.py", line 1376, in zeros
+    output = constant(zero, shape=shape, dtype=dtype, name=name)
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/framework/constant_op.py", line 169, in constant
+    attrs={"value": tensor_value, "dtype": dtype_value}, name=name).outputs[0]
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2395, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/yaroslav/.conda/envs/tim-jan17/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1264, in __init__
+    self._traceback = _extract_stack()
+
+InternalError (see above for traceback): Dst tensor is not initialized.
+	 [[Node: zeros_1266 = Const[dtype=DT_FLOAT, value=Tensor<type: float shape: [160] values: 0 0 0...>, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]

@@ -1,0 +1,188 @@
+bug with frame_step in tf.contrib.signal overlap_and_add inverse_stft
+
+System information
+
+Based on example
+Linux Ubuntu 16.04
+installed from binary
+v1.4.0-19-ga52c8d9, 1.4.1; also 1.5.0
+Python 2.7.14 |Anaconda custom (64-bit)| (default, Oct 16 2017, 17:29:19). IPython 5.4.1
+Cuda release 8.0, V8.0.61, cuDNN 6; also Cuda release 9.0, V9.0.176, cuDNN 7.0.5
+Geforce GTX 970M, also GTX 1070, Driver Version: 384.111
+
+Describe the problem
+A.) When I create frames from a signal with frame_length=1024 and  frame_step=256 (i.e. 25% hop size, 75% overlap) using a hann window (also tried hamming), and then I reconstruct with overlap_and_add, I'd expect the signal to be reconstructed correctly (because of COLA etc). But instead it comes out exactly double the amplitude. I need to divide the resulting signal by two for it to be correct.
+B.) If I use STFT to create a series of overlapping spectrograms, and then reconstruct with inverse STFT, again with frame_length=1024 and frame_step=256, the signal is again reconstructed at double amplitude.
+I realise why these might be the case (unity gain at 50% overlap for hann, so 75% overlap will double the signal). But is it not normal for the reconstruction function to take this into account? E.g. librosa istft does return signal with correct amplitude while tensorflow returns double.
+C.)
+At any other frame_step there is severe amplitude modulation going on. See images below. This doesn't seem right at all.
+UPDATE: If I explicitly set window_fn=tf.contrib.signal.inverse_stft_window_fn(frame_step) in inverse_stft the output is correct. So it seems the frame_step parameter in inverse_stft is not being passed into the window function (which is also what the results hint at).
+Source code / logs
+original data:
+
+tensorflow output from frames + overlap_and_add:
+
+
+
+
+tensorflow output from stft+istft:
+
+
+
+
+librosa output from stft+istft:
+
+
+
+
+tensorflow code:
+from __future__ import print_function
+from __future__ import division
+
+import numpy as np
+import scipy.io.wavfile
+import math
+import random
+import matplotlib.pyplot as plt
+
+import tensorflow as tf
+out_prefix = 'tensorflow'
+
+
+def plot(data, title, do_save=True):
+    plt.figure(figsize=(20,5))
+    plt.plot(data[:3*frame_length])
+    plt.ylim([-1, 1])
+    plt.title(title)
+    plt.grid()
+    if do_save: plt.savefig(title + '.png')
+    plt.show()
+
+
+def reconstruct_from_frames(x, frame_length, frame_step):
+    name = 'frame'
+    frames_T = tf.contrib.signal.frame(x, frame_length=frame_length, frame_step=frame_step)
+    windowed_frames_T = frames_T * tf.contrib.signal.hann_window(frame_length, periodic=True)
+    output_T = tf.contrib.signal.overlap_and_add(windowed_frames_T, frame_step=frame_step)
+    return name, output_T
+
+
+def reconstruct_from_stft(x, frame_length, frame_step):
+    name = 'stft'
+    spectrograms_T = tf.contrib.signal.stft(x, frame_length, frame_step)
+    output_T = tf.contrib.signal.inverse_stft(spectrograms_T, frame_length, frame_step)
+    return name, output_T
+
+
+def test(fn, input_data):
+    print('-'*80)
+    tf.reset_default_graph()
+    input_T = tf.placeholder(tf.float32, [None]) 
+    name, output_T = fn(input_T, frame_length, frame_step)
+
+    title = "{}.{}.{}.l{}.s{}".format(out_prefix, sample_rate, name, frame_length, frame_step)
+    print(title)
+
+    with tf.Session():
+        output_data =  output_T.eval({input_T:input_data})
+
+#    output_data /= frame_length/frame_step/2 # tensorflow needs this to normalise amp
+    plot(output_data, title)
+    scipy.io.wavfile.write(title+'.wav', sample_rate, output_data)
+
+
+def generate_data(duration_secs, sample_rate, num_sin, min_freq=10, max_freq=500, rnd_seed=0, max_val=0):
+    '''generate signal from multiple random sin waves'''
+    if rnd_seed>0: random.seed(rnd_seed)
+    data = np.zeros([duration_secs*sample_rate], np.float32)
+    for i in range(num_sin):
+        w = np.float32(np.sin(np.linspace(0, math.pi*2*random.randrange(min_freq, max_freq), num=duration_secs*sample_rate)))
+        data += random.random() * w
+    if max_val>0:
+        data *= max_val / np.max(np.abs(data))
+    return data
+    
+
+frame_length = 1024
+sample_rate = 22050
+
+input_data = generate_data(duration_secs=1, sample_rate=sample_rate, num_sin=1, rnd_seed=2, max_val=0.5)
+
+title = "{}.orig".format(sample_rate)
+plot(input_data, title)
+scipy.io.wavfile.write(title+'.wav', sample_rate, input_data)
+
+for frame_step in [256, 512, 768, 1024]:
+    test(reconstruct_from_frames, input_data)
+    test(reconstruct_from_stft, input_data)
+
+print('done.')
+
+librosa code:
+from __future__ import print_function
+from __future__ import division
+
+import numpy as np
+import scipy.io.wavfile
+import math
+import random
+import matplotlib.pyplot as plt
+
+import librosa.core as lc
+out_prefix = 'librosa'
+
+
+def plot(data, title, do_save=True):
+    plt.figure(figsize=(20,5))
+    plt.plot(data[:3*frame_length])
+    plt.ylim([-1, 1])
+    plt.title(title)
+    plt.grid()
+    if do_save: plt.savefig(title + '.png')
+    plt.show()
+
+
+def reconstruct_from_stft(x, frame_length, frame_step):
+    name = 'stft'
+    stft = lc.stft(x, n_fft=frame_length, hop_length=frame_step)
+    istft = lc.istft(stft, frame_step)
+    return name, istft
+
+
+def test(fn, input_data):
+    print('-'*80)
+    name, output_data = fn(input_data, frame_length, frame_step)
+
+    title = "{}.{}.{}.l{}.s{}".format(out_prefix, sample_rate, name, frame_length, frame_step)
+    print(title)
+
+#    output_data /= frame_length/frame_step/2 # tensorflow needs this to normalise amp
+    plot(output_data, title)
+    scipy.io.wavfile.write(title+'.wav', sample_rate, output_data)
+
+
+def generate_data(duration_secs, sample_rate, num_sin, min_freq=10, max_freq=500, rnd_seed=0, max_val=0):
+    '''generate signal from multiple random sin waves'''
+    if rnd_seed>0: random.seed(rnd_seed)
+    data = np.zeros([duration_secs*sample_rate], np.float32)
+    for i in range(num_sin):
+        w = np.float32(np.sin(np.linspace(0, math.pi*2*random.randrange(min_freq, max_freq), num=duration_secs*sample_rate)))
+        data += random.random() * w
+    if max_val>0:
+        data *= max_val / np.max(np.abs(data))
+    return data
+    
+
+frame_length = 1024
+sample_rate = 22050
+
+input_data = generate_data(duration_secs=1, sample_rate=sample_rate, num_sin=1, rnd_seed=2, max_val=0.5)
+
+title = "{}.orig".format(sample_rate)
+plot(input_data, title)
+scipy.io.wavfile.write(title+'.wav', sample_rate, input_data)
+
+for frame_step in [256, 512, 768, 1024]:
+    test(reconstruct_from_stft, input_data)
+
+print('done.')

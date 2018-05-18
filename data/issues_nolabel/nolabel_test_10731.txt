@@ -1,0 +1,26 @@
+scope reuse problem variable not exist for using Dense(in contirb.seq2seq.attention_wrapper)
+
+tf version '1.2.0-rc0'
+in attention_wrapper.py(contirb.seq2seq.attention_wrapper), it use below
+from tensorflow.python.layers import core as layers_core 
+memory_layer = layers_core.Dense(10, name="memory_layer", use_bias=False)  #line 416
+
+but this usage will cause un expected result when trying to reuse memory_layer, see below
+input = tf.constant([[1,2,3], [4,5,6]], dtype=tf.float32)
+with tf.variable_scope('main') as scope:
+    memory_layer = layers_core.Dense(10, name="memory_layer", use_bias=False)
+    x = memory_layer(input)
+    scope.reuse_variables()
+    memory_layer = layers_core.Dense(10, name="memory_layer", use_bias=False)
+    y = memory_layer(input)
+
+ValueError: Variable main/memory_layer_1/kernel does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+One workaround is to change name="memory_layer" to _scope="memory_layer"
+with tf.variable_scope('main') as scope:
+    memory_layer = layers_core.Dense(10, _scope="memory_layer", use_bias=False)
+    x = memory_layer(input)
+    scope.reuse_variables()
+    memory_layer = layers_core.Dense(10, _scope="memory_layer", use_bias=False)
+    y = memory_layer(input)
+
+I think this is a bug for atttention_wrapper.py ? since we can not reuse memory_layer, then we can not train/evaluate in one graph when using attention cell wrapper.

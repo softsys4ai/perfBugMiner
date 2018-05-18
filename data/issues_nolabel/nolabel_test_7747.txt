@@ -1,0 +1,69 @@
+Why restore checkpoint will effect the tfrecord reader path?
+
+I'm training my model with training dataset in standard format
+features = tf.parse_example(
+    batch_serialized_example,
+    features={
+        "label": tf.FixedLenFeature([], tf.float32),
+        "ids": tf.VarLenFeature(tf.int64),
+        "values": tf.VarLenFeature(tf.float32),
+    })
+batch_labels = features["label"]
+batch_ids = features["ids"]
+batch_values = features["values"]
+
+then I  save the checkpoint and want to do some predicting on my other dataset, but add two more fields: uid and item_id (just for statistics)
+predict_features = tf.parse_example(
+    predict_batch_serialized_example,
+    features={
+        "label": tf.FixedLenFeature([], tf.float32),
+        "ids": tf.VarLenFeature(tf.int64),
+        "values": tf.VarLenFeature(tf.float32),
+        "uid": tf.FixedLenFeature([], tf.int64),
+        "item_id": tf.FixedLenFeature([], tf.int64)
+    })
+predict_batch_labels = predict_features["label"]
+predict_batch_ids = predict_features["ids"]
+predict_batch_values = predict_features["values"]
+predict_batch_uids = predict_features["uid"]
+predict_batch_item_ids = predict_features["item_id"]
+
+
+When I restore the checkpoint , the simply read-data  faild InvalidArgumentError (see above for traceback): Name: <unknown>, Feature: item_id (data type: int64) is required but could not be found.
+When I remove the restore function , it's seems right.
+Why the checkpoint do effect the reader? it's seems that after restore the checkponit ,the reader no longer read from the new path ?
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+https://gist.github.com/ericyue/e694a90338b9fadf9996025719005c9d
+mininal code (just read data)
+      if not restore_session_from_checkpoint(sess, saver,cf):
+        logging.error("No checkpoint found, exit now")
+        exit(1)
+      try:
+          while not coord.should_stop():
+            uids, item_ids = sess.run( [predict_batch_uids, predict_batch_item_ids])
+      except tf.errors.OutOfRangeError:
+          logging.info("Done predicting after reading all data")
+      finally:
+          coord.request_stop()
+          logging.info("coord stopped")
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+  1 Caused by op u'ParseExample_2/ParseExample', defined at:
+  2   File "deepcake-tf.py", line 139, in <module>
+  3     "item_id": tf.FixedLenFeature([], tf.int64)
+  4   File "/home/moon/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/parsing_ops.py", line 445, in parse_example
+  5     dense_types, dense_defaults, dense_shapes, name)
+  6   File "/home/moon/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/parsing_ops.py", line 544, in _parse_example_raw
+  7     name=name)
+  8   File "/home/moon/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/gen_parsing_ops.py", line 167, in _parse_example
+  9     dense_shapes=dense_shapes, name=name)
+ 10   File "/home/moon/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 763, in apply_op
+ 11     op_def=op_def)
+ 12   File "/home/moon/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2395, in create_op
+ 13     original_op=self._default_original_op, op_def=op_def)
+ 14   File "/home/moon/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1264, in __init__
+ 15     self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Name: <unknown>, Feature: item_id (data type: int64) is required but could not be found.
+	 [[Node: ParseExample_2/ParseExample = ParseExample[Ndense=3, Nsparse=2, Tdense=[DT_INT64, DT_FLOAT, DT_INT64], dense_shapes=[[], [], []], sparse_types=[DT_INT64, DT_FLOAT], _device="/job:localhost/replica:0/task:0/cpu:0"](shuffle_batch_2, ParseExample_2/ParseExample/names, ParseExample_2/ParseExample/sparse_keys_0, ParseExample_2/ParseExample/sparse_keys_1, ParseExample_2/ParseExample/dense_keys_0, ParseExample_2/ParseExample/dense_keys_1, ParseExample_2/ParseExample/dense_keys_2, ParseExample_2/Const, ParseExample_2/Const_1, ParseExample_2/Const_2)]]

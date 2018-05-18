@@ -1,0 +1,45 @@
+Noise in Variable assignment
+
+I am writing a code to use an LSTM in the following manner:
+
+Given an input x of dimensionality d at time t, two quantities are computed:
+a. The difference x(t) - x(t-1). I call this the first derivative of x: x'(t).
+b. The difference x'(t) - x'(t-1). I call this the second derivative of x: x''(t).
+x(t), x'(t), x''(t) are concatenated as the total input to an LSTM of state size 3xd.
+The output from the LSTM, say L(t) is then passed onto a d-dimensional densely connected linear layer. So the final output out is f(t) = W x L(t) + b
+
+I am using the AdamOptimizer with a learning rate of 0.0005.
+The problem I am facing is, when I do steps 1 and 2 as given above outside TensorFlow, the model works well. However, when I try to do the computation of derivatives inside a TensorFlow Graph, there seems to be some noise seeping into the values of the variables. Heres the code:
+##The Input Layer as a Placeholder
+#Since we will provide data sequentially, the 'batch size'
+#is 1.
+input_layer = tf.placeholder(tf.float32, [1, input_dim])
+
+##First Order Derivative Layer
+#This will store the last recorded value
+last_value1 = tf.Variable(tf.zeros([1, input_dim]))
+#Subtract last value from current
+sub_value1 = tf.sub(input_layer, last_value1)
+#Update last recorded value
+last_assign_op1 = last_value1.assign(input_layer)
+
+##Second Order Derivative Layer
+#This will store the last recorded derivative
+last_value2 = tf.Variable(tf.zeros([1, input_dim]))
+#Subtract last value from current
+sub_value2 = tf.sub(sub_value1, last_value2)
+#Update last recorded value
+last_assign_op2 = last_value2.assign(sub_value1)
+
+##Overall input to the LSTM
+#x and its first and second order derivatives as outputs of
+#earlier layers
+zero_order = input_layer
+first_order = sub_value1
+second_order = sub_value2
+#Concatenated
+total_input = tf.concat(1, [zero_order, first_order, second_order])
+
+While running the model, I run in order: final_output (which is dependent on total_input), then last_assign_op1 and then last_assign_op2.
+However, there always seems to be a difference of about 0.001 between what the actual values of last_value1 and last_value2 should be, and what they really are. This is causing a lot of noise in the final output.
+What is the reason for this? Is this somehow because of the Optimizer (I can't figure out why that would be)? Or am I doing something wrong?

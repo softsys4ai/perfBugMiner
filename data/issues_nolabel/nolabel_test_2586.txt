@@ -1,0 +1,42 @@
+Persistent tensors get placed onto GPU unexpectedly
+
+Running get_session_handle ops seems to affect where subsequent get_session_tensor is placed.
+The following fails when built with config=cuda with
+E tensorflow/stream_executor/cuda/cuda_driver.cc:1239] failed to enqueue async memcpy from device to host: CUDA_ERROR_INVALID_VALUE; host dst: 0x208a00000; GPU src: 0x1b1a4a0; size: 4=0x4
+F tensorflow/core/common_runtime/gpu/gpu_util.cc:296] GPU->CPU Memcpy failed
+
+
+Looking at device placement, it seems that GetSessionTensor ops are placed on GPU. Changing failure_case to False makes the test below pass as everything is placed on CPU as expected.
+import tensorflow as tf                                                         
+
+class HandleTest(tf.test.TestCase):                                             
+
+  def testHandle(self):                                                         
+    with self.test_session() as sess:                                           
+      a = tf.constant(1.0)                                                      
+      a_handle_op = tf.get_session_handle(a)                                    
+      b = tf.constant(2.0)                                                      
+      b_handle_op = tf.get_session_handle(b)                                    
+
+      failure_case = True                                                       
+      if failure_case:                                                          
+        a_p, a_t = tf.get_session_tensor(tf.float32)                            
+        b_p, b_t = tf.get_session_tensor(tf.float32)                            
+        a_handle = sess.run(a_handle_op)                                        
+        b_handle = sess.run(b_handle_op)                                        
+      else:                                                                     
+        a_handle = sess.run(a_handle_op)                                        
+        b_handle = sess.run(b_handle_op)                                        
+        a_p, a_t = tf.get_session_tensor(tf.float32)                            
+        b_p, b_t = tf.get_session_tensor(tf.float32)                            
+
+      c = tf.add(a_t, b_t)                                                      
+      c_handle = sess.run(                                                      
+        tf.get_session_handle(c),                                               
+        feed_dict={a_p: a_handle.handle,                                        
+                   b_p: b_handle.handle})                                       
+      self.assertEqual(3.0, c_handle.eval())                                    
+
+
+if __name__ == "__main__":                                                      
+  tf.test.main()

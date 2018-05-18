@@ -1,0 +1,218 @@
+CUDA_TOO_MANY_PEERS exception when launching on p2.16xlarge on aws
+
+This issue is identical to the issue discussed here.
+When launching tensorflow to train on more than 8 gpu instances, tensorflow will cause a CUDA_TOO_MANY_PEERS error in the driver. The Tesla K80 shows up as 2 gpu instances internally so even though the p2.16xlarge technically only has 8 gpus it looks to the driver like it has 16. It seems that the cuda p2p system limits any gpu to only connect to a maximum 8 other gpus via p2p, but when the graph is launched, tensorflow (quite understandably) attempts to create a p2p connection between every gpu in the graph.
+Is there some way to disable p2p or is there a way via intelligent graph construction to limit the number of connections any given gpu requires, or even use a resource pool for gpu p2p connections?
+ubuntu@host:~/workspace/nn$ nvidia-smi
+Wed Nov  2 20:53:20 2016       
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 361.93.02              Driver Version: 361.93.02                 |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  Tesla K80           Off  | 0000:00:0F.0     Off |                    0 |
+| N/A   45C    P8    27W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   1  Tesla K80           Off  | 0000:00:10.0     Off |                    0 |
+| N/A   39C    P8    30W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   2  Tesla K80           Off  | 0000:00:11.0     Off |                    0 |
+| N/A   50C    P8    27W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   3  Tesla K80           Off  | 0000:00:12.0     Off |                    0 |
+| N/A   43C    P8    31W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   4  Tesla K80           Off  | 0000:00:13.0     Off |                    0 |
+| N/A   50C    P8    57W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   5  Tesla K80           Off  | 0000:00:14.0     Off |                    0 |
+| N/A   41C    P8    70W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   6  Tesla K80           Off  | 0000:00:15.0     Off |                    0 |
+| N/A   51C    P0    56W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   7  Tesla K80           Off  | 0000:00:16.0     Off |                    0 |
+| N/A   43C    P0    71W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   8  Tesla K80           Off  | 0000:00:17.0     Off |                    0 |
+| N/A   46C    P0    56W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   9  Tesla K80           Off  | 0000:00:18.0     Off |                    0 |
+| N/A   39C    P0    71W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|  10  Tesla K80           Off  | 0000:00:19.0     Off |                    0 |
+| N/A   49C    P0    58W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|  11  Tesla K80           Off  | 0000:00:1A.0     Off |                    0 |
+| N/A   40C    P0    73W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|  12  Tesla K80           Off  | 0000:00:1B.0     Off |                    0 |
+| N/A   49C    P0    58W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|  13  Tesla K80           Off  | 0000:00:1C.0     Off |                    0 |
+| N/A   40C    P0    70W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|  14  Tesla K80           Off  | 0000:00:1D.0     Off |                    0 |
+| N/A   49C    P0    60W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|  15  Tesla K80           Off  | 0000:00:1E.0     Off |                    0 |
+| N/A   41C    P0    69W / 149W |      0MiB / 11441MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+ubuntu@host:~/workspace/nn$ python3 deploy_local.py 
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcurand.so.8.0 locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 0 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:0f.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x3bb3f120
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 1 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:10.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x3bf86790
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 2 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:11.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x3c3cf0c0
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 3 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:12.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x4a7fe070
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 4 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:13.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x4ac4dd20
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 5 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:14.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x4b0a16a0
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 6 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:15.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x4b4f9220
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 7 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:16.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x4b9545d0
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 8 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:17.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x4bdb3920
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 9 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:18.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x4c216790
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 10 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:19.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x4c67d450
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 11 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:1a.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x4cae8580
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 12 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:1b.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x28999af0
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 13 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:1c.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x28e0bf00
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 14 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:1d.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x29282290
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 15 with properties: 
+name: Tesla K80
+major: 3 minor: 7 memoryClockRate (GHz) 0.8235
+pciBusID 0000:00:1e.0
+Total memory: 11.17GiB
+Free memory: 11.11GiB
+E tensorflow/core/common_runtime/direct_session.cc:132] Internal: Internal: failed to enable peer access from 0x1c961680 to 0x18f1ac60: CUDA_ERROR_TOO_MANY_PEERS
+Traceback (most recent call last):
+  File "deploy_local.py", line 39, in <module>
+    n_test_batches=4,
+  File "/home/ubuntu/workspace/nn/nn/model/network.py", line 271, in train
+    test_steps=test_steps, save_steps=save_steps, load_all=load_all, debug=debug, **kwargs)
+  File "/home/ubuntu/workspace/nn/nn/train/train.py", line 86, in train_model
+    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)) as sesh:
+  File "/usr/local/lib/python3.4/dist-packages/tensorflow/python/client/session.py", line 1138, in __init__
+    super(Session, self).__init__(target, graph, config=config)
+  File "/usr/local/lib/python3.4/dist-packages/tensorflow/python/client/session.py", line 502, in __init__
+    self._session = tf_session.TF_NewSession(opts, status)
+  File "/usr/lib/python3.4/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/usr/local/lib/python3.4/dist-packages/tensorflow/python/framework/errors.py", line 463, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors.InternalError: Failed to create session.

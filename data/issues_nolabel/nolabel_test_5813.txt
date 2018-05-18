@@ -1,0 +1,67 @@
+Fix a bug which repeated variable creation in optimizer when using bucketing
+
+Hi, all,
+It's a pull request mentioned in #5786.
+When we use adam or momentum as optimizer in bucketing, the variables in optimizer will not be shared between different buckets.
+Because it uses name_scope to create scope name (and potentially add a suffix to the scope name if a variable with such name already exists) and uses Variable to create variable.
+See _create_slot_var and create_slot.
+def _create_slot_var(primary, val, scope):
+  """Helper function for creating a slot variable."""
+  slot = variables.Variable(val, name=scope, trainable=False)
+  ...
+  return slot
+
+
+def create_slot(primary, val, name, colocate_with_primary=True):
+  with ops.name_scope(primary.op.name + "/" + name) as scope:
+    if colocate_with_primary:
+      with ops.colocate_with(primary):
+        return _create_slot_var(primary, val, scope)
+    else:
+      return _create_slot_var(primary, val, scope)
+But there is a potential bug when using bucketing in seq2seq task.
+Every bucket will create a list of variables in its optimizer and they should be shared with each other. But now these variables will not be shared.
+Discussion is #5786.
+For example,
+when I use two buckets and adam optimizer in my task, it will create two repeated variable lists:
+embedding_attention_seq2seq/RNN/EmbeddingWrapper/embedding/Adam:0 (50000, 256)
+embedding_attention_seq2seq/RNN/EmbeddingWrapper/embedding/Adam_1:0 (50000, 256)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Matrix/Adam:0 (1056, 1600)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Matrix/Adam_1:0 (1056, 1600)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Bias/Adam:0 (1600,)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Bias/Adam_1:0 (1600,)
+embedding_attention_seq2seq/RNN/EmbeddingWrapper/embedding/Adam_2:0 (50000, 256)
+embedding_attention_seq2seq/RNN/EmbeddingWrapper/embedding/Adam_3:0 (50000, 256)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Matrix/Adam_2:0 (1056, 1600)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Matrix/Adam_3:0 (1056, 1600)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Bias/Adam_2:0 (1600,)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Bias/Adam_3:0 (1600,)
+
+As a solution, I remove name_scope and replace Variable to get_variable for sharing variables in bucketing.
+And meanwhile adam optimizer will create two different lists of variables for parameter update.
+Adam
+    for v in var_list:
+      self._zeros_slot(v, "m", self._name)
+      self._zeros_slot(v, "v", self._name)
+And we have to distinguish the creations of these two variables' lists.
+So I think add slot_name as a suffix to op_name is a suitable solution. It use op_name + '/' + slot_name to create different shared variables.
+  def _zeros_slot(self, var, slot_name, op_name):
+    named_slots = self._slot_dict(slot_name)
+    if var not in named_slots:
+      named_slots[var] = slot_creator.create_zeros_slot(var, op_name)
+    return named_slots[var]
+So I add op_name += '/' + slot_name in Optimizer._zeros_slot and Optimizer._zeros_slot.
+Testing
+I have run the tests in training and there are all OK.
+And I have run my code, and it seems that it works well.
+And I have run the example of mnist, the log is below:
+#Result of MNIST in tensorflow/models/image/mnist/convolutional.py
+Step 8500 (epoch 9.89), 122.8 ms
+Minibatch loss: 1.618, learning rate: 0.006302
+Minibatch error: 0.0%
+Validation error: 0.9%
+Test error: 0.8%
+
+I'm not sure if I miss some important things.
+And please read my pull request and give some advices if it could fix this bug.
+Getting a lot of help from @lukaszkaiser .Thanks so much.

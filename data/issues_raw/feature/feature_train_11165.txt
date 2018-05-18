@@ -1,0 +1,12 @@
+[feature-request] Multi-arity elems in fold{l,r}
+
+The functions fold{l,r} that are part of tensorflow.python.ops.functional_ops currently only allow single-arity arguments for elems. This makes it inconvenient for writing operations that involve dynamic concatenation of tensors differing in the dimension along a particular axis without padding (this also means one can't use tf.map_fn for accomplishing this task).
+This scenario is present in cases like object detection where a different number of boxes are emitted for each image in the batch. Currently, the implementation in tensorflow/models (tensorflow-models:object_detection/core/post_processing.py) gets around this by fixing the batch size and using tf.split during graph compilation time. The requested op would make such scenarios dynamic; it would also be the way forward in making tf.dynamic_partition ..erm, more dynamic (without introducing a List into Tensorflow's semantics).
+I currently resort to something like the following,
+zeroq = tf.constant(0) - tf.constant(0)
+nkeeps_0 = tf.zeros([zeroq], dtype=tf.int32); keeps_0 = tf.zeros([zeroq], dtype=tf.int32)  
+def _compute(ii, nkeeps_r, keeps_r):
+  keep_ii = <function that spits a varying tensor of shape [M_ii]>
+  return (ii + 1, tf.concat([nkeeps_r, tf.stack([tf.shape(keep_ii)[0]])], axis=0), tf.concat([keeps_r, keep_ii], axis=0))
+_, *ret = control_flow_ops.while_loop(lambda ii, *_: ii < bsize, _compute, [tf.constant(0), nkeeps_0, keeps_0], back_prop=False)
+I'm not sure how this will play with back_prop=True, or as to how this would fit in with the larger goals for the project.

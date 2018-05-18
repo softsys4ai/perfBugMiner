@@ -1,0 +1,30 @@
+Document that tf.train.Supervisor is deprecated
+
+I am using CUDA 8.0, cuDNN 5.1, ubuntu 16.04, GPU: TitanX, tensorflow r0.12.
+And I met some problems when using tf.train.Supervisor in distributed training. I have simplified my  code shown as belown:
+from __future__ import print_function
+import tensorflow as tf
+
+server = tf.train.Server.create_local_server()
+logs_path = "mnist/logs"
+
+
+global_step = tf.get_variable('global_step', [],
+                              initializer=tf.constant_initializer(0),
+                              trainable=False)
+with tf.name_scope("weights"):
+    W1 = tf.Variable(tf.random_normal([784, 100]))
+    W2 = tf.Variable(tf.random_normal([784, 100]))
+
+init_op = tf.global_variables_initializer()
+print("Variables initialized ...")
+sv = tf.train.Supervisor(is_chief=True,
+                         logdir=logs_path,
+                         global_step=global_step,
+                         init_op=init_op,
+                         save_model_secs=600)
+with sv.managed_session(server.target) as sess:
+    while not sv.should_stop():
+        print('==============')
+sv.stop()
+The problem is that if I set logdir explicitly in tf.train.Supervisor, then the code above will met error like this:NotFoundError (see above for traceback): Key weights/Variable not found in checkpoint. But if I comment the lines about defining W1 and W2, then the code could work. So I assume there might be come issues in saving and restoring the checkpoint files in tf.train.Supervisor or maybe I did not use tf.train.Supervisor correctly.

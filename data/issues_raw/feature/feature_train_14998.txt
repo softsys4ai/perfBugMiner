@@ -1,0 +1,100 @@
+Extend reshape with begin_axis and end_axis like in cntk
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version: 3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+CNTK has a generalized version of reshape and it would be nice to have such a version also in Tensorflow
+(https://github.com/Microsoft/CNTK/blob/master/bindings/python/cntk/ops/__init__.py#L1972).
+def reshape(x, shape, begin_axis=None, end_axis=None, name=''):
+    ...
+The difference is, that the user can provide begin_axis and end_axis and if they are specified reshape only operate on a subset of the shape.
+I can make a PR, when somebody says me, where I have to write the code.
+Source code / logs
+Here a working example:
+def reshape(tensor, shape, begin_axis=None, end_axis=None, name=None) -> tf.Tensor:
+    if begin_axis is None and end_axis is None:
+        return tf.reshape(tensor, shape, name=name)
+
+    with tf.name_scope(name, 'reshape', [tensor]):
+        tensor_shape = tf.shape(tensor)
+        to_concat = [shape]
+        if begin_axis is not None:
+            bs = tensor_shape[:begin_axis]
+            to_concat.insert(0, bs)
+        if end_axis is not None:
+            es = tensor_shape[end_axis:]
+            to_concat.append(es)
+
+        tensor_shape = tf.concat(to_concat, 0)
+
+        return = tf.reshape(tensor, tensor_shape)
+and an example doctest
+    """
+
+    Inspired from cntk.reshape to allow begin_axis and end_axis
+
+    Assume you call reshape
+    >> out = reshape(in, shape, b, e)
+    Than the following will hold
+    (Note: If b or e is None, the are interpreted as 0 and/or include the last axis)
+    >> in_shape = in.shape
+    >> in_shape[b:e] = shape
+    >> assert out.shape == in_shape
+
+    First example normal reshape, where the input has unknown dimension
+    >>> import numpy as np
+    >>> _ = tf.InteractiveSession()
+    >>> x = tf.placeholder(tf.float32)
+    >>> y = reshape(x, [-1])
+    >>> y
+    <tf.Tensor 'Reshape:0' shape=(?,) dtype=float32>
+    >>> y.eval({x: np.zeros([3, 4])}).shape
+    (12,)
+
+    Now keep first and last axis: (No shape inference expected, to difficult)
+    >>> y = reshape(x, [-1], begin_axis=1, end_axis=-1)
+    >>> y
+    <tf.Tensor 'reshape/Reshape:0' shape=<unknown> dtype=float32>
+    >>> y.eval({x: np.zeros([3, 4, 5, 6])}).shape
+    (3, 20, 6)
+
+    Now with ndim defined:
+    >>> x = tf.placeholder(tf.float32, shape=[None, None, None, None])
+    >>> y = reshape(x, [-1], begin_axis=1, end_axis=-1)
+    >>> y
+    <tf.Tensor 'reshape_1/Reshape:0' shape=(?, ?, ?) dtype=float32>
+    >>> y.eval({x: np.zeros([3, 4, 5, 6])}).shape
+    (3, 20, 6)
+
+    Now with partial defined shape:
+    >>> x = tf.placeholder(tf.float32, shape=[3, 4, None, 6])
+    >>> y = reshape(x, [-1], begin_axis=1, end_axis=-1)
+    >>> y
+    <tf.Tensor 'reshape_2/Reshape:0' shape=(3, ?, 6) dtype=float32>
+    >>> y.eval({x: np.zeros([3, 4, 5, 6])}).shape
+    (3, 20, 6)
+
+    Now with full defined shape:
+    >>> x = tf.placeholder(tf.float32, shape=[3, 4, 5, 6])
+    >>> y = reshape(x, [-1], begin_axis=1, end_axis=-1)
+    >>> y
+    <tf.Tensor 'reshape_3/Reshape:0' shape=(3, 20, 6) dtype=float32>
+    >>> y.eval({x: np.zeros([3, 4, 5, 6])}).shape
+    (3, 20, 6)
+
+    :param tensor:
+    :param shape:
+    :param name:
+    :return:
+    """

@@ -1,0 +1,57 @@
+Tensorflow MNIST Estimator: does the training batch size affect the graph expected input?
+
+Hello Tensorflow team,
+First of all let me thank you for your amazing job. Tensorflow is one of the greatest Deep Learning frameworks out there.
+I am opening this issue because I am experiencing  something weird after following the MNIST tutorial with the new Estimator high level interface.
+The training and evaluation worked fine, but visualizing the model graph on Tensorboard there is something weird: the input shape that the model requires is 100 x 784.
+I thought I would see ?x784 there, because even if I did use 100 as a batch size in training, in the model function it is explicitly specified that the amount of samples in the input is variable:
+input_layer = tf.reshape(features["x"], [-1, 28, 28, 1], name="input_layer")
+Here is a screenshot from Tensorboard: as you can see in the right box, expected input size is 100x784.
+
+At first I thought this was a Tensorboard issue, but after some testing I don't think so anymore.
+First of all I tried to test my model changing the amount of input samples using the Estimator interface:
+
+I tried to use the estimator.train and estimator.evaluate methods on the same model with different batch sizes (e.g. 50).
+I tried to use the estimator.predict method passing a single sample at a time.
+
+In these cases, everything worked fine.
+After that, I have frozen my model using the "freeze_graph" script in the TensorFlow tools, and I have tried to load the frozen model into a GraphDef and to run it in a session.
+This is the code I have used:
+import tensorflow as tf
+import cv2
+import numpy as np
+
+with tf.gfile.GFile("/path/to/my/frozen/model.pb", "rb") as f:
+    graph_def = tf.GraphDef()
+    graph_def.ParseFromString(f.read())
+
+with tf.Graph().as_default() as graph:
+    tf.import_graph_def(graph_def, name="prefix")
+
+    for op in graph.get_operations():
+        print(op.name)
+
+    # so far it worked: i was able to print the operation of the MNIST model
+
+    x = graph.get_tensor_by_name('prefix/input_layer:0')
+    y = graph.get_tensor_by_name('prefix/softmax_tensor:0')
+
+    with tf.Session(graph=graph) as sess:
+        img = cv2.imread("/path/to/a/mnist/like/image.png", cv2.IMREAD_GRAYSCALE)
+        img = np.asarray(1-img/255, dtype=np.float32)
+        img = np.reshape(img, (28, 28, 1))
+
+        y_out = sess.run(y, feed_dict={x: [img]})
+        print(y_out)
+I got this error: ValueError: Cannot feed value of shape (1, 28, 28, 1) for Tensor 'prefix/input_layer:0', which has shape '(100, 28, 28, 1)'
+So, I feel that I get problems if I try to use this model without passing through the Estimator interface.
+This worries me a lot, because in production I do need to freeze, optimize and convert my models to run them on TensorFlow Lite. So I won't be using the Estimator interface to perform prediction (but I still would like to employ it during training and evaluation).
+Environment
+Have I written custom code: Yes, but only for testing purposes. My model was trained with this MNIST tutorial code
+OS Platform and Distribution: MacOS High Sierra 10.13.3
+TensorFlow installed from: pip
+TensorFlow version: 1.7
+Bazel version: N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A

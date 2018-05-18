@@ -1,0 +1,23 @@
+Remove unnecessary input-size requirement for convolutions with padding='SAME'
+
+Right now there is conflicting behavior when padding='SAME': If inputs have a defined height and width, then convolutions require that filters be no larger than input images (spatially). If inputs do not have a defined height and width, then it's okay for filters to be larger than images.
+I think this conflicting behavior should be removed, especially since padding='SAME' is used for convenience and with the intention of allowing some border effects, and because this way we can continue to use this convenience even when filter size > input size.
+TensorFlow 0.9 example with defined height and width:
+inputs = tf.placeholder(tf.float32, shape=[None, 2, 2, 3])
+weights = tf.get_variable('weights', [3, 3, 3, 10], tf.float32,
+                          initializer=tf.random_normal_initializer())
+t = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], 'SAME')
+
+# ValueError: Filter must not be larger than the input: Filter: (3, 3) Input: (2, 2)
+
+TensorFlow 0.9 example without defined height and width:
+inputs = tf.placeholder(tf.float32, shape=[None, None, None, 3])
+weights = tf.get_variable('weights', [3, 3, 3, 10], tf.float32,
+                          initializer=tf.random_normal_initializer())
+t = tf.nn.conv2d(inputs, weights, [1, 1, 1, 1], 'SAME')
+
+with tf.Session() as sess:
+    sess.run(tf.initialize_all_variables())
+    print(sess.run(t, feed_dict={inputs: np.random.rand(1, 2, 2, 3)}).shape)
+
+# Shape is what we expect: (1, 2, 2, 10)

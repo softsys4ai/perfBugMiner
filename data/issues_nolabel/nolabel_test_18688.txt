@@ -1,0 +1,199 @@
+Estimator.predict() has Shape Issues?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 8.1
+TensorFlow installed from (source or binary):
+Binary
+TensorFlow version (use command below):
+1.6
+Python version:
+3.6
+Bazel version (if compiling from source):
+N/A
+GCC/Compiler version (if compiling from source):
+N/A
+CUDA/cuDNN version:
+N/A
+GPU model and memory:
+N/A
+-Exact command to reproduce:
+Just execture run.py in this repository
+
+Describe the problem
+I've already posted this problem in stackoverflow. Unfortunately, no one can figure it out there so I'm posting it here as well.
+I can train and evalaute a Tensorflow Estimator model without any problems. When I do prediction, this error arises:
+InvalidArgumentError (see above for traceback): output_shape has incorrect number of elements: 79 should be: 2
+	 [[Node: output = SparseToDense[T=DT_INT32, Tindices=DT_INT32, validate_indices=true, _device="/job:localhost/replica:0/task:0/device:CPU:0"](ToInt32, ToInt32_1, ToInt32_2, bidirectional_rnn/bidirectional_rnn/fw/fw/time)]]
+
+All of the model functions I made use the same architecture:
+def _train_model_fn(features, labels, mode, params):
+    features, outputs = _get_fed_features_and_resulting_predictions(features, params['num_classes'])
+    predictions = {"outputs": outputs}
+
+    ... # loss initialization and whatnot
+
+    return _create_model_fn(mode,
+                                            predictions,
+                                            loss,
+                                            train_op)
+
+def _predict_model_fn(features, mode, params):
+    features, outputs = _get_fed_features_and_resulting_predictions(features, params['num_classes'])
+    predictions = {"outputs": outputs}
+
+    return _create_model_fn(mode, predictions,
+                            export_outputs={
+                                "outputs": tf.estimator.export.PredictOutput(outputs)
+                            })
+
+
+def _create_model_fn(mode, predictions, loss=None, train_op=None, export_outputs=None):
+    return tf.estimator.EstimatorSpec(mode=mode,
+                                      predictions=predictions,
+                                      loss=loss,
+                                      train_op=train_op,
+                                      export_outputs=export_outputs)
+
+Here's the training code and the predict code:
+def train(features, labels, num_classes, params, checkpoint_dir,
+          batch_size=1, num_epochs=1, save_checkpoint_every_n_epochs=1):
+    num_steps_per_epoch = len(features) // batch_size
+    save_checkpoint_steps = save_checkpoint_every_n_epochs * num_steps_per_epoch
+    params['num_classes'] = num_classes
+    params['log_step_count_steps'] = num_steps_per_epoch
+    estimator = tf.estimator.Estimator(model_fn=_train_model_fn,
+                                       params=params,
+                                       model_dir=checkpoint_dir,
+                                       config=tf.estimator.RunConfig(
+                                           save_checkpoints_steps=save_checkpoint_steps,
+                                           log_step_count_steps=num_steps_per_epoch,
+                                           save_summary_steps=num_steps_per_epoch
+                                       ))
+    estimator.train(input_fn=_input_fn(features, labels, batch_size),
+                    steps=num_epochs * num_steps_per_epoch)
+
+
+def predict(features, params, checkpoint_dir):
+    estimator = tf.estimator.Estimator(model_fn=_predict_model_fn,
+                                       params=params,
+                                       model_dir=checkpoint_dir)
+    predictions = estimator.predict(input_fn=_input_fn(features))
+    for i, p in enumerate(predictions):
+        print(i, p)
+
+I also checked the shapes given every time the input passes a layer when training, and the same thing for predicting. They give the same shapes:
+Training:
+conv2d [1, 358, 358, 16]
+max_pool2d [1, 179, 179, 16]
+collapse_to_rnn_dims [1, 179, 2864]
+birnn [1, 179, 64]
+
+Prediction:
+conv2d [1, 358, 358, 16]
+max_pool2d [1, 179, 179, 16]
+collapse_to_rnn_dims [1, 179, 2864]
+birnn [1, 179, 64]
+
+Here are the SparseTensors that are passed to sparse_to_dense:
+Training:
+SparseTensor(indices=Tensor("CTCBeamSearchDecoder:0", shape=(?, 2), dtype=int64), values=Tensor("CTCBeamSearchDecoder:1", shape=(?,), dtype=int64), dense_shape=Tensor("CTCBeamSearchDecoder:2", shape=(2,), dtype=int64))
+Prediction:
+SparseTensor(indices=Tensor("CTCBeamSearchDecoder:0", shape=(?, 2), dtype=int64), values=Tensor("CTCBeamSearchDecoder:1", shape=(?,), dtype=int64), dense_shape=Tensor("CTCBeamSearchDecoder:2", shape=(2,), dtype=int64))
+Which are all pretty much the same.
+Any reason why this is happening? Shouldn't the _predict_model_fn work given that it follows the same architecture as that of the other model_fns?
+Here's the full stacktrace: (Note: I called the predict function after evaluation)
+INFO:tensorflow:Using config: {'_cluster_spec': <tensorflow.python.training.server_lib.ClusterSpec object at 0x0000006041C05978>, '_model_dir': 'model-20180420-112636', '_task_type': 'worker', '_keep_checkpoint_every_n_hours': 10000, '_task_id': 0, '_session_config': None, '_num_worker_replicas': 1, '_global_id_in_cluster': 0, '_service': None, '_tf_random_seed': None, '_log_step_count_steps': 100, '_evaluation_master': '', '_save_summary_steps': 100, '_save_checkpoints_steps': None, '_master': '', '_keep_checkpoint_max': 5, '_is_chief': True, '_num_ps_replicas': 0, '_save_checkpoints_secs': 600}
+INFO:tensorflow:Calling model_fn.
+[1, 179, 64]
+INFO:tensorflow:Done calling model_fn.
+SparseTensor(indices=Tensor("CTCBeamSearchDecoder:0", shape=(?, 2), dtype=int64), values=Tensor("CTCBeamSearchDecoder:1", shape=(?,), dtype=int64), dense_shape=Tensor("CTCBeamSearchDecoder:2", shape=(2,), dtype=int64))
+INFO:tensorflow:Graph was finalized.
+INFO:tensorflow:Restoring parameters from model-20180420-112636\model.ckpt-1
+INFO:tensorflow:Running local_init_op.
+INFO:tensorflow:Done running local_init_op.
+Traceback (most recent call last):
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1361, in _do_call
+    return fn(*args)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1340, in _run_fn
+    target_list, status, run_metadata)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\framework\errors_impl.py", line 516, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: output_shape has incorrect number of elements: 82 should be: 2
+	 [[Node: output = SparseToDense[T=DT_INT32, Tindices=DT_INT32, validate_indices=true, _device="/job:localhost/replica:0/task:0/device:CPU:0"](ToInt32, ToInt32_1, ToInt32_2, bidirectional_rnn/bidirectional_rnn/fw/fw/time)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:/Users/asus.11/Documents/ShapeErrorReproduce/run.py", line 56, in <module>
+    main()
+  File "C:/Users/asus.11/Documents/ShapeErrorReproduce/run.py", line 52, in main
+    predict_with_model(checkpoint_dir)
+  File "C:/Users/asus.11/Documents/ShapeErrorReproduce/run.py", line 46, in predict_with_model
+    predict(images, run_params, checkpoint_dir)
+  File "C:\Users\asus.11\Documents\ShapeErrorReproduce\experiment_ops.py", line 173, in predict
+    for i, p in enumerate(predictions):
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\estimator\estimator.py", line 492, in predict
+    preds_evaluated = mon_sess.run(predictions)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\training\monitored_session.py", line 546, in run
+    run_metadata=run_metadata)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\training\monitored_session.py", line 1022, in run
+    run_metadata=run_metadata)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\training\monitored_session.py", line 1113, in run
+    raise six.reraise(*original_exc_info)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\six.py", line 693, in reraise
+    raise value
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\training\monitored_session.py", line 1098, in run
+    return self._sess.run(*args, **kwargs)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\training\monitored_session.py", line 1170, in run
+    run_metadata=run_metadata)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\training\monitored_session.py", line 950, in run
+    return self._sess.run(*args, **kwargs)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 905, in run
+    run_metadata_ptr)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1137, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1355, in _do_run
+    options, run_metadata)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1374, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: output_shape has incorrect number of elements: 82 should be: 2
+	 [[Node: output = SparseToDense[T=DT_INT32, Tindices=DT_INT32, validate_indices=true, _device="/job:localhost/replica:0/task:0/device:CPU:0"](ToInt32, ToInt32_1, ToInt32_2, bidirectional_rnn/bidirectional_rnn/fw/fw/time)]]
+
+Caused by op 'output', defined at:
+  File "C:/Users/asus.11/Documents/ShapeErrorReproduce/run.py", line 56, in <module>
+    main()
+  File "C:/Users/asus.11/Documents/ShapeErrorReproduce/run.py", line 52, in main
+    predict_with_model(checkpoint_dir)
+  File "C:/Users/asus.11/Documents/ShapeErrorReproduce/run.py", line 46, in predict_with_model
+    predict(images, run_params, checkpoint_dir)
+  File "C:\Users\asus.11\Documents\ShapeErrorReproduce\experiment_ops.py", line 173, in predict
+    for i, p in enumerate(predictions):
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\estimator\estimator.py", line 479, in predict
+    features, None, model_fn_lib.ModeKeys.PREDICT, self.config)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\estimator\estimator.py", line 793, in _call_model_fn
+    model_fn_results = self._model_fn(features=features, **kwargs)
+  File "C:\Users\asus.11\Documents\ShapeErrorReproduce\experiment_ops.py", line 129, in _predict_model_fn
+    features, outputs = _get_fed_features_and_resulting_predictions(features, params['num_classes'])
+  File "C:\Users\asus.11\Documents\ShapeErrorReproduce\experiment_ops.py", line 124, in _get_fed_features_and_resulting_predictions
+    outputs = _get_decoded_outputs(features, num_classes)
+  File "C:\Users\asus.11\Documents\ShapeErrorReproduce\experiment_ops.py", line 73, in _get_decoded_outputs
+    name="output")
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\ops\sparse_ops.py", line 791, in sparse_to_dense
+    name=name)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\ops\gen_sparse_ops.py", line 2401, in _sparse_to_dense
+    name=name)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\framework\ops.py", line 3271, in create_op
+    op_def=op_def)
+  File "C:\Users\asus.11\Anaconda3\lib\site-packages\tensorflow\python\framework\ops.py", line 1650, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): output_shape has incorrect number of elements: 82 should be: 2
+	 [[Node: output = SparseToDense[T=DT_INT32, Tindices=DT_INT32, validate_indices=true, _device="/job:localhost/replica:0/task:0/device:CPU:0"](ToInt32, ToInt32_1, ToInt32_2, bidirectional_rnn/bidirectional_rnn/fw/fw/time)]]
+
+Apparently, the shape error also changes with every run.

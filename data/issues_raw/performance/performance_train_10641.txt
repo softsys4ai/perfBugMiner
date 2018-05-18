@@ -1,0 +1,25 @@
+bug: BeamSearchDecoder should not assume that  when time > 0 beam will be full
+
+scores_flat = control_flow_ops.cond(
+      time > 0,
+      lambda: array_ops.reshape(scores, [batch_size, -1]),
+      lambda: scores[:, 0])
+  num_available_beam = control_flow_ops.cond(
+      time > 0,
+      lambda: math_ops.reduce_prod(scores_shape[1:]),
+      lambda: math_ops.reduce_prod(scores_shape[2:]))
+
+  # Pick the next beams according to the specified successors function
+  next_beam_size = math_ops.minimum(
+      ops.convert_to_tensor(
+          beam_width, dtype=dtypes.int32, name="beam_width"),
+      num_available_beam)
+  next_beam_scores, word_indices = nn_ops.top_k(scores_flat, k=next_beam_size)
+  next_beam_scores.set_shape([static_batch_size, beam_width])
+  word_indices.set_shape([static_batch_size, beam_width])
+
+code start from
+https://github.com/tensorflow/tensorflow/blob/master/tensorflow/contrib/seq2seq/python/ops/beam_search_decoder.py#L510
+Correct me if I am wrong, but I think this code is assuming that, when time > 0 the beam will be full. It is true when the vocabulary is big such as is the case in machine translation. but if the vocabulary is small, the beam might won't be full when time > 0 and might pose a problem.  the value of next_beam_size in the code seems must be beam_width or it will raise an error since next_beam_scores.set_shape([static_batch_size, beam_width]), which make next_beam_size = math_ops.minimum useless.
+I am trying to write a Pointer Network BeamSearch Decoder by modifying this source file. And the vocabulary is usually small, so there is a possibility that when time == 1 the beam won't be fully filled.
+I appreciate finally some one wrote a general BeamSeach decoder, that will make my life easier.

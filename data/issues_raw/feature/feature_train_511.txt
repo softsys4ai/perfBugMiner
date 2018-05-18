@@ -1,0 +1,36 @@
+Large RNN graphs, incredibly slow graph creation and step time...
+
+When I build a large seq2seq RNN graph (i.e., 3000 timesteps encoder, and 100 time steps decoder), both the graph construction and step time is insanely slow.
+For example, using approx 3000 timesteps of stacked 4 layers of GRUs (in a seq2seq model w/ attention), we get something like this:
+*** graph creation time ***
+create_encoder graph time 77.442740
+create_decoder graph time 7.298214
+create_loss graph time 0.934293
+create_optimizer graph time 349.426908
+create_model graph time 489.119399
+create_optimizer is the part where i call something like this (pulled from the tutorial):
+def create_optimizer(self):
+start_time = time.time()
+params = tf.trainable_variables()
+
+self.gradient_norms = []
+self.updates = []
+opt = tf.train.GradientDescentOptimizer(0.001)
+
+gradients = tf.gradients(self.losses, params)
+clipped_gradients, norm = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
+
+self.gradient_norms.append(norm)
+self.updates.append(opt.apply_gradients(
+    zip(clipped_gradients, params), global_step=self.global_step))
+
+print('create_optimizer graph time %f' % (time.time() - start_time))
+
+*** step time ***
+step_time: 142.356251001
+When I run nvidia-smi while the graph is computing , the utilization is something like 12% ... definitely something wrong...
+In my personal framework (not TF), creating a graph of equal size takes approx 2 secs (as opposed to TF almost 8 mins) and the step time is less 4 seconds (as opposed to TF 2 mins).... something really weird is going on.
+I wasn't able to profile / debug it too much (are there public tools for that? i cant find anything on tensorboard). also, is there a command i can run to confirm how many weights i have (and the dimensions and the device location of the variables).
+I've confirmed with the tensorboard and log_device_placement=True, and seems like most of the graph is in the GPU (except for embedding layers).
+If you want a link to my graph, send me an email.
+Thanks All!

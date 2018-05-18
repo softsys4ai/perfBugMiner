@@ -1,0 +1,196 @@
+Unable to convert LSTM model to .tflite model
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS High Sierra 10.13.2
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): ('v1.3.0-rc2-20-g0787eee', '1.3.0')
+Python version: 2.7.13
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A, using CPU only
+GPU model and memory: N/A
+Exact command to reproduce:
+
+~/tensorflow/bazel-bin/tensorflow/contrib/lite/toco/toco \
+  --input_file="$(pwd)/lstm-model.pb" \
+  --input_format=TENSORFLOW_GRAPHDEF \
+  --output_format=TFLITE \
+  --output_file="$(pwd)/lstm-model.tflite" --inference_type=FLOAT \
+  --input_type=FLOAT --input_arrays=input \
+  --output_arrays=output --input_shapes=28,28
+
+The Issue
+When trying to convert an LSTM from a frozen graph (.pb) file to (.tflite) using the tensorflow toco script, I get unsupported operations error.
+Source code / logs
+This is the source code for the mode:
+'''
+Edited code from https://jasdeep06.github.io/posts/Understanding-LSTM-in-Tensorflow-MNIST/
+'''
+
+import tensorflow as tf
+from tensorflow.contrib import rnn
+
+#import mnist dataset
+from tensorflow.examples.tutorials.mnist import input_data
+mnist=input_data.read_data_sets("/tmp/data/",one_hot=True)
+
+#define constants
+#unrolled through 28 time steps
+time_steps=28
+#hidden LSTM units
+num_units=128
+#rows of 28 pixels
+n_input=28
+#learning rate for adam
+learning_rate=0.001
+#mnist is meant to be classified in 10 classes(0-9).
+n_classes=10
+#size of batch
+batch_size=128
+
+#weights and biases of appropriate shape to accomplish above task
+out_weights=tf.Variable(tf.random_normal([num_units,n_classes]))
+out_bias=tf.Variable(tf.random_normal([n_classes]))
+
+#defining placeholders
+#input image placeholder
+x=tf.placeholder("float",[None,time_steps,n_input],name="input")
+#input label placeholder
+y=tf.placeholder("float",[None,n_classes])
+
+#processing the input tensor from [batch_size,n_steps,n_input] to "time_steps" number of [batch_size,n_input] tensors
+input=tf.unstack(x ,time_steps,1)
+
+#defining the network
+#cell = rnn.BasicLSTMCell(num_units,forget_bias=0)
+lstm_layer = tf.nn.rnn_cell.MultiRNNCell([rnn.BasicLSTMCell(num_units) for _ in range(3)])
+outputs, _ = rnn.static_rnn(lstm_layer,input,dtype="float32")
+
+#converting last output of dimension [batch_size,num_units] to [batch_size,n_classes] by out_weight multiplication
+prediction=tf.matmul(outputs[-1],out_weights,name="output")+out_bias
+
+#loss_function
+loss=tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=prediction,labels=y))
+#optimization
+opt=tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
+
+#model evaluation
+correct_prediction=tf.equal(tf.argmax(prediction,1),tf.argmax(y,1))
+accuracy=tf.reduce_mean(tf.cast(correct_prediction,tf.float32))
+
+#initialize variables
+init=tf.global_variables_initializer()
+
+saver = tf.train.Saver()
+
+with tf.Session() as sess:
+    sess.run(init)
+    iter=1
+    while iter<800:
+        batch_x,batch_y=mnist.train.next_batch(batch_size=batch_size)
+
+        batch_x=batch_x.reshape((batch_size,time_steps,n_input))
+
+        sess.run(opt, feed_dict={x: batch_x, y: batch_y})
+
+        if iter %10==0:
+            acc=sess.run(accuracy,feed_dict={x:batch_x,y:batch_y})
+            los=sess.run(loss,feed_dict={x:batch_x,y:batch_y})
+            print("For iter ",iter)
+            print("Accuracy ",acc)
+            print("Loss ",los)
+            print("__________________")
+
+        filename = saver.save(sess, "model/model.ckpt")
+
+        iter=iter+1
+
+#calculating test accuracy
+test_data = mnist.test.images[:128].reshape((-1, time_steps, n_input))
+test_label = mnist.test.labels[:128]
+print("Testing Accuracy:", sess.run(accuracy, feed_dict={x: test_data, y: test_label}))
+
+This is code I used for freezing the graph:
+'''
+Code from https://blog.metaflow.fr/tensorflow-how-to-freeze-a-model-and-serve-it-with-a-python-api-d4f3596b3adc
+'''
+
+import os, argparse
+
+import tensorflow as tf
+
+# The original freeze_graph function
+# from tensorflow.python.tools.freeze_graph import freeze_graph
+
+dir = os.path.dirname(os.path.realpath(__file__))
+
+def freeze_graph(model_dir, output_node_names):
+    """Extract the sub graph defined by the output nodes and convert
+    all its variables into constant
+    Args:
+        model_dir: the root folder containing the checkpoint state file
+        output_node_names: a string, containing all the output node's names,
+                            comma separated
+    """
+    if not tf.gfile.Exists(model_dir):
+        raise AssertionError(
+            "Export directory doesn't exists. Please specify an export "
+            "directory: %s" % model_dir)
+
+    if not output_node_names:
+        print("You need to supply the name of a node to --output_node_names.")
+        return -1
+
+    # We retrieve our checkpoint fullpath
+    checkpoint = tf.train.get_checkpoint_state(model_dir)
+    input_checkpoint = checkpoint.model_checkpoint_path
+
+    # We precise the file fullname of our freezed graph
+    absolute_model_dir = "/".join(input_checkpoint.split('/')[:-1])
+    output_graph = absolute_model_dir + "/frozen_model.pb"
+
+    # We clear devices to allow TensorFlow to control on which device it will load operations
+    clear_devices = True
+
+    # We start a session using a temporary fresh Graph
+    with tf.Session(graph=tf.Graph()) as sess:
+        # We import the meta graph in the current default Graph
+        saver = tf.train.import_meta_graph(input_checkpoint + '.meta', clear_devices=clear_devices)
+
+        # We restore the weights
+        saver.restore(sess, input_checkpoint)
+
+        # We use a built-in TF helper to export variables to constants
+        output_graph_def = tf.graph_util.convert_variables_to_constants(
+            sess, # The session is used to retrieve the weights
+            tf.get_default_graph().as_graph_def(), # The graph_def is used to retrieve the nodes
+            output_node_names.split(",") # The output node names are used to select the usefull nodes
+        )
+
+        # Finally we serialize and dump the output graph to the filesystem
+        with tf.gfile.GFile(output_graph, "wb") as f:
+            f.write(output_graph_def.SerializeToString())
+        print("%d ops in the final graph." % len(output_graph_def.node))
+
+    return output_graph_def
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_dir", type=str, default="", help="Model folder to export")
+    parser.add_argument("--output_node_names", type=str, default="", help="The name of the output nodes, comma separated.")
+    args = parser.parse_args()
+
+    freeze_graph(args.model_dir, args.output_node_names)
+
+This is the output of the toco command:
+2018-01-02 20:05:24.912921: W tensorflow/contrib/lite/toco/toco_cmdline_flags.cc:178] --input_type is deprecated. It was an ambiguous flag that set both --input_data_types and --inference_input_type. If you are trying to complement the input file with information about the type of input arrays, use --input_data_type. If you are trying to control the quantization/dequantization of real-numbers input arrays in the output file, use --inference_input_type.
+2018-01-02 20:05:24.973744: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1099] Converting unsupported operation: Unpack
+2018-01-02 20:05:24.974315: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1099] Converting unsupported operation: StridedSlice
+2018-01-02 20:05:25.041459: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before general graph transformations: 1209 operators, 1775 arrays (0 quantized)
+2018-01-02 20:05:25.118862: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] After general graph transformations pass 1: 1114 operators, 1672 arrays (0 quantized)
+2018-01-02 20:05:25.176555: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before dequantization graph transformations: 1114 operators, 1672 arrays (0 quantized)
+2018-01-02 20:05:25.208552: I tensorflow/contrib/lite/toco/allocate_transient_arrays.cc:313] Total transient array allocated size: 0 bytes, theoretical optimal value: 0 bytes.
+2018-01-02 20:05:25.234811: F tensorflow/contrib/lite/toco/tflite/export.cc:303] Some of the operators in the model are not supported by the standard TensorFlow Lite runtime. If you have a custom implementation for them you can disable this error with --allow_custom_ops. Here is a list of operators for which you will need custom implementations: ExpandDims, Fill, SPLIT, StridedSlice, TensorFlowShape, Unpack.
+pbtotflite.sh: line 8:  8277 Abort trap: 6           ~/tensorflow/bazel-bin/tensorflow/contrib/lite/toco/toco --input_file="$(pwd)/lstm-model.pb" --input_format=TENSORFLOW_GRAPHDEF --output_format=TFLITE --output_file="$(pwd)/lstm-model.tflite" --inference_type=FLOAT --input_type=FLOAT --input_arrays=input --output_arrays=output --input_shapes=28,28

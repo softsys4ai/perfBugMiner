@@ -1,0 +1,45 @@
+docker image for 1.6.0 is missing CUPTI libraries
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04, 4.4.0-104-generic
+TensorFlow installed from (source or binary): binary
+TensorFlow version: v1.6.0-0-gd2e24b6 1.6.0
+Bazel version: N/A
+CUDA/cuDNN version: 9.0.176 (from docker image)
+GPU model and memory: GeForce GTX TITAN X
+Exact command to reproduce: (see below)
+
+Describe the Error
+CUPTI library is missing in docker image tensorflow/tensorflow:1.6.0-gpu-py3. This is required when using trace_level=tf.RunOptions.FULL_TRACE and run_metadata in session.run.
+Source code / logs
+To reproduce:
+
+# run.py
+import tensorflow as tf
+
+with tf.Session().as_default() as sess:
+    test_op = tf.no_op()
+
+    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+    sess.run(test_op, options=run_options, run_metadata=run_metadata)
+
+And run:
+> nvidia-docker run --volume /path/to/run.py:/run.py --rm -it tensorflow/tensorflow:1.6.0-gpu-py3 python /run.py
+The error message is:
+
+2018-03-05 00:00:00.000000: I tensorflow/stream_executor/dso_loader.cc:141] Couldn't open CUDA library libcupti.so.9.0. LD_LIBRARY_PATH: /usr/local/cuda/extras/CUPTI/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+2018-03-05 00:00:00.000000: F ./tensorflow/stream_executor/lib/statusor.h:212] Non-OK-status: status_ status: Failed precondition: could not dlopen DSO: libcupti.so.9.0; dlerror: libcupti.so.9.0: cannot open shared object file: No such file or directory
+
+Additional information from within the docker image:
+
+> echo $LD_LIBRARY_PATH
+/usr/local/cuda/extras/CUPTI/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+> ll /usr/local/cuda/extras/CUPTI/lib64
+ls: cannot access '/usr/local/cuda/extras/CUPTI/lib64': No such file or directory
+> find / -name libcupti*
+(not found)
+
+The library seems to be missing in this build. Worked with tensorflow/tensorflow:1.4.0-gpu-py3.

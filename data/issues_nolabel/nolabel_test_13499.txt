@@ -1,0 +1,267 @@
+Using third party library in custom op implementation with GPU memory manipulation
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Ubuntu 14.04.5
+TensorFlow installed from (source or binary):pip
+TensorFlow version (use command below):1.2.0
+Python version: 2.7.6
+Bazel version (if compiling from source):
+CUDA/cuDNN version:CUDA 8.0
+GPU model and memory:GeForce GTX 1080 8G
+Exact command to reproduce:
+
+Describe the problem
+To speed up the model's training and evaluating process, and to make the model more flexible, people would like to use some third party libraries for their customized ops. For example, CUDPP, http://cudpp.github.io/, allows people to build a hash table on GPU.
+However, I find that TensorFlow does not allow people to manipulate GPU memory by themselves, but only to use allocate_temp in the compute function, which is very inconvenient and inflexible. And these good third party libraries involve many GPU memory manipulations. I cannot find much information about this, but I met some errors in allocating memories.
+
+What's the reason behind this prohibition?
+Is there some method to allow us manipulate GPU by ourselves? (some switches, some options)
+If we cannot manipulate GPU memory, then how can we use/adapt these third party GPU libraries for the customized ops? What's the good programming practice?
+
+More specifically, the problem I met is that I implemented a customized op on GPU, using the multivalue hash table from the CUDPP library. For very small-scale data, the customized op passed the test. But when I use larger data, and incorporate the customized op into a larger model, then I cannot allocate the memory on CUDA. https://stackoverflow.com/questions/40183189/trouble-compiling-with-custom-tensorflow-gpu-op, this expalins something. I can avoid manipulating GPU memory myself, but the CUDPP library needs to manipulate GPU memory.
+Source code / logs
+The cudpp git repo: https://github.com/cudpp/cudpp/compare?expand=1.
+My OpKernel:
+void querySquarePointLauncher(int b, int n, int m, float grid_size, int nsample, const float *all_xyz, const float *centroids_xyz, const float *limits, const int *sizes, int *idx, int *pts_cnt, unsigned int *d_keys, unsigned int *d_vals, unsigned int *d_queries, uint2 *d_vals_multivalue);
+class QuerySquarePointGpuOp : public OpKernel {
+    public:
+        explicit QuerySquarePointGpuOp(OpKernelConstruction* context) : OpKernel(context) {
+            OP_REQUIRES_OK(context, context->GetAttr("grid_size", &grid_size_));
+            OP_REQUIRES(context, grid_size_ > 0, errors::InvalidArgument("QuerySquarePoint expects positive grid size"));
+
+            OP_REQUIRES_OK(context, context->GetAttr("nsample", &nsample_));
+            OP_REQUIRES(context, nsample_ > 0, errors::InvalidArgument("QuerySquarePoint expects positive nsample"));
+        }
+
+        void Compute(OpKernelContext* context) override {
+            const Tensor& all_xyz_tensor = context->input(0);
+            OP_REQUIRES(context, all_xyz_tensor.dims()==3 && all_xyz_tensor.shape().dim_size(2)==3, errors::InvalidArgument("QuerySquarePoint expects (batch_size, ndataset, 3) all_xyz_tensor shape."));
+            int b = all_xyz_tensor.shape().dim_size(0);
+            int n = all_xyz_tensor.shape().dim_size(1);
+
+            const Tensor& centroids_xyz_tensor = context->input(1);
+            OP_REQUIRES(context, centroids_xyz_tensor.dims()==3 && centroids_xyz_tensor.shape().dim_size(2)==3, errors::InvalidArgument("QuerySquarePoint expects (batch_size, npoint, 3) centroids_xyz shape."));
+            int m = centroids_xyz_tensor.shape().dim_size(1);
+            
+            const Tensor& limits_tensor = context->input(2);
+            OP_REQUIRES(context, limits_tensor.dims()==1 && limits_tensor.shape().dim_size(0)==6, errors::InvalidArgument("QuerySquarePoint expects (6) limits shape."))
+            
+            const Tensor& sizes_tensor = context->input(3);
+            OP_REQUIRES(context, sizes_tensor.dims()==1 && sizes_tensor.shape().dim_size(0) == 3, errors::InvalidArgument("QuerySquarePoint expects (3) sizes shape."))
+
+            Tensor *idx_tensor = nullptr;
+            OP_REQUIRES_OK(context, context->allocate_output(0, TensorShape{b,m,nsample_}, &idx_tensor));
+            Tensor *pts_cnt_tensor = nullptr;
+            OP_REQUIRES_OK(context, context->allocate_output(1, TensorShape{b,m}, &pts_cnt_tensor));
+            
+            Tensor keys_tensor;
+            OP_REQUIRES_OK(context, context->allocate_temp(DT_INT32, TensorShape({b*n}), &keys_tensor));
+            
+            Tensor vals_tensor;
+            OP_REQUIRES_OK(context, context->allocate_temp(DT_INT32, TensorShape({b*n}), &vals_tensor));
+            
+            Tensor vals_multivalue_tensor;
+            OP_REQUIRES_OK(context, context->allocate_temp(DT_INT32, TensorShape({b*m*27*2}), &vals_multivalue_tensor));
+            
+            Tensor queries_tensor;
+            OP_REQUIRES_OK(context, context->allocate_temp(DT_INT32, TensorShape({b*m*27}), &queries_tensor));
+            
+
+            auto all_xyz_flat = all_xyz_tensor.flat<float>();
+            const float *all_xyz = &(all_xyz_flat(0));
+            
+            auto centroids_xyz_flat = centroids_xyz_tensor.flat<float>();
+            const float *centroids_xyz = &(centroids_xyz_flat(0));
+            
+            auto limits_flat = limits_tensor.flat<float>();
+            const float *limits = &(limits_flat(0));
+            
+            auto sizes_flat = sizes_tensor.flat<int>();
+            const int *sizes = &(sizes_flat(0));
+            
+            auto idx_flat = idx_tensor->flat<int>();
+            int *idx = &(idx_flat(0));
+            auto pts_cnt_flat = pts_cnt_tensor->flat<int>();
+            int *pts_cnt = &(pts_cnt_flat(0));
+            
+            auto keys_flat = keys_tensor.flat<int>();
+            unsigned int *keys = (unsigned int *)&(keys_flat(0));
+            
+            auto vals_flat = vals_tensor.flat<int>();
+            unsigned int *vals = (unsigned int *)&(vals_flat(0));
+            
+            auto queries_flat = queries_tensor.flat<int>();
+            unsigned int *queries = (unsigned int *)&(queries_flat(0));
+            
+            auto vals_multivalue_flat = vals_multivalue_tensor.flat<int>();
+            uint2 *vals_multivalue = reinterpret_cast<uint2*> (&(vals_multivalue_flat(0)));
+            
+            printf("Before launcher in cpp\n");
+            
+            querySquarePointLauncher(b, n, m, grid_size_, nsample_, all_xyz, centroids_xyz, limits, sizes, idx, pts_cnt, keys, vals, queries, vals_multivalue);         
+        }
+    private:
+        float grid_size_;
+        int nsample_;
+};
+REGISTER_KERNEL_BUILDER(Name("QuerySquarePoint").Device(DEVICE_GPU), QuerySquarePointGpuOp);
+The CUDA implementation:
+__global__ void compose_insert_items(int b, int n, float grid_size, const float *all_xyz, const float *limits, const int *sizes, unsigned int *d_keys, unsigned int *d_vals){
+    int index = threadIdx.x;
+   
+    if(index < n){
+        int batch_index = blockIdx.x;
+        all_xyz += batch_index * n * 3;
+        unsigned int *tmp_d_keys = d_keys + batch_index * n;
+        unsigned int *tmp_d_vals = d_vals + batch_index * n;
+        int stride = blockDim.x;
+        
+        for(int point_idx = index; point_idx < n; point_idx += stride){
+            unsigned int x_idx = __float2uint_rd((all_xyz[point_idx*3] - limits[0]) / grid_size) + 1;
+            unsigned int y_idx = __float2uint_rd((all_xyz[point_idx*3+1] - limits[2]) / grid_size) + 1;
+            unsigned int z_idx = __float2uint_rd((all_xyz[point_idx*3+2] - limits[4]) / grid_size) + 1;
+            
+            tmp_d_keys[point_idx] = z_idx + sizes[2] * (y_idx + sizes[1] * (x_idx + batch_index * sizes[0]));
+            tmp_d_vals[point_idx] = point_idx;
+        }
+    }
+}
+//compose_queries<<<b,256>>>(b, m, grid_size, centroids_xyz, limits, sizes, d_queries);
+__global__ void compose_queries(int b, int m, float grid_size, const float *centroids_xyz, const float *limits, const int *sizes, unsigned int *d_queries){
+
+    int index = threadIdx.x;
+    
+    if(index < m){
+        int stride = blockDim.x;
+        int batch_index = blockIdx.x;
+        centroids_xyz += batch_index * m * 3;
+        unsigned int *tmp_d_queries = d_queries + batch_index * m * 27;
+        
+        unsigned int x_idx = __float2uint_rd((centroids_xyz[index*3] - limits[0]) / grid_size);
+        unsigned int y_idx = __float2uint_rd((centroids_xyz[index*3+1] - limits[2]) / grid_size);
+        unsigned int z_idx = __float2uint_rd((centroids_xyz[index*3+2] - limits[4]) / grid_size);
+        
+        int cnt = 0;
+        for(int x_offset = 0; x_offset < 3; x_offset++){
+            for(int y_offset = 0; y_offset < 3; y_offset++){
+                for(int z_offset = 0; z_offset < 3; z_offset++){
+                    tmp_d_queries[index*27+cnt] = z_idx + z_offset + sizes[2] * (y_idx + y_offset + sizes[1] * (x_idx + x_offset + batch_index * sizes[0]));  
+                    cnt++;
+                }
+            }
+        }
+
+    }
+}
+__global__ void hash_square_idx_gpu(int b, int n, int m, int nsample, const uint2 *d_vals_multivalue, const unsigned int * d_all_values, int *idx, int *pts_cnt){
+    int index = threadIdx.x;
+    if(index < m){
+        int stride = blockDim.x;
+        int batch_index = blockIdx.x;
+        unsigned int sorted_idx[27] = {13, 4,10,12,14,16,22, 1,3,5,7,9,11,15,17,19,21,23,25,  0,2,6,8,18,20,24,26};
+                
+        idx += batch_index * m * nsample;
+        pts_cnt += batch_index * m;
+        int query_idx_base = batch_index*m*27+index*27;
+        
+        int cnt = 0;
+        for(int i = 0; i < 27; i++){
+            int query_idx = query_idx_base + sorted_idx[i];
+            unsigned int num_values = d_vals_multivalue[query_idx].y;
+            if(num_values > 0){
+                for(unsigned int j = 0; j < num_values && cnt < nsample; j++){
+                    idx[index*nsample + cnt] = d_all_values[d_vals_multivalue[query_idx].x + j];
+                    cnt++;
+                }
+            }
+        }
+        pts_cnt[index] = cnt;
+        for(;cnt < nsample;cnt++){
+            idx[index*nsample + cnt] = idx[index*nsample];
+        }
+    }
+}
+
+void querySquarePointLauncher(int b, int n, int m, float grid_size, int nsample, const float *all_xyz, const float *centroids_xyz, const float *limits, const int *sizes, int *idx, int *pts_cnt, unsigned int *d_keys, unsigned int *d_vals, unsigned int *d_queries, uint2 *d_vals_multivalue) {
+    printf("Start\n");    
+    unsigned int kInputSize = b * n;
+    printf("b %d, n %d, kInputSize: %u\n", b, n, kInputSize);
+    
+    compose_insert_items<<<b,256>>>(b, n, grid_size, all_xyz, limits, sizes, d_keys, d_vals);
+    cudaDeviceSynchronize();
+    
+    CUDPPHandle theCudpp;
+    CUDPPResult result = cudppCreate(&theCudpp);
+    if (result != CUDPP_SUCCESS){
+        fprintf(stderr, "Error initializing CUDPP Library.\n");
+        exit(-1);
+    }
+
+    CUDPPHashTableConfig config;
+    config.type = CUDPP_MULTIVALUE_HASH_TABLE;
+    config.kInputSize = kInputSize;
+    config.space_usage = 2.0f;
+    CUDPPHandle hash_table_handle;
+    result = cudppHashTable(theCudpp, &hash_table_handle, &config);
+    if (result != CUDPP_SUCCESS){
+        fprintf(stderr, "Error in cudppHashTable call in"
+                "testHashTable (make sure your device is at"
+                "least compute version 2.0\n");
+    }
+    
+    result = cudppHashInsert(hash_table_handle, d_keys,
+                                d_vals, kInputSize);
+    cudaThreadSynchronize();
+    printf("insert values\n");
+    if (result != CUDPP_SUCCESS){
+        fprintf(stderr, "Error in cudppHashInsert call in"
+                "testHashTable\n");
+    }
+    
+    unsigned int values_size;
+    if (cudppMultivalueHashGetValuesSize(hash_table_handle,
+                                    &values_size) !=
+                                    CUDPP_SUCCESS){
+        fprintf(stderr, "Error: "
+                "cudppMultivalueHashGetValuesSize()\n");
+    }
+    
+    unsigned int * d_all_values = NULL;
+    if (cudppMultivalueHashGetAllValues(hash_table_handle,
+                                        &d_all_values) !=
+                                        CUDPP_SUCCESS){
+        fprintf(stderr, "Error: "
+                "cudppMultivalueHashGetAllValues()\n");
+    }
+    
+    compose_queries<<<b,256>>>(b, m, grid_size, centroids_xyz, limits, sizes, d_queries);
+    cudaDeviceSynchronize();
+    
+    result = cudppHashRetrieve(hash_table_handle,
+                                d_queries,
+                                d_vals_multivalue,
+                                b * m * 27);
+    cudaThreadSynchronize();
+    printf("retrieved values\n");
+    if (result != CUDPP_SUCCESS){
+        fprintf(stderr, "Error in cudppHashRetrieve call\n");
+    }
+
+    hash_square_idx_gpu<<<b,256>>>(b, n, m, nsample, d_vals_multivalue, d_all_values, idx, pts_cnt);
+    cudaDeviceSynchronize();
+    printf("obtain idx\n");
+    
+    result = cudppDestroyHashTable(theCudpp, hash_table_handle);
+    if (result != CUDPP_SUCCESS){
+        fprintf(stderr, "Error in cudppDestroyHashTable call in"
+                "testHashTable\n");
+    }
+
+    result = cudppDestroy(theCudpp);
+    if (result != CUDPP_SUCCESS){
+        printf("Error shutting down CUDPP Library.\n");
+    }
+    printf("Ends\n");
+}

@@ -1,0 +1,54 @@
+Frequent "Premature EOF" error in LLVM archive when running bazel build
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Patches against tf dev tree
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 14.04
+TensorFlow installed from (source or binary):
+Source
+TensorFlow version (use command below):
+1.6.0rc1 (last upstream commit 0abc4c9)
+Python version:
+n/a
+Bazel version (if compiling from source):
+0.11.1
+GCC/Compiler version (if compiling from source):
+gcc (Ubuntu 4.8.4-2ubuntu1~14.04.3) 4.8.4
+CUDA/cuDNN version:
+n/a
+GPU model and memory:
+n/a
+Exact command to reproduce:
+From the dockerfile:
+
+`
+ENV GCC_HOST_COMPILER_PATH "/usr/bin/gcc"
+ENV PYTHON_BIN_PATH "/usr/bin/python3"
+ENV PYTHON_LIB_PATH "/usr/lib/python3/dist-packages"
+ENV CC_OPT_FLAGS "-march=native"
+ENV TF_NEED_GCP 0
+ENV TF_NEED_GDR 0
+ENV TF_NEED_HDFS 0
+ENV TF_NEED_MKL 0
+ENV TF_NEED_MPI 0
+ENV TF_NEED_OPENCL 0
+ENV TF_NEED_CUDA 0
+ENV TF_ENABLE_XLA 1
+ENV TF_NEED_JEMALLOC 1
+ENV TF_NEED_VERBS 0
+ENV TF_NEED_S3 0
+WORKDIR /tmp/tensorflow-knureon
+RUN ./configure 
+&& bazel build --config=opt --config=kpi --copt=-mfma --copt=-mavx2 //tensorflow/tools/pip_package:build_pip_package 
+&& bazel-bin/tensorflow/tools/pip_package/build_pip_package /tmp/tensorflow_pkg
+`
+Describe the problem
+About 60% of the time I try from console and 100% of the time our CI system attempts to build TensorFlow, this error is observed, always related to the LLVM archive:
+20-Apr-2018 11:43:32 | ERROR: /tmp/tensorflow-knureon/tensorflow/tools/pip_package/BUILD:85:1: no such package '@llvm//': java.io.IOException: Error downloading [https://mirror.bazel.build/github.com/llvm-mirror/llvm/archive/8f7bcdf3c65b9a47e35653d525135beb18f3ac25.tar.gz, https://github.com/llvm-mirror/llvm/archive/8f7bcdf3c65b9a47e35653d525135beb18f3ac25.tar.gz] to /root/.cache/bazel/_bazel_root/0726af6ab00d84b2e399e1660b859bdb/external/llvm/8f7bcdf3c65b9a47e35653d525135beb18f3ac25.tar.gz: Premature EOF and referenced by '//tensorflow/tools/pip_package:licenses' -- | -- 20-Apr-2018 11:43:32 | ERROR: Analysis of target '//tensorflow/tools/pip_package:build_pip_package' failed; build aborted: no such package '@llvm//': java.io.IOException: Error downloading [https://mirror.bazel.build/github.com/llvm-mirror/llvm/archive/8f7bcdf3c65b9a47e35653d525135beb18f3ac25.tar.gz, https://github.com/llvm-mirror/llvm/archive/8f7bcdf3c65b9a47e35653d525135beb18f3ac25.tar.gz] to /root/.cache/bazel/_bazel_root/0726af6ab00d84b2e399e1660b859bdb/external/llvm/8f7bcdf3c65b9a47e35653d525135beb18f3ac25.tar.gz: Premature EOF
+I can use wget to fetch the tarball from the github source from within the Docker container without issues and the tarball opens without any errors reported.  The sha256 hash of the tarball is the same as what is specified in workspace.bzl:
+sha256sum 8f7bcdf3c65b9a47e35653d525135beb18f3ac25.tar.gz 63d4da54dc7bc9a79e2ad266d230f4f759520cccb344a2dd49c2c6383ab75285 8f7bcdf3c65b9a47e35653d525135beb18f3ac25.tar.gz
+Source code / logs
+TF-TFLOW-JOB1-170.log
+I have searched StackOverflow and github for the issue and found bazel LLVM errors, but nothing that would return "Premature EOF"

@@ -1,0 +1,95 @@
+A problem when indexing tensor, I'm not sure if it is related to gather_nd issue
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Might be related to #206
+Environment info
+cuda-7.5
+tensorflow 0.10.0rc0
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+# logit_t is tensor of shape (batch_size, number_of_label)
+# correct_t is targets, of size  (batch_size)
+
+logit_corrects = []
+# I loop through batch_size because gather_nd doesn't support gradient
+for i in xrange(batch_size):
+    logit_correct = tf.gather( logit_t[ i , : ], correct_t[ i ] ) 
+    logit_corrects.append( logit_correct )
+
+logit_corrects = tf.pack( logit_corrects )
+self._cost = cost = tf.reduce_mean( -logit_correct )
+
+However, it complained that there is no supported kernel for GPU device.
+What other attempted solutions have you tried?
+Logs or other output that would be helpful
+E tensorflow/core/client/tensor_c_api.cc:485] Cannot assign a device to node 'model/gradients/model/Squeeze_159_grad/Res
+hape/tensor': Could not satisfy explicit device specification '/device:GPU:3' because no supported kernel for GPU device
+s is available.
+         [[Node: model/gradients/model/Squeeze_159_grad/Reshape/tensor = UnsortedSegmentSum[T=DT_FLOAT, Tindices=DT_INT3
+2, _device="/device:GPU:3"](model/gradients/model/Gather_39_grad/Reshape, model/gradients/model/Gather_39_grad/Reshape_1
+, model/gradients/model/Squeeze_159_grad/Reshape/Squeeze)]]
+Traceback (most recent call last):
+  File "learning3.py", line 976, in <module>
+    tf.initialize_all_variables().run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1553, in run
+    _run_using_default_session(self, feed_dict, self.graph, session)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 3684, in _run_using_default_ses
+sion
+    session.run(operation, feed_dict)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 382, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 655, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 723, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 743, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: Cannot assign a device to node 'model/gradients/model/Squeeze_1
+59_grad/Reshape/tensor': Could not satisfy explicit device specification '/device:GPU:3' because no supported kernel for
+ GPU devices is available.
+         [[Node: model/gradients/model/Squeeze_159_grad/Reshape/tensor = UnsortedSegmentSum[T=DT_FLOAT, Tindices=DT_INT3
+2, _device="/device:GPU:3"](model/gradients/model/Gather_39_grad/Reshape, model/gradients/model/Gather_39_grad/Reshape_1
+, model/gradients/model/Squeeze_159_grad/Reshape/Squeeze)]]
+Caused by op u'model/gradients/model/Squeeze_159_grad/Reshape/tensor', defined at:
+  File "learning3.py", line 967, in <module>
+    m = Recognizer(is_training=True, config=config)
+  File "learning3.py", line 501, in __init__
+    grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients.py", line 478, in gradients
+    in_grads = _AsList(grad_fn(op, *out_grads))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_grad.py", line 291, in _SqueezeGrad
+    return _ReshapeToInput(op, grad)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_grad.py", line 281, in _ReshapeToInput
+    return array_ops.reshape(grad, array_ops.shape(op.inputs[0]))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_array_ops.py", line 1750, in reshape
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 454, in apply_op
+    as_ref=input_arg.is_ref)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 621, in convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients.py", line 95, in _IndexedSlicesToTensor
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_math_ops.py", line 2350, in unsorted_segment_su
+m
+    num_segments=num_segments, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 703, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2310, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1232, in __init__
+    self._traceback = _extract_stack()
+
+...which was originally created as op u'model/Squeeze_159', defined at:
+  File "learning3.py", line 967, in <module>
+    m = Recognizer(is_training=True, config=config)
+  File "learning3.py", line 480, in __init__
+    tf.gather(logit_t[i,:], correct_t[i])
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_ops.py", line 340, in _SliceHelper
+    return squeeze(sliced, squeeze_dims=squeeze_dims)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_array_ops.py", line 2273, in squeeze
+    squeeze_dims=squeeze_dims, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 703, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2310, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1232, in __init__
+    self._traceback = _extract_stack()

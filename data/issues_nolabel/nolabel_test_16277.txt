@@ -1,0 +1,27 @@
+Control dependency does not ensure write observed by read
+
+TF version 1.3.0
+def sleep(t):
+    '''TF sleep'''
+    import time
+    def f(t):
+        time.sleep(t)
+        return np.array([], dtype=np.float32)
+    return tf.py_func(f, [t], [tf.float32])[0]
+
+with tf.device('gpu'):
+    x = tf.Variable(0.)
+with tf.control_dependencies([tf.identity(sleep(0.1))]):
+    with tf.device('gpu'):
+        mod = tf.assign(x, 100.)
+with tf.device('cpu'):
+    a = x+1.
+    with tf.control_dependencies([tf.identity(mod)]):
+        b = x+2.
+        with tf.device('gpu'):
+            c = x+3.
+
+x.initializer.run()
+sess.run([a, b, c])
+# [1.0, 2.0, 103.0]
+When a variable is read on another device, TF seems to copy once regardless of dependencies. I understand this is how TF works, but I think it would be nice to have dependencies ensure memory access order.

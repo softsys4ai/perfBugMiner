@@ -1,0 +1,87 @@
+[iOS] Bug: No OpKernel was registered to support Op 'LessEqual'
+
+System information
+Running OS macOS Sierra building for iOS specifically.
+$ gcc --version
+Apple LLVM version 8.1.0 (clang-802.0.42)
+Target: x86_64-apple-darwin16.0.0
+
+TensorFlow version 1.2.0, installed through pip.
+Describe the problem
+Case: Build From Source (1.2.0)
+Clone the tensorflow repository and build for iOS
+cd tensorflow
+sh tensorflow/contrib/makefile/build_all_ios.sh
+Installs with no problem. Follow the iOS example.
+Case: Pod Install (1.1)
+Use CocoaPods
+pod install TensorFlow-experimental
+Status Not ok
+For both of the cases, the status from loading and creating session from a frozen graph (binary proto- file) is not ok when using LessEqual op in a seq2seq based model.
+Note: This example runs without any problems on the python (pip install tensorflow) distribution.
+Source code / logs
+This error occurs when loading from a .pb context:
+// ...else-where
+// ReadBinaryProto(tensorflow::Env::Default(), path.fileSystemRepresentation, &graph)
+// ...
+status = session->Create(graph);
+if (!status.ok()) {
+  RCTLogInfo(@"Error adding graph to session: %s", status.error_message().c_str());
+  return false;
+}
+Issue is logged here:
+No OpKernel was registered to support Op 'LessEqual' with these attrs.  Registered devices: [CPU], Registered kernels:
+  <no registered kernels>
+
+	 [[Node: decode/decoder_1/LessEqual = LessEqual[T=DT_INT32](max_target_len, decode/decoder_1/LessEqual/y)]]
+
+Checked tf_op_files.txt and saw that LessEqual op was not included:
+tensorflow/core/kernels/cwise_op_less.cc
++tensorflow/core/kernels/cwise_op_less_equal.cc
+tensorflow/core/kernels/cwise_op_isfinite.cc
+Maybe this has something to do with it?
+Update it seems that this did have something to do with it.
+I rebuilt after adding /cwise_op_less_equal.cc to tf_op_files.txt:
+$ tensorflow/contrib/makefile/build_all_ios.sh 
+I re-froze the graph:
+$ python ../tensorflow/tensorflow/python/tools/freeze_graph.py \
+--input_graph=./pb/input_graph.pb --input_checkpoint=./save/model \
+--output_node_names=predictions --input_binary \
+--output_graph=./tmp/frozen.pb
+Then optimized...
+$ python ../tensorflow/tensorflow/python/tools/optimize_for_inference.py \
+--input=./tmp/frozen.pb --output=./tmp/inference.pb \
+--input_names=input,target_sequence_length,source_sequence_length,keep_prob \
+--output_names=predictions \
+--frozen_graph=True
+And the issue is no-longer there.
+BUT
+There's still an error, which I assume is on my end.
+2017-06-30 14:44:18.410032: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseAnd" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT8 } } }') for unknown op: BitwiseAnd
+2017-06-30 14:44:18.410300: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseAnd" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT16 } } }') for unknown op: BitwiseAnd
+2017-06-30 14:44:18.410421: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseAnd" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT32 } } }') for unknown op: BitwiseAnd
+2017-06-30 14:44:18.410519: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseAnd" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT64 } } }') for unknown op: BitwiseAnd
+2017-06-30 14:44:18.410641: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseAnd" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_UINT8 } } }') for unknown op: BitwiseAnd
+2017-06-30 14:44:18.410740: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseAnd" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_UINT16 } } }') for unknown op: BitwiseAnd
+2017-06-30 14:44:18.410833: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseOr" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT8 } } }') for unknown op: BitwiseOr
+2017-06-30 14:44:18.410921: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseOr" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT16 } } }') for unknown op: BitwiseOr
+2017-06-30 14:44:18.410998: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseOr" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT32 } } }') for unknown op: BitwiseOr
+2017-06-30 14:44:18.411104: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseOr" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT64 } } }') for unknown op: BitwiseOr
+2017-06-30 14:44:18.411194: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseOr" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_UINT8 } } }') for unknown op: BitwiseOr
+2017-06-30 14:44:18.411290: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseOr" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_UINT16 } } }') for unknown op: BitwiseOr
+2017-06-30 14:44:18.411408: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseXor" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT8 } } }') for unknown op: BitwiseXor
+2017-06-30 14:44:18.411505: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseXor" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT16 } } }') for unknown op: BitwiseXor
+2017-06-30 14:44:18.411613: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseXor" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT32 } } }') for unknown op: BitwiseXor
+2017-06-30 14:44:18.411706: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseXor" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT64 } } }') for unknown op: BitwiseXor
+2017-06-30 14:44:18.411806: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseXor" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_UINT8 } } }') for unknown op: BitwiseXor
+2017-06-30 14:44:18.411898: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "BitwiseXor" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_UINT16 } } }') for unknown op: BitwiseXor
+2017-06-30 14:44:18.412014: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "Invert" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT8 } } }') for unknown op: Invert
+2017-06-30 14:44:18.412106: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "Invert" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT16 } } }') for unknown op: Invert
+2017-06-30 14:44:18.412194: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "Invert" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT32 } } }') for unknown op: Invert
+2017-06-30 14:44:18.412297: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "Invert" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_INT64 } } }') for unknown op: Invert
+2017-06-30 14:44:18.412406: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "Invert" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_UINT8 } } }') for unknown op: Invert
+2017-06-30 14:44:18.412499: E tensorflow/core/framework/op_kernel.cc:1141] OpKernel ('op: "Invert" device_type: "CPU" constraint { name: "T" allowed_values { list { type: DT_UINT16 } } }') for unknown op: Invert
+...
+
+And all the way at the bottom...
+Input 0 of node rnn/Shape_1 was passed float from source_sequence_length:0 incompatible with expected int32.

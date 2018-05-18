@@ -1,0 +1,119 @@
+load_op_library breaks when loading 2 different .so
+
+For bugs/issues, please fill in the following.  The more information you
+provide, the more likely we can help you.
+Environment info
+Operating System:
+Rhel 7
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+Built from source.  0.7.1 master 3/3/2016
+The output from python -c "import tensorflow; print(tensorflow.version)".
+0.7.1
+If installed from sources, provide the commit hash:
+99952d6
+
+Steps to reproduce
+
+Follow Instructions via:
+https://www.tensorflow.org/versions/master/how_tos/adding_an_op/index.html
+Create zero_out.cc and build zero_out.so
+
+#include "tensorflow/core/framework/op.h"
+
+REGISTER_OP("ZeroOut")
+    .Input("to_zero: int32")
+    .Output("zeroed: int32");
+
+#include "tensorflow/core/framework/op_kernel.h"
+
+using namespace tensorflow;
+
+class ZeroOutOp : public OpKernel {
+ public:
+  explicit ZeroOutOp(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    // Grab the input tensor
+    const Tensor& input_tensor = context->input(0);
+    auto input = input_tensor.flat<int32>();
+
+    // Create an output tensor
+    Tensor* output_tensor = NULL;
+    OP_REQUIRES_OK(context, context->allocate_output(0, input_tensor.shape(),
+                                                     &output_tensor));
+    auto output = output_tensor->template flat<int32>();
+
+    // Set all but the first element of the output tensor to 0.
+    const int N = input.size();
+    for (int i = 1; i < N; i++) {
+      output(i) = 0;
+    }
+
+    // Preserve the first input value if possible.
+    if (N > 0) output(0) = input(0);
+  }
+};
+
+REGISTER_KERNEL_BUILDER(Name("ZeroOut").Device(DEVICE_CPU), ZeroOutOp);
+
+
+Create one_out.cc and build one_out.so
+
+#include "tensorflow/core/framework/op.h"
+
+REGISTER_OP("OneOut")
+    .Input("to_one: int32")
+    .Output("oneed: int32");
+
+#include "tensorflow/core/framework/op_kernel.h"
+
+using namespace tensorflow;
+
+class OneOutOp : public OpKernel {
+ public:
+  explicit OneOutOp(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    // Grab the input tensor
+    const Tensor& input_tensor = context->input(0);
+    auto input = input_tensor.flat<int32>();
+
+    // Create an output tensor
+    Tensor* output_tensor = NULL;
+    OP_REQUIRES_OK(context, context->allocate_output(0, input_tensor.shape(),
+                                                     &output_tensor));
+    auto output = output_tensor->template flat<int32>();
+
+    // Set all but the first element of the output tensor to 0.
+    const int N = input.size();
+    for (int i = 1; i < N; i++) {
+      output(i) = 1;
+    }
+
+    // Preserve the first input value if possible.
+    if (N > 0) output(0) = input(0);
+  }
+};
+
+REGISTER_KERNEL_BUILDER(Name("OneOut").Device(DEVICE_CPU), OneOutOp);
+
+
+Attempt to load both so in same script:
+
+import tensorflow as tf
+
+zero_out_module = tf.load_op_library('./zero_out.so')
+one_out_module = tf.load_op_library('./one_out.so')
+
+with tf.Session('') as session:
+    inputs = tf.constant([[1,1,1], [-2, -2, -2]], dtype=tf.int32)
+    print(inputs.eval())
+
+
+Get Error:
+
+F tensorflow/core/framework/op.cc:119] Check failed: ::tensorflow::Status::OK() == (RegisterAlreadyLocked(op_def)) (OK vs. Already exists: Op with name ZeroOu
+t)Attempting to register: Op<name=ZeroOut; signature=to_zero:int32 -> zeroed:int32>
+Aborted

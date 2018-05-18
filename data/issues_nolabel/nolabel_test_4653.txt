@@ -1,0 +1,104 @@
+sysmalloc in session.run(tf.initialize_all_variables()) - cuda 8.0 + cudnn 5/5.1 + tensorflow 0.9/0.10
+
+Hi all
+I recently bought a new Titan X Pascal, and needed to upgrade cuda from 7 to 8.
+After updating cuda 7 + cudnn 4 + tensorflow 0.9 -> cuda 8 + cudnn 5 + tensorflow 0.10, my code which used to work fine now crashes with a segfault :
+
+with my GPUs on :
+
+/usr/bin/python2.7 /work/repos/qs-lab-cornerdetection/model_noclass.py
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties: 
+name: TITAN X (Pascal)
+major: 6 minor: 1 memoryClockRate (GHz) 1.531
+pciBusID 0000:03:00.0
+Total memory: 11.90GiB
+Free memory: 11.76GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x30882d0
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 1 with properties: 
+name: GeForce GTX TITAN X
+major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:04:00.0
+Total memory: 11.92GiB
+Free memory: 11.81GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:59] cannot enable peer access from device ordinal 0 to device ordinal 1
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:59] cannot enable peer access from device ordinal 1 to device ordinal 0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0 1 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y N 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 1:   N Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:838] Creating TensorFlow device (/gpu:0) -> (device: 0, name: TITAN X (Pascal), pci bus id: 0000:03:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:838] Creating TensorFlow device (/gpu:1) -> (device: 1, name: GeForce GTX TITAN X, pci bus id: 0000:04:00.0)
+python2.7: malloc.c:2372: sysmalloc: Assertion `(old_top == (((mbinptr) (((char *) &((av)->bins[((1) - 1) * 2])) - __builtin_offsetof (struct malloc_chunk, fd)))) && old_size == 0) || ((unsigned long) (old_size) >= (unsigned long)((((__builtin_offsetof (struct malloc_chunk, fd_nextsize))+((2 *(sizeof(size_t))) - 1)) & ~((2 *(sizeof(size_t))) - 1))) && ((old_top)->size & 0x1) && ((unsigned long) old_end & pagemask) == 0)' failed.
+
+Process finished with exit code 134 (interrupted by signal 6: SIGABRT)
+
+
+if I restrict to 1 detected device with os.environ['CUDA_VISIBLE_DEVICES'] = '1', it still crashes (with any of my 2 gpus) but with a different signal code:
+
+/usr/bin/python2.7 /work/repos/qs-lab-cornerdetection/model_noclass.py
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties: 
+name: GeForce GTX TITAN X
+major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:04:00.0
+Total memory: 11.92GiB
+Free memory: 11.81GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:838] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:04:00.0)
+
+Process finished with exit code 139 (interrupted by signal 11: SIGSEGV)
+
+
+If finally I restrict to CPU only, it works fine.
+
+I verified, both host and docker have the same driver version (367.48 ), cuda is installed correctly (on my host AND in my docker), nvdia-smi correctly finds the 2 GPUs, deviceQuery runs fine (also on the host and inside the docker), cudnn libraries are there, and moreover caffe works just fine on the gpus, which would indicate that my install is indeed correct.
+The problem persists with cudnn 5.1, and on both version of cudnn if i rollback to tensorflow 0.9
+Environment info
+Operating System:
+Docker ubuntu 14.04
+Installed version of CUDA and cuDNN:
+-rw-r--r-- 1 root root   558720 Sep 29 09:18 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Sep 29 09:18 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root       38 Sep 29 10:01 /usr/local/cuda/lib64/libcudart.so.7.5 -> /usr/local/cuda/lib64/libcudart.so.8.0
+lrwxrwxrwx 1 root root       19 Sep 29 09:18 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rwxr-xr-x 1 root root   415432 Sep 29 09:18 /usr/local/cuda/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root   775162 Sep 29 09:18 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 1000 1000       13 Apr 25 01:19 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 1000 1000       17 Apr 25 01:19 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.0.5
+-rwxr-xr-x 1 1000 1000 78065952 Apr 22 19:17 /usr/local/cuda/lib64/libcudnn.so.5.0.5
+
+But the problem remains with cudnn 5.1
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+http://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.10.0-cp27-none-linux_x86_64.whl
+
+(but the problem reproduces with tensorflow 0.9)
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+0.10.0
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Complicated at this point, but I'm not sure its relevant...
+What other attempted solutions have you tried?
+Tried with cudnn-5 and cudnn 5.1, and tensorflow 0.9 / 0.10
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).

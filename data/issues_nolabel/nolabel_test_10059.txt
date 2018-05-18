@@ -1,0 +1,124 @@
+tf.summary not working in tf.cond functions...
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution: Windows 10 as well as Linux Ubuntu 16.04.2
+TensorFlow installed from (source or binary): installed with pip (in root of anaconda) like in the documentation (not installed from master)
+TensorFlow version: v1.1
+CUDA/cuDNN version: CUDA Version 8.0.44
+GPU model and memory: GeForce GTX TITAN X 12GB
+Exact command to reproduce: python test_summarizing.py
+
+Describe the problem
+Hi everyone,
+I was trying to write a function to do data augmentation on images. With a probability of 0.5, the function should do the augmentation and if not return the image unmodified. The basic idea of my usage you can extract from the code below.
+image = tf.cond(tf.less(probability, 0.5), lambda: do_augmentation(image), lambda: image)
+In the augmentation function, I want to see how the image changed so I added tf.summary.image(...) after every image-processing step. But when running the summary operation (after I merged all summaries with tf.summary.merge_all()) I get the following error:
+tensorflow.python.framework.errors_impl.InvalidArgumentError: The tensor returned for Merge/MergeSummary:0 was not valid.
+
+I tried to debug the problem and saw that when I don't use the summaries (commenting them) in the augmentation function, the whole code works.
+I couldn't find any help on StackOverflow regarding this problem. However, I saw only one other post (http://stackoverflow.com/questions/39275641/tensorflow-how-to-write-multistep-decay) which had this kind of error, so I took that code (to be sure that it was not a problem with tf.summary.image() but a problem in general with tf.summary) and played around to see where the problem is. Sadly, I couldn't figure it out...
+In the attached zip file (test_summarizing.zip) there is the test_summarizing.py file, which contains 2 functions.
+
+summary_not_working_simple():
+Is a minimal example to replicate the error of my code and of the original problem I had.
+(I used the scalar summary instead of the image summary because it doesn't make a difference...)
+
+
+If you comment both summaries in f1 and f2, the code always works.
+If you comment one out of the 2 summary-calls (in either function f1 or f2), the code sometimes works and sometimes produces the traceback found below.
+To replicate, try commenting both calls then run the code. Then comment only one call and run the code (possibly multiple times). Then comment the other call and run the code again. You should see that with one commented call to tf.summary.scalar, the code sometimes produces the error and sometimes it simply works...
+If you don't comment anything (leaving both calls to the summary), the code never works and always produces the traceback shown below.
+
+
+summary_not_working_stack_overflow():
+To replicate the error you must in the function multi_step_decay of class MultiStepDecay at lines 62-63 comment (resp. uncomment) the with tf.control_dependencies block and the error will appear.
+
+Could someone please look into the problem of the summary_not_working_simple() and explain to me, why the summary is not working? I have found a workaround to using the tf.cond() but the code is very messy now :) Plus it would make sense to have the possibility of writing summaries from every point of the tensorflow code, right?
+And if you could also explain why the issue in the second function summary_not_working_stack_overflow() occurs, I would appreciate it very much!
+Source code / logs
+Traceback for summary_not_working_simple() example:
+Traceback (most recent call last):
+  File "C:\Users\Andrei\Anaconda\lib\site-packages\tensorflow\python\client\session.py", line 1039, in _do_call
+    return fn(*args)
+  File "C:\Users\Andrei\Anaconda\lib\site-packages\tensorflow\python\client\session.py", line 1021, in _run_fn
+    status, run_metadata)
+  File "C:\Users\Andrei\Anaconda\lib\contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "C:\Users\Andrei\Anaconda\lib\site-packages\tensorflow\python\framework\errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: The tensor returned for Merge/MergeSummary:0 was not valid.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:/Users/Andrei/PycharmProjects/testing/test_summarizing.py", line 93, in <module>
+    summary_not_working_simple()
+  File "C:/Users/Andrei/PycharmProjects/testing/test_summarizing.py", line 30, in summary_not_working_simple
+    _ = session.run(summary_merge_opt)
+  File "C:\Users\Andrei\Anaconda\lib\site-packages\tensorflow\python\client\session.py", line 778, in run
+    run_metadata_ptr)
+  File "C:\Users\Andrei\Anaconda\lib\site-packages\tensorflow\python\client\session.py", line 982, in _run
+    feed_dict_string, options, run_metadata)
+  File "C:\Users\Andrei\Anaconda\lib\site-packages\tensorflow\python\client\session.py", line 1032, in _do_run
+    target_list, options, run_metadata)
+  File "C:\Users\Andrei\Anaconda\lib\site-packages\tensorflow\python\client\session.py", line 1052, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: The tensor returned for Merge/MergeSummary:0 was not valid.
+
+Source code of my the original function:
+def preprocess_for_train_summary_error(image, height, width, fast_mode=True, scope=None, central_fraction=0.875):
+    with tf.name_scope(scope, 'train_image', [image, height, width]):
+        if image.dtype != tf.float32:
+            image = tf.image.convert_image_dtype(image, dtype=tf.float32)
+
+        tf.summary.image("original_image", tf.expand_dims(image, axis=0), max_outputs=1)
+
+        random_augment = tf.random_uniform([], minval=0, maxval=1, dtype=tf.float32)
+
+        def augmentation_pipeline(image_arg):
+            random_translate = tf.random_uniform([], minval=0, maxval=1, dtype=tf.float32)
+            translated_image = tf.cond(tf.less(random_translate, 0.5),
+                                       lambda: translate(image_arg),
+                                       lambda: image_arg)
+            tf.summary.image('translated_image', tf.expand_dims(translated_image, axis=0), max_outputs=1)
+
+            random_rotate = tf.random_uniform([], minval=0, maxval=1)
+            rotated_image = tf.cond(tf.less(random_rotate, 0.8),
+                                    lambda: rotate(translated_image),
+                                    lambda: translated_image)
+            tf.summary.image('rotated_image', tf.expand_dims(rotated_image, axis=0), max_outputs=1)
+
+            random_flip = tf.random_uniform([], minval=0, maxval=1)
+            flipped_image = tf.cond(tf.less(random_flip, 0.5),
+                                    lambda: flip(rotated_image),
+                                    lambda: rotated_image)
+            tf.summary.image('flipped_image', tf.expand_dims(flipped_image, axis=0), max_outputs=1)
+
+            def f(x, ordering):
+                return distort_color(x, color_ordering=ordering, fast_mode=fast_mode)
+
+            random_distort_colors = tf.random_uniform([], minval=0, maxval=1)
+            color_distorted_image = tf.cond(tf.less(random_distort_colors, 0.5),
+                                            lambda: apply_with_random_selector(flipped_image, f, 4),
+                                            lambda: flipped_image)
+            tf.summary.image('color_distorted_image', tf.expand_dims(color_distorted_image, axis=0), max_outputs=1)
+
+            return image_arg
+
+        image = tf.cond(tf.less(random_augment, 0.5),
+                        lambda: augmentation_pipeline(image),
+                        lambda: image)
+
+        image = tf.image.central_crop(image, central_fraction=central_fraction)
+        tf.summary.image('central_cropped_image', tf.expand_dims(image, axis=0), max_outputs=1)
+        image = tf.expand_dims(image, 0)
+        image = tf.image.resize_bilinear(image, [height, width], align_corners=False)
+        image = tf.squeeze(image, [0])
+        tf.summary.image('resized_image', tf.expand_dims(image, axis=0), max_outputs=1)
+
+        # Subtract off the mean and divide by the variance of the pixels.
+        image = tf.subtract(image, 0.5, name="sub_mean")
+        image = tf.multiply(image, 2.0, name="div_var")
+        return image

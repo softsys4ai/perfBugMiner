@@ -1,0 +1,72 @@
+I want read train or test data in next_batch by tf.cond
+
+import tensorflow as tf
+import matplotlib.pyplot as plt
+import os
+batch_size = 4
+im_w = 32
+im_h = 32
+im_d = 3
+label_bytes = 1
+im_bytes = im_w*im_h*im_d
+
+def next_path(data_dir, is_train, batch_size, shuffle):
+    # if is_train:
+    #     filenames = [os.path.join(data_dir, 'data_batch_%d.bin' % i) for i in range(1, 6)]
+    # else:
+    #     filenames = [os.path.join(data_dir, 'test_batch.bin')]
+
+    a = tf.cast([os.path.join(data_dir, 'data_batch_%d.bin' % i) for i in range(1, 6)], tf.string)
+    b = tf.cast([os.path.join(data_dir, 'data_batch_%d.bin' % i) for i in range(1, 6)], tf.string)
+    filenames = tf.cond(is_train, lambda: a, lambda: b)
+
+    # filenames = tf.cast([os.path.join(data_dir, 'data_batch_%d.bin' % i) for i in range(1, 6)], tf.string)
+    filenames_queue = tf.train.string_input_producer(filenames)
+    reader = tf.FixedLengthRecordReader(label_bytes+im_bytes)
+    key, value = reader.read(filenames_queue)
+    record_bytes = tf.decode_raw(value, tf.uint8)
+    label = tf.slice(record_bytes, [0], [label_bytes])
+    label = tf.cast(label, tf.int32)
+
+    im_raw = tf.slice(record_bytes, [label_bytes], [im_bytes])
+    im_raw = tf.reshape(im_raw, [im_d, im_h, im_w])
+    im = tf.transpose(im_raw, [1, 2, 0])
+    im = tf.cast(im, tf.float32)
+
+    # im = tf.image.per_image_standardization(im)
+    if shuffle:
+        images, labels = tf.train.shuffle_batch([im, label],
+                                                batch_size=batch_size,
+                                                capacity=1000,
+                                                num_threads=16,
+                                                min_after_dequeue=100)
+    else:
+        images, labels = tf.train.batch([im, label], batch_size=batch_size, capacity=1000, num_threads=16)
+
+    labels = tf.reshape(labels, [batch_size])
+
+    return images, labels
+
+is_train = tf.placeholder(tf.bool)
+images, labels = next_path('cifar-10-batches-bin', is_train, batch_size, True)
+
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+    for step in range(1):
+        images_, _ = sess.run([images, labels], feed_dict={is_train:True})
+        plt.imshow(images_[0, :,:,:])
+        plt.show()
+
+    coord.request_stop()
+    coord.join(threads=threads)
+
+
+a = tf.cast([os.path.join(data_dir, 'data_batch_%d.bin' % i) for i in range(1, 6)], tf.string)
+b = tf.cast([os.path.join(data_dir, 'data_batch_%d.bin' % i) for i in range(1, 6)], tf.string)
+filenames = tf.cond(is_train, lambda: a, lambda: b)
+
+this is error ,but below is ok, why and how to do
+filenames = tf.cast([os.path.join(data_dir, 'data_batch_%d.bin' % i) for i in range(1, 6)], tf.string)

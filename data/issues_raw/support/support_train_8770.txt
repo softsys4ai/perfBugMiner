@@ -1,0 +1,44 @@
+tf.contrib.seq2seq.sequence_loss with tf.nn.sampled_softmax_loss
+
+There maybe an incompatible matmul when use tf.contrib.seq2seq.sequence_loss together with tf.nn.sampled_softmax_loss. sampled_softmax_loss need a rank 2 tensor as its label, however in sequence_loss, the label has been reshape to [-1], which will raise an error:
+ValueError: Shape must be rank 2 but is rank 1 for 'sequence_loss/sampled_softmax_loss/MatMul_1' (op: 'MatMul') with input shapes: [50], [?,20].
+    batch_size = 5
+    max_step = 10
+    dim = 20
+    vocab_size = 100
+
+    logits = tf.constant(np.random.randn(batch_size, max_step, dim),
+                         tf.float32)
+    targets = tf.constant(np.random.randint(vocab_size, size=(batch_size, max_step)),
+                         tf.int32)
+    target_weights = tf.constant(np.ones((batch_size, max_step)), tf.float32)
+    proj_w = tf.constant(np.random.randn(vocab_size, dim), tf.float32)
+    proj_b = tf.constant(np.zeros(vocab_size), tf.float32)
+
+    def _sampled_loss(labels, logits):
+        labels = tf.cast(labels, tf.int64)
+        logits = tf.cast(logits, tf.float32)
+        return tf.cast(
+                        tf.nn.sampled_softmax_loss(
+                            proj_w,
+                            proj_b,
+                            labels,
+                            logits,
+                            num_sampled=20,
+                            num_classes=vocab_size),
+                        tf.float32)
+
+    softmax_loss_f = _sampled_loss
+
+    loss = tf.contrib.seq2seq.sequence_loss(
+                    logits,
+                    targets,
+                    target_weights,
+                    softmax_loss_function=softmax_loss_f)
+
+    sess = tf.Session()
+    print sess.run(loss)
+
+This error can be fixed if the I change line 81 in contrib/seq2seq/python/ops/loss.py:
+crossent = softmax_loss_function(labels=array_ops.reshape(targets, [-1, 1]), logits=logits_flat)
+tensorflow version: 1.01

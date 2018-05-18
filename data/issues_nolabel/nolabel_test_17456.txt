@@ -1,0 +1,20 @@
+TensorForestEstimator with TensorFlow v1.4 "No attribute model_fn"
+
+Setting up a TensorForestEstimator on CloudML running TensorFlow version 1.4.
+The setup is identical to a working DNNClassifier estimator (of course, swapping the parameters within the Random Forest), however, an error occurs when the TensorForestEstimator has its model_fn called.
+This seems to be a bug, since the model_fn attribute is defined during initialization https://github.com/tensorflow/tensorflow/blob/r1.4/tensorflow/contrib/tensor_forest/client/random_forest.py
+Here's the relevant parts of the code:
+`  # Build an estimator.
+graph_builder_class = tensor_forest.RandomForestGraphs
+params = tf.contrib.tensor_forest.python.tensor_forest.ForestHParams(num_classes=10, num_features=100, num_trees=200, max_nodes=1000)
+rfClf=random_forest.TensorForestEstimator(params=params,feature_columns=TF_INPUT_COLUMNS,config=config,graph_builder_class = graph_builder_class,keys_column='key2')
+rfClf2 = tf.contrib.estimator.forward_features(rfClf, ['key1',key2', 'key3'])`
+Below is the error traceback I get from the CloudML runner.
+
+Traceback (most recent call last): File "/usr/lib/python2.7/runpy.py", line 174, in _run_module_as_main "main", fname, loader, pkg_name) File "/usr/lib/python2.7/runpy.py", line 72, in _run_code exec code in run_globals File "/root/.local/lib/python2.7/site-packages/RF_Model/RF_task_tf14.py", line 201, in  run_experiment(hparams) File "/root/.local/lib/python2.7/site-packages/RF_Model/RF_task_tf14.py", line 88, in run_experiment eval_spec) File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/training.py", line 464, in train_and_evaluate getattr(executor, task_to_run)() File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/training.py", line 562, in run_master self._start_distributed_training(saving_listeners=saving_listeners) File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/training.py", line 687, in _start_distributed_training saving_listeners=saving_listeners) File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/estimator.py", line 302, in train loss = self._train_model(input_fn, hooks, saving_listeners) File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/estimator.py", line 711, in _train_model features, labels, model_fn_lib.ModeKeys.TRAIN, self.config) File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/estimator.py", line 694, in _call_model_fn model_fn_results = self._model_fn(features=features, **kwargs) File "/root/.local/lib/python2.7/site-packages/RF_Model/model1.py", line 286, in _model_fn features=features, labels=labels, mode=mode, config=estimator.config) File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/estimator/estimator.py", line 694, in _call_model_fn model_fn_results = self._model_fn(features=features, **kwargs) File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/estimator/python/estimator/extenders.py", line 222, in new_model_fn spec = estimator.model_fn(features, labels, mode, config) AttributeError: 'TensorForestEstimator' object has no attribute 'model_fn'
+
+I'm attempting to use tf.contrib.estimator.forward_features to past a list of keys through to the prediction output (this is reflected in the traceback when new_model_fn tries to call the TensorForestEstimator's "model_fn attribute") https://github.com/tensorflow/tensorflow/blob/r1.4/tensorflow/contrib/estimator/python/estimator/extenders.py
+It's also probably worth mentioning that the model_fn call within contrib.estimator.forward_features passes 4 parameters, whereas the model function defined within TensorForestEstimator only accepts 3 (see line 392 in the first link).
+-OS Platform: (N/A - CloudML (likely Debian workers?))
+-Tensorflow running v1.4
+-Relevant code mentioned above.

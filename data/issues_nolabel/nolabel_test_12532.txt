@@ -1,0 +1,293 @@
+Undefined symbol 'fixed_address_empty_string' : new tensorflow op with protobuf
+
+I would like to create a new operation that can communicate to an
+external python process. At the momemnt, I created a new operation
+that sends to a python process "hello world" with protobuf.
+In this tiny example, I'm sending a string. In the future I would like
+to send more complex data, like Eigen matrices, that's why I chose
+protobuf. (and for possible 'easy integration into tensorflow).
+msg.proto :
+package prototest;
+
+message Foo {
+  required string bar = 1;
+}
+
+
+protoc msg.proto --cpp_out=. --python_out=.
+generates : msg.pb.cc msg.pb.h msg_pb2.py
+
+hello_world.cc :
+#include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/tensor_shape.h"
+#include "tensorflow/core/platform/default/logging.h"
+#include "tensorflow/core/framework/shape_inference.h"
+
+// to send serialized data through UPD socket
+#include <sys/socket.h>
+#include <arpa/inet.h>
+
+// generated header file from protoc
+#include "msg.pb.h"
+
+namespace tensorflow{
+    namespace shape_inference{
+
+        Status HelloWorldShape(InferenceContext* c){
+            std::cout << "shape_infernce is done" << std::endl;
+            return Status::OK();
+        }
+        REGISTER_OP("HelloWorld")
+            .SetShapeFn(HelloWorldShape)
+            .Doc(R"doc(HelloWorld operation)doc");
+    } // end namespace shape_inference
+
+    class HelloWorldOp : public OpKernel {
+    public :
+        // constructor
+        explicit HelloWorldOp(OpKernelConstruction* context) : OpKernel(context) {
+            std::cout << "HelloWorldOp constructor" << std::endl;
+        }
+
+        void Compute(OpKernelContext* context) override {
+            std::cout << "Start Compute method" << std::endl;
+            //-----------------------------------------------------------------
+            // send something to a Python process with protobuf
+            struct sockaddr_in addr;
+            addr.sin_family = AF_INET;
+            inet_aton("127.0.0.1", &addr.sin_addr);
+            addr.sin_port = htons(5555);
+
+            // initialise a foo and set some properties
+            GOOGLE_PROTOBUF_VERIFY_VERSION;
+
+            prototest::Foo foo;
+            foo.set_bar("Hello World");
+
+            // serialise to string, this one is obvious ; )
+            std::string buf;
+            foo.SerializeToString(&buf);
+
+            int sock = socket(PF_INET, SOCK_DGRAM, 0);
+            sendto(sock, buf.data(), buf.size(), 0, (struct sockaddr *)&addr, sizeof(addr));
+            //------------------------------------------------------------------
+            std::cout << "Compute method is done" << std::endl;
+        }
+    };
+    REGISTER_KERNEL_BUILDER(Name("HelloWorld").Device(DEVICE_CPU), HelloWorldOp);
+} // end namespace tensorflow
+To compile and run my code, I use a test scrip found at #10950
+compiler_and_run.py :
+#!/usr/bin/env python3.5
+
+# Demo from https://github.com/tensorflow/tensorflow/issues/10950
+
+from __future__ import print_function
+import os
+import sys
+import tensorflow as tf
+
+
+my_dir = os.path.dirname(os.path.abspath(__file__))
+so_filename = "lib_hello_world.so"
+cc_filename = "hello_world.cc"
+
+
+def compile():
+    # Fix for undefined symbol: _ZN6google8protobuf8internal26fixed_address_empty_stringE.
+    # https://github.com/tensorflow/tensorflow/issues/1419
+    from google.protobuf.pyext import _message as msg
+    lib = msg.__file__
+    ld_flags = [
+        "-Xlinker", "-rpath", "-Xlinker", os.path.dirname(lib),
+        "-L", os.path.dirname(lib), "-l", ":" + os.path.basename(lib)]
+    common_opts = ["-shared", "-O2", "-std=c++11"]
+    if sys.platform == "darwin":
+        common_opts += ["-undefined", "dynamic_lookup"]
+    common_opts += ["-I", tf.sysconfig.get_include()]
+    common_opts += ["-fPIC"]
+    common_opts += ["-D_GLIBCXX_USE_CXX11_ABI=0"]  # might be obsolete in the future
+    opts = common_opts + [cc_filename, "-o", so_filename]
+    opts += ld_flags
+    cmd_bin = "g++"
+    cmd_args = [cmd_bin] + opts
+    from subprocess import Popen, PIPE, STDOUT, CalledProcessError
+    print("compile call: %s" % " ".join(cmd_args))
+    proc = Popen(cmd_args, stdout=PIPE, stderr=STDOUT)
+    stdout, stderr = proc.communicate()
+    assert stderr is None  # should only have stdout
+    if proc.returncode != 0:
+      print("compile failed: %s" % cmd_bin)
+      print("Original stdout/stderr:")
+      print(stdout)
+      raise CalledProcessError(returncode=proc.returncode, cmd=cmd_args)
+    assert os.path.exists(so_filename)
+
+
+def main():
+    print("TensorFlow version:", tf.GIT_VERSION, tf.VERSION)
+    os.chdir(my_dir)
+    compile()
+    mod = tf.load_op_library("%s/%s" % (my_dir, so_filename))
+
+
+if __name__ == "__main__":
+    main()
+This returns :
+TensorFlow version: v1.2.0-rc2-21-g12f033d 1.2.0
+compile call: g++ -shared -O2 -std=c++11 -I /usr/local/lib/python3.5/dist-packages/tensorflow/include -fPIC -D_GLIBCXX_USE_CXX11_ABI=0 hello_world.cc -o lib_hello_world.so -Xlinker -rpath -Xlinker /usr/local/lib/python3.5/dist-packages/protobuf-3.2.0-py3.5-linux-x86_64.egg/google/protobuf/pyext -L /usr/local/lib/python3.5/dist-packages/protobuf-3.2.0-py3.5-linux-x86_64.egg/google/protobuf/pyext -l :_message.cpython-35m-x86_64-linux-gnu.so
+Traceback (most recent call last):
+  File "./compile_and_test.py", line 55, in <module>
+    main()
+  File "./compile_and_test.py", line 51, in main
+    mod = tf.load_op_library("%s/%s" % (my_dir, so_filename))
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/load_library.py", line 64, in load_op_library
+    None, None, error_msg, error_code)
+tensorflow.python.framework.errors_impl.NotFoundError: /src/ext_hello_world/lib_hello_world.so: undefined symbol: _ZN6google8protobuf8internal26fixed_address_empty_stringE
+
+Compilation seems to work (no fatal error). But `tf.load_op_library()``fails due to undefined library in shared lib (*.so).
+This undefined symbol seems to come from protobuf.
+I installed protoc by myself (see Note about it).
+In tf.sysconfig.get_include() there is a  google/protobuf folder with header files from built tensorflow.
+So I don't know which header files are used during compilation :
+
+header files from include files of tensorflow ?
+header files of hand-installed protobuf ?
+
+Or this undefined symbol is not due to this fact ?
+
+How can I resolve this undefined symbol error in the shared library ?
+May I have to install protoc starting from tensorflow/includes/google/protobuf ? (and not from scratch)
+
+I observed that in #10950 :
+from google.protobuf.pyext import _message as msg
+lib = msg.__file__
+returns : /u/zeyer/.local/lib/python2.7/site-packages/google/protobuf/pyext/_message.so
+In my case it's : /usr/local/lib/python3.5/dist-packages/protobuf-3.2.0-py3.5-linux-x86_64.egg/google/protobuf/pyext/_message.cpython-35m-x86_64-linux-gnu.so
+This file about protobuf seems to be completely different ...
+Note about protoc install :
+protoc (protobuf compiler) was not installed.
+I identified the version of protobuf used in tensorflow : v3.2.0 !
+After, I followed protobuf installation instruction (C++ and Python implementation).
+```bash
+cd /opt/
+# clone protobuf repo
+git clone https://github.com/google/protobuf.git
+cd protobuf
+
+# change to the right branch
+# list tags
+git tag -l
+git checkout tags/v3.2.0
+
+# install protobuf
+apt-get install autoconf automake libtool curl make g++ unzip
+./autogen.sh
+./configure
+make
+make check
+make install
+ldconfig
+
+# protoc version
+protoc --version
+>>> libprotoc 3.2.0
+
+# print linker and compiler files
+pkg-config --cflags --libs protobuf
+>>> -pthread -I/usr/local/include -L/usr/local/lib -lprotobuf -pthread -lpthread
+
+#some useful env variables
+PB_INC=$(pkg-config --cflags protobuf)
+PB_LINK=$(pkg-config --libs protobuf)
+TF_INC=$(python3.5 -c 'import tensorflow as tf; print(tf.sysconfig.get_include())')
+TF_LIBS=$(find $TF_INC/../ -name "*.so")
+
+# here, I used python3.5
+cd python
+export LD_LIBRARY_PATH=../src/.libs
+python3.5 setup.py build --cpp_implementation
+python3.5 setup.py test --cpp_implementation
+python3.5 setup.py install --cpp_implementation
+```
+
+System information
+
+docker : Docker version 1.12.6, build 78d1802
+image : tensorflow/tensorflow:1.2.0-devel-gpu-py3
+based on : ubuntu 16.04 (4.4.0-78-generic)
+tensorflow build from source
+tensorflow version : 1.2.0
+python version : Python 3.5.2
+bazel version :
+Build label: 0.4.5
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Mar 16 12:19:38 2017 (1489666778)
+Build timestamp: 1489666778
+Build timestamp as int: 1489666778
+
+
+gcc -v :
+Using built-in specs.
+COLLECT_GCC=gcc
+COLLECT_LTO_WRAPPER=/usr/lib/gcc/x86_64-linux-gnu/5/lto-wrapper
+Target: x86_64-linux-gnu
+Configured with: ../src/configure -v --with-pkgversion='Ubuntu 5.4.0-6ubuntu1~16.04.4' --with-bugurl=file:///usr/share/doc/gcc-5/README.Bugs --enable-languages=c,ada,c++,java,go,d,fortran,objc,obj-c++ --prefix=/usr --program-suffix=-5 --enable-shared --enable-linker-build-id --libexecdir=/usr/lib --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --with-sysroot=/ --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-gnu-unique-object --disable-vtable-verify --enable-libmpx --enable-plugin --with-system-zlib --disable-browser-plugin --enable-java-awt=gtk --enable-gtk-cairo --with-java-home=/usr/lib/jvm/java-1.5.0-gcj-5-amd64/jre --enable-java-home --with-jvm-root-dir=/usr/lib/jvm/java-1.5.0-gcj-5-amd64 --with-jvm-jar-dir=/usr/lib/jvm-exports/java-1.5.0-gcj-5-amd64 --with-arch-directory=amd64 --with-ecj-jar=/usr/share/java/eclipse-ecj.jar --enable-objc-gc --enable-multiarch --disable-werror --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu
+Thread model: posix
+gcc version 5.4.0 20160609 (Ubuntu 5.4.0-6ubuntu1~16.04.4)
+
+
+
+Information from https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh :
+== cat /etc/issue ===============================================
+Linux 2b98f5ebc987 4.4.0-78-generic #99-Ubuntu SMP Thu Apr 27 15:29:09 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="16.04.2 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+
+== are we in docker =============================================
+Yes
+== compiler =====================================================
+c++ (Ubuntu 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+== uname -a =====================================================
+Linux 2b98f5ebc987 4.4.0-78-generic #99-Ubuntu SMP Thu Apr 27 15:29:09 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+== check pips ===================================================
+numpy (1.13.0)
+protobuf (3.3.0)
+tensorflow (1.2.0)
+
+== check for virtualenv =========================================
+False
+== tensorflow import ============================================
+tf.VERSION = 1.2.0
+tf.GIT_VERSION = v1.2.0-rc2-21-g12f033d
+tf.COMPILER_VERSION = v1.2.0-rc2-21-g12f033d
+Sanity check: array([1], dtype=int32)
+== env ==========================================================
+LD_LIBRARY_PATH /usr/local/cuda/extras/CUPTI/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+DYLD_LIBRARY_PATH is unset
+== nvidia-smi ===================================================
+Wed Aug 23 17:24:13 2017
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 370.28                 Driver Version: 370.28                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce 940MX       Off  | 0000:01:00.0     Off |                  N/A |
+| N/A   54C    P0    N/A /  N/A |    277MiB /  2002MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
++-----------------------------------------------------------------------------+
+
+== cuda libs  ===================================================
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart_static.a
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart.so.8.0.61

@@ -1,0 +1,62 @@
+transform_graph generates faulty model after optimization (quantisation).
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):
+source
+TensorFlow version (use command below):
+Python version:
+1.4.1
+Bazel version (if compiling from source):
+0.8.1
+GCC/Compiler version (if compiling from source):
+gcc version 5.4.0 20160609 (Ubuntu 5.4.0-6ubuntu1~16.04.6)
+
+Describe the problem
+I am using a pre-trained style transfer model that I have converted  to .pb format. When I inference a single image through the fp32 model then I can see the styled image at the output of the network and everything works fine. Later on I optimized the model for inference using transform_graph tool with these parameters :
+--transforms='
+  add_default_attributes
+  strip_unused_nodes(type=float)
+  remove_nodes(op=CheckNumerics)
+  fold_constants(ignore_errors=true)
+  fold_batch_norms
+  fold_old_batch_norms
+  quantize_weights
+  quantize_nodes
+  strip_unused_nodes
+  sort_by_execution_order'
+
+the quantised models (.pb) generated successfully but now I have problem with inference when I execute sess.run().
+Source code / logs
+Traceback (most recent call last):
+  File "Inf_Image_pb.py", line 89, in <module>
+    Session_out = sess.run(l_output, feed_dict={l_input: image})            
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 889, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1120, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1317, in _do_run
+    options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1336, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Shapes of all inputs must match: values[0].shape = [474,712,3] != values[2].shape = []
+	 [[Node: Reshape/shape = Pack[N=3, T=DT_INT32, axis=0, _device="/job:localhost/replica:0/task:0/device:CPU:0"](_arg_input_image_0_0, _arg_input_image_0_0, Reshape/shape/2)]]
+
+Caused by op u'Reshape/shape', defined at:
+  File "Inf_Image_pb.py", line 74, in <module>
+    producer_op_list=None
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/importer.py", line 313, in import_graph_def
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): Shapes of all inputs must match: values[0].shape = [474,712,3] != values[2].shape = []
+	 [[Node: Reshape/shape = Pack[N=3, T=DT_INT32, axis=0, _device="/job:localhost/replica:0/task:0/device:CPU:0"](_arg_input_image_0_0, _arg_input_image_0_0, Reshape/shape/2)]]
+
+I have tried other tensorflow versions, other bazel versions to rebuild the tool and the legacy quantisation tool 'quantize_graph' with mode --mode=eightbit but still fail to inference. In addition I tried other transform combinations using the transform_graph tool, other batch sizes and other input dimensions but still getting error. What is this error refers to ? I can't find any useful information online ..

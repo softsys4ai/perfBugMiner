@@ -1,0 +1,36 @@
+CMake OBJECT library Xcode problems
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): N/A
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): OS X 10.12.2 (Any)
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): Master @Head
+Python version: N/A
+Bazel version (if compiling from source): N/A (CMake)
+GCC/Compiler version (if compiling from source): Xcode 8.3.3 (Any)
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: cmake -GXcode ...
+
+Describe the problem
+CMake's OBJECT libraries don't play well with Xcode generators.  In particular, there is an incompatibility (effectively a bug) that prevents an object library from containing multiple files with the same base filename ("stem"), i.e.
+
+tensorflow//core/platform/env_time.cc
+tensorflow//core/platform/posix/env_time.cc
+
+This pattern occurs in quite a few places in the tensorflow source code (and is otherwise perfectly reasonable).  For reference, here is a minimal sample project that directly reproduces a test case originally shared in a post by Matthew Wheeler on the CMake mailing list:
+https://github.com/headupinclouds/cmake_xcode_object_lib
+I'd like to help provide a fix for this, but would like some input on the preferred approach prior to implementing anything.  I see a few options:
+
+identify duplicates manually and add an alias for the offending files in the repository: for i in ${FAILURES}; do echo -e "#include \"$i\"" > ${i%.cc}_fix.cc; done and then update CMake to include those files.  Maybe _fix could be replaced with a more unique directory name.  PRO: Reasonably easy; CON: The problem will likely occur again, #include "source.cc" violates some style guides
+iterate through each list of object files in CMake at generate time and identify duplicates automatically, then map each of these files to an alias for the build using something like configure_file(${duplicate_file} ${CMAKE_CURRENT_BINARY_DIR}/${duplicat_file_w_suffix} COPYONLY) (for Xcode only).  PRO: Automatic (future proof); CON: More complicated and users can't apply changes directly in their IDE
+(long term) replace OBJECT libraries with standard libraries (static or shared based on CMAKE_BUILD_SHARED): In addition to the Xcode related bug above, OBJECT libraries have a number of other limitations which make the CMake code more complicated, or rather, standard libraries have a number of benefits that could make the CMake code cleaner.  Perhaps the most significant drawback is that OBJECT libraries can't be used with target_link_libraries(), so we lose the ability to pass along transitive dependency chains and scoped usage requirements from  find_package() (future) system dependencies using target_link_libraries().  This relates to Proposal: Making the cmake build distribution friendly, where common system dependencies would be included using find_package() calls and linked directly to the tensorflow submodules: target_link_libraries(tf_core_lib PRIVATE ${tensorflow_EXTERNAL_PACKAGES}) # zlib, etc.  This would also allow most of the manual add_dependencies() calls to be removed.  (Note: I've already added CMake package config installation steps to most of the google repository dependencies in forks, and will try to get this stuff accepted upstream.)
+
+The last one is broader in scope, so I'm hoping there is an initial workaround based on some variation of (1) or (2) that would be accepted upstream in the near future for CMake + Xcode.  If there is interest in using standard libraries (3), I can help work on putting an initial solution together in a branch for evaluation as a follow up effort.
+I understand CMake status is currently under discussion.  In any event, I'd like to help get tensorflow building through CMake for easy integration with other CMake based projects, including iOS builds, where Xcode is required.  I also appreciate tensorflow is an incredibly complicated piece of SW, and I appreciate the work that has gone in to supporting CMake builds to date.  Thanks!
+Source code / logs
+Numerous "no such file or directory" errors such as these:
+clang: error: no such file or directory: '/Users/developer/tensorflow/tensorflow/contrib/cmake/_builds/xcode-hid-sections/tensorflow.build/Release/tf_core_lib.build/Objects-normal/x86_64/env.o'
+clang: error: no such file or directory: '/Users/developer/tensorflow/tensorflow/contrib/cmake/_builds/xcode-hid-sections/tensorflow.build/Release/tf_core_lib.build/Objects-normal/x86_64/env_time.o'
+clang: error: no such file or directory: '/Users/developer/tensorflow/tensorflow/contrib/cmake/_builds/xcode-hid-sections/tensorflow.build/Release/tf_core_lib.build/Objects-normal/x86_64/tracing.o

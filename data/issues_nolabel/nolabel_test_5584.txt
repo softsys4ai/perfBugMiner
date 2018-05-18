@@ -1,0 +1,105 @@
+Who can help me about my cuda-convnet2 reproduction in low accuracy
+
+I followed the tutorials of cnn and  tried the exercise about reproducing  cifar10 model in cuda-convnet2.
+Recently, I thought I had worked it out, with implementing the local unshared layer by extract_image_patch function and batch_matmul function. Here is my code of the cifar10.py However, I found that the trained model is useless, because its accuracy is just 0.101, too low, for evaluation as below:
+precision @ 1 = 0.101
+My inference() function just like this:
+def inference(images):
+  """Build the CIFAR-10 model.
+  Args:
+    images: Images returned from distorted_inputs() or inputs().
+  Returns:
+    Logits.
+  """
+  # We instantiate all variables using tf.get_variable() instead of
+  # tf.Variable() in order to share variables across multiple GPU training runs.
+  # If we only ran this model on a single GPU, we could simplify this function
+  # by replacing all instances of tf.get_variable() with tf.Variable().
+  #
+  # conv1
+  with tf.variable_scope('conv1') as scope:
+    kernel = _variable_with_weight_decay('weights', shape=[5, 5, 3, 64],
+                                         stddev=1e-4, wd=0.0)
+    conv = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.0))
+    bias = tf.nn.bias_add(conv, biases)
+    conv1 = tf.nn.relu(bias, name=scope.name)
+    _activation_summary(conv1)
+
+  # pool1
+  pool1 = tf.nn.max_pool(conv1, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+                         padding='SAME', name='pool1')
+  # norm1
+  norm1 = tf.nn.lrn(pool1, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
+                    name='norm1')
+
+  # conv2
+  with tf.variable_scope('conv2') as scope:
+    kernel = _variable_with_weight_decay('weights', shape=[5, 5, 64, 64],
+                                         stddev=1e-4, wd=0.0)
+    conv = tf.nn.conv2d(norm1, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1))
+    print('conv2 is', conv)
+    print('biases2 is', biases)
+    bias = tf.nn.bias_add(conv, biases)
+    conv2 = tf.nn.relu(bias, name=scope.name)
+    _activation_summary(conv2)
+
+  # norm2
+  norm2 = tf.nn.lrn(conv2, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
+                    name='norm2')
+  # pool2
+  pool2 = tf.nn.max_pool(norm2, ksize=[1, 3, 3, 1],
+                         strides=[1, 2, 2, 1], padding='SAME', name='pool2')
+
+  # local3
+  with tf.variable_scope('local3') as scope:
+    print('pool2 is', pool2)
+    local3_extract_imgs = tf.extract_image_patches(pool2,[1,3,3,1],[1,1,1,1],[1,1,1,1],'SAME')
+    print('local3_extract_imgs is', local3_extract_imgs)
+    #local3_reshape = tf.reshape(local3_extract_imgs,[FLAGS.batch_size,6,6,3*3*64,1])
+    #print('local3_reshape is', local3_reshape)
+    kernel = _variable_with_weight_decay('weights', shape=[6,6,64,3*3*64], stddev=0.04, wd=0.004)
+    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1))
+    local3_list = []
+    for img in tf.unpack(value=local3_extract_imgs,axis=0):
+      #print('raw img is', img)
+      img = tf.reshape(img, [6, 6, 3*3*64, 1])
+      local = tf.reshape(tf.batch_matmul(kernel, img),[6,6,64])
+      #print( 'local is', local)
+      local3_list.append(local)
+
+    local3 = tf.nn.relu(tf.nn.bias_add(tf.pack(local3_list), biases), name=scope.name)
+    print('local3 is', local3)
+    _activation_summary(local3)
+
+  # local4
+  with tf.variable_scope('local4') as scope:
+    local4_extract_imgs = tf.extract_image_patches(local3,[1,3,3,1],[1,1,1,1],[1,1,1,1],'SAME')
+    #local4_reshape = tf.reshape(local4_extract_imgs, [FLAGS.batch_size, 6, 6, 3*3*64, 1])
+    kernel = _variable_with_weight_decay( 'weights', shape=[6,6,32,3*3*64], stddev=0.04, wd=0.004) 
+    biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.1))
+    local4_list = []
+    for img in tf.unpack(value=local4_extract_imgs, axis=0):
+      img = tf.reshape(img, [6, 6, 3*3*64, 1])
+      local = tf.reshape(tf.batch_matmul(kernel, img), shape=[6,6,32])
+      local4_list.append(local)
+
+    local4 = tf.nn.relu(tf.nn.bias_add(tf.pack(local4_list), biases), name=scope.name)
+    print('local4 is', local4)
+    _activation_summary(local4)
+
+  # softmax, i.e. softmax(WX + b)
+  with tf.variable_scope('softmax_linear') as scope:
+    reshape = tf.reshape(tensor=local4, shape=[FLAGS.batch_size,-1])
+
+    weights = _variable_with_weight_decay('weights', [6*6*32, NUM_CLASSES],
+                                          stddev=1/192.0, wd=0.0)
+    biases = _variable_on_cpu('biases', [NUM_CLASSES],
+                              tf.constant_initializer(0.0))
+    softmax_linear = tf.nn.softmax(tf.add(tf.matmul(reshape, weights), biases, name=scope.name))
+    _activation_summary(softmax_linear)
+
+return softmax_linear
+
+I have tried my best, and I think my local layer implementation is  theorectically correct, so I have no idea where is wrong on my code. Who can give me some advices?

@@ -1,0 +1,71 @@
+SIGSEGV with sparse_add and broadcasting
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+yes, enclosed below
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04
+TensorFlow installed from (source or binary):
+binary via pip
+TensorFlow version (use command below):
+('v1.0.0-65-g4763edf-dirty', '1.0.1')
+Bazel version (if compiling from source):
+N/A, using pip installation
+CUDA/cuDNN version:
+N/A, CPU-only
+GPU model and memory:
+none
+Exact command to reproduce:
+
+from __future__ import print_function
+import numpy as np
+import tensorflow as tf
+
+dense_sz = [1, 1000, 1000]
+dense = tf.constant(1.0, shape=dense_sz, dtype=tf.float32)
+
+sparse_sz = [10, 1000, 1000]
+nnz = 100
+nz_ind = np.random.choice(np.prod(sparse_sz), size=nnz, replace=False)
+nz_ind = np.unravel_index(nz_ind, dims=sparse_sz)
+nz_ind = np.array(nz_ind).T
+assert np.all(nz_ind < np.array(sparse_sz)[None, :])
+# Ensure canonical ordering.
+ind = np.lexsort([nz_ind[:, i].flatten() for i in reversed(range(nz_ind.shape[1]))])
+nz_ind = nz_ind[ind, :]
+print('nz_ind\n', nz_ind)
+
+sparse_plc = tf.sparse_placeholder(tf.float32)
+sparse_sum = tf.sparse_add(dense, sparse_plc)
+init = tf.global_variables_initializer()
+
+with tf.Session() as sess:
+    sess.run(init)
+    print('after init')
+    res = sess.run(sparse_sum, feed_dict={sparse_plc: tf.SparseTensorValue(nz_ind, np.ones((nnz,)), sparse_sz)})
+    print('sum\n', res)
+
+Describe the problem
+Running the code above results in
+[...]
+after init
+
+Process finished with exit code 139 (interrupted by signal 11: SIGSEGV)
+
+For lower values of nnz, (nnz = 1) it finishes fine quite often.
+[...]
+after init
+sum
+ [[[ 1.  1.  1. ...,  1.  1.  1.]
+  [ 1.  1.  1. ...,  1.  1.  1.]
+  [ 1.  1.  1. ...,  1.  1.  1.]
+  ..., 
+  [ 1.  1.  1. ...,  1.  1.  1.]
+  [ 1.  1.  1. ...,  1.  1.  1.]
+  [ 1.  1.  1. ...,  1.  1.  1.]]]
+
+Process finished with exit code 0
+
+Source code / logs
+See above.

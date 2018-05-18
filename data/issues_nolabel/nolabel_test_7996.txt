@@ -1,0 +1,188 @@
+Cant  implement Miking Human
+
+I want to implement a neural architecture from  A Neural Architecture Mimicking Humans
+End-to-End for Natural Language Inference . In keras , I can get accuracy  86% . But the same  architecture in tensorflow , just get 76% . Here is the main code ：
+`class miki(BaseModel):
+def build(self):
+    params = self.params
+    batch_size = params.batch_size
+    max_length = params.max_length
+    nr_hidden = params.nr_hidden
+    keep_dr=params.dr
+
+
+    ids1 = tf.placeholder(tf.int32, shape=[batch_size, max_length], name='premise')  # none l1
+    ids2 = tf.placeholder(tf.int32, shape=[batch_size, max_length], name='hypoyhesis')
+    lable = tf.placeholder(tf.float32, shape=[batch_size, 3], name='lable')
+    train_dr = tf.placeholder(tf.bool)
+
+
+    oov_W = np.load(open(os.path.join('glove/', 'oov_W.weights'), 'rb'))
+    oov_W = oov_W.astype('float32')
+    unchanged_W = np.load(open(os.path.join('glove/', 'unchanged_W.weights'), 'rb'))
+    unchanged_W = unchanged_W.astype('float32')
+    embedding = np.concatenate((oov_W, unchanged_W), axis=0)
+    W = tf.get_variable(name="W", shape=embedding.shape, initializer=tf.constant_initializer(embedding),
+                        trainable=False)
+
+    def he_nomal(fan_in):
+        s = np.sqrt(2. / fan_in)
+        seed = np.random.randint(10e8)
+        return tf.random_normal_initializer(0.0, s, dtype=tf.float32, seed=seed)
+
+    with tf.variable_scope('embedding1'):
+        embed1 = tf.nn.embedding_lookup(W, ids1)  # none l1  h
+        em_reshape1=tf.reshape(embed1,[-1,nr_hidden])
+        network_en1 = tl.layers.InputLayer(inputs=em_reshape1, name='em_layer1-1')
+        network_en1 = tl.layers.DropoutLayer(network_en1, is_fix=True, keep=keep_dr, name='emdrop1-1',is_train=train_dr)
+        network_en1 = tl.layers.DenseLayer(network_en1, n_units=nr_hidden,
+                                       act=tf.nn.relu, name='emrelu2-1')
+        embed1_out=network_en1.outputs
+        embed1_re=tf.reshape(embed1_out,[-1,max_length,nr_hidden])
+
+
+    with tf.variable_scope('embedding2'):
+        embed2 = tf.nn.embedding_lookup(W, ids1)  # none l1  h
+        em_reshape2=tf.reshape(embed2,[-1,nr_hidden])
+        network_en2 = tl.layers.InputLayer(inputs=em_reshape2, name='em_layer2-1')
+        network_en2 = tl.layers.DropoutLayer(network_en2, is_fix=True, keep=keep_dr, name='emdrop2-1',is_train=train_dr)
+        network_en2 = tl.layers.DenseLayer(network_en2, n_units=nr_hidden,
+                                       act=tf.nn.relu, name='emrelu1-1')
+        embed2_out=network_en2.outputs
+        embed2_re=tf.reshape(embed2_out,[-1,max_length,nr_hidden])
+
+
+    _seq_len = tf.fill(tf.expand_dims(batch_size, 0),
+                       tf.constant(max_length, dtype=tf.int32))
+
+    with tf.variable_scope('ecode1'):
+        fwd_cell = tf.nn.rnn_cell.BasicLSTMCell(nr_hidden)
+        back_cell = tf.nn.rnn_cell.BasicLSTMCell(nr_hidden)
+        h, _ = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw=fwd_cell, cell_bw=back_cell, inputs=embed1_re, sequence_length=(_seq_len), dtype=tf.float32)
+        encode1 = tf.concat(2, h)  # none l 2h
+
+    with tf.variable_scope('ecode2'):
+        fwd_cell = tf.nn.rnn_cell.BasicLSTMCell(nr_hidden)
+        back_cell = tf.nn.rnn_cell.BasicLSTMCell(nr_hidden)
+        h, _ = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw=fwd_cell, cell_bw=back_cell, inputs=embed2_re, sequence_length=(_seq_len), dtype=tf.float32)
+        encode2 = tf.concat(2, h)  # none l 2h
+
+    with tf.variable_scope('atte_layer'):
+
+        encode2_tr = tf.transpose(encode2, perm=[0, 2, 1])  # none 2h l2
+        attention = tf.batch_matmul(encode1, encode2_tr)  # none l1 l2
+        e = tf.exp(attention - tf.reduce_max(attention, 2, keep_dims=True))
+        s = tf.reduce_sum(e, 2, keep_dims=True)  #none l1 1
+        am_att = e / s  #none l1 l2
+        aligh_attention = tf.batch_matmul(am_att, encode2)  # none l1 2h
+        concat = tf.concat(2, [aligh_attention, encode1])  # none l1 4h
+        concat_reshape=tf.reshape(concat,[-1,4*nr_hidden])    #none*l1 4h
+
+
+    with tf.variable_scope('task1_operator'):
+        network_task1=tl.layers.InputLayer(concat_reshape, name='task_layer1-1')
+        network_task1 = tl.layers.DropoutLayer(network_task1, keep=keep_dr, name='drop1-1',is_train=train_dr,is_fix=True)
+        network_task1 = tl.layers.DenseLayer(network_task1, n_units=2 * nr_hidden, act=tf.nn.relu, name='relu1-1')
+        network_task1 = tl.layers.DropoutLayer(network_task1, keep=keep_dr, name='drop1-2',is_train=train_dr,is_fix=True)
+        network_task1 = tl.layers.DenseLayer(network_task1, n_units=2 * nr_hidden, act=tf.nn.relu, name='relu1-2')
+        task1 = network_task1.outputs  # none*l 2h
+        task1_re = tf.reshape(task1, [-1, max_length, 2 * nr_hidden])  #none l h
+
+    with tf.variable_scope('task2_operator'):
+        network_task2=tl.layers.InputLayer(concat_reshape, name='task_layer2-1')
+        network_task2 = tl.layers.DropoutLayer(network_task2, keep=keep_dr, name='drop2-1',is_train=train_dr,is_fix=True)
+        network_task2 = tl.layers.DenseLayer(network_task2, n_units=2 * nr_hidden, act=tf.nn.relu, name='relu2-1')
+        network_task2 = tl.layers.DropoutLayer(network_task2, keep=keep_dr, name='drop2-2',is_train=train_dr,is_fix=True)
+        network_task2 = tl.layers.DenseLayer(network_task2, n_units=2 * nr_hidden, act=tf.nn.relu, name='relu2-2')
+        task2 = network_task2.outputs  # none*l 2h
+        task2_re = tf.reshape(task2, [-1, max_length, 2 * nr_hidden])  #none l h
+
+    with tf.variable_scope('task3_operator'):
+        network_task3=tl.layers.InputLayer(concat_reshape, name='task_layer3-1')
+        network_task3 = tl.layers.DropoutLayer(network_task3, keep=keep_dr, name='drop3-1',is_train=train_dr,is_fix=True)
+        network_task3 = tl.layers.DenseLayer(network_task3, n_units=2 * nr_hidden, act=tf.nn.relu, name='relu3-1')
+        network_task3 = tl.layers.DropoutLayer(network_task3, keep=keep_dr, name='drop3-2',is_train=train_dr,is_fix=True)
+        network_task3 = tl.layers.DenseLayer(network_task3, n_units=2 * nr_hidden, act=tf.nn.relu, name='relu3-2')
+        task3 = network_task3.outputs  # none*l 2h
+        task3_re = tf.reshape(task3, [-1, max_length, 2 * nr_hidden])  #none l h
+
+    with tf.variable_scope('task4_operator'):
+        network_task4=tl.layers.InputLayer(concat_reshape, name='task_layer4-1')
+        network_task4 = tl.layers.DropoutLayer(network_task4, keep=keep_dr, name='drop4-1',is_train=train_dr,is_fix=True)
+        network_task4 = tl.layers.DenseLayer(network_task4, n_units=2 * nr_hidden, act=tf.nn.relu, name='relu4-1')
+        network_task4 = tl.layers.DropoutLayer(network_task4, keep=keep_dr, name='drop4-2',is_train=train_dr,is_fix=True)
+        network_task4 = tl.layers.DenseLayer(network_task4, n_units=2 * nr_hidden, act=tf.nn.relu, name='relu4-2')
+        task4 = network_task4.outputs  # none*l 2h
+        task4_re = tf.reshape(task4, [-1, max_length, 2 * nr_hidden])  #none l h
+
+
+    with tf.variable_scope('gate_operator'):
+        network_gate= tl.layers.InputLayer(concat_reshape, name='gate_layer')
+        network_gate = tl.layers.DropoutLayer(network_gate, is_fix=True, keep=keep_dr, name='gate_drop1',is_train=train_dr)
+        network_gate = tl.layers.DenseLayer(network_gate, n_units=2 * nr_hidden,
+                                            act=tf.nn.relu, name='relu_gate1')
+        network_gate = tl.layers.DropoutLayer(network_gate, is_fix=True, keep=keep_dr, name='gate_drop2',is_train=train_dr)
+        network_gate = tl.layers.DenseLayer(network_gate, n_units=4,
+                                            act=tf.nn.softmax, name='relu_gate2')
+        gate = network_gate.outputs
+        gate_re = tf.reshape(gate, [-1, max_length, 4])  # none l 2
+
+    def repeat(gate_i):
+
+        gate_a = gate_i  # none l
+        gate_b = tf.tile(gate_a, [1, 2 * nr_hidden])
+        gate_c = tf.reshape(gate_b, [-1, 2 * nr_hidden, max_length])
+        gate_d = tf.transpose(gate_c, perm=[0, 2, 1])
+        return gate_d  # none l 2h
+
+    def Out(t1,t2,t3,t4,gate):
+        gate_shuffle = tf.transpose(gate, perm=[0, 2, 1])  # none 4 l
+
+        g1 = repeat(gate_shuffle[:, 0, :])  # none l
+        g2 = repeat(gate_shuffle[:, 1, :])
+        g3 = repeat(gate_shuffle[:, 2, :])  # none l
+        g4 = repeat(gate_shuffle[:, 3, :])
+
+        O1=g1*t1
+        O2 = g2 * t2
+        O3=g3*t3
+        O4 = g4 * t4
+
+        out = O1 + O2 +O3+O4
+        return out
+
+    task_output = Out(task1_re,task2_re,task3_re,task4_re,gate_re)  # none l1 2h
+
+
+    with tf.variable_scope('aggregate'):
+        fwd_lstm = tf.nn.rnn_cell.BasicLSTMCell(2 * nr_hidden)
+        x_output, x_state = tf.nn.dynamic_rnn(cell=fwd_lstm, inputs=task_output, dtype=tf.float32,sequence_length=(_seq_len))
+
+        composable = x_output[:,-1, :]  # none  2h
+
+    with tf.variable_scope('Entaiment'):
+        network3 = tl.layers.InputLayer(composable, name='layer_entalment1')
+        network3 = tl.layers.DropoutLayer(network3, keep=keep_dr, name='entaidrop3',is_train=train_dr,is_fix=True)
+        network3 = tl.layers.DenseLayer(network3, n_units=2 * nr_hidden,
+                                        act=tf.nn.tanh, name='layer_entaiment2')
+        network3 = tl.layers.DenseLayer(network3, n_units=3,
+                                        act=tf.nn.softmax, name='entai_relu3.2')
+        entaiment = network3.outputs
+
+with tf.name_scope('Loss'):
+cross_entropy = tf.reduce_mean(-tf.reduce_sum(lable * tf.log(entaiment), reduction_indices=[1]))
+        loss = cross_entropy
+
+    with tf.variable_scope('Accuracy'):
+        predicts = tf.cast(tf.argmax(entaiment, 1), 'int32')   #entaiment none 3
+        lable_one = tf.cast(tf.argmax(lable, 1), 'int32')
+        corrects = tf.equal(predicts, lable_one)
+        num_corrects = tf.reduce_sum(tf.cast(corrects, tf.float32))
+        accuracy = tf.reduce_mean(tf.cast(corrects, tf.float32))
+
+    optimizer = tf.train.AdamOptimizer(params.learning_rate)
+    opt_op = optimizer.minimize(loss, global_step=self.global_step)
+
+`

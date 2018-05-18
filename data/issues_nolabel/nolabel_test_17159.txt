@@ -1,0 +1,229 @@
+Estimator WarmStartSettings Cause Extreme Training Slowdown.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary(official docker image)
+TensorFlow version (use command below): 1.6.0-rc1
+Python version: 2.7.12
+Bazel version (if compiling from source): None
+GCC/Compiler version (if compiling from source): None
+CUDA/cuDNN version: 9.0 / 7.0.5.15-1
+GPU model and memory: GeForce GTX 1060 6GB
+Exact command to reproduce:
+
+warm_start_from = None 
+if FLAGS.warm_start:
+    warm_start_from = tf.estimator.WarmStartSettings(
+        ckpt_to_initialize_from=FLAGS.warm_start,
+        # NOTE: attempted with and without `vars_to_warm_start` set
+        # vars_to_warm_start='^(?!.*(RMSProp|global_step))'
+    )
+
+my_model = tf.estimator.Estimator(
+    model_fn=my_model_fn,
+    model_dir=FLAGS.model,
+    warm_start_from=warm_start_from
+)
+Describe the problem
+I am attempting to fine tune a model trained with RMSProp. I only want to load the model weights from the checkpoint, not the RMSProp state. To achieve this, I am using Tensorflow 1.6-rc1's WarmStartSettings.
+When I train the model without WarmStartSettings, each minibatch takes around 0.5 seconds. However, when I attempt to use that checkpoint with WarmStartSettings, each minibatch takes around 1.7 seconds.
+Having inspected the logs to make sure the weights are not being initialised for every batch, It seems like this is a bug in Tensorflow. It should also be noted that I experienced similar problems in Tensorflow 1.5 when using init_from_checkpoint in my model_fn (as seen in #10155, which led me to discover the WarmStartSettings API).
+Source code / logs
+Without WarmStartSettings (train for one epoch)
+/usr/local/lib/python2.7/dist-packages/h5py/__init__.py:36: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+Train data shape...
+(30000, 500)
+(30000, 2048)
+Eval data shape...
+(5000, 500)
+(5000, 2048)
+Test data shape...
+(5000, 500)
+(5000, 2048)
+INFO:tensorflow:Using default config.
+INFO:tensorflow:Using config: {'_save_checkpoints_secs': 600, '_session_config': None, '_keep_checkpoint_max': 5, '_task_type': 'worker', '_global_id_in_cluster': 0, '_is_chief': True, '_cluster_spec': <tensorflow.python.training.server_lib.ClusterSpec object at 0x7f6243687f90>, '_evaluation_master': '', '_save_checkpoints_steps': None, '_keep_checkpoint_every_n_hours': 10000, '_service': None, '_num_ps_replicas': 0, '_tf_random_seed': None, '_master': '', '_num_worker_replicas': 1, '_task_id': 0, '_log_step_count_steps': 100, '_model_dir': 'output/my_model', '_save_summary_steps': 100}
+Training Epoch #1...
+INFO:tensorflow:Calling model_fn.
+INFO:tensorflow:Done calling model_fn.
+INFO:tensorflow:Create CheckpointSaverHook.
+INFO:tensorflow:Graph was finalized.
+2018-02-20 20:31:08.668914: I tensorflow/core/platform/cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX2 FMA
+2018-02-20 20:31:08.767997: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:898] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2018-02-20 20:31:08.768353: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1212] Found device 0 with properties: 
+name: GeForce GTX 1060 6GB major: 6 minor: 1 memoryClockRate(GHz): 1.7085
+pciBusID: 0000:01:00.0
+totalMemory: 5.93GiB freeMemory: 3.84GiB
+2018-02-20 20:31:08.768368: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-02-20 20:31:08.919155: I tensorflow/core/common_runtime/gpu/gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 3579 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+INFO:tensorflow:Running local_init_op.
+INFO:tensorflow:Done running local_init_op.
+INFO:tensorflow:Saving checkpoints for 1 into output/my_model/model.ckpt.
+INFO:tensorflow:loss = 0.43950942, step = 1
+INFO:tensorflow:global_step/sec: 196.162
+INFO:tensorflow:loss = 0.46729112, step = 101 (0.510 sec)
+INFO:tensorflow:global_step/sec: 205.419
+INFO:tensorflow:loss = 0.35870957, step = 201 (0.487 sec)
+INFO:tensorflow:global_step/sec: 206.952
+INFO:tensorflow:loss = 0.32010338, step = 301 (0.483 sec)
+INFO:tensorflow:global_step/sec: 204.129
+INFO:tensorflow:loss = 0.3345171, step = 401 (0.490 sec)
+INFO:tensorflow:global_step/sec: 209.188
+INFO:tensorflow:loss = 0.34134513, step = 501 (0.478 sec)
+INFO:tensorflow:global_step/sec: 205.325
+INFO:tensorflow:loss = 0.33101806, step = 601 (0.487 sec)
+INFO:tensorflow:global_step/sec: 207.222
+INFO:tensorflow:loss = 0.34841973, step = 701 (0.483 sec)
+INFO:tensorflow:global_step/sec: 206.455
+INFO:tensorflow:loss = 0.33363524, step = 801 (0.484 sec)
+INFO:tensorflow:global_step/sec: 208.705
+INFO:tensorflow:loss = 0.33115995, step = 901 (0.479 sec)
+INFO:tensorflow:global_step/sec: 205.786
+INFO:tensorflow:loss = 0.32718512, step = 1001 (0.486 sec)
+INFO:tensorflow:global_step/sec: 205.812
+INFO:tensorflow:loss = 0.33765212, step = 1101 (0.486 sec)
+INFO:tensorflow:global_step/sec: 205.522
+INFO:tensorflow:loss = 0.33326942, step = 1201 (0.487 sec)
+INFO:tensorflow:global_step/sec: 208.248
+INFO:tensorflow:loss = 0.34017226, step = 1301 (0.480 sec)
+INFO:tensorflow:global_step/sec: 205.824
+INFO:tensorflow:loss = 0.32448825, step = 1401 (0.486 sec)
+INFO:tensorflow:Saving checkpoints for 1500 into output/my_model/model.ckpt.
+INFO:tensorflow:Loss for final step: 0.30791047.
+Evaluating Epoch #5...
+INFO:tensorflow:Calling model_fn.
+INFO:tensorflow:Done calling model_fn.
+INFO:tensorflow:Starting evaluation at 2018-02-20-20:31:17
+INFO:tensorflow:Graph was finalized.
+2018-02-20 20:31:17.344022: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-02-20 20:31:17.344148: I tensorflow/core/common_runtime/gpu/gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 42 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+INFO:tensorflow:Restoring parameters from output/my_model/model.ckpt-1500
+INFO:tensorflow:Running local_init_op.
+INFO:tensorflow:Done running local_init_op.
+INFO:tensorflow:Finished evaluation at 2018-02-20-20:31:17
+INFO:tensorflow:Saving dict for global step 1500: global_step = 1500, loss = 0.32683796
+INFO:tensorflow:Calling model_fn.
+INFO:tensorflow:Done calling model_fn.
+INFO:tensorflow:Graph was finalized.
+2018-02-20 20:31:17.575632: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-02-20 20:31:17.575748: I tensorflow/core/common_runtime/gpu/gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 42 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+INFO:tensorflow:Restoring parameters from output/my_model/model.ckpt-1500
+INFO:tensorflow:Running local_init_op.
+INFO:tensorflow:Done running local_init_op.
+WARNING:tensorflow:From scripts/my_model.py:85: calling l2_normalize (from tensorflow.python.ops.nn_impl) with dim is deprecated and will be removed in a future version.
+Instructions for updating:
+dim is deprecated, use axis instead
+2018-02-20 20:31:17.738903: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-02-20 20:31:17.739028: I tensorflow/core/common_runtime/gpu/gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 42 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+R@1: 1.2
+R@5: 2.9
+R@10: 4.7
+With WarmStartSettings
+/usr/local/lib/python2.7/dist-packages/h5py/__init__.py:36: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+Train data shape...
+(30000, 500)
+(30000, 2048)
+Eval data shape...
+(5000, 500)
+(5000, 2048)
+Test data shape...
+(5000, 500)
+(5000, 2048)
+INFO:tensorflow:Using default config.
+INFO:tensorflow:Using config: {'_save_checkpoints_secs': 600, '_session_config': None, '_keep_checkpoint_max': 5, '_task_type': 'worker', '_global_id_in_cluster': 0, '_is_chief': True, '_cluster_spec': <tensorflow.python.training.server_lib.ClusterSpec object at 0x7fccf90c7f90>, '_evaluation_master': '', '_save_checkpoints_steps': None, '_keep_checkpoint_every_n_hours': 10000, '_service': None, '_num_ps_replicas': 0, '_tf_random_seed': None, '_master': '', '_num_worker_replicas': 1, '_task_id': 0, '_log_step_count_steps': 100, '_model_dir': 'output/my_model', '_save_summary_steps': 100}
+Training Epoch #1...
+INFO:tensorflow:Calling model_fn.
+INFO:tensorflow:Done calling model_fn.
+INFO:tensorflow:Warm-starting with WarmStartSettings: WarmStartSettings(ckpt_to_initialize_from='output/checkpoint/', vars_to_warm_start='^(?!.*(RMSProp|global_step))', var_name_to_vocab_info={}, var_name_to_prev_var_name={})
+INFO:tensorflow:Warm-starting from: ('output/checkpoint/',)
+INFO:tensorflow:Warm-starting variable: my_model/dense_3/kernel; prev_var_name: Unchanged
+INFO:tensorflow:Initialize variable my_model/dense_3/kernel:0 from checkpoint output/checkpoint/ with my_model/dense_3/kernel
+INFO:tensorflow:Warm-starting variable: my_model/dense_3/bias; prev_var_name: Unchanged
+INFO:tensorflow:Initialize variable my_model/dense_3/bias:0 from checkpoint output/checkpoint/ with my_model/dense_3/bias
+INFO:tensorflow:Warm-starting variable: my_model/dense_2/bias; prev_var_name: Unchanged
+INFO:tensorflow:Initialize variable my_model/dense_2/bias:0 from checkpoint output/checkpoint/ with my_model/dense_2/bias
+INFO:tensorflow:Warm-starting variable: my_model/dense_1/kernel; prev_var_name: Unchanged
+INFO:tensorflow:Initialize variable my_model/dense_1/kernel:0 from checkpoint output/checkpoint/ with my_model/dense_1/kernel
+INFO:tensorflow:Warm-starting variable: my_model/dense_1/bias; prev_var_name: Unchanged
+INFO:tensorflow:Initialize variable my_model/dense_1/bias:0 from checkpoint output/checkpoint/ with my_model/dense_1/bias
+INFO:tensorflow:Warm-starting variable: my_model/dense/kernel; prev_var_name: Unchanged
+INFO:tensorflow:Initialize variable my_model/dense/kernel:0 from checkpoint output/checkpoint/ with my_model/dense/kernel
+INFO:tensorflow:Warm-starting variable: my_model/dense/bias; prev_var_name: Unchanged
+INFO:tensorflow:Initialize variable my_model/dense/bias:0 from checkpoint output/checkpoint/ with my_model/dense/bias
+INFO:tensorflow:Warm-starting variable: my_model/dense_2/kernel; prev_var_name: Unchanged
+INFO:tensorflow:Initialize variable my_model/dense_2/kernel:0 from checkpoint output/checkpoint/ with my_model/dense_2/kernel
+INFO:tensorflow:Create CheckpointSaverHook.
+INFO:tensorflow:Graph was finalized.
+2018-02-20 20:31:44.926116: I tensorflow/core/platform/cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX2 FMA
+2018-02-20 20:31:45.024835: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:898] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2018-02-20 20:31:45.025212: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1212] Found device 0 with properties: 
+name: GeForce GTX 1060 6GB major: 6 minor: 1 memoryClockRate(GHz): 1.7085
+pciBusID: 0000:01:00.0
+totalMemory: 5.93GiB freeMemory: 3.84GiB
+2018-02-20 20:31:45.025242: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-02-20 20:31:45.174051: I tensorflow/core/common_runtime/gpu/gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 3579 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+INFO:tensorflow:Running local_init_op.
+INFO:tensorflow:Done running local_init_op.
+INFO:tensorflow:Saving checkpoints for 1 into output/my_model/model.ckpt.
+INFO:tensorflow:loss = 0.32987013, step = 1
+INFO:tensorflow:global_step/sec: 56.8537
+INFO:tensorflow:loss = 0.3100884, step = 101 (1.759 sec)
+INFO:tensorflow:global_step/sec: 57.4584
+INFO:tensorflow:loss = 0.32932568, step = 201 (1.740 sec)
+INFO:tensorflow:global_step/sec: 58.9717
+INFO:tensorflow:loss = 0.30233204, step = 301 (1.696 sec)
+INFO:tensorflow:global_step/sec: 57.5253
+INFO:tensorflow:loss = 0.3428804, step = 401 (1.738 sec)
+INFO:tensorflow:global_step/sec: 57.8845
+INFO:tensorflow:loss = 0.331369, step = 501 (1.728 sec)
+INFO:tensorflow:global_step/sec: 58.2558
+INFO:tensorflow:loss = 0.3059027, step = 601 (1.717 sec)
+INFO:tensorflow:global_step/sec: 58.3863
+INFO:tensorflow:loss = 0.32942265, step = 701 (1.713 sec)
+INFO:tensorflow:global_step/sec: 58.454
+INFO:tensorflow:loss = 0.31594634, step = 801 (1.711 sec)
+INFO:tensorflow:global_step/sec: 58.8543
+INFO:tensorflow:loss = 0.31210855, step = 901 (1.699 sec)
+INFO:tensorflow:global_step/sec: 58.7531
+INFO:tensorflow:loss = 0.33128193, step = 1001 (1.702 sec)
+INFO:tensorflow:global_step/sec: 57.5272
+INFO:tensorflow:loss = 0.31882855, step = 1101 (1.739 sec)
+INFO:tensorflow:global_step/sec: 58.2324
+INFO:tensorflow:loss = 0.32009652, step = 1201 (1.717 sec)
+INFO:tensorflow:global_step/sec: 58.8266
+INFO:tensorflow:loss = 0.31766868, step = 1301 (1.700 sec)
+INFO:tensorflow:global_step/sec: 57.1415
+INFO:tensorflow:loss = 0.304159, step = 1401 (1.750 sec)
+INFO:tensorflow:Saving checkpoints for 1500 into output/my_model/model.ckpt.
+INFO:tensorflow:Loss for final step: 0.30592433.
+Evaluating Epoch #5...
+INFO:tensorflow:Calling model_fn.
+INFO:tensorflow:Done calling model_fn.
+INFO:tensorflow:Starting evaluation at 2018-02-20-20:32:12
+INFO:tensorflow:Graph was finalized.
+2018-02-20 20:32:12.146704: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-02-20 20:32:12.146840: I tensorflow/core/common_runtime/gpu/gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 45 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+INFO:tensorflow:Restoring parameters from output/my_model/model.ckpt-1500
+INFO:tensorflow:Running local_init_op.
+INFO:tensorflow:Done running local_init_op.
+INFO:tensorflow:Finished evaluation at 2018-02-20-20:32:12
+INFO:tensorflow:Saving dict for global step 1500: global_step = 1500, loss = 0.32321918
+INFO:tensorflow:Calling model_fn.
+INFO:tensorflow:Done calling model_fn.
+INFO:tensorflow:Graph was finalized.
+2018-02-20 20:32:12.352526: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-02-20 20:32:12.352642: I tensorflow/core/common_runtime/gpu/gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 45 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+INFO:tensorflow:Restoring parameters from output/my_model/model.ckpt-1500
+INFO:tensorflow:Running local_init_op.
+INFO:tensorflow:Done running local_init_op.
+WARNING:tensorflow:From scripts/my_model.py:85: calling l2_normalize (from tensorflow.python.ops.nn_impl) with dim is deprecated and will be removed in a future version.
+Instructions for updating:
+dim is deprecated, use axis instead
+2018-02-20 20:32:12.522432: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-02-20 20:32:12.522561: I tensorflow/core/common_runtime/gpu/gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 45 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+R@1: 1.7
+R@5: 4.3
+R@10: 7.4

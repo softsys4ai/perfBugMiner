@@ -1,0 +1,50 @@
+incorrect gradient for complex matmul
+
+The MatMul kernel is registered for complex64 and complex128 on CPU and GPU. However the gradient is incorrect. This issue has not been caught because there is no test for a complex-valued MatMul gradient in tensorflow\python\kernel_tests\matmul_op_test.py.
+When computing the complex gradient we need to apply the conjugate of the input. Several cwise gradient ops in TF were ignoring this step until it was addressed by @girving and @tensorflower-gardener in 821063d. However it seems that MatMul snuck through the cracks.
+To Reproduce
+ops.reset_default_graph()
+sess = tf.Session()
+x = (np.linspace(-3, 3, 6) + 1j*np.linspace(3, -3, 6)).reshape(3, 2)
+y = (np.linspace(-3, 3, 8) + 1j*np.linspace(3, -3, 8)).reshape(2, 4)
+with sess.as_default():
+    with tf.device('/cpu'):
+        x_tf = tf.constant(x, dtype=tf.complex64, name="x")
+        y_tf = tf.constant(y, dtype=tf.complex64, name="y")
+        m = tf.matmul(x_tf, y_tf, name="matmul")
+        err = tf.test.compute_gradient_error(x_tf, [3, 2], m, [3, 4])
+        print(err)
+
+with sess.as_default():
+    with tf.device('/gpu'):
+        x_tf = tf.constant(x, dtype=tf.complex64, name="x")
+        y_tf = tf.constant(y, dtype=tf.complex64, name="y")
+        m = tf.matmul(x_tf, y_tf, name="matmul")
+        err = tf.test.compute_gradient_error(x_tf, [3, 2], m, [3, 4])
+        print(err)
+>>> 6.00002098083
+>>> 6.00002098083
+Proposed Fix
+Replace these lines with:
+@ops.RegisterGradient("MatMul")
+def _MatMulGrad(op, grad):
+  with ops.control_dependencies([grad.op]):
+      inp0 = math_ops.conj(op.inputs[0])
+      inp1 = math_ops.conj(op.inputs[1])
+      t_a = op.get_attr("transpose_a")
+      t_b = op.get_attr("transpose_b")
+      if not t_a and not t_b:
+        return (math_ops.matmul(grad, inp1, transpose_b=True),
+                math_ops.matmul(inp0, grad, transpose_a=True))
+      elif not t_a and t_b:
+        return (math_ops.matmul(grad, inp1),
+                math_ops.matmul(grad, inp0, transpose_a=True))
+      elif t_a and not t_b:
+        return (math_ops.matmul(op.inp1, grad, transpose_b=True),
+                math_ops.matmul(op.inp0, grad))
+      elif t_a and t_b:
+        return (math_ops.matmul(op.inp1, grad, transpose_a=True,
+                                transpose_b=True),
+                math_ops.matmul(grad, op.inp0, transpose_a=True,
+                                transpose_b=True))
+and add a complex gradient test to tensorflow\python\kernel_tests\matmul_op_test.py.

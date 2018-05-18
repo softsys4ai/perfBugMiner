@@ -1,0 +1,54 @@
+Control flow gradient problem with `tf.float16` datatype
+
+Environment info
+Operating System:
+Linux
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+3cb3995
+The output of bazel version
+
+Build label: 0.3.1
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Fri Jul 29 09:09:52 2016 (1469783392)
+Build timestamp: 1469783392
+Build timestamp as int: 1469783392
+
+
+Steps to reproduce
+# Minimal example to reproduce the error.
+import tensorflow as tf
+from tensorflow.contrib.layers import conv2d, batch_norm
+sess = tf.InteractiveSession()
+is_train_var = tf.placeholder(tf.bool)
+# If `tf.float32` is used here, it works flawlessly. Alternatively,
+# if a constant instead of a variable is used for `is_training`,
+# everything works as expected.
+inp = tf.placeholder(tf.float16, [1, 5, 5, 3], name='data')
+conv1 = conv2d(inp, 1, 5, padding='VALID',
+               normalizer_fn=batch_norm,
+               normalizer_params={'is_training': is_train_var})
+optimizer = tf.train.MomentumOptimizer(learning_rate=0.1, momentum=0.9)
+optimizer.compute_gradients(conv1)
+
+This results in the error
+Traceback (most recent call last):
+  File "repr.py", line 10, in <module>
+    optimizer.compute_gradients(conv1)
+  File "/lustre/home/classner/git/tensorflow/_python_build/tensorflow/python/training/optimizer.py", line 253, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/lustre/home/classner/git/tensorflow/_python_build/tensorflow/python/ops/gradients.py", line 478, in gradients
+    in_grads = _AsList(grad_fn(op, *out_grads))
+  File "/lustre/home/classner/git/tensorflow/_python_build/tensorflow/python/ops/control_flow_grad.py", line 69, in _SwitchGrad
+    return merge([good_grad, zero_grad], name="cond_grad")[0], None
+  File "/lustre/home/classner/git/tensorflow/_python_build/tensorflow/python/ops/control_flow_ops.py", line 361, in merge
+    return gen_control_flow_ops._merge(inputs, name)
+  File "/lustre/home/classner/git/tensorflow/_python_build/tensorflow/python/ops/gen_control_flow_ops.py", line 153, in _merge
+    result = _op_def_lib.apply_op("Merge", inputs=inputs, name=name)
+  File "/lustre/home/classner/git/tensorflow/_python_build/tensorflow/python/framework/op_def_library.py", line 437, in apply_op
+    raise TypeError("%s that don't all match." % prefix)
+TypeError: Tensors in list passed to 'inputs' of 'Merge' Op have types [float16, float32] that don't all match.
+
+What have you tried?
+I am currently using constant variables as a workaround as described.

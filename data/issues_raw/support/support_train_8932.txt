@@ -1,0 +1,60 @@
+Can't register new xla device
+
+I'm trying to register a fake 'xpu' device to use with xla, but it hasn't been working. I've gotten Tensorflow to build after making the changes found in the attached file (diffOutput.txt, the output from git diff). But, when I run the following sample code:
+import argparse
+import sys
+
+import tensorflow as tf
+
+from tensorflow.examples.tutorials.mnist import input_data
+from tensorflow.python.client import timeline
+
+FLAGS = None
+
+
+def main(_):
+    config = tf.ConfigProto(log_device_placement=True)
+    jit_level = 0
+    if FLAGS.xla:
+        # Turns on XLA JIT compilation.
+        jit_level = tf.OptimizerOptions.ON_1
+        print('XLA flag on')
+
+    config.graph_options.optimizer_options.global_jit_level = jit_level
+    run_metadata = tf.RunMetadata()
+    # Creates a session with log_device_placement set to True.
+    with tf.Session(config=config) as sess:
+        # Creates a graph.
+        with tf.device('/job:localhost/replica:0/task:0/device:XLA_XPU:0'):
+        #with tf.device('/device:CPU:0'):
+            a = tf.constant([1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                            shape=[2, 3], name='a')
+
+            b = tf.constant([1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                            shape=[3, 2], name='b')
+            c = tf.matmul(a, b)
+
+        # Runs the op.
+        print(sess.run(c,
+              options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
+              run_metadata=run_metadata))
+        trace = timeline.Timeline(step_stats=run_metadata.step_stats)
+        with open('timeline.ctf.json', 'w') as trace_file:
+            trace_file.write(trace.generate_chrome_trace_format())
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_dir', type=str,
+            default='/tmp/tensorflow/mnist/input_data',
+            help='Directory for storing input data')
+    parser.add_argument(
+              '--xla', type=bool, default=True, help='Turn xla via JIT on')
+    FLAGS, unparsed = parser.parse_known_args()
+    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+
+
+I get the error:
+InvalidArgumentError (see above for traceback): Cannot assign a device to node 'MatMul': Could not satisfy explicit device specification '/job:localhost/replica:0/task:0/device:XLA_XPU:0' because no devices matching that specification are registered in this process; available devices: /job:localhost/replica:0/task:0/cpu:0, /job:localhost/replica:0/task:0/device:XLA_CPU:0
+	 [[Node: MatMul = MatMul[T=DT_FLOAT, transpose_a=false, transpose_b=false, _device="/job:localhost/replica:0/task:0/device:XLA_XPU:0"](a, b)]]
+
+What else needs to change in order for my code to work?

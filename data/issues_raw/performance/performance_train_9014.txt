@@ -1,0 +1,75 @@
+Freshly built tfcompile core dumps
+
+NOTE: Issues that are not bugs or feature requests will be closed. Please ask usage questions on StackOverflow.
+You must complete this information or else your issue will be closed
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow)?: No
+TensorFlow installed from (source or binary)?: Source
+TensorFlow version: docker image: "tensorflow/tensorflow:nightly-devel" - git describe = 0.6.0-16017-ga9b7946 (aka: docker-pullable://tensorflow/tensorflow@sha256:5b568f7dd9890bb0b86101bb27779c539f608724c7d4ecf4fdfbbab289bc29de)
+Bazel version (if compiling from source): Build label: 0.4.5
+CUDA/cuDNN version: -
+GPU Model and Memory: -
+Exact command to reproduce: cd /tensorflow; bazel build tensorflow/compiler/aot:tfcompile ; bazel-bin/tensorflow/compiler/aot/tfcompile
+
+Describe the problem clearly
+I'm trying to use tfcompile, when I build it in a Pod on my kubernetes cluster, the resulting binary exits with Aborted (core dumped) after displaying the help message.
+Source Code / Logs
+I create a pod like this:
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    name: tfcompile
+  name: tfcompile
+spec:
+  containers:
+  - args:
+    - sh
+    - -c
+    - cd /tensorflow; bazel build tensorflow/compiler/aot:tfcompile ; sleep 864000
+    image: tensorflow/tensorflow:nightly-devel
+    name: tfcompile
+    resources:
+      limits:
+        cpu: "1"
+        memory: 16Gi
+      requests:
+        cpu: "1"
+        memory: 16Gi
+
+and then when the build is finished, I execute into the pod and try the resulting binary: bazel-bin/tensorflow/compiler/aot/tfcompile
+full output:
+root@tfcompile-1266760932-s2dht:/tensorflow# bazel-bin/tensorflow/compiler/aot/tfcompile                                         
+2017-04-06 08:08:02.798285: F tensorflow/compiler/aot/tfcompile_main.cc:136] Check failed: argc == 1 && !flags.config.empty() && (flags.dump_fetch_nodes || (!flags.graph.empty() && !flags.entry_point.empty())) 
+tfcompile performs ahead-of-time compilation of a TensorFlow graph,
+resulting in an object file compiled for your target architecture, and a
+header file that gives access to the functionality in the object file.
+A typical invocation looks like this:
+
+   $ tfcompile --graph=mygraph.pb --config=myfile.pbtxt
+
+usage: bazel-bin/tensorflow/compiler/aot/tfcompile
+Flags:
+	--graph=""                       	string	Input GraphDef file.  If the file ends in '.pbtxt' it is expected to be in the human-readable proto text format, otherwise it is expected to be in the proto binary format.
+	--config=""                      	string	Input file containing Config proto.  If the file ends in '.pbtxt' it is expected to be in the human-readable proto text format, otherwise it is expected to be in the proto binary format.
+	--dump_fetch_nodes=false         	bool	If set, only flags related to fetches are processed, and the resulting fetch nodes will be dumped to stdout in a comma-separated list.  Typically used to format arguments for other tools, e.g. freeze_graph.
+	--debug_dir=""                   	string	Specifies a directory to dump debugging information, including rewritten graphs and the XLA HLO module.
+	--target_triple="x86_64-pc-linux"	string	Target platform, similar to the clang -target flag.  The general format is <arch><sub>-<vendor>-<sys>-<abi>.  http://clang.llvm.org/docs/CrossCompilation.html#target-triple.
+	--target_cpu=""                  	string	Target cpu, similar to the clang -mcpu flag.  http://clang.llvm.org/docs/CrossCompilation.html#cpu-fpu-abi
+	--target_features=""             	string	Target features, e.g. +avx2, +neon, etc.
+	--entry_point=""                 	string	Name of the generated function.  If multiple generated object files will be linked into the same binary, each will need a unique entry point.
+	--cpp_class=""                   	string	Name of the generated C++ class, wrapping the generated function.  The syntax of this flag is [[<optional_namespace>::],...]<class_name>.  This mirrors the C++ syntax for referring to a class, where multiple namespaces may precede the class name, separated by double-colons.  The class will be generated in the given namespace(s), or if no namespaces are given, within the global namespace.
+	--out_object="out.o"             	string	Output object file name.
+	--out_header="out.h"             	string	Output header file name.
+	--xla_debug_cpu_dump_ir=""       	string	Dump IR, before optimizations to a path
+	--xla_cpu_llvm_opt_level=2       	int32	The LLVM optimization level for the CPU XLA backend. Valid range is from 0 to 3 where 0 means no optimizations.
+	--xla_cpu_llvm_cl_opts=""        	string	Comma-separated list of command line options to pass to LLVM.
+	--xla_cpu_embed_ir=false         	bool	Embed the LLVM IR module string in the resultant CpuExecutable.
+	--xla_cpu_parallel=false         	bool	Use the multi-threaded CPU backend.
+	--xla_cpu_use_eigen=true         	bool	Use Eigen for matrix multiply on the CPU platform. This is a useful hack for performance comparisons against XLA's implementation.
+	--xla_cpu_multi_thread_eigen=true	bool	When generating calls to Eigen for matmul and conv, should single or multi-threaded eigen be used? Only used when --xla_cpu_use_eigen is true.
+
+Aborted (core dumped)
+root@tfcompile-1266760932-s2dht:/tensorflow#
+
+I've actually been trying this sporadically with different nightly/release builds for the past few weeks, hoping that this would be resolved, but it still does not work, so here is my GH issue ;)

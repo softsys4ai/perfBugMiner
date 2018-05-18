@@ -1,0 +1,143 @@
+first session.Run() when inference too slow on android and mac with c++ api
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Android-armeabi-v7a, macOS
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.4.0 (for building .so file), 1.3.0 (for model train)
+Python version: 3.5.2 (Just used for train)
+Bazel version (if compiling from source):0.8.0
+GCC/Compiler version (if compiling from source): Apple LLVM version 9.0.0
+CUDA/cuDNN version: V8.0.61 (Just used for train)
+GPU model and memory: 11GB (Just used for train)
+Exact command to reproduce:
+
+In a word, after I loaded the model, the cost time of first use session.Run() is longer(4x) than the second use of session.Run() and the third... when coding with C++ API.
+First, I used tensorflow-1.3.0 (python) to define and train a rnn model. Then, I used freeze_graph and transform_graph to make the model files to be one file and shrink the model file size. After setting the <WORKSPACE> by adding the following lines, I build the benchmark tool to test the performance.
+android_sdk_repository(
+    name = "androidsdk",
+    api_level = 23,
+    build_tools_version = "27.0.1",
+    # Replace with path to Android SDK on your system
+    path = "/Users/XXX/Library/Android/sdk/",
+)
+android_ndk_repository(
+    name="androidndk",
+    path="/Users/XXX/Downloads/android-ndk-r12b/",
+    api_level=14)
+
+building benchmark tool like this:
+bazel build -c opt --crosstool_top=//external:android/crosstool --cpu=armeabi-v7a --host_crosstool_top=@bazel_tools//tools/cpp:toolchain --config monolithic tensorflow/tools/benchmark:benchmark_model
+test model performance like this:
+./bechmark_model --graph="frozen_model.pb" --input_layer="Placeholder_data/inputs_placeholder:0,Placeholder_data/length_placeholder:0" --input_layer_shape="1,10:1" --input_layer_type="int32,int32" --input_layer_values="6,13:2" --output_layer="Top_ids/topk:1"
+and the performance on Oneplus3T(android 8.0):
+native : stat_summarizer.cc:468 Timings (microseconds): count=300 first=19337 curr=24105 min=19337 max=39753 avg=26515.4 std=4461
+native : stat_summarizer.cc:468 Memory (bytes): count=300 curr=1382834(all same)
+native : stat_summarizer.cc:468 188 nodes observed
+native : stat_summarizer.cc:468
+
+and then I tried to use C++ API to use this model, some major code as following:
+model load:
+Status RNNInference::InitializeSession(
+    int num_threads, const std::string& graph,
+    std::unique_ptr<Session>* session,
+    std::unique_ptr<GraphDef>* graph_def) {
+  tensorflow::SessionOptions options;
+  tensorflow::ConfigProto& config = options.config;
+ // here num_threads = -1
+  if (num_threads > 0) {
+    config.set_intra_op_parallelism_threads(num_threads); 
+  }
+  LOG(INFO) << " Got config, " << config.device_count_size() << " devices";
+  session->reset(tensorflow::NewSession(options));
+  graph_def->reset(new GraphDef());
+  tensorflow::GraphDef tensorflow_graph;
+
+  Status s = ReadBinaryProto(Env::Default(), graph, graph_def->get());
+  if (!s.ok()) {
+    LOG(ERROR) << "Could not create TensorFlow Graph: " << s;
+    return s;
+  }
+
+  s = (*session)->Create(*(graph_def->get()));
+  if (!s.ok()) {
+    LOG(ERROR) << "Could not create TensorFlow Session: " << s;
+    return s;
+  }
+
+  return Status::OK();
+}
+
+first inference:
+int RNNInference::InitializePredict() {
+  int ram_size = GetRamKB();
+  // 内存限制
+  if (ram_size < MIN_MEMORY_SIZE) {
+    return -1;
+  }
+
+  tensorflow::Status s;
+  const int64 start_time = Env::Default()->NowMicros();
+  s = session_.get()->Run(model_inputs_, {"Top_ids/topk:1"}, {}, {});
+  if (!s.ok()) {
+    // return s;
+    LOG(ERROR) << " rnn_inference -- session error : " << s;
+    return -1;
+  }
+  const int64 end_time = Env::Default()->NowMicros();
+  int64 use_time = end_time - start_time;
+  LOG(INFO) << " rnn_inference -- init session use time is " << use_time;
+
+  // 速度测试 + 限制 1 - 20
+  if (use_time < 1000000) {
+    return ceil(use_time / 50000);
+  }
+
+  // default
+  return 0;
+}
+
+second inference and so on:
+  // Keep output results
+  std::vector<tensorflow::Tensor> output_tensors;
+  // Assign new data to model input
+  int history_count = input_words_index.size();
+  AssignVaulesFromWordHistroy(input_words_index, history_count);
+  tensorflow::Status s;
+  const int64 start_time = Env::Default()->NowMicros();
+  s = session->Run(model_inputs_, {"Top_ids/topk:1"}, {}, &output_tensors);
+  const int64 end_time = Env::Default()->NowMicros();
+  int64 use_time = end_time - start_time;
+  LOG(INFO) << " input inference use " << use_time;
+  if (!s.ok()) {
+    return s;
+  }
+  auto output_matrix = output_tensors[0].matrix<int32>();
+  // dim_size is int64, which is long long
+  // int first_dim = (int)(output_tensors[0].dim_size(0) - 1);
+  int first_dim = history_count - 1;
+  int second_dim = (int)(output_tensors[0].dim_size(1));
+  for(int n = 0; n < second_dim; ++n){
+    // Pass pad and unk
+    if (output_matrix(first_dim, n) > 1) { 
+      // int is equal to int32
+      output_words_index->push_back(output_matrix(first_dim, n));
+    }
+  }
+
+And I build these file or say my app like this and adb push it to my android device:
+bazel build -c opt --copt="-DSELECTIVE_REGISTRATION" --copt="-DSUPPORT_SELECTIVE_REGISTRATION" --crosstool_top=//external:android/crosstool --cpu=armeabi-v7a --host_crosstool_top=@bazel_tools//tools/cpp:toolchain tensorflow/contrib/xxx/myapp:demo
+
+here I used print_selective_registration_header to get ops_to_register .h
+
+Last, I run it on android and test it performance about real application.
+Output:(only show time cost)
+native : inference.cc:126  rnn_inference -- init session use time is 198629 (first)
+native : inference.cc:165  input inference use 53291 (second)
+native : inference.cc:165  input inference use 50341 (third)
+native : inference.cc:165  input inference use 60115 (fourth)
+native : inference.cc:165  input inference use 44707 (fifth)
+
+If you need other information, please let me know!

@@ -1,0 +1,38 @@
+Distributed TF hangs because of "CreateSession still waiting for response from worker...."
+
+UPDATE: The first 2 posts are no longer appropriate to describe the issue. Please jump to my 3rd post.
+Hi,
+I followed the idea of this https://github.com/tensorflow/benchmarks/blob/master/scripts/tf_cnn_benchmarks/benchmark_cnn.py#L1670 to implement a worker sync queue. Everything seemed to work fine except when I increased the size of the dataset or number of workers: all workers hang when they try to evaluate the sync op. Typical example of my code is as follow:
+For each worker:
+    def create_sync_queue_ops(self, op_prefix):
+        """
+        op_prefix: a string that denote where the sync is being used.
+        """
+        #Evenly distribute queues to all ps or workers
+        device_name = "/job:ps/task:{}/cpu:0".format(self.sync_queue_counter % self.num_ps_nodes)
+        self.sync_queue_counter += 1
+        with tf.device(device_name):
+            sync_queues = [tf.FIFOQueue(self.num_worker_nodes, [tf.bool], shapes=[[]], shared_name="{0}_{1}".format(op_prefix,i)) for i in xrange(self.num_worker_nodes)]
+            token = tf.constant(False)
+            queue_ops = []
+            for i, q in enumerate(sync_queues):
+                if i == self.worker_id:
+                    queue_ops.append(tf.no_op())
+                else:
+                    queue_ops.append(q.enqueue(token))
+            #Drain tokens off queue for this worker after enqueuing ops
+            with tf.control_dependencies(queue_ops):
+                wait_ops = sync_queues[self.worker_id].dequeue_many(len(sync_queues)-1)
+            return wait_ops
+
+(some graph definition...)
+sess = tf.Session()
+demo_sync_ops = self.create_sync_queue_ops("demo")
+if self.is_chief_worker: #only execute by worker 0, other workers do nothing
+    sess.run(tf.global_variables_initializer())
+print "finishing message"
+sess.run(demo_sync_ops)
+
+I could occasionally see all workers hang after printing the "finishing message".
+My observation so far is that this only happened when dataset is huge or number of worker is big. e.g. 10+TB dataset with 300-500 workers.
+I haven't been able to see why this occurred, not sure if it is a TF issue or some network bottleneck that I was not aware of. Any help would be much appreciated!

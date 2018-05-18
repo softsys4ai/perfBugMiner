@@ -1,0 +1,43 @@
+OpKernel not registered, despite being listed in OpRegistry
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):macOS High Sierra 10.13.3
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.7.0
+Python version: 2.7.14
+Bazel version (if compiling from source): 0.12.0-homebrew
+GCC/Compiler version (if compiling from source): Xcode 9.3: Apple LLVM version 9.1.0 (clang-902.0.39.1)
+CUDA/cuDNN version: n/a
+GPU model and memory: n/a
+Exact command to reproduce: tensorflow/contrib/makefile/build_all_ios.sh -g /path/to/model.p
+
+Describe the problem
+I have a ListDiff op in my model; as such, the generated ops_to_register file includes the following bits (edited way down to fit nicely):
+constexpr inline bool ShouldRegisterOp(const char op[]) {
+  return false
+     || isequal(op, "ListDiff")
+  ;
+}
+constexpr const char* kNecessaryOpKernelClasses[] = {
+  "ListDiffOp<::tensorflow::int32, int32>",
+};
+However, when I try to load the model, it gives:
+Error adding graph to session: No OpKernel was registered to support Op 'ListDiff' with these attrs.  Registered devices: [CPU], Registered kernels:
+  <no registered kernels>
+
+	 [[Node: rgb_to_grayscale/Tensordot/ListDiff = ListDiff[T=DT_INT32, out_idx=DT_INT32](rgb_to_grayscale/Tensordot/range, rgb_to_grayscale/Tensordot/add_1)]]
+
+If I print the full list of registered ops via tensorflow::OpRegistry::Global()->DebugString(false), the line for ListDiff is (line breaks added for readability):
+Op<
+    name=ListDiff; 
+    signature=x:T, y:T -> out:T, idx:out_idx; 
+    attr=T:type; 
+    attr=out_idx:type,default=DT_INT32,allowed=[DT_INT32, DT_INT64]
+>
+
+The only thing I can think of here is that T:type has no allowable values (I would expect to see DT_INT32 given my ops_to_register.h file). However in a working build before I added ListDiff,  I had a few ops that has no listed allowable values (Reshape and Squeeze, in this case). I've read through the code that registers the ListDiff op and couldn't find anything out of the ordinary, but I'm a fairly novice Tensorflower.
+Possibly related to #15732?
+Source code / logs
+N/A

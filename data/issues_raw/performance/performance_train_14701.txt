@@ -1,0 +1,138 @@
+startup time (_make_train_function()) very slow on Tesla V100-SXM2-16GB GPU, compared to less powerful GPU
+
+cross posted on keras: fchollet/keras#8537
+Running mnist_cnn.py (slightly modified - mainly adding logging) from tensorflow 1.4
+running was done using a prebuilt docker image: tensorflow/tensorflow:1.4.0-gpu-py3
+on a p2.xlarge aws machine (that has a Tesla K80 GPU) performance is good, the 1st batch (which is dominated by the call to _make_train_function) takes about 2 seconds: (see time stamp for begin batch and end batch)
+2017-11-19 08:26:26,172 : INFO : fit
+
+2017-11-19 08:26:26,637 : INFO : begin batch
+2017-11-19 08:26:26.638409: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2017-11-19 08:26:26.760940: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:892] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-11-19 08:26:26.761478: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Found device 0 with properties:
+name: Tesla K80 major: 3 minor: 7 memoryClockRate(GHz): 0.8235
+pciBusID: 0000:00:1e.0
+totalMemory: 11.17GiB freeMemory: 11.11GiB
+2017-11-19 08:26:26.761506: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:00:1e.0, compute capability: 3.7)
+
+2017-11-19 08:26:28,135 : INFO : end batch
+x_train shape: (60000, 28, 28, 1)
+60000 train samples
+10000 test samples
+Train on 60000 samples, validate on 10000 samples
+Epoch 1/1
+60000/60000 [==============================] - 12s - loss: 0.3526 - acc: 0.8920 - val_loss: 0.0818 - val_acc: 0.9755
+Test loss: 0.081773182778
+Test accuracy: 0.9755
+
+on a p3.2xlarge machine (with a Tesla V100-SXM2-16GB GPU) the same part takes about 10 minutes
+2017-11-19 08:26:44,120 : INFO : fit
+
+2017-11-19 08:26:44,715 : INFO : begin batch
+2017-11-19 08:26:44.716680: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2017-11-19 08:26:46.108295: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:892] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-11-19 08:26:46.108775: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Found device 0 with properties:
+name: Tesla V100-SXM2-16GB major: 7 minor: 0 memoryClockRate(GHz): 1.53
+pciBusID: 0000:00:1e.0
+totalMemory: 15.77GiB freeMemory: 15.36GiB
+2017-11-19 08:26:46.108815: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla V100-SXM2-16GB, pci bus id: 0000:00:1e.0, compute capability: 7.0)
+
+2017-11-19 08:36:16,552 : INFO : end batch
+x_train shape: (60000, 28, 28, 1)
+60000 train samples
+10000 test samples
+Train on 60000 samples, validate on 10000 samples
+Epoch 1/1
+60000/60000 [==============================] - 576s - loss: 0.3418 - acc: 0.8949 - val_loss: 0.0769 - val_acc: 0.9772
+Test loss: 0.0769035610346
+Test accuracy: 0.9772
+
+the code that was used:
+#!/usr/bin/env python
+'''Trains a simple convnet on the MNIST dataset.
+
+Gets to 99.25% test accuracy after 12 epochs
+(there is still a lot of margin for parameter tuning).
+16 seconds per epoch on a GRID K520 GPU.
+'''
+
+from __future__ import print_function
+import cProfile
+import os
+from tensorflow.contrib import keras
+from tensorflow.contrib.keras import backend as K
+import logging
+
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='\n%(asctime)s : %(levelname)s : %(message)s')
+
+class callback(keras.callbacks.Callback):
+    def on_batch_begin(self, batch, logs=None):
+      if batch <= 1:
+            logger.info('begin batch')
+
+class callback(keras.callbacks.Callback):
+    def on_batch_end(self, batch, logs=None):
+        if batch <= 1:
+            logger.info('end batch')
+
+batch_size = 128
+num_classes = 10
+epochs = 1
+
+# input image dimensions
+img_rows, img_cols = 28, 28
+
+# the data, shuffled and split between train and test sets
+(x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()
+
+if K.image_data_format() == 'channels_first':
+    x_train = x_train.reshape(x_train.shape[0], 1, img_rows, img_cols)
+    x_test = x_test.reshape(x_test.shape[0], 1, img_rows, img_cols)
+    input_shape = (1, img_rows, img_cols)
+else:
+    x_train = x_train.reshape(x_train.shape[0], img_rows, img_cols, 1)
+    x_test = x_test.reshape(x_test.shape[0], img_rows, img_cols, 1)
+    input_shape = (img_rows, img_cols, 1)
+
+x_train = x_train.astype('float32')
+x_test = x_test.astype('float32')
+x_train /= 255
+x_test /= 255
+print('x_train shape:', x_train.shape)
+print(x_train.shape[0], 'train samples')
+print(x_test.shape[0], 'test samples')
+
+# convert class vectors to binary class matrices
+y_train = keras.utils.to_categorical(y_train, num_classes)
+y_test = keras.utils.to_categorical(y_test, num_classes)
+
+model = keras.models.Sequential()
+model.add(keras.layers.Conv2D(32, kernel_size=(3, 3),
+                 activation='relu',
+                 input_shape=input_shape))
+model.add(keras.layers.Conv2D(64, (3, 3), activation='relu'))
+model.add(keras.layers.MaxPooling2D(pool_size=(2, 2)))
+model.add(keras.layers.Dropout(0.25))
+model.add(keras.layers.Flatten())
+model.add(keras.layers.Dense(128, activation='relu'))
+model.add(keras.layers.Dropout(0.5))
+model.add(keras.layers.Dense(num_classes, activation='softmax'))
+
+model.compile(loss=keras.losses.categorical_crossentropy,
+              optimizer=keras.optimizers.Adadelta(),
+              metrics=['accuracy'])
+profiler = cProfile.Profile()
+profiler.enable()
+logger.info('fit')
+model.fit(x_train, y_train,
+          batch_size=batch_size,
+          epochs=epochs,
+          verbose=1,
+          validation_data=(x_test, y_test), callbacks=[callback()])
+profiler.dump_stats(os.path.expanduser('~/profiler.pstats'))
+score = model.evaluate(x_test, y_test, verbose=0)
+
+print('Test loss:', score[0])
+print('Test accuracy:', score[1])

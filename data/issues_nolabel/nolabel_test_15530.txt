@@ -1,0 +1,222 @@
+Bug?: reading from Google Cloud Storage appears to be accessing cached version
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version: 3.6
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: observed on CPU & GPU.
+GPU model and memory: observed on CPU & GPU.
+Exact command to reproduce: See below.
+
+Describe the problem
+How this arose:
+We are trying to set up a basic distributed TF version, where we have separate pods (on Kubernetes) doing validation and training (a simple version, with 1 of each).  GCS is used as the backend to store model output (checkpoints, etc.).
+The validation pod periodically (via Experiment’s continuous_eval 
+  
+    
+      tensorflow/tensorflow/contrib/learn/python/learn/experiment.py
+    
+    
+         Line 564
+      in
+      f5f2f78
+    
+    
+    
+    
+
+        
+          
+           def continuous_eval(self, 
+        
+    
+  
+
+) periodically polls for new checkpoints to evaluate (
+  
+    
+      tensorflow/tensorflow/contrib/learn/python/learn/experiment.py
+    
+    
+         Line 517
+      in
+      f5f2f78
+    
+    
+    
+    
+
+        
+          
+           latest_path = saver.latest_checkpoint(self._estimator.model_dir) 
+        
+    
+  
+
+).
+If it doesn’t find a new checkpoint, it (per the underlying code) echoes out “No new checkpoint ready for evaluation” and continues to wait for a new one.
+In practice, we found that, even as the training pod produces new checkpoints, the validation pod never picks up a new checkpoint, beyond the first one.  I.e., it collects an initial checkpoint, does evaluation, and then, in all future cycles, echoes out "No new checkpoint ready for evaluation".
+In debugging, we found that the checkpoint file the saver tries to load up is always found to be some earlier iteration of the file (
+  
+    
+      tensorflow/tensorflow/python/training/saver.py
+    
+    
+         Line 1005
+      in
+      f5f2f78
+    
+    
+    
+    
+
+        
+          
+           file_content = file_io.read_file_to_string( 
+        
+    
+  
+
+) -- i.e., it seems like the GCS file loader reads the file once, and, from then on out, is continuous accessing a cached version of the data.
+Digging into the code further, this appears to be an issue with how the file reader (file_io.read_file_to_string(...) and downstream methods) loads GCS files.  We were able to replicate this behavior separately, below.
+Help appreciated!
+
+Is this intended behavior?  Is there, e.g., some sort of GCS setting we have incorrectly set?
+Assuming we're seeing something real, is there any suggested remediation here, with regards to our validation behavior?  Our next step is going to be to try monkey-patching some of the tf functions to just pull the GCS file local to disk and read it from there...although this is of course not preferred.
+
+As a side note, Experiment does have a number of references to special handling around using GCS as the backend, although I don't have enough context to say if this is relevant to what we are seeing or not (
+  
+    
+      tensorflow/tensorflow/contrib/learn/python/learn/experiment.py
+    
+    
+         Line 94
+      in
+      f5f2f78
+    
+    
+    
+    
+
+        
+          
+           # searches on GCS. 
+        
+    
+  
+
+, 
+  
+    
+      tensorflow/tensorflow/contrib/learn/python/learn/experiment.py
+    
+    
+         Line 269
+      in
+      f5f2f78
+    
+    
+    
+    
+
+        
+          
+           # fixed holistically later (b/36498507). 
+        
+    
+  
+
+).
+Source code / logs
+Below is a pair of scripts that will replicate this issue.  Run the “Basic Reader” (using the same loading interface from get_checkpoint_state) and the “Basic Writer” simultaneously, and the reader will initially catch whatever is in the file, and then never update, even as the writer continues to write.
+Other things we tried:
+
+Changing the read/write path to local disk, instead of GCS.  This, unsurprisingly, worked.
+A version of a reader with a context manager (below), to try to reset the reader each loop, and an explicit file.close() (not shown).  Both had the same behavior, i.e., new reads didn't provide the updated file.
+Writing from the same file (process) that we read from: probably unsurprisingly, this does work; i.e., the writing activity either updates the local cache or otherwise convinces the reader to grab a fresh copy from GCS (we didn’t actually test which this might be).
+
+Basic Reader:
+#!/usr/bin/env python
+
+from tensorflow.python.lib.io import file_io
+import time
+import os
+
+file='gs://[MYPATH]'
+
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = '/usr/src/app/gcloud/keys/google-auth.json'
+
+def read():
+    counter=0
+    while counter<15:
+        print("reading...")
+        print("Contents:")
+        print(file_io.read_file_to_string(file))
+        print("")
+        print("Sleeping for a second...")
+        time.sleep(3)
+        print("")
+        print("")
+        print("")
+        counter +=1
+
+read()
+Basic writer
+#!/usr/bin/env python
+
+from tensorflow.python.lib.io import file_io
+import time
+import os
+
+file='gs://[MYPATH]'
+
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = '/usr/src/app/gcloud/keys/google-auth.json'
+
+def write():
+    counter=0
+    while counter<15:
+        with file_io.FileIO(file, mode='w') as f:
+            f.write(str(counter))
+        print("Wrote {}".format(counter))
+        print("")
+        print("Sleeping for a second...")
+        time.sleep(3)
+        print("")
+        print("")
+        print("")
+        counter +=1
+
+write()
+Reader with context manager
+#!/usr/bin/env python
+
+from tensorflow.python.lib.io import file_io
+
+import time
+import os
+
+file='gs://[MYPATH]'
+
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = '/usr/src/app/gcloud/keys/google-auth.json'
+
+def read():
+    counter=0
+    while counter<15:
+        print("reading...")
+        print("Contents:")
+        with file_io.FileIO(file, mode='r') as f:
+           print(f.read())
+        print("")
+        print("Sleeping for a second...")
+        time.sleep(3)
+        print("")
+        print("")
+        print("")
+        counter +=1
+
+read()

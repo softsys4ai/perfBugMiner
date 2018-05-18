@@ -1,0 +1,61 @@
+Convert magenta/image_stylization model on Android, but doesn't work
+
+I try TF Stylize on Android and it works perfectly.  Also I find the training code of this image stylization model. Its name is magenta/image_stylization and provides two pre-trained models: Monet and Varied. The first one had 10 styles and second has 32.
+So my idea it to use them to replace image stylization model.
+Here is what I did.
+1 Save *.ckpt model to *.pb
+Save graph
+import tensorflow as tf
+import model
+import ops
+
+num_styles = 10
+imgWidth = 216
+imgHeight = 216
+channel = 3
+checkpoint = "models/multistyle-pastiche-generator-monet.ckpt"
+
+inputImage = tf.placeholder(tf.float32,shape=[None,imgWidth,imgHeight,channel],name="input")
+styles = tf.placeholder(tf.float32,shape=[num_styles],name="style_num")
+
+with tf.name_scope(""):
+    transform = model.transform(inputImage,
+                            normalizer_fn=ops.weighted_instance_norm,
+                            normalizer_params={
+                                # 'weights': tf.constant(mixture),
+                                'weights' : styles,
+                                'num_categories': num_styles,
+                                'center': True,
+                                'scale': True})
+
+model_saver = tf.train.Saver(tf.global_variables())
+
+with tf.Session() as sess:
+    tf.train.write_graph(sess.graph_def, "models/", "input.pb")
+
+Freeze Graph
+bazel-bin/tensorflow/python/tools/freeze_graph \
+ --input_graph=input.pb --input_checkpoint=multistyle-pastiche-generator-monet.ckpt \
+ --output_node_names=transformer/expand/conv3/conv/Sigmoid --input_binary=False \
+ --output_graph=frozen.pb
+
+Inference
+bazel-bin/tensorflow/python/tools/optimize_for_inference \
+--input=frozen.pb --output=inference.pb \
+--input_names=input --output_names=transformer/expand/conv3/conv/Sigmoid \
+--frozen_graph=True
+
+Quantize
+bazel-bin/tensorflow/tools/quantization/quantize_graph \
+--input=inference.pb \
+--output=quantize_graph.pb \
+--output_node_names=transformer/expand/conv3/conv/Sigmoid  \
+--mode=weights_rounded
+
+2 Replace model with quantize_graph.pb
+Then I got an issue.
+I can see there are 10 styles and they display on the screen :
+
+However, the image is not transformed.  There's no style on the image. It's the just original image.
+TF version is 1.1.0. Android is 6.0.1
+Anyone met the same issue or anyone knew how exactly to convert these two models  and use on mobile?

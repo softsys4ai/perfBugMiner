@@ -1,0 +1,121 @@
+Tensorflow built from sources in Docker doesn't recognize GPUs
+
+I need to build TensorFlow from sources in a Dockerfile (because of our architecture's constraints). Unfortunately, TensorFlow does not recognize the gpus.
+I use a Tesla K80, with Nvidia driver's version 367.55
+Here is the DockerFile related to Tensorflow:
+#####       BAZEL        #####
+RUN apt-get update \
+&& apt-get install -y software-properties-common curl
+RUN apt-get update
+RUN echo oracle-java8-installer shared/accepted-oracle-license-v1-1 select true | debconf-set-selections
+
+RUN add-apt-repository ppa:webupd8team/java 
+RUN apt-get update 
+RUN apt-get install -y oracle-java8-installer
+
+RUN echo "deb [arch=amd64] http://storage.googleapis.com/bazel-apt stable jdk1.8" | tee /etc/apt/sources.list.d/bazel.list
+RUN curl https://storage.googleapis.com/bazel-apt/doc/apt-key.pub.gpg | apt-key add - 
+RUN apt-get update
+RUN apt-get install --yes --force-yes bazel
+RUN apt-get upgrade -y --force-yes bazel
+RUN apt-get install -y swig
+
+#####       TENSORFLOW        #####
+WORKDIR /Programs
+RUN git clone https://github.com/tensorflow/tensorflow.git
+WORKDIR /Programs/tensorflow
+
+ENV PYTHON_BIN_PATH /usr/bin/python3.5
+ENV TF_NEED_GCP 0
+ENV TF_NEED_HDFS 1
+ENV TF_NEED_CUDA 1
+ENV TF_NEED_OPENCL 0
+ENV TF_CUDNN_VERSION 5
+ENV TF_CUDA_VERSION 8.0
+ENV TF_CUDA_COMPUTE_CAPABILITIES 3.7
+ENV GCC_HOST_COMPILER_PATH /usr/bin/gcc
+ENV CUDA_TOOLKIT_PATH /usr/local/cuda
+ENV CUDNN_INSTALL_PATH /usr/local/cuda
+
+RUN echo /usr/local/lib/python3.5/dist-packages | ./configure && \
+    bazel build -c opt --config=cuda tensorflow/tools/pip_package:build_pip_package
+RUN bazel-bin/tensorflow/tools/pip_package/build_pip_package /tmp/tensorflow_pkg
+
+RUN pip3 install /tmp/tensorflow_pkg/*.whl --upgrade
+
+I run the docker like this :
+docker run -it --device /dev/nvidiactl --device /dev/nvidia-uvm --device /dev/nvidia0 --device /dev/nvidia1 tensorflow bash
+
+When I am in the Docker, I run this little script to see if it sees gpu's work:
+import tensorflow as tf
+if __name__ == "__main__":
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.8)
+    sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+    print("Tf version :",tf.__version__)
+
+What it prints :
+root@fae4ae4d9fee:/home# CUDA_VISIBLE_DEVICES=0 python3 gpu.py 
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so.8.0 locally
+E tensorflow/stream_executor/cuda/cuda_driver.cc:509] failed call to cuInit: CUDA_ERROR_UNKNOWN
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:158] retrieving CUDA diagnostic information for host: fae4ae4d9fee
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:165] hostname: fae4ae4d9fee
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:189] libcuda reported version is: 367.55.0
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:363] driver version file contents: """NVRM version: NVIDIA UNIX x86_64 Kernel Module  367.55  Tue Sep 27 10:17:05 PDT 2016
+GCC version:  gcc version 4.9.2 (Debian 4.9.2-10) 
+"""
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:193] kernel reported version is: 367.55.0
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:300] kernel version seems to match DSO: 367.55.0
+Tf version : 0.11.0rc2
+
+Note that I obtain the same output when I run this script without the CUDA_VISIBLE_DEVICES=0 flag
+output of ls -l /path/to/cuda/lib/libcud*
+root@fae4ae4d9fee:/home# ls -l /usr/local/cuda/lib64/libcud*
+-rw-r--r-- 1 root root    558720 Nov 15 11:29 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root        16 Nov 15 11:29 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root        19 Nov 15 11:29 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rwxr-xr-x 1 root root    415432 Nov 15 11:29 /usr/local/cuda/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root    775162 Nov 15 11:29 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 1000 users       13 Jul 27 05:55 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 1000 users       17 Jul 27 05:55 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+-rwxrwxr-x 1 1000 users 79337624 Jul 27 05:53 /usr/local/cuda/lib64/libcudnn.so.5.1.5
+-rw-rw-r-- 1 1000 users 69756172 Jul 27 05:53 /usr/local/cuda/lib64/libcudnn_static.a
+
+The commit hash (git rev-parse HEAD):
+de6bbda2353b50944bd06d5b04c86f8c0a62792a
+The output of bazel version:
+root@fae4ae4d9fee:/Programs/tensorflow# bazel version
+.
+Build label: 0.4.0
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Nov 2 17:54:14 2016 (1478109254)
+Build timestamp: 1478109254
+Build timestamp as int: 1478109254
+
+Note that the nvidia drivers in the Docker are very aware of the GPU's:
+root@fae4ae4d9fee:~# nvidia-smi
+Wed Nov 16 13:33:16 2016       
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 367.55                 Driver Version: 367.55                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  Tesla K80           Off  | 0000:83:00.0     Off |                    0 |
+| N/A   36C    P0    60W / 149W |      0MiB / 11439MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   1  Tesla K80           Off  | 0000:84:00.0     Off |                    0 |
+| N/A   27C    P0    74W / 149W |      0MiB / 11439MiB |     98%      Default |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+
+I am not very familiar with Docker, so maybe am I doing something wrong in the Dockerfile. Thank's to anyone who could help me with this !

@@ -1,0 +1,27 @@
+Memory leak in conv2d()
+
+System information
+Python: 3.5.2
+TensorFlow version 1.3.0 via pip, 1.3.1 via source, 1.4.0-rc1 from source (confirmed the problem on all three of them)
+Bazel: 0.7.0
+Ubuntu 16.04
+GPU: GeForce GTX 1080 with 8GB
+Nvidia drivers: 384.90
+CUDA: 8.0
+CuDNN: 6.0
+Optimizer: Adam with default parameters
+Problem Description
+I will post here some evidence that makes me think that there's a major leak in conv_2d().
+Unfortunately I can't provide code and data replicate this as my employer doesn't allow me to as both are confidential, but hopefully the information i will provide will make it possible for you to replicate it.
+The setting:
+I'm training a word cnn on text data on GPU. The length of the sequence of text is 256, the dimension of the embeddings is 256, I have 4 convolutional layers in parallel with different sizes (2, 3, 4 and 5 x 256). The inputs to the conv layers are batch_size x 256 x 256 x 1.
+In my code I run a full epoch of training, then I evaluate on the training set, the validation set and the test set, then I start a new epoch.
+The problem:
+Depending on the batch_size the memory needed by TensorFlow to compute his operations changes, but it is in the order of few hundreds MB. At the last batch of training, the memory consumption increases dramatically, as happens at the last batch of evaluation on validation set and the last batch of evaluation on the test set.
+As _traini_set_size mod batch_size is not 0 (the same happens for validation and test set too), the last batch has a different dimension with respect to all others batches. For instance in my case with a batch_size of 100, the last batch of the validation set is of size 25.
+What happens is that, in the conv2d() function TF allocates a lot of memory if the batch size is not the same that was used so far. In my case, that operation goes from needing 50 MB to 3.18 GB. As it seems too much, I suspect there's a memory leak somehow.
+I'm attaching 2 screenshots taken from TensorBoard. What they show is the same node in the second last batch of the validation set and the last batch of the validation set. The memory consumption is in the node state on the right of the image. I can share the log directory if needed as it contains the graph of the model and the memory information at all steps of training and evaluation.
+
+
+The weird thing is that when batch_size is 256 or 512 it doesn't happen, but with batch_size 100 or 128 or 200 (the other 3 I tested) it happens. testing on another bigger dataset, even with 256 as the batch size the supposed memory leak happens, but in that case TF tries to allocate around 33 GB of ram and goes out of memory. My temporary workaround is just throwing away the last batch of the train, validation and test set. Doing so the memory consumption keeps constant.
+Hopefully this is enough information for investigate the problem, otherwise feel free to request me additional information, even if, as I said, unfortunately I can't provide code and data.

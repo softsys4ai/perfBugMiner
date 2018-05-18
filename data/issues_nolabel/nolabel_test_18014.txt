@@ -1,0 +1,126 @@
+Creating a Dataset within a while_loop does not work
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug, a feature request, or a significant problem with documentation (for small docs fixes please send a PR instead).
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+
+yes
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+
+Linux Ubuntu 16.04
+
+TensorFlow installed from (source or binary):
+
+binary
+
+TensorFlow version (use command below):
+
+$ python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+('v1.7.0-rc0-12-g98c955ee73', '1.7.0-rc1')
+
+Python version:
+
+$ python --version
+Python 2.7.12
+
+Bazel version (if compiling from source):
+
+N/A
+
+GCC/Compiler version (if compiling from source):
+
+N/A
+
+CUDA/cuDNN version:
+
+CUDA 9.1, cuDNN 7.1
+
+GPU model and memory:
+
+2018-03-27 14:21:38.224538: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1344] Found device 0 with properties: 
+name: GeForce GTX 960M major: 5 minor: 0 memoryClockRate(GHz): 1.176
+
+Exact command to reproduce:
+
+import tensorflow as tf
+
+with tf.Graph().as_default() as graph:
+    zero = tf.constant(0, dtype=tf.int64)
+    ten = tf.constant(10, dtype=tf.int64)
+    one = tf.constant(1, dtype=tf.int64)
+
+    def condition(i, n):
+        return tf.less(i, ten)
+
+    def body(i, n):
+        value = ten + i
+        ds = tf.data.Dataset.from_tensors(value)
+        it = ds.make_one_shot_iterator()
+
+        return i + one, n + it.get_next()
+
+    loop = tf.while_loop(condition, body, [zero,  zero])
+
+    global_init_op = tf.global_variables_initializer()
+
+with tf.Session(graph=graph) as S:
+    S.run(global_init_op)
+    print S.run(loop)
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+The above example is trivial, but I would expect a new Dataset and Iterator to be created within each iteration of the while_loop. Instead it seems that only a single instance of the  Dataset/Iterator is created resulting in an OutOfRange error (see log in next section)
+Source code / logs
+Traceback (most recent call last):
+  File "test_tf_dataset_in_graph.py", line 24, in <module>
+    print S.run(loop)
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 905, in run
+    run_metadata_ptr)
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1140, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1321, in _do_run
+    run_metadata)
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1340, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.OutOfRangeError: End of sequence
+	 [[Node: while/IteratorGetNext = IteratorGetNext[output_shapes=[[]], output_types=[DT_INT64], _device="/job:localhost/replica:0/task:0/device:CPU:0"](while/OneShotIterator)]]
+	 [[Node: while/IteratorGetNext/_17 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device_incarnation=1, tensor_name="edge_23_while/IteratorGetNext", tensor_type=DT_INT64, _device="/job:localhost/replica:0/task:0/device:GPU:0"](^_cloopwhile/add_2/_6)]]
+
+Caused by op u'while/IteratorGetNext', defined at:
+  File "test_tf_dataset_in_graph.py", line 18, in <module>
+    loop = tf.while_loop(condition, body, [zero,  zero])
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 3202, in while_loop
+    result = loop_context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2940, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2877, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "test_tf_dataset_in_graph.py", line 16, in body
+    return i + one, n + it.get_next()
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/data/ops/iterator_ops.py", line 366, in get_next
+    name=name)), self._output_types,
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/ops/gen_dataset_ops.py", line 1455, in iterator_get_next
+    output_shapes=output_shapes, name=name)
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 3290, in create_op
+    op_def=op_def)
+  File "/home/sperkins/venv/mb/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1654, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+OutOfRangeError (see above for traceback): End of sequence
+	 [[Node: while/IteratorGetNext = IteratorGetNext[output_shapes=[[]], output_types=[DT_INT64], _device="/job:localhost/replica:0/task:0/device:CPU:0"](while/OneShotIterator)]]
+	 [[Node: while/IteratorGetNext/_17 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device_incarnation=1, tensor_name="edge_23_while/IteratorGetNext", tensor_type=DT_INT64, _device="/job:localhost/replica:0/task:0/device:GPU:0"](^_cloopwhile/add_2/_6)]]

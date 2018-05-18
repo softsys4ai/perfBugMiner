@@ -1,0 +1,48 @@
+How to get RunMetadata for tf.data.Dataset ops?
+
+Tensorflow version: 1.5 (pip)
+I am interested in the runtime of ops when using the tf.data.Dataset api.
+Information like how long shuffle, repeat or batch took.
+When running the code below and visualizing it in tensoboard the intersting ops are marked as "unused substructure".
+Is my approach the right one?
+I find it a little confusing that they show up, but are not traceable.
+Example code
+import numpy as np
+import tensorflow as tf
+
+tf.set_random_seed(0)
+
+data = np.array([[10] * 10] * 3 + [[4] * 10]).astype(np.float32)
+
+with tf.Graph().as_default():
+  dataset = tf.data.Dataset.from_tensor_slices(data)
+  sess = tf.Session()
+
+  dataset = dataset.cache()
+  dataset = dataset.shuffle(10, seed=0)
+  dataset = dataset.repeat(5)
+  dataset = dataset.batch(2)
+
+  iterator = tf.data.Iterator.from_structure(
+      output_types=tf.float32)
+  batch = iterator.get_next()
+
+  init1 = iterator.make_initializer(dataset)
+
+  sess.run(init1)
+
+  writer = tf.summary.FileWriter('tmp/datasettest/', sess.graph)
+  run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+
+  i = 0
+  while True:
+    try:
+      run_metadata = tf.RunMetadata()
+      sess.run(batch, options=run_options, run_metadata=run_metadata)
+      writer.add_run_metadata(run_metadata, 'step{}'.format(i))
+      i += 1
+    except tf.errors.OutOfRangeError as ex:
+      break
+    except Exception as ex:
+      raise ex
+This will result in the following visualization in Tensorboard.

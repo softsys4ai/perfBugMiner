@@ -1,0 +1,79 @@
+Memory leak when writing to Logfile with Tensorboard summarywriter
+
+Issue:
+Memory occupied after call to Filewriter not being freed till python termination. This causes accumulation of data and subsequent filling up of RAM which is freed only when the entire script completes execution and python is terminated.
+Environment info
+Operating System: Ubuntu 16.04
+CUDA/cuDNN : Not installed
+Link to the pip package you : https://github.com/tensorflow/tensorflow/releases/tag/v1.0.0
+Tensorflow version: 1.0.0
+A small script replicating the issue
+import os
+import numpy as np
+import tensorflow as tf
+from memory_profiler import profile
+import time
+
+@profile
+def _write_into_log(images):
+    path_logdir = os.path.join("./MiniExample")
+    if not os.path.exists(path_logdir):
+        os.makedirs(path_logdir)
+
+    with tf.Graph().as_default() as g:
+        image = tf.placeholder(tf.float32, shape = [None, None, None, 3])
+
+        image_summary = tf.summary.image(name = "Images", tensor = image, max_outputs = 2000)
+
+        with tf.Session() as sess:
+            summary = sess.run(image_summary, feed_dict = {image : np.concatenate(images, axis = 0)})
+            file_writer = tf.summary.FileWriter(path_logdir, g)
+            file_writer.add_summary(summary)
+            file_writer.close()
+
+@profile
+def main():
+    out = [np.random.random((1, 224, 224, 3)) for i in range(2000)]
+    _write_into_log(out)
+    out = None
+    time.sleep(10)
+
+main()
+
+Logs or other output that would be helpful
+Python memory profiler output
+$ python test.py 
+Filename: test.py
+
+Line #    Mem usage    Increment   Line Contents
+================================================
+     7   2394.5 MiB      0.0 MiB   @profile
+     8                             def _write_into_log(images):
+     9   2394.5 MiB      0.0 MiB       path_logdir = os.path.join("./MiniExample")
+    10   2394.5 MiB      0.0 MiB       if not os.path.exists(path_logdir):
+    11                                     os.makedirs(path_logdir)
+    12                             
+    13   2394.6 MiB      0.0 MiB       with tf.Graph().as_default() as g:
+    14   2399.0 MiB      4.4 MiB           image = tf.placeholder(tf.float32, shape = [None, None, None, 3])
+    15                             
+    16   2399.1 MiB      0.1 MiB           image_summary = tf.summary.image(name = "Images", tensor = image, max_outputs = 2000)
+    17                             
+    18   2407.9 MiB      8.9 MiB           with tf.Session() as sess:
+    19   2978.8 MiB    570.9 MiB               summary = sess.run(image_summary, feed_dict = {image : np.concatenate(images, axis = 0)})
+    20   2980.8 MiB      2.0 MiB               file_writer = tf.summary.FileWriter(path_logdir, g)
+    21   3269.7 MiB    288.9 MiB             file_writer.add_summary(summary)
+    22   3269.7 MiB      0.0 MiB               file_writer.close()
+
+
+Filename: test.py
+
+Line #    Mem usage    Increment   Line Contents
+================================================
+    24     89.6 MiB      0.0 MiB   @profile
+    25                             def main():
+    26   2394.5 MiB   2304.9 MiB       out = [np.random.random((1, 224, 224, 3)) for i in range(2000)]
+    27   2981.4 MiB    586.8 MiB       _write_into_log(out)
+    28    676.7 MiB  -2304.7 MiB       out = None
+    29    676.7 MiB      0.0 MiB       time.sleep(10)
+
+As can be seen above, the additional 586.8 MB occupied after call to the _write_into_log is never cleared.

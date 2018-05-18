@@ -1,0 +1,49 @@
+get_shape() does not work for output of tf.image.resize_nearest_neighbor()
+
+Hello everyone,
+Following the issue  #7932, I have also noticed that get_shape() does not work when using
+tf.image.resize_nearest_neighbor().
+I use linux 16.06 and TF in [1.3.0, 1.3.1, 1.4.0-dev20171008] and I have the same error.
+The error is quite easy to understand. The fact that tf.image.resize_nearest_neighbor is unable to compute correctly get_shape leads to some problematic behavior.
+import numpy as np
+import tensorflow as tf
+
+x = tf.placeholder(tf.float32, [None, 32, 32, 1])
+
+print("x_shape:", x.get_shape()) # x_shape: (?, 32, 32, 1)
+
+input_shape = tf.shape(x)[1:3]
+newsize     = tf.multiply(input_shape, (2, 2)) # gives (64, 64)
+
+####################
+
+resized_data = tf.image.resize_nearest_neighbor(
+    images        = x,
+    size          = newsize,
+    align_corners = None,
+    name          = None
+)
+print("resized_data:", resized_data.get_shape()) # resized_data: (?, ?, ?, 1)
+
+#################### NOW THE PROBLEMATIC #################
+
+flatten_tensor = tf.contrib.layers.flatten(inputs = resized_data)
+print("flatten_tensor:", flatten_tensor.get_shape()) # resized_data: (?, ?)
+
+failing_layer = tf.contrib.layers.fully_connected(
+    inputs        = flatten_tensor,
+    num_outputs   = 1,
+    activation_fn = None
+)
+
+##############################################
+############# LAUNCH THE SESSION #############
+##############################################
+
+with tf.Session() as sess:
+    rslt = sess.run(resized_data, feed_dict={x: np.ones((666, 32, 32,1))})
+    print("Rslt Shape:", rslt.shape)
+    
+    failing_layer = sess.run(failing_layer, feed_dict={x: np.ones((666, 32, 32,1))})
+    print("failing_layer Shape:", failing_layer.shape)
+For information, it is absolutely to launch the session with the FC layer in the script, it completely fails.

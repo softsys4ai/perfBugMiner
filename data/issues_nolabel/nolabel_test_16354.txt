@@ -1,0 +1,77 @@
+Dataset map func shape inference
+
+System information
+tf.VERSION = 1.4.1
+tf.GIT_VERSION = v1.4.0-19-ga52c8d9
+tf.COMPILER_VERSION = v1.4.0-19-ga52c8d9
+Sanity check: array([1], dtype=int32)
+
+Describe the problem
+I use dataset api to build  input_fn  in train and evaluate process， the input_fn is as follows
+def input_fn(data_dir, num_epochs, shuffle, batch_size):
+  """Generate an input function for the Estimator."""
+  data_files = tf.gfile.Glob(data_dir)
+  assert len(data_files), ('%s has no files!' % data_files) 
+  
+  def parse_line(value):
+    columns = module_decode_file.decode_file(value, 
+            record_defaults=_COLUMN_DEFAULTS,
+            output_size=_COLUMN_SIZESt,
+            field_outer_delim=',',
+            field_inner_delim='%')
+    features = dict(zip(_COLUMN_NAMES, columns))
+    labels = features.pop('label')
+    return features, labels
+
+  # Extract lines from input files using the Dataset API.
+  dataset = tf.data.TextLineDataset(data_files)
+  if shuffle:
+    dataset = dataset.shuffle(buffer_size=batch_size*3)
+  dataset = dataset.map(parse_line, num_parallel_calls=1)
+  dataset = dataset.repeat(num_epochs)
+  dataset = dataset.batch(batch_size)
+
+  iterator = dataset.make_one_shot_iterator()
+  features, labels = iterator.get_next("iterator")
+  return features, labels
+
+I use custom op decode_file, which is like tf.decode_csv.
+the decode_file's SetShapeFn is as follows:
+    .SetShapeFn([](InferenceContext* c) {
+      std::vector<int> output_size;
+      c->GetAttr("output_size", &output_size);
+
+      for (int i = 0; i < c->num_outputs(); ++i) {
+        ShapeHandle s = c->MakeShape({DimensionOrConstant(output_size[i])});
+        c->set_output(i, s); 
+      }   
+      return Status::OK();
+    })  
+
+this custom op  can work well  in train and evaluate ,  but  when it is used for export_savedmodel api, i need modify  SetShapeFn as follows ( to support batch predict)
+ .SetShapeFn([](InferenceContext* c) {
+      std::vector<int> output_size;
+      c->GetAttr("output_size", &output_size);
+      for (int i = 0; i < c->num_outputs(); ++i) {
+          c->set_output(i, c->Matrix(c->Dim(c->input(0), 0), output_size[i]));
+      }
+      return Status::OK();
+}
+
+# my serving_input_fn
+def string_decode_serving_input_receiver_fn():
+  string_placeholder = tf.placeholder(shape=[None, 1], dtype=tf.string)
+
+  columns = module_decode_file_serve.decode_file_serve(string_placeholder,
+          record_defaults=_COLUMN_DEFAULTS,
+          output_size=_COLUMN_SIZESt, 
+          field_outer_delim=',',
+          field_inner_delim='%')
+  features = dict(zip(_COLUMN_NAMES, columns))
+  features.pop('label')
+  return tf.estimator.export.ServingInputReceiver(features, string_placeholder)
+
+Why does dataset map api (dataset = dataset.map(parse_line)) only handle single record?  and pase_line's shape inference does not include batch dimmension
+At present I need use different SetShapeFn in train and export_savedmodel
+Can dataset map function add new feature to  handle batch dimmension ?
+@mrry  thanks! (sorry for bad description ...）

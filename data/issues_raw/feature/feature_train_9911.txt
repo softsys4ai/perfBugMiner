@@ -1,0 +1,199 @@
+Estimator predict() fails after fit() or evaluate()
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes, I did write an input_fn based code based on the Abalone example. Specifically, I replaced the x and y parameters with custom input_fn implementations loading images and applying map_fn to them before batching. This resulted in a batch of unknown tensor shape (None).
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): v1.1.0-1-g10ec24a
+Bazel version (if compiling from source): 0.4.5
+CUDA/cuDNN version: 8.0, 5.1
+GPU model and memory: GeForce 1080 Ti
+Exact command to reproduce:  running the code
+
+Describe the problem
+When calling predict() after calling fit() or evaluate() on an Estimator instance (an unlikely scenario, but shown in the example), the call crashes with
+Traceback (most recent call last):
+  File "/home/mmayer/dev/everybag/orientation_network/orientation.py", line 169, in <module>
+    main()
+  File "/home/mmayer/dev/everybag/orientation_network/orientation.py", line 35, in main
+    as_iterable=False)
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/python/util/deprecation.py", line 281, in new_func
+    return func(*args, **kwargs)
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 565, in predict
+    as_iterable=as_iterable)
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 857, in _infer_model
+    infer_ops = self._get_predict_ops(features)
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1187, in _get_predict_ops
+    self._labels_info)
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/estimators/tensor_signature.py", line 164, in create_placeholders_from_signatures
+    return signatures.get_placeholder()
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/estimators/tensor_signature.py", line 89, in get_placeholder
+    shape=[None] + list(self.shape[1:]))
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/python/framework/tensor_shape.py", line 478, in __iter__
+    raise ValueError("Cannot iterate over a shape with unknown rank.")
+ValueError: Cannot iterate over a shape with unknown rank.
+
+if self._labels_info of the Estimator has unknown shape (e.g. as an effect of using map_fn on images to obtain both feature and target from them. This is due to
+  def get_placeholder(self):
+    if self.is_sparse:
+      return array_ops.sparse_placeholder(dtype=self.dtype)
+    return array_ops.placeholder(dtype=self.dtype,
+                                 shape=[None] + list(self.shape[1:]))
+in tensor_signature.py, since self.shape[1:] is None.
+The call comes through
+  def _get_predict_ops(self, features):
+    labels = tensor_signature.create_placeholders_from_signatures(
+        self._labels_info)
+    return self._call_model_fn(features, labels, model_fn_lib.ModeKeys.INFER)
+which uses the labels to construct the inference graph, when it probably shouldn't.
+The predict() operation succeeds if it is called without prior calls to fit() or evaluate() as in this case the method
+def create_placeholders_from_signatures(signatures):
+  if signatures is None:
+    return None
+  if not isinstance(signatures, dict):
+    return signatures.get_placeholder()
+  return {
+      key: signatures[key].get_placeholder()
+      for key in signatures}
+early exits.
+Source code / logs
+Example code that triggers the problem; requires images in img directory. The problem can be resolved by explicitly setting the indices Tensor's shape in input_fn using a tf.reshape to [-1], but given that it works for training and evaluation and that inference probably shouldn't use the targets at all (especially not from previous runs), I consider this a bug.
+import os
+import time
+from typing import Dict, Optional, Any
+import tensorflow as tf
+import tensorflow.contrib.learn as tfl
+import tensorflow.contrib.slim as slim
+from tensorflow.contrib.slim.python.slim.nets import inception_v3 as inception
+
+
+def main():
+    model_params = {'learning_rate': 0.001,
+                    'batch_size': 16,
+                    'num_epochs': None}
+
+    nn = tfl.Estimator(model_fn=model_fn, params=model_params)
+    nn.fit(input_fn=lambda: input_fn('img', params=model_params), steps=10)
+    ev = nn.evaluate(input_fn=lambda: input_fn('img', params=model_params), steps=1)
+    predictions = nn.predict(input_fn=lambda: input_fn('img', params=model_params), as_iterable=False)
+
+
+def model_fn(features, targets, mode, params):
+    training = (mode == tfl.ModeKeys.TRAIN)
+    num_classes = 5
+
+    image = features['image']
+    image.set_shape((None, 299, 299, 3))
+    targets.set_shape((None, num_classes))
+
+    with tf.contrib.slim.arg_scope(inception.inception_v3_arg_scope()):
+        _, end_points = inception.inception_v3(image, is_training=training, num_classes=num_classes)
+
+        logits = end_points['Logits']
+        predictions = end_points['Predictions']
+
+    predictions_dict = {'predictions': predictions}
+
+    loss = tf.losses.softmax_cross_entropy(targets, logits)
+    eval_metric_ops = {
+        'rmse': tf.metrics.root_mean_squared_error(targets, predictions)
+    }
+
+    train_op = tf.contrib.layers.optimize_loss(
+        loss=loss,
+        global_step=tf.contrib.framework.get_global_step(),
+        learning_rate=params['learning_rate'],
+        optimizer='Adam')
+
+    return tfl.ModelFnOps(
+        mode=mode,
+        predictions=predictions_dict,
+        loss=loss,
+        train_op=train_op,
+        eval_metric_ops=eval_metric_ops)
+
+
+def input_fn(dataset_dir, params):
+    pattern = os.path.join(dataset_dir, '*.jpg')
+    filename_queue = tf.train.string_input_producer(
+        tf.train.match_filenames_once(pattern),
+        num_epochs=params['num_epochs'])
+
+    image_reader = tf.WholeFileReader()
+    _, image_file = image_reader.read_up_to(filename_queue, 10)
+
+    image_batch = tf.train.shuffle_batch([image_file], params['batch_size'], 1000, 100,
+                                         num_threads=2,
+                                         enqueue_many=True,
+                                         allow_smaller_final_batch=True)
+    images, indices = tf.map_fn(image_fn, image_batch,
+                                dtype=(tf.float32, tf.int32),
+                                infer_shape=False)
+
+    images = tf.reshape(images, [-1, 299, 299, 3])
+
+    features = {'image': images}
+    targets = tf.one_hot(indices=indices, depth=5, dtype=tf.float32)
+    return features, targets
+
+
+def image_fn(image_file):
+    image = tf.image.decode_jpeg(image_file, channels=3)
+
+    image = tf.expand_dims(image, 0)
+    image = tf.image.resize_bilinear(image, [299, 299])
+    image = tf.squeeze(image, [0])
+
+    k = 2
+    image = tf.image.rot90(image, k=k, name='rotate')
+    image = tf.cast(image, tf.float32)
+    image = tf.subtract(tf.divide(image, 128.), 1.)
+
+    return image, k
+
+
+if __name__ == '__main__':
+    main()
+Full output:
+WARNING:tensorflow:Using temporary folder as model directory: /tmp/tmpv1o9e6jk
+2017-05-15 11:55:54.834870: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:901] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-05-15 11:55:54.835292: I tensorflow/core/common_runtime/gpu/gpu_device.cc:887] Found device 0 with properties: 
+name: GeForce GTX 1080 Ti
+major: 6 minor: 1 memoryClockRate (GHz) 1.6325
+pciBusID 0000:01:00.0
+Total memory: 10.91GiB
+Free memory: 9.24GiB
+2017-05-15 11:55:54.835305: I tensorflow/core/common_runtime/gpu/gpu_device.cc:908] DMA: 0 
+2017-05-15 11:55:54.835309: I tensorflow/core/common_runtime/gpu/gpu_device.cc:918] 0:   Y 
+2017-05-15 11:55:54.835315: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1080 Ti, pci bus id: 0000:01:00.0)
+2017-05-15 11:56:03.923926: I tensorflow/core/common_runtime/gpu/pool_allocator.cc:247] PoolAllocator: After 1546 get requests, put_count=1200 evicted_count=1000 eviction_rate=0.833333 and unsatisfied allocation rate=0.935317
+2017-05-15 11:56:03.923951: I tensorflow/core/common_runtime/gpu/pool_allocator.cc:259] Raising pool_size_limit_ from 100 to 110
+2017-05-15 11:57:49.153141: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1080 Ti, pci bus id: 0000:01:00.0)
+WARNING:tensorflow:Skipping summary for global_step, must be a float or np.float32.
+WARNING:tensorflow:From untitled.py:18: calling BaseEstimator.predict (from tensorflow.contrib.learn.python.learn.estimators.estimator) with as_iterable is deprecated and will be removed after 2016-12-01.
+Instructions for updating:
+Estimator is decoupled from Scikit Learn interface by moving into
+separate class SKCompat. Arguments x, y and batch_size are only
+available in the SKCompat class, Estimator will only accept input_fn.
+Example conversion:
+  est = Estimator(...) -> est = SKCompat(Estimator(...))
+Traceback (most recent call last):
+  File "untitled.py", line 97, in <module>
+  File "untitled.py", line 18, in main
+    predictions = nn.predict(input_fn=lambda: input_fn('img', params=model_params), as_iterable=False)
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/python/util/deprecation.py", line 281, in new_func
+    return func(*args, **kwargs)
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 565, in predict
+    as_iterable=as_iterable)
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 857, in _infer_model
+    infer_ops = self._get_predict_ops(features)
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1187, in _get_predict_ops
+    self._labels_info)
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/estimators/tensor_signature.py", line 164, in create_placeholders_from_signatures
+    return signatures.get_placeholder()
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/contrib/learn/python/learn/estimators/tensor_signature.py", line 89, in get_placeholder
+    shape=[None] + list(self.shape[1:]))
+  File "/home/mmayer/.conda/envs/tensorflow/lib/python3.6/site-packages/tensorflow/python/framework/tensor_shape.py", line 478, in __iter__
+    raise ValueError("Cannot iterate over a shape with unknown rank.")
+ValueError: Cannot iterate over a shape with unknown rank.

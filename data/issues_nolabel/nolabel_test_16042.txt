@@ -1,0 +1,82 @@
+tf.contrib.cudnn_rnn.CudnnGRU does not work with input_mode='skip_input' in TF1.5
+
+System information
+
+OS Platform and Distribution: Linux Ubuntu 16.04
+TensorFlow installed from: pip install tensorflow-gpu==1.5.0rc0
+TensorFlow version: v1.3.0-rc1-6090-g622487f 1.5.0-rc0
+Python version:  3.5
+CUDA/cuDNN version: CUDA 9.0, CuDNN 7.0.5
+GPU model and memory: GTX 1080 8GB
+
+Describe the problem
+We are running tf.contrib.cudnn_rnn.CudnnGRU in our speech recognition setup with input_mode='skip_input' and it crashes the whole process. Here is the assertion error that we are getting:
+Check failed: size == params_input[i].NumElements() Params size mismatch. Expected 0, got 10000
+Looks like it's crashing here: tensorflow/contrib/cudnn_rnn/kernels/cudnn_rnn_ops.cc:440. It does not crash if input_mode is 'linear_input'.
+Here is the minimal example to reproduce:
+Source code / logs
+import tensorflow as tf
+
+layer = tf.contrib.cudnn_rnn.CudnnGRU(num_layers=1, num_units=100,
+                             input_mode='skip_input', direction='bidirectional')
+# (time, batch_size, num_inputs)
+x = tf.random_normal((100, 16, 100))
+y = layer(x)
+
+with tf.Session() as sess:
+	sess.run(tf.global_variables_initializer())
+	print(sess.run(y))
+
+
+Logs:
+2018-01-11 17:10:44.858413: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2018-01-11 17:10:45.067854: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1105] Found device 0 with properties: 
+name: GeForce GTX 1080 major: 6 minor: 1 memoryClockRate(GHz): 1.8095
+pciBusID: 0000:03:00.0
+totalMemory: 7.92GiB freeMemory: 7.80GiB
+2018-01-11 17:10:45.274222: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1105] Found device 1 with properties: 
+name: GeForce GTX 1080 major: 6 minor: 1 memoryClockRate(GHz): 1.8095
+pciBusID: 0000:04:00.0
+totalMemory: 7.92GiB freeMemory: 7.80GiB
+2018-01-11 17:10:45.274776: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Device peer to peer matrix
+2018-01-11 17:10:45.274804: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1126] DMA: 0 1 
+2018-01-11 17:10:45.274812: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1136] 0:   Y Y 
+2018-01-11 17:10:45.274817: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1136] 1:   Y Y 
+2018-01-11 17:10:45.274826: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1195] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 1080, pci bus id: 0000:03:00.0, compute capability: 6.1)
+2018-01-11 17:10:45.274832: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1195] Creating TensorFlow device (/device:GPU:1) -> (device: 1, name: GeForce GTX 1080, pci bus id: 0000:04:00.0, compute capability: 6.1)
+2018-01-11 17:10:46.240862: F tensorflow/contrib/cudnn_rnn/kernels/cudnn_rnn_ops.cc:440] Check failed: size == params_input[i].NumElements() Params size mismatch. Expected 0, got 10000
+Aborted (core dumped)
+
+Thoughts
+I think the problem is in python wrapper code located at contrib/cudnn_rnn/python/layers/cudnn_rnn.py.
+Both _canonical_weight_shape(self, layer) and _canonical_bias_shape(self, layer) don't handle the case when input_mode='skip_input'. The wrapper code doesn't even check if input_size == num_units when input_mode='skip_input' as it should! The issue seems to be easy to fix, but I may be mistaken.
+Here is an example that shows that both 'skip_input' and 'linear_input' get the same set of canonical parameter shapes:
+CudnnGRU = lambda **kwargs: tf.contrib.cudnn_rnn.CudnnGRU(num_layers=1, num_units=7, direction='bidirectional', **kwargs)
+
+layer = CudnnGRU(input_mode='skip_input')
+layer.build((200, 16, 5))
+print("skip_input weights", layer.canonical_weight_shapes)
+print("skip_input biases", layer.canonical_bias_shapes)
+
+layer = CudnnGRU(input_mode='linear_input')
+layer.build((200, 16, 5))
+print("linear_input_weights", layer.canonical_weight_shapes)
+print("linear_input_biases", layer.canonical_bias_shapes)
+
+Example output:
+skip_input weights [(7, 5), (7, 5), (7, 5), (7, 7), (7, 7), (7, 7), (7, 5), (7, 5), (7, 5), (7, 7), (7, 7), (7, 7)]
+skip_input biases [[7], [7], [7], [7], [7], [7], [7], [7], [7], [7], [7], [7]]
+linear_input_weights [(7, 5), (7, 5), (7, 5), (7, 7), (7, 7), (7, 7), (7, 5), (7, 5), (7, 5), (7, 7), (7, 7), (7, 7)]
+linear_input_biases [[7], [7], [7], [7], [7], [7], [7], [7], [7], [7], [7], [7]]
+
+Workaround
+In our setup we decided that we will keep allocating opaque_params buffer manually with first querying its size with
+# Note: this code may require tf==1.4 to run.
+layer = tf.contrib.cudnn_rnn.CudnnGRU(1, num_units=800, input_size=800,
+                                      input_mode='linear_input',
+                                      direction='bidirectional')
+with tf.Session() as sess:
+    OPAQUE_BUFFER_SIZE = sess.run(layer.params_size())
+    print(OPAQUE_BUFFER_SIZE)
+
+But this is really troublesome because it requires running the intermediate graph to get OPAQUE_BUFFER_SIZE before building the main graph.

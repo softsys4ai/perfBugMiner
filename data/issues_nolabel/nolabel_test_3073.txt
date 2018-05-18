@@ -1,0 +1,46 @@
+tf.reset_default_graph() doesn't work on kubernetes?
+
+In my understanding reset_default_graph() will reset the whole graph. However, it seems that this will only reset the value of variables when running parameter servers on kubernetes.
+First, I tried to get variable values before and after reset_default_graph(). The value is reset (value is 0) after running reset_default_graph().
+Then I tried to run a totally different algorithm using the same parameter server, it reported the error below:
+Assign requires shapes of both tensors to match. lhs shape= [5,5,32,64] rhs shape= [50000]
+Only chief run the reset_default_graph()  cmd. The code is:
+is_chief = (FLAGS.worker_index == 0)
+if is_chief: tf.reset_default_graph()
+
+The whole error message is:
+Traceback (most recent call last):                                                                                                 
+  File "word2vector.py", line 160, in <module>                                                                                     
+    with sv.prepare_or_wait_for_session(FLAGS.worker_grpc_url, config=sess_config) as sess:                                        
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 685, in prepare_or_wait_for_session 
+    config=config, init_feed_dict=self._init_feed_dict)                                                                            
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/session_manager.py", line 163, in prepare_session        
+    sess.run(init_op, feed_dict=init_feed_dict)                                                                                    
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 340, in run                              
+    run_metadata_ptr)                                                                                                              
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 564, in _run                             
+    feed_dict_string, options, run_metadata)                                                                                       
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 637, in _do_run                          
+    target_list, options, run_metadata)                                                                                            
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 659, in _do_call                         
+    e.code)                    
+
+tensorflow.python.framework.errors.InvalidArgumentError: Assign requires shapes of both tensors to match. lhs shape= [5,5,32,64] rhs shape= [50000]                                                                                                                   
+
+         [[Node: Variable_3/Assign = Assign[T=DT_FLOAT, _class=["loc:@Variable_3"], use_locking=true, validate_shape=true, _device=
+"/job:ps/replica:0/task:3/cpu:0"](Variable_3, zeros_S1)]]                                                                          
+Caused by op u'Variable_3/Assign', defined at:                                                                                     
+  File "word2vector.py", line 127, in <module>                                                                                     
+    nce_biases = tf.Variable(tf.zeros([vocabulary_size]))                                                                          
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 209, in __init__                          
+    dtype=dtype)                                                                                                                   
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 308, in _init_from_args                   
+    validate_shape=validate_shape).op                                                                                              
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_state_ops.py", line 40, in assign                         
+    use_locking=use_locking, name=name)                                                                                            
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 655, in apply_op                     
+    op_def=op_def)                                                                                                                 
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2154, in create_op                        
+    original_op=self._default_original_op, op_def=op_def)                                                                          
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1154, in __init__                         
+    self._traceback = _extract_stack()

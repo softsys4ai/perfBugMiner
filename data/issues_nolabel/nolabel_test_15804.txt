@@ -1,0 +1,54 @@
+[bug]libtensorflowlite_jni.so crash when creating interpreter with byteBuffer mode
+
+Dear tensorflow developers：
+A crash is found when using java nio to create interpreter of tensorflowLite, which make us puzzled for a long time. I hope you can help us to solve the issue, thanks & best regard. The issues will be described in detail as follows:
+   Naturally, we use the function provided by tensorflow below to create model & interpreter.      
+
+   NativeInterpreterWrapper(ByteBuffer modelByteBuffer) {
+      errorHandle = createErrorReporter(ERROR_BUFFER_SIZE);
+      modelHandle = createModelWithBuffer(modelByteBuffer, errorHandle);
+      interpreterHandle = createInterpreter(modelHandle);
+   }
+
+   step 1.  We create the Input parameter modelByteBuffer. The ByteBuffer as follows:
+
+      fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
+      
+      The following conditions should be satisfied at the same time, 
+      1)  startOffset is not zero,  for example startOffset = 200
+           If the startOffset is zero, the issue will not occur.
+      2)  the byteBuffer size is very large, for example size = 80MB
+           if the size is small, the issue will not occur.
+
+   Step 2. We call the funtion NativeInterpreterWrapper with byteBuffer.
+    
+   Unfortunately, after running  step 1 & 2, the crash is occured as follows:
+
+01-02 18:58:54.544 21135-21135/? A/DEBUG: *** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+01-02 18:58:54.545 21135-21135/? A/DEBUG: Build fingerprint: 'google/marlin/marlin:8.0.0/OPR3.170623.013/4397526:user/release-keys'
+01-02 18:58:54.545 21135-21135/? A/DEBUG: Revision: '0'
+01-02 18:58:54.545 21135-21135/? A/DEBUG: ABI: 'arm'
+01-02 18:58:54.545 21135-21135/? A/DEBUG: pid: 20837, tid: 20837, name: fish.xxxxxx  >>> com.taobao.idlexxxx.xxxxxx <<<
+01-02 18:58:54.545 21135-21135/? A/DEBUG: signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0xa733f5a6
+01-02 18:58:54.545 21135-21135/? A/DEBUG:     r0 a733f5a6  r1 00000004  r2 00000006  r3 00000000
+01-02 18:58:54.545 21135-21135/? A/DEBUG:     r4 e0f59c58  r5 de9734b0  r6 a73f5160  r7 ffc5de20
+01-02 18:58:54.545 21135-21135/? A/DEBUG:     r8 00000004  r9 00000000  sl ffc5de90  fp a733f57a
+01-02 18:58:54.545 21135-21135/? A/DEBUG:     ip edee063c  sp ffc5dd90  lr edea7741  pc a73aa208  cpsr 200f1830
+01-02 18:58:54.546 21135-21135/? A/DEBUG: backtrace:
+01-02 18:58:54.546 21135-21135/? A/DEBUG:     #00 pc 00062208  /data/app/com.taobao.idlexxxx.xxxxxx-qw202S8jC-x2xWFXznSPlw==/lib/arm/libtensorflowlite_jni.so
+01-02 18:58:54.546 21135-21135/? A/DEBUG:     #1 pc 00062d53  /data/app/com.taobao.idlexxxx.xxxxxx-qw202S8jC-x2xWFXznSPlw==/lib/arm/libtensorflowlite_jni.so
+01-02 18:58:54.546 21135-21135/? A/DEBUG:     #2 pc 00006d93  /data/app/com.taobao.idlexxxx.xxxxxx-qw202S8jC-x2xWFXznSPlw==/lib/arm/libtensorflowlite_jni.so (Java_org_tensorflow_lite_NativeInterpreterWrapper_createInterpreter+50)
+01-02 18:58:54.546 21135-21135/? A/DEBUG:     #3 pc 000281ef  /data/app/com.taobao.idlexxxx.xxxxxx-qw202S8jC-x2xWFXznSPlw==/oat/arm/base.odex (offset 0x1c000)
+01-02 18:58:55.403 742-742/? E//system/bin/tombstoned: Tombstone written to: /data/tombstones//tombstone_03
+While, If we reallocate memory, the issue will also not occur .The relative code is as follows:
+…….
+rf = new RandomAccessFile(modelPath, "r");
+declaredLength = rf.length() - startOffset;
+rf.seek(startOffset);
+ByteBuffer byteBuffer = ByteBuffer.allocateDirect((int) declaredLength);
+…….
+byteBuffer.put(tfbyte);
+…….
+
+Is there a memory allocation bug? And could you tell me how to avoid the crash if not reallocate 
+memory？ Thanks very much.

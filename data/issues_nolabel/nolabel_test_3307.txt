@@ -1,0 +1,31 @@
+NaN values in the learnable parameters with custom initialization, along with lasso regularization
+
+From what I read online, getting NaN cost values can happen if someone uses a custom cross entropy calculation while doing classification. However, I use the built-in cross entropy calculation provided.
+My problem is different. I have a network that consists of an RNN and a convolutional layer before that. When I initialize the convolutional layer with random values(e.g., normal random or uniform random), I do not experience any problem. However, I use a custom initialization, and start getting NaN gradients right away(i.e., starting from the first batch).
+My filter initialization is as follows: All values in the filter are zero, except a single value is 1. When I initialize the filters in this manner, I start to get NaN gradients starting from the first batch, hence NaN weights and NaN cost in the following batches.
+Environment info
+Operating System: Mac v10.11.3 (El Capitan)
+The output of ls -l /path/to/cuda/lib/libcud*:
+-rw-r--r-- 1 root root 189170 Mar 24 16:02 libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Mar 24 16:02 libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 Mar 24 16:02 libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 311596 Mar 24 16:02 libcudart.so.7.5.18
+-rw-r--r-- 1 root root 558020 Mar 24 16:02 libcudart_static.a
+
+The tensorflow version is: 0.9.0rc0
+
+The whole code is quite messy and complex, . But reproducing the code should not be hard: I initialize convolutional filters with all zeros but one "1" value, and I get nan values as gradients in the locations where 0's appear.
+One thing to note is that I apply group lasso regularization to the convolutional filter weights. I realized when regularization lambda is set to a small value, (like 10e-3), the problem did not occur. However, when I chose values that have larger order of magnitude (like 10e-2 or 1), I observed this problem. Values other than the group initialized as "1" becomes all Nan.
+To exemplify, suppose I initialize the weights as the matrix on the top, and each column is a group (in group lasso objective). After the first batch of data, the matrix on the bottom is what I get:
+0 0 0 0 0
+0 0 0 0 0
+0 0 1 0 0
+0 0 0 0 0
+0 0 0 0 0
+becomes:
+NaN NaN 0.3 NaN NaN
+NaN NaN 0.7 NaN NaN
+NaN NaN  0.1  NaN NaN
+NaN NaN 0.5 NaN NaN
+NaN NaN 0.2 NaN NaN
+Long story short; I know how to avoid this problem (using smaller lambda values), but I just wanted to know if there is an explanation for why this problem occur. Is it because of a numerical error, or it is because I am doing something wrong?

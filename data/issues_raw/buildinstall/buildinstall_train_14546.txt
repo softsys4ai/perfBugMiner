@@ -1,0 +1,103 @@
+[Go] SIGABRT when running go test, using tensorflow 1.4 compiled form source
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Archlinux
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.4.0
+Python version: 3.6
+Bazel version (if compiling from source): Build label: 0.7.0- (@non-git)
+GCC/Compiler version (if compiling from source): gcc-6
+CUDA/cuDNN version: CUDA 9 / cuDNN 7
+GPU model and memory: Dual Nvidia 1080 Ti
+Exact command to reproduce:
+
+go test github.com/tensorflow/tensorflow/tensorflow/go
+
+Describe the problem
+I have build tensorflow with CUDA support. Since Go requires the C library, I built libtensorflow.so and libtensorflow_framework.so, with:
+bazel build //tensorflow:libtensorflow_framework.so
+bazel build //tensorflow:libtensorflow.so
+
+I updated LD_LIBRARY_PATH accordingly:
+TENSORFLOW_LIBLIB="${HOME}/sources/tensorflow/bazel-bin/tensorflow/"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/opt/cuda/lib64:/opt/cuda/extras/CUPTI/lib64:${TENSORFLOW_LIBLIB}"
+export LIBRARY_PATH="${TENSORFLOW_LIBLIB}:${LIBRARY_PATH}"
+I can now go get tensorflow without problems, I can hence compile it and use the -ltensorflow linker flag.
+When I run go test on the tensorflow package, the following error (tensorflow/core/framework/tensor.cc:822] Unexpected type: 23) is thrown and causes SIGABRT.
+Source code / logs
+go test github.com/tensorflow/tensorflow/tensorflow/go                                                                                                                                                                                                    
+2017-11-14 12:12:06.299645: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 AVX512F FMA                                                                        
+2017-11-14 12:12:06.303492: F tensorflow/core/framework/tensor.cc:822] Unexpected type: 23                                                                                                                                                                                     
+SIGABRT: abort                                                                                                                                                                                                                                                                 
+PC=0x7f1d39a098a0 m=6 sigcode=18446744073709551610                        
+signal arrived during cgo execution                                                                                                                                                                                                                                            
+                                                                                                                                                                                                                                                                               goroutine 40 [syscall, locked to thread]:                                                                                                                                                                                                                                      
+runtime.cgocall(0x656af0, 0xc4200519c8, 0xc4200519f0)
+        /usr/lib/go/src/runtime/cgocall.go:132 +0xe4 fp=0xc420051998 sp=0xc420051958 pc=0x4054c4                                                                                                                                                                        
+github.com/tensorflow/tensorflow/tensorflow/go._Cfunc_TF_SetAttrTensor(0x7f1cf000a9a0, 0x7f1cf000b5a0, 0x7f1cf000b6b0, 0x7f1cf000cc00)                                                                                                                                         
+        github.com/tensorflow/tensorflow/tensorflow/go/_test/_obj_test/_cgo_gotypes.go:890 +0x45 fp=0xc4200519c8 sp=0xc420051998 pc=0x52ce85                                                                                                                                   
+github.com/tensorflow/tensorflow/tensorflow/go.setAttr.func18(0x7f1cf000a9a0, 0x7f1cf000b5a0, 0x7f1cf000b6b0, 0x7f1cf000cc00)                                                                                                                                                  
+        /home/pgaleone/go/src/github.com/tensorflow/tensorflow/tensorflow/go/graph.go:273 +0xec fp=0xc420051a00 sp=0xc4200519c8 pc=0x53907c
+github.com/tensorflow/tensorflow/tensorflow/go.setAttr(0x7f1cf000a9a0, 0xc42000e0c0, 0x6ef59e, 0x5, 0x6b6560, 0xc4200f6460, 0x0, 0x0)
+        /home/pgaleone/go/src/github.com/tensorflow/tensorflow/tensorflow/go/graph.go:273 +0x11b9 fp=0xc420051c00 sp=0xc420051a00 pc=0x52fab9                                                                                                                                  
+github.com/tensorflow/tensorflow/tensorflow/go.(*Graph).AddOperation(0xc42000e080, 0x6ef404, 0x5, 0xc42050c4e0, 0x6, 0x0, 0x0, 0x0, 0xc42008af00, 0x4b388b, ...)                                                                                                               
+        /home/pgaleone/go/src/github.com/tensorflow/tensorflow/tensorflow/go/graph.go:176 +0x4a0 fp=0xc420051d60 sp=0xc420051c00 pc=0x52e700                                                                                                                                   
+github.com/tensorflow/tensorflow/tensorflow/go.Const(0xc42000e080, 0xc42050c4e0, 0x6, 0x682c40, 0xc4200f62e0, 0xc42050c4e0, 0x6, 0x4d48ed, 0x7ab068)
+        /home/pgaleone/go/src/github.com/tensorflow/tensorflow/tensorflow/go/util_test.go:38 +0x221 fp=0xc420051e38 sp=0xc420051d60 pc=0x52a0a1
+github.com/tensorflow/tensorflow/tensorflow/go.TestOutputDataTypeAndShape.func1(0xc420110780)                                                                                                                                                                                  
+        /home/pgaleone/go/src/github.com/tensorflow/tensorflow/tensorflow/go/operation_test.go:137 +0x11e fp=0xc420051fa8 sp=0xc420051e38 pc=0x53650e                                                                                                                          
+testing.tRunner(0xc420110780, 0xc4200f6420)                                                                                                                                                                                                                                    
+        /usr/lib/go/src/testing/testing.go:746 +0xd0 fp=0xc420051fd0 sp=0xc420051fa8 pc=0x4d4990
+runtime.goexit()                                                                                                                                                                                                                                                               
+        /usr/lib/go/src/runtime/asm_amd64.s:2337 +0x1 fp=0xc420051fd8 sp=0xc420051fd0 pc=0x45f981                                                                                                                                                                              
+created by testing.(*T).Run                                                                                                                                                                                                                                                    
+        /usr/lib/go/src/testing/testing.go:789 +0x2de                                                                                                                                                                                                                          
+                                                                                                                                                                                                                                                                               
+goroutine 1 [chan receive]:                                                                                                                                                                                                                                                    
+testing.(*T).Run(0xc420110000, 0x6f567b, 0x1a, 0x702ab0, 0x47b301)             
+        /usr/lib/go/src/testing/testing.go:790 +0x2fc                                                                                                                                                                                                                          
+testing.runTests.func1(0xc420110000)                                           
+        /usr/lib/go/src/testing/testing.go:1004 +0x64                          
+testing.tRunner(0xc420110000, 0xc420061de0)                                    
+        /usr/lib/go/src/testing/testing.go:746 +0xd0
+testing.runTests(0xc4200f6240, 0xa413c0, 0x11, 0x11, 0xc420061e78)
+        /usr/lib/go/src/testing/testing.go:1002 +0x2d8
+testing.(*M).Run(0xc420061f18, 0xc420061f70)
+        /usr/lib/go/src/testing/testing.go:921 +0x111                                                         
+main.main()                                                                            
+        github.com/tensorflow/tensorflow/tensorflow/go/_test/_testmain.go:82 +0xdb
+
+goroutine 36 [chan receive]:         
+testing.(*T).Run(0xc4201103c0, 0xc4200145e0, 0x13, 0xc4200f6420, 0x2)                                                                                                                                                                                                          
+        /usr/lib/go/src/testing/testing.go:790 +0x2fc                                                                                                                                                                                                                          
+github.com/tensorflow/tensorflow/tensorflow/go.TestOutputDataTypeAndShape(0xc4201103c0)                                                                                                                                                                                        
+        /home/pgaleone/go/src/github.com/tensorflow/tensorflow/tensorflow/go/operation_test.go:136 +0x56e                                                                                                                                                                      
+testing.tRunner(0xc4201103c0, 0x702ab0)                                                                                                                                                                                                                                        
+        /usr/lib/go/src/testing/testing.go:746 +0xd0
+created by testing.(*T).Run
+        /usr/lib/go/src/testing/testing.go:789 +0x2de
+
+rax    0x0
+rbx    0x6
+rcx    0x7f1d39a098a0
+rdx    0x0
+rdi    0x2
+rsi    0x7f1cf67fb7b0
+rbp    0x7f1cf67fba00
+rsp    0x7f1cf67fb7b0
+r8     0x0
+r9     0x7f1cf67fb7b0
+r10    0x8
+r11    0x246
+r12    0x7f1cf000c210
+r13    0x17
+r14    0x7f1cf000b5a0
+r15    0x7f1cf67fbc40
+rip    0x7f1d39a098a0
+rflags 0x246
+cs     0x33
+fs     0x0
+gs     0x0
+FAIL    github.com/tensorflow/tensorflow/tensorflow/go  0.059s

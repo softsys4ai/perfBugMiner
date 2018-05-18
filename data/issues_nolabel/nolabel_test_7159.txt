@@ -1,0 +1,70 @@
+Tensorflow restore doesn't work on AWS
+
+I am running a script that perfectly works on ubuntu 14.04, docker over ubuntu 14.04, docker over MAC OS - but doesn't work on ubuntu 16 on AWS.
+the script is:
+import tensorflow as tf
+import os
+
+def load_model_to_session(session, model_dir, meta_file, ckpt_file):
+    model_dir_exp = os.path.expanduser(model_dir)
+    saver = tf.train.import_meta_graph(os.path.join(model_dir_exp, meta_file))
+    saver.restore(session, os.path.join(model_dir_exp, ckpt_file))
+
+session = tf.Session()
+print ('loading models')
+model_dir = '/data/model'
+meta_file, ckpt_file = 'a.meta', 'a.ckpt'
+print ('ckpt file ' + ckpt_file)
+load_model_to_session(session, model_dir, meta_file, ckpt_file)
+print ('finish loading the model')
+session.close()
+
+
+the errors i get:
+
+W tensorflow/core/framework/op_kernel.cc:975] Data loss: Unable to open table file /data/model/a.ckpt: Data loss: not an sstable (bad magic number): perhaps your file is in a different file format and you need to use a different restore operator?
+W tensorflow/core/util/tensor_slice_reader.cc:95] Could not open /data/model/a.ckpt: Data loss: not an sstable (bad magic number): perhaps your file is in a different file format and you need to use a different restore operator?
+W tensorflow/core/util/tensor_slice_reader.cc:95] Could not open /data/model/a.ckpt: Data loss: not an sstable (bad magic number): perhaps your file is in a different file format and you need to use a different restore operator?
+W tensorflow/core/framework/op_kernel.cc:975] Data loss: Unable to open table file /data/model/a.ckpt: Data loss: not an sstable (bad magic number): perhaps your file is in a different file format and you need to use a different restore operator?
+W tensorflow/core/util/tensor_slice_reader.cc:95] Could not open /data/model/a.ckpt: Data loss: not an sstable (bad magic number): perhaps your file is in a different file format and you need to use a different restore operator?
+W tensorflow/core/framework/op_kernel.cc:975] Data loss: Unable to open table file /data/model/a.ckpt: Data loss: not an sstable (bad magic number): perhaps your file is in a different file format and you need to use a different restore operator?
+Traceback (most recent call last):
+File "/tmp/runner.py", line 35, in 
+load_model_to_session(session, model_dir, meta_file, ckpt_file)
+File "/tmp/runner.py", line 7, in load_model_to_session
+saver.restore(session, os.path.join(model_dir_exp, ckpt_file))
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 1388, in restore
+{self.saver_def.filename_tensor_name: save_path})
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 766, in run
+run_metadata_ptr)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 964, in _run
+feed_dict_string, options, run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+target_list, options, run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.DataLossError: Unable to open table file /data/model/a.ckpt: Data loss: not an sstable (bad magic number): perhaps your file is in a different file format and you need to use a different restore operator?
+[[Node: save/restore_slice_318 = RestoreSlice[dt=DT_FLOAT, preferred_shard=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](_recv_save/Const_0, save/restore_slice_318/tensor_name, save/restore_slice_318/shape_and_slice)]]
+Caused by op u'save/restore_slice_318', defined at:
+File "/tmp/runner.py", line 35, in 
+load_model_to_session(session, model_dir, meta_file, ckpt_file)
+File "/tmp/runner.py", line 6, in load_model_to_session
+saver = tf.train.import_meta_graph(os.path.join(model_dir_exp, meta_file))
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 1526, in import_meta_graph
+**kwargs)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/meta_graph.py", line 502, in import_scoped_meta_graph
+producer_op_list=producer_op_list)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/importer.py", line 285, in import_graph_def
+op_def=op_def)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2240, in create_op
+original_op=self._default_original_op, op_def=op_def)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1128, in init
+self._traceback = _extract_stack()
+DataLossError (see above for traceback): Unable to open table file /data/model/a.ckpt: Data loss: not an sstable (bad magic number): perhaps your file is in a different file format and you need to use a different restore operator?
+[[Node: save/restore_slice_318 = RestoreSlice[dt=DT_FLOAT, preferred_shard=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](_recv_save/Const_0, save/restore_slice_318/tensor_name, save/restore_slice_318/shape_and_slice)]]
+
+in order to reproduce this, you can use the pre-trained open source model here:
+https://drive.google.com/file/d/0B5MzpY9kBtDVSTgxX25ZQzNTMGc/view
+I'm using tensorflow (python) 0.12.1 .
+I suspect that it has something to do with the virtualization (AWS).
+BTW, the code works on the pretrained model http://download.tensorflow.org/models/inception_v1_2016_08_28.tar.gz

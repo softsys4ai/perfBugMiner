@@ -1,0 +1,32 @@
+Tensor with GPUBFCAllocator generate Segfaults on tensorflow::ops
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): r1.8
+Python version:  2.7
+Bazel version (if compiling from source): 0.18
+GCC/Compiler version (if compiling from source): 5.4
+CUDA/cuDNN version: 9.0 / 7.1
+GPU model and memory: nvidia p6000
+Exact command to reproduce:
+
+Describe the problem
+Using the C++ api, when a tensorflow::Tensor is allocated using GPUBFCAllocator, all further operations (such as tensorflow::op::Identity) generate a segfault. Memory is properly allocated (tested with cudaMemcpy). If the allocator is removed, or switched to tensorflow::cpu_allocator(), the error does not occur, but the memory is not allocated on the gpu (memcpy fails). My final goal is to obtain the cuda pointer of the tensor to fill the tensor with data manually.
+Source code / logs
+Reproducible code:
+  auto root = tensorflow::Scope::NewRootScope().WithDevice("/gpu:0");
+  tensorflow::ClientSession* session = new tensorflow::ClientSession(root);
+  
+  tensorflow::VisitableAllocator* gpu_allocator;
+  gpu_allocator = new tensorflow::GPUBFCAllocator(tensorflow::CudaGpuId(0), sizeof(float) * 512 * 640 * 3, "bfc_gpu_0");
+  gpu_allocator = new tensorflow::GPUcudaMallocAllocator(gpu_allocator, tensorflow::CudaGpuId(0));
+
+  void* myp = gpu_allocator->AllocateRaw(1,512*640*3*4);
+  tensorflow::Tensor *myTensor = new tensorflow::Tensor(gpu_allocator,tensorflow::DT_FLOAT, tensorflow::TensorShape({1, 512, 640, 3}));
+
+  checkCudaErrors(cudaMemcpy(tensorflow::DMAHelper::base(myTensor), myp, sizeof(float) * 512 * 640 *3, cudaMemcpyDeviceToDevice));
+
+  auto identity = tensorflow::ops::Identity(root.WithOpName("init"), *myTensor);

@@ -1,0 +1,17 @@
+Possibly serious bug in cuDNN RNNParamsSaveable
+
+RNNParamsSaveable appears to only save half of the weights when the RNN is bidirectional. See below.
+When the RNN is unidirectional, model.params_size() matches the total size of weights + biases returned by model.params_to_canonical(params)
+model = cudnn_rnn_ops.CudnnLSTM(num_layers=1, num_units=100, input_size=20, direction='unidirectional')
+params = tf.get_variable('cudnn_rnn_params', initializer=tf.random_uniform([model.params_size()]), validate_shape=False)
+model.params_size().eval(session=sess) # returns 48800
+sum([wts.eval(session=sess).shape[0] for wtss in model.params_to_canonical(params) for wts in wtss]) # returns 48800
+
+On the other hand, when the RNN is bidirectional, model.params_size() returns twice the size of the unidirectional case, which makes sense, but the size of model.params_to_canonical(params) is unchanged.
+model = cudnn_rnn_ops.CudnnLSTM(num_layers=1, num_units=100, input_size=20, direction='bidirectional')
+params = tf.get_variable('cudnn_rnn_params', initializer=tf.random_uniform([model.params_size()]), validate_shape=False)
+model.params_size().eval(session=sess) # returns 97600
+sum([wts.eval(session=sess).shape[0] for wtss in model.params_to_canonical(params) for wts in wtss]) # returns 48800
+
+I believe this may have been missed by tests because, as this TODO suggests, both the canonical and non-canonical versions are being saved and restored, and so even if only half the weights are being restored from the canonical version, the non-canonical weights can compensate and hide the problem.
+Am I missing something?

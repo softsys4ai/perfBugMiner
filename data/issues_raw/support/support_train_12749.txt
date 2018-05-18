@@ -1,0 +1,46 @@
+Android- Tensorflow model loading issue
+
+I have saved model using tf.train.Saver.save() and then freeze the graph bu using below method:
+def freezeModel(modelName):
+input_graph_path = modelName + '.pb'
+checkpoint_path = './' + modelName + '.ckpt'
+input_saver_def_path = ""
+input_binary = True
+output_node_names = "x_indices,x_values,x_dense_shape,unary_scores,transition_params,train_op"
+restore_op_name = "save/restore_all"
+filename_tensor_name = "save/Const:0"
+output_frozen_graph_name = 'frozen_' + modelName + '.pb'
+clear_devices = True
+
+freeze_graph.freeze_graph(input_graph_path, input_saver_def_path,input_binary, checkpoint_path, output_node_names,restore_op_name, filename_tensor_name,output_frozen_graph_name, clear_devices, "")
+#freeze_graph.freeze_graph(input_saved_model_dir='Model/', saved_model_tags='serve')
+return
+
+Then loading the modelName.pb file in Android using inference api as below:
+TensorFlowInferenceInterface inferenceInterface = new TensorFlowInferenceInterface(context.getAssets(), MODEL_FILE);
+I am getting below error:
+Caused by: java.io.IOException: Not a valid TensorFlow Graph serialization: Value for attr 'T' of int64 is not in the list of allowed values: float, int32
+; NodeDef: Less_1 = Less[T=DT_INT64](ToInt64_2, ToInt64_3); Op<name=Less; signature=x:T, y:T -> z:bool; attr=T:type,allowed=[DT_FLOAT, DT_INT32]>
+at org.tensorflow.contrib.android.TensorFlowInferenceInterface.loadGraph(TensorFlowInferenceInterface.java:439)
+at org.tensorflow.contrib.android.TensorFlowInferenceInterface.(TensorFlowInferenceInterface.java:98)
+Here is the code using to create the graph:
+x_indices_t= tf.placeholder(tf.int64, shape=(None, 3), name="x_indices")
+x_values_t= tf.placeholder(tf.float32, shape=(None), name="x_values")
+x_dense_shape_t= tf.placeholder(tf.int64, shape=(3), name="x_dense_shape")#[len(X_train), max_word_count, feature_count]
+shape_unary_score_t = tf.placeholder(dtype=tf.int64, shape=(None, None, None), name="shape_unary_score")#[num_examples_t, max_word_count, num_tags]
+shape_t = tf.shape(shape_unary_score_t)
+x_t = tf.SparseTensor(indices=x_indices, values=x_values, dense_shape=x_dense_shape)
+To resolve above error i changed the dtype of indices and shapes to int32 then tf.SparseTensor() is givving below error:
+File "CRF_POS_Trainer_Tensor - Training.py", line 323, in 
+x_t = tf.SparseTensor(indices=x_indices_t, values=x_values_t, dense_shape=x_dense_shape_t)
+File "/home/anaconda3/envs/tensorflow/lib/python3.6/site-packages/tensorflow/python/framework/sparse_tensor.py", line 119, in init
+indices, name="indices", dtype=dtypes.int64)
+File "/home/anaconda3/envs/tensorflow/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 676, in convert_to_tensor
+as_ref=False)
+File "/home/anaconda3/envs/tensorflow/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 741, in internal_convert_to_tensor
+ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+File "/home/anaconda3/envs/tensorflow/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 614, in _TensorTensorConversionFunction
+% (dtype.name, t.dtype.name, str(t)))
+ValueError: Tensor conversion requested dtype int64 for Tensor with dtype int32: 'Tensor("x_indices:0", shape=(?, 3), dtype=int32)'
+So how to i resolve issue to create SparseTensor with int32 data.
+Tensorflow Version: 1.3.0

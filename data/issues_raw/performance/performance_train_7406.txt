@@ -1,0 +1,115 @@
+Should check whether n_class is zero before calling sample_n() in mixture.py
+
+Problem Description
+Mixture model first use categorical to sample how much samples it need for each mixture components (this is variable n_class at line 308, but it actually means number of samples per component), and then it pass n_class to sample_n().
+The problem is n_class could be 0 and you can't pass shape=0 to tf.random_gamma(shape, alpha, ...), which is used in Beta distribution. (see line 310 in mixture.py)
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+It's easy to reproduce: just create a mixture of Beta + Uniform with 50/50 probability. Half of the time it'll sample from uniform, and half of the time it'll sample from Beta.
+#!/usr/bin/python
+import tensorflow as tf
+ds = tf.contrib.distributions
+
+# Create mixture distribution of Beta + Uniform
+components = [ds.Beta(2., 2.), ds.Uniform(a=0., b=1.)]
+cat = ds.Categorical(p=[0.5, 0.5])
+mix = ds.Mixture(cat=cat, components=components)
+
+# get ONLY 1 sample
+x = mix.sample_n(1)
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())    
+    # repeats until crash
+    for i in range(1000):
+        print sess.run(x)
+What other attempted solutions have you tried?
+Two possible solutions:
+
+
+Add a conditional branch in mixture.py like this (tested with the above script):
+# INSTEAD OF DOING
+# samples_class_c = self.components[c].sample_n(n_class, seed=seed)
+# DO THIS
+samples_class_c = control_flow_ops.cond(
+    math_ops.equal(n_class, 0),
+    lambda: array_ops.zeros(0, self.components[c].dtype),
+    lambda: self.components[c].sample_n(n_class, seed=seed)
+)
+Just create a zero tensor with shape 0 when n_class is 0 and let the reshape operator at line 330 to worry about the shape.
+
+
+Support shape=0 in random_gamma(shape, alpha, ...). Personally I think it's a bad idea. It already caused InvalidArgumentError exception, which means the one who implemented this might already considered this problem before.
+
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:937] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties: 
+name: TITAN X (Pascal)
+major: 6 minor: 1 memoryClockRate (GHz) 1.531
+pciBusID 0000:02:00.0
+Total memory: 11.90GiB
+Free memory: 337.50MiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:590] creating context when one is currently active; existing: 0x4190110
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:937] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 1 with properties: 
+name: GeForce GTX 980 Ti
+major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:01:00.0
+Total memory: 5.93GiB
+Free memory: 5.08GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:777] Peer access not supported between device ordinals 0 and 1
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:777] Peer access not supported between device ordinals 1 and 0
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0 1 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y N 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 1:   N Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: TITAN X (Pascal), pci bus id: 0000:02:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:1) -> (device: 1, name: GeForce GTX 980 Ti, pci bus id: 0000:01:00.0)
+[ 0.32805401]
+[ 0.2802822]
+W tensorflow/core/framework/op_kernel.cc:975] Invalid argument: Input shape should have non-zero element count, got: 0
+	 [[Node: Beta/sample_n/random_gamma_1/RandomGamma = RandomGamma[S=DT_INT32, T=DT_FLOAT, seed=0, seed2=0, _device="/job:localhost/replica:0/task:0/cpu:0"](Beta/sample_n/random_gamma_1/shape/_25, Beta/sample_n/random_gamma_1/add/_27)]]
+Traceback (most recent call last):
+  File "bug.py", line 21, in <module>
+    print sess.run(x)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 766, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 964, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Input shape should have non-zero element count, got: 0
+	 [[Node: Beta/sample_n/random_gamma_1/RandomGamma = RandomGamma[S=DT_INT32, T=DT_FLOAT, seed=0, seed2=0, _device="/job:localhost/replica:0/task:0/cpu:0"](Beta/sample_n/random_gamma_1/shape/_25, Beta/sample_n/random_gamma_1/add/_27)]]
+
+Caused by op u'Beta/sample_n/random_gamma_1/RandomGamma', defined at:
+  File "bug.py", line 15, in <module>
+    x = mix.sample_n(1)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/distributions/python/ops/distribution.py", line 574, in sample_n
+    x = self._sample_n(n, seed, **condition_kwargs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/distributions/python/ops/mixture.py", line 313, in _sample_n
+    samples_class_c = self.components[c].sample_n(n_class, seed=seed)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/distributions/python/ops/distribution.py", line 574, in sample_n
+    x = self._sample_n(n, seed, **condition_kwargs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/distributions/python/ops/beta.py", line 205, in _sample_n
+    seed=distribution_util.gen_new_seed(seed, "beta"))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/random_ops.py", line 437, in random_gamma
+    seed2=seed2) / beta
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_random_ops.py", line 122, in _random_gamma
+    seed=seed, seed2=seed2, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 759, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2240, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1128, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Input shape should have non-zero element count, got: 0
+	 [[Node: Beta/sample_n/random_gamma_1/RandomGamma = RandomGamma[S=DT_INT32, T=DT_FLOAT, seed=0, seed2=0, _device="/job:localhost/replica:0/task:0/cpu:0"](Beta/sample_n/random_gamma_1/shape/_25, Beta/sample_n/random_gamma_1/add/_27)]]
+P.S. The variable name n_class confused me for a while.

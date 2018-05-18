@@ -1,0 +1,53 @@
+always get negative moving_variance in batchnormalization
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+MacOS 10.12.6
+TensorFlow installed from (source or binary):
+pycharm
+TensorFlow version (use command below):
+1.5.0
+Python version:
+2.7
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+no CUDA
+GPU model and memory:
+0
+Exact command to reproduce:
+
+Describe the problem
+I trained a simple NN on my local mac without GPU. training data is random generated and validation data is exactly same as training data. During validation,  i always got negative moving_variance in some dimension in batchnormalization, which as a result, causes the network to output NaN issue.
+By the way, frontend is Keras 2.1.5.
+Here's the code
+def create_pointwise_model():
+inputs = Input(shape=(13,), name='input_layer')
+normalized_inputs = BatchNormalization(momentum=0.01)(inputs) # i incline to take the value of current batch
+sum_inputs = Dense(1, name="final_dense", use_bias=False, kernel_initializer='glorot_normal')(normalized_inputs)
+sum_inputs = Activation('selu')(sum_inputs)
+    model = Model(inputs=inputs, outputs=sum_inputs, name='pointwise_model')
+    model.compile(optimizer='Adam', loss='binary_crossentropy')
+    return model
+
+#here's the test I wrote:
+sample  = np.random.rand(4,13)
+def get_data():
+while 1:
+yield (sample, np.array([[1],[1],[0],[0]]))
+model = create_pointwise_model()
+model.fit_generator(get_data(), steps_per_epoch=1, epochs=1000, validation_data= get_data().next())
+During the training, I got NaN error and pinpointed that it's caused by negative moving_variance in batchnormalization. The way I fix this is that inside
+def batch_normalization(x,
+mean,
+variance,
+offset,
+scale,
+variance_epsilon,
+name=None):
+I added this line:
+variance = tf.multiply(variance, tf.cast(tf.greater_equal(variance, 0),tf.float32))
+But that's not the right way...

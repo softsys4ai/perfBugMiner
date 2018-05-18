@@ -1,0 +1,33 @@
+Operation Documentation has " within it
+
+https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/ops/array_ops.cc#L1154
+This wasn't causing a problem because TF was stripping out the documentation before hitting Python and the Python Protobuf text_format.py google/protobuf#2798. I wanted to expose the documentation in the Python (A patch I am NOT recommending!!) per http://stackoverflow.com/questions/42521166/tensorflow-operation-documentation, but ran into numerous issues in the Protobuf seen in the above issue posted to Protobuf. The last problem I had stemmed from TF's misuse of " within the documentation
+I did a batch replacement with a small script,
+import os, re
+
+for fname in os.listdir('./'):
+    if fname[-3:] != ".cc":
+        print "Skipping", fname
+        continue
+
+    with open(fname) as f:
+        code = f.read()
+
+    quotes = 0
+    blocks = re.findall('\"[Dd]oc\((?:(?!REG).|\n)*\)[Dd]oc\"', code)
+    for sub in blocks:
+        if sub.count('"') <= 2:
+            continue
+
+        s = sub.find('"')
+        e = sub.rfind('"')
+        new_sub = sub[:s+1] + sub[s+1:e].replace('"', "'") + sub[e:]
+        quotes += sub.count('"') - new_sub.count('"')
+        code = code.replace(sub, new_sub)
+
+    print "Replacing", quotes, "in", fname
+    f = open(fname, 'w')
+    f.write(code)
+    f.close()
+
+I can submit a pull request if you like, but running that script in tensorflow/tensorflow/core/ops achieves the same thing.

@@ -1,0 +1,39 @@
+tf.train.SyncReplicasOptimizer no synchronization among workers
+
+System information
+
+Have I written custom code : Yes
+OS Platform and Distribution : Linux
+TensorFlow installed from (source or binary)**: Binary
+TensorFlow version (use command below)**: 1.2.1
+Python version**: 3.5.2
+
+Problem Description
+I'm trying to train an rnn model with distributed synchronized training and between graph replication. I'm using tf.train.replica_device_setter. Asynchronous Training works perfectly fine. As written in the documentation I'm wrapping my optimizer and creating the hook:
+def training(loss,learning_rate,global_step,num_workers,is_chief):
+    optimizer=tf.train.AdamOptimizer(learning_rate=learning_rate)
+    optimizer = tf.train.SyncReplicasOptimizer(optimizer, replicas_to_aggregate=num_workers,
+                                       total_num_replicas=num_workers)
+    gvs = optimizer.compute_gradients(loss)
+    capped_gvs = [(tf.clip_by_value(grad, -CLIPPING_THRESHOLD, CLIPPING_THRESHOLD), var) for       grad, var in gvs]
+    train_op = optimizer.apply_gradients(capped_gvs,global_step=global_step)
+    print('Is Chief?: ' + str(is_chief))
+    hook=optimizer.make_session_run_hook(is_chief)
+    return train_op,hook
+
+For creating and running the Session I'm using exactly as told in the documentation:
+sess = tf.train.MonitoredTrainingSession(master=server.target, is_chief=(task_index == 0),hooks=[hook])
+sess.run([train_op],feed_dict=...)
+
+However as already noticed in #9596 and several other issues[1,2] the training does not seem to synchronize among workers. So is there a bug in SyncReplicasOptimizer? I'm seeing several hints for this hypothesis:
+
+One worker is constantly ahead by several steps in my logs.
+When stopping one worker the other just continues with the training as if nothing happened. In a synchronized setting training should stop or crash.
+The training steps take approximately the same time as asynchronous training. Synchronous Training should be slower because of the synchronization.
+
+Questions:
+
+Is there any test with which one can confirm, that sync_replicas_optimizer.py really does synchronize?
+Is the API-Documentation regarding sync_replicas_optimizer.py up to date?
+Is this somehow related to tf.train.replica_device_setter as mentioned by @jmchen-g in #9596?
+Are there any workarounds for this?

@@ -1,0 +1,21 @@
+Forcing recomputation of graph expressions
+
+We are using graph editor to rewrite the graph. It seems that there's some kind of caching going on, so that rewiring the graph after first session.run call has limited effect.
+Using OptimizerOptions.L0 when creating session does not prevent this caching.
+It would be nice to have a way to force TF_Run run exactly the graph given to it by TF_ExtendGraph, rather than returning some internally cached result.
+This is similar to #6804 where Defun definitions are frozen at first session.run call
+Here's an example, we rewrite the graph to have "v2" use same initializer op as "v1". This has different effect depending on whether rewiring happens before or after first session.run call
+@purpledog have you seen something like this?
+tf.reset_default_graph()
+v1 = tf.Variable([1. ,2. ,3.])
+v2 = tf.Variable([9., 9., 9.])
+config = tf.ConfigProto(graph_options=tf.GraphOptions(optimizer_options=tf.OptimizerOptions(opt_level=tf.OptimizerOptions.L0)))
+sess = tf.Session(config=config)
+# uncommenting this changes final print from [1, 2, 3] to [9, 9, 9]
+# sess.run(tf.constant(1))
+
+ge.reroute_a2b_ts(v1.initial_value, v2.initial_value)
+tf.get_default_graph()._version+=1   # make sure TF_ExtendGraph gets called
+
+sess.run(v2.initializer)
+print(sess.run(v2))

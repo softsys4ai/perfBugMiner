@@ -1,0 +1,29 @@
+Constant folding seems to cause error with ImmutableConst ops
+
+Using memory-mapped ImmutableConst ops seems to cause the initial constant folding process to fail.
+Reproduction steps:
+
+Load a graph containing ImmutableConst ops.
+Create a memory-mapped environment and session like this:
+
+ // Create and initialize MemmappedEnv from the converted file.
+  MemmappedEnv memmapped_env(Env::Default());
+  TF_ASSERT_OK(memmapped_env.InitializeFromFile(filename_mmap));
+
+  // Load the graph and run calculations.
+  SessionOptions session_options;
+  session_options.env = &memmapped_env;
+  std::unique_ptr<Session> session(NewSession(session_options));
+
+Run the graph using session->Run().
+
+Expected results:
+The graph should execute successfully with no error messages.
+Actual results:
+The graph seems to execute correctly, but the following is printed to the console:
+E tensorflow/core/common_runtime/executor.cc:334] Executor failed to create kernel. Unimplemented: File system scheme memmapped_package not implemented
+     [[Node: W_conv23 = ImmutableConst[dtype=DT_FLOAT, memory_region_name="memmapped_package://W_conv23", shape=[9,9,32,3], _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+Notes
+From investigation, it seems like the constant folding code creates a new device with empty session options, which means a default Env is used instead of the memory-map-aware one the client passes in:
+https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/common_runtime/constant_folding.cc#L166

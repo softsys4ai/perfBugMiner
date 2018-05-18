@@ -1,0 +1,60 @@
+tensorflow/compiler/xla/statusor.h not included in installation, but required for compiling custom TensorFlow operators
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Fedora 27
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): v1.8.0-rc1-909-g968addadfd 1.8.0-rc1
+Python version: 3.6m
+Bazel version (if compiling from source): 0.12.0
+GCC/Compiler version (if compiling from source): 6.4
+CUDA/cuDNN version: 9.1/7.1
+GPU model and memory: GTX 1080 8GB
+Exact command to reproduce:
+
+include Makefile.config
+TF_INC = `$(PYTHON) -W ignore -c 'import tensorflow as tf; print(tf.sysconfig.get_include())'`
+TF_CFLAGS = `$(PYTHON) -W ignore -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_compile_flags()))'`
+TF_LFLAGS = `$(PYTHON) -W ignore -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_link_flags()))'`
+CUDA_INC = $(CUDA_HOME)/../
+GPUCC     = nvcc -ccbin=$(CXX)
+CFLAGS    = -std=c++11 $(TF_CFLAGS) -I. -I$(CUDA_INC) -I$(TF_INC)
+GPUCFLAGS = -c
+LFLAGS    = $(ODFLAGS) -pthread -fopenmp -shared -fPIC $(TF_LFLAGS)
+GPULFLAGS = -x cu -Xcompiler "$(CFLAGS) $(LFLAGS)" --expt-relaxed-constexpr
+GPUDEF    = -DGOOGLE_CUDA=1
+CGPUFLAGS = -lcuda
+SRC       = cart_hex_interpol.cc
+GPUSRC    = cart_hex_interpol.cu.cc
+SRC_O	  = cart_hex_interpol.o
+GPUSRC_O  = cart_hex_interpol.cu.o
+LIB       = cart_hex_interpol.so
+all: gpu
+default: gpu
+cpu:
+	$(CXX) $(CFLAGS) $(SRC) $(LFLAGS) -o $(LIB)
+gpu:
+	$(GPUCC) $(GPUDEF) $(CFLAGS) $(GPUCFLAGS) $(GPUSRC) $(GPULFLAGS) -o $(GPUSRC_O)
+	$(CXX) $(GPUDEF) $(CFLAGS) $(SRC) $(GPUSRC_O) $(LFLAGS) $(CGPUFLAGS)  -o $(LIB)
+clean:
+	rm -f $(SRC_O) $(GPUSRC_O) $(LIB)
+
+Describe the problem
+When compiling a custom TensorFlow operator using a Makefile and including CUDA/GPU code, the compilation fails due to missing fatal error: tensorflow/compiler/xla/statusor.h: No such file or directory. The files are missing in /usr/local/lib/python3.6/site-packages/tensorflow/ because the headers do not get installed during installation of the wheel package for TensorFlow.
+A temporary fix is to copy the headers from source:
+sudo mkdir /usr/local/lib/python3.6/site-packages/tensorflow/include/tensorflow/compiler/
+sudo mkdir /usr/local/lib/python3.6/site-packages/tensorflow/include/tensorflow/compiler/xla
+sudo cp tensorflow/compiler/xla/*.h /usr/local/lib/python3.6/site-packages/tensorflow/include/tensorflow/compiler/xla/
+
+This issue was not present in TensorFlow 1.5, but must have been introduced since then. Compiling with or without XLA makes no difference.
+Source code / logs
+make gpu -j2
+nvcc -ccbin=/usr/local/gcc-6.4/bin/g++-6.4 -DGOOGLE_CUDA=1 -std=c++11 `python3 -W ignore -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_compile_flags()))'` -I. -I/usr/local/cuda/../ -I`python3 -W ignore -c 'import tensorflow as tf; print(tf.sysconfig.get_include())'` -c cart_hex_interpol.cu.cc -x cu -Xcompiler "-std=c++11 `python3 -W ignore -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_compile_flags()))'` -I. -I/usr/local/cuda/../ -I`python3 -W ignore -c 'import tensorflow as tf; print(tf.sysconfig.get_include())'` -O3 -pthread -fopenmp -shared -fPIC `python3 -W ignore -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_link_flags()))'`" --expt-relaxed-constexpr -o cart_hex_interpol.cu.o
+In file included from /usr/local/lib/python3.6/site-packages/tensorflow/include/tensorflow/stream_executor/dso_loader.h:26:0,
+                 from /usr/local/lib/python3.6/site-packages/tensorflow/include/tensorflow/core/platform/stream_executor.h:26,
+                 from /usr/local/lib/python3.6/site-packages/tensorflow/include/tensorflow/core/util/cuda_launch_config.h:27,
+                 from /usr/local/lib/python3.6/site-packages/tensorflow/include/tensorflow/core/util/cuda_kernel_helper.h:22,
+                 from cart_hex_interpol.cu.cc:5:
+/usr/local/lib/python3.6/site-packages/tensorflow/include/tensorflow/stream_executor/lib/statusor.h:21:46: fatal error: tensorflow/compiler/xla/statusor.h: No such file or directory
+ #include "tensorflow/compiler/xla/statusor.h"

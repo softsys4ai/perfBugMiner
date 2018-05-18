@@ -1,0 +1,141 @@
+Numerical Problem in tf.nn.softmax_cross_entropy_with_logits
+
+The function tf.nn.softmax_cross_entropy_with_logits(logits, labels) is numerical unstable when used in weak labelling scenarios (i.e. there are no labels for some rows of the labels).
+The instability does not occure, when using tf.nn.softmax followed by a simple cross_entropy implementation, i.e.:
+epsilon = tf.constant(value=0.00001, shape=shape)
+logits = logits + epsilon
+softmax = tf.nn.softmax(logits)
+cross_entropy = -tf.reduce_sum(labels * tf.log(softmax),
+                                                 reduction_indices=[1])
+
+I therefore conclude, that this is a bug occurring in the softmax layer. I can not give a a minimal example, as it only occurs in bigger models. Also, I did only observe the Bug when using weakly labeled data, that is, when cases without labels occur. This case however is explicitly mentioned in the documentation.
+labels: Each row labels[i] must be a valid probability distribution or all zeros. If all zeros, the corresponding loss will be 0, regardless of the contents of logits[i].
+If the unstability occurs, tf.nn.softmax_cross_entropy_with_logits() produces high gradients, causing the training process to diverge. This usually happens after about 450 iterations. Changing the learning rate will not avoid this issue.
+Environment info
+Operating System: Linux
+Installed version of CUDA and cuDNN: CUDA 7.5; CUDNN 7.0
+Installed from Pip:
+
+Which pip package you installed. https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-0.8.0-cp27-none-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.version)". 0.8.0
+
+Steps to reproduce
+
+Use loss function provided below
+Use data containing about 10% unlabeled entries.
+
+What have you tried?
+
+Implementing tf.nn.softmax_cross_entropy_with_logits() myselfe. It works fine.
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+The error occurs, when estimating the loss like below.
+def loss(hypes, logits, labels):
+    """Calculates the loss from the logits and the labels.
+    Args:
+      logits: Logits tensor, float - [batch_size, 2].
+      labels: Labels tensor, int32 - [batch_size, 2].
+    Returns:
+      loss: Loss tensor of type float.
+    """
+
+    with tf.name_scope('loss'):
+        logits = tf.reshape(logits, (-1, 2))
+        labels = tf.to_float(tf.reshape(labels, (-1, 2)))
+        shape = [logits.get_shape()[0], 2]
+        epsilon = tf.constant(value=hypes['solver']['epsilon'], shape=shape)
+        logits = logits + epsilon
+        cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
+            logits, labels, name='xentropy')
+
+        cross_entropy_mean = tf.reduce_mean(
+            cross_entropy, name='xentropy_mean')
+        tf.add_to_collection('losses', cross_entropy_mean)
+
+        loss = tf.add_n(tf.get_collection('losses'), name='total_loss')
+    return loss
+
+When the error occurs my training output looks like this:
+2016-05-10 20:20:56,256 root INFO Step 0/10000: loss = 11.98 ( 0.013 sec (per Batch); 74.5 examples/sec)
+2016-05-10 20:21:01,804 root INFO Step 10/10000: loss = 11.47 ( 0.028 sec (per Batch); 35.1 examples/sec)
+2016-05-10 20:21:07,565 root INFO Step 20/10000: loss = 10.82 ( 0.029 sec (per Batch); 34.7 examples/sec)
+2016-05-10 20:21:12,554 root INFO Step 30/10000: loss = 10.32 ( 0.028 sec (per Batch); 35.5 examples/sec)
+2016-05-10 20:21:17,317 root INFO Step 40/10000: loss = 9.90 ( 0.028 sec (per Batch); 35.5 examples/sec)
+2016-05-10 20:21:22,387 root INFO Step 50/10000: loss = 9.50 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:21:27,209 root INFO Step 60/10000: loss = 9.27 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:21:32,134 root INFO Step 70/10000: loss = 8.75 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:21:37,198 root INFO Step 80/10000: loss = 8.34 ( 0.028 sec (per Batch); 35.3 examples/sec)
+2016-05-10 20:21:42,074 root INFO Step 90/10000: loss = 8.10 ( 0.028 sec (per Batch); 35.3 examples/sec)
+2016-05-10 20:21:49,483 root INFO Doing Evaluate with Training Data.
+2016-05-10 20:22:09,883 root INFO Data: train  Num examples:  200  Num correct:  168.3478 Precision @ 1:  0.8417 
+2016-05-10 20:22:09,883 root INFO Doing Evaluation with Testing Data.
+2016-05-10 20:22:15,032 root INFO Data: val  Num examples:  50  Num correct:  41.3079 Precision @ 1:  0.8262 
+2016-05-10 20:22:15,323 root INFO Step 100/10000: loss = 8.03 ( 0.003 sec (per Batch); 344.2 examples/sec)
+2016-05-10 20:22:20,180 root INFO Step 110/10000: loss = 7.56 ( 0.028 sec (per Batch); 35.2 examples/sec)
+2016-05-10 20:22:25,208 root INFO Step 120/10000: loss = 7.13 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:22:30,053 root INFO Step 130/10000: loss = 6.93 ( 0.028 sec (per Batch); 35.5 examples/sec)
+2016-05-10 20:22:34,883 root INFO Step 140/10000: loss = 6.65 ( 0.028 sec (per Batch); 35.3 examples/sec)
+2016-05-10 20:22:39,765 root INFO Step 150/10000: loss = 6.34 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:22:44,741 root INFO Step 160/10000: loss = 6.23 ( 0.028 sec (per Batch); 35.3 examples/sec)
+2016-05-10 20:22:49,867 root INFO Step 170/10000: loss = 5.88 ( 0.028 sec (per Batch); 35.3 examples/sec)
+2016-05-10 20:22:54,890 root INFO Step 180/10000: loss = 5.70 ( 0.028 sec (per Batch); 35.2 examples/sec)
+2016-05-10 20:22:59,822 root INFO Step 190/10000: loss = 5.61 ( 0.028 sec (per Batch); 35.3 examples/sec)
+2016-05-10 20:23:07,190 root INFO Doing Evaluate with Training Data.
+2016-05-10 20:23:27,775 root INFO Data: train  Num examples:  200  Num correct:  167.6011 Precision @ 1:  0.8380 
+2016-05-10 20:23:27,776 root INFO Doing Evaluation with Testing Data.
+2016-05-10 20:23:32,933 root INFO Data: val  Num examples:  50  Num correct:  42.5874 Precision @ 1:  0.8517 
+2016-05-10 20:23:33,231 root INFO Step 200/10000: loss = 5.41 ( 0.003 sec (per Batch); 336.0 examples/sec)
+2016-05-10 20:23:38,108 root INFO Step 210/10000: loss = 5.36 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:23:43,053 root INFO Step 220/10000: loss = 5.05 ( 0.028 sec (per Batch); 35.3 examples/sec)
+2016-05-10 20:23:48,021 root INFO Step 230/10000: loss = 4.96 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:23:52,982 root INFO Step 240/10000: loss = 4.70 ( 0.028 sec (per Batch); 35.2 examples/sec)
+2016-05-10 20:23:58,049 root INFO Step 250/10000: loss = 4.55 ( 0.028 sec (per Batch); 35.5 examples/sec)
+2016-05-10 20:24:03,004 root INFO Step 260/10000: loss = 4.43 ( 0.028 sec (per Batch); 35.1 examples/sec)
+2016-05-10 20:24:07,973 root INFO Step 270/10000: loss = 4.32 ( 0.029 sec (per Batch); 35.0 examples/sec)
+2016-05-10 20:24:12,886 root INFO Step 280/10000: loss = 4.14 ( 0.028 sec (per Batch); 35.3 examples/sec)
+2016-05-10 20:24:17,765 root INFO Step 290/10000: loss = 4.80 ( 0.028 sec (per Batch); 35.3 examples/sec)
+2016-05-10 20:24:25,209 root INFO Doing Evaluate with Training Data.
+2016-05-10 20:24:45,899 root INFO Data: train  Num examples:  200  Num correct:  156.8744 Precision @ 1:  0.7844 
+2016-05-10 20:24:45,900 root INFO Doing Evaluation with Testing Data.
+2016-05-10 20:24:51,048 root INFO Data: val  Num examples:  50  Num correct:  40.3362 Precision @ 1:  0.8067 
+2016-05-10 20:24:51,349 root INFO Step 300/10000: loss = 6.08 ( 0.003 sec (per Batch); 333.3 examples/sec)
+2016-05-10 20:24:56,176 root INFO Step 310/10000: loss = 136.59 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:25:01,130 root INFO Step 320/10000: loss = 2029.89 ( 0.028 sec (per Batch); 35.6 examples/sec)
+2016-05-10 20:25:05,964 root INFO Step 330/10000: loss = 75585.02 ( 0.028 sec (per Batch); 35.6 examples/sec)
+2016-05-10 20:25:10,901 root INFO Step 340/10000: loss = 7492798.00 ( 0.028 sec (per Batch); 35.5 examples/sec)
+2016-05-10 20:25:15,863 root INFO Step 350/10000: loss = 50291024.00 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:25:20,790 root INFO Step 360/10000: loss = 1344814592.00 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:25:25,716 root INFO Step 370/10000: loss = 8610205696.00 ( 0.028 sec (per Batch); 35.4 examples/sec)
+2016-05-10 20:25:30,749 root INFO Step 380/10000: loss = 344546377728.00 ( 0.028 sec (per Batch); 35.5 examples/sec)
+2016-05-10 20:25:35,588 root INFO Step 390/10000: loss = 2766554529792.00 ( 0.028 sec (per Batch); 35.5 examples/sec)
+2016-05-10 20:25:43,335 root INFO Doing Evaluate with Training Data.
+
+When training longer, the loss will eventually become Nan. The error does not occure, when using the following Loss Code:
+def loss(hypes, logits, labels):
+    """Calculates the loss from the logits and the labels.
+
+    Args:
+      logits: Logits tensor, float - [batch_size, 2].
+      labels: Labels tensor, int32 - [batch_size, 2].
+
+    Returns:
+      loss: Loss tensor of type float.
+    """
+    with tf.name_scope('loss'):
+        logits = tf.reshape(logits, (-1, 2))
+        shape = [logits.get_shape()[0], 2]
+        epsilon = tf.constant(value=hypes['solver']['epsilon'], shape=shape)
+        logits = logits + epsilon
+        labels = tf.to_float(tf.reshape(labels, (-1, 2)))
+
+        softmax = tf.nn.softmax(logits)
+        cross_entropy = -tf.reduce_sum(labels * tf.log(softmax),
+                                       reduction_indices=[1])
+
+        cross_entropy_mean = tf.reduce_mean(cross_entropy,
+                                            name='xentropy_mean')
+        tf.add_to_collection('losses', cross_entropy_mean)
+
+        loss = tf.add_n(tf.get_collection('losses'), name='total_loss')
+    return loss

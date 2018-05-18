@@ -1,0 +1,83 @@
+LSTM in eager is 15 slower than in tensorflow on CPU
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.3.0-rc1-6744-gf99275a 1.6.0-dev20180105
+Python version: 3.5.2
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: none
+GPU model and memory: none
+Exact command to reproduce:
+
+git clone https://gist.github.com/idavydov/1060b3fae833af436cdad11913c9e7e1
+cd 1060b3fae833af436cdad11913c9e7e1
+time python lstm_test_tensorflow.py
+time python lstm_test_eager.py
+
+Describe the problem
+LSTM in eager seeems to work 15 times slower than LSTM in tensorflow, when running on CPU (tf.nn.dynamic_rnn).  Tensorflow time: 9s, eager time: 149s.
+Source code / logs
+lstm_test_tensorflow.py
+#!/usr/bin/env python
+import numpy as np
+import tensorflow as tf
+
+
+# use 1 CPU
+conf=tf.ConfigProto(
+    intra_op_parallelism_threads=1,
+    inter_op_parallelism_threads=1)
+
+n_iter = 100
+
+n_layers = 2
+
+batch_size = 32
+seq_len = 1000
+input_dim = 7
+data = np.random.uniform(size=(batch_size, seq_len, input_dim))
+
+x = tf.placeholder(tf.float32, shape=(batch_size, seq_len, input_dim))
+
+cells = [tf.contrib.rnn.LSTMCell(input_dim) for _ in range(n_layers)]
+multicell = tf.contrib.rnn.MultiRNNCell(cells)
+rnn_outputs, final_state = tf.nn.dynamic_rnn(multicell, x, dtype=tf.float32)
+
+init = tf.global_variables_initializer()
+
+with tf.Session(config=conf) as sess:
+    sess.run(init)
+    for _ in range(n_iter):
+        sess.run(rnn_outputs, {x: data})
+
+lstm_test_eager.py
+#!/usr/bin/env python
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+
+# use 1 CPU
+conf=tf.ConfigProto(
+    intra_op_parallelism_threads=1,
+    inter_op_parallelism_threads=1)
+
+tfe.enable_eager_execution(conf)
+
+n_iter = 100
+
+n_layers = 2
+
+batch_size = 32
+seq_len = 1000
+input_dim = 7
+data = tf.random_uniform((batch_size, seq_len, input_dim))
+
+cells = [tf.contrib.rnn.LSTMCell(input_dim) for _ in range(n_layers)]
+multicell = tf.contrib.rnn.MultiRNNCell(cells)
+
+
+for _ in range(n_iter):
+    tf.nn.dynamic_rnn(multicell, data, dtype=tf.float32)

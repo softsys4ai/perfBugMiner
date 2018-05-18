@@ -1,0 +1,29 @@
+PyImport_Import crash while using bazel to build the project
+
+I recently ran into a problem, while using bazel to build a project.  This project is compiled as a dynamic linking library, using PyImport_Import to import python module. when there is "import tensorflow as tf" in the python file , application who calls the dynamic linking library crashed everytime, but when it‘s not there ,everything works just fine. where is the problem?
+my tensorflow version is 1.0.0,python 2.7.0,bazel 0.4.3
+here is the console information when the application crashes:
+
+F tensorflow/core/framework/function.cc:1015] Check failed: GetOpGradFactory()->insert({op, func}).second Duplicated gradient for Softmax
+
+here is the test python file looks like:
+`from future import print_function
+import tensorflow as tf
+import os
+import time
+from itertools import izip
+import numpy as np
+import wrapt
+import cv2
+def get_int( ):
+a = 10
+b = 20
+return a + b
+def get_str( s1, s2 ):
+#return s1 + s2
+#return 'Hello , TY'
+return ('Hello, World', 10, 20)`
+here is the source code of .so file:
+Py_Initialize(); if ( !Py_IsInitialized() ) { return -1; } PyEval_InitThreads(); PyThreadState *mainThreadState = NULL; // save a pointer to the main PyThreadState object mainThreadState = PyThreadState_Get(); // release the lock PyEval_ReleaseLock(); char* mockargv[1]={(char*)""}; PySys_SetArgv(1,mockargv); PyRun_SimpleString("import sys"); PyRun_SimpleString("sys.path.append('./')"); pName_ = PyString_FromString("test_py"); displayPyObject(pName_); if(pName_ == NULL){ return -1; } pModule_ = PyImport_Import(pName_); displayPyObject(pModule_);
+and here is the dynamic linking library part of my BUILD file
+cc_binary( name = "test.so", linkshared = 1, deps = [ ":test_lib", ], ) cc_library( name = "test_lib", visibility = ["//visibility:__subpackages__"], srcs = glob(["test.cpp" ], ), includes=["test.h"], linkopts = [ "-lm -lpthread -L/usr/lib/python2.7 -lpython2.7 -lopencv_core -lopencv_imgproc -lopencv_highgui -lopencv_ml -lfreeimage" ], deps = [ "//tensorflow/cc:cc_ops", "//tensorflow/core:framework", "//tensorflow/core:framework_internal", "//tensorflow/core:tensorflow", ], )

@@ -1,0 +1,90 @@
+python: ../nptl/pthread_mutex_lock.c:349: __pthread_mutex_lock_full: Assertion `INTERNAL_SYSCALL_ERRNO (e, __err) != EDEADLK || (kind != PTHREAD_MUTEX_ERRORCHECK_NP && kind != PTHREAD_MUTEX_RECURSIVE_NP)' failed.
+
+Tensorflow is crashing when run using multiple GPUs (2,3,and 4) on cifar10_multi_gpu .py example in a Power8 computer.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+We have found some suggestions regarding updating glibc (https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1642390?cm_mc_uid=49967414488814888059863&cm_mc_sid_50200000=1489663906), but our system is already updated to the latest version and the problem remains.
+We have also used ppc64_pc to reduce SMT (to 2)  and also turned off. Still the problem remains.
+Environment info
+Operating System:
+Distributor ID:	Ubuntu
+Description:	Ubuntu 16.04.2 LTS
+Release:	16.04
+Codename:	xenial
+Linux minsky31 4.4.0-64-generic #85-Ubuntu SMP Mon Feb 20 17:05:51 UTC 2017 ppc64le ppc64le ppc64le GNU/Linux
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+CUDA
+-rw-r--r-- 1 root root 559800 gen 27 00:10 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 gen 27 00:13 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root     19 gen 27 00:13 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.61
+-rw-r--r-- 1 root root 476024 gen 27 00:10 /usr/local/cuda/lib64/libcudart.so.8.0.61
+-rw-r--r-- 1 root root 966166 gen 27 00:10 /usr/local/cuda/lib64/libcudart_static.a
+cuDNN
+/usr/lib/powerpc64le-linux-gnu/libcudnn_static.a
+/usr/lib/powerpc64le-linux-gnu/libcudnn.so.5.1.10
+/usr/lib/powerpc64le-linux-gnu/libcudnn.so
+/usr/lib/powerpc64le-linux-gnu/libcudnn_static_v5.a
+/usr/lib/powerpc64le-linux-gnu/libcudnn.so.5
+If installed from source, provide
+1. The commit hash (git rev-parse HEAD):
+012f9c1
+
+The output of bazel version:
+Build label: 0.4.3-2017-01-24 (@6fc5c53)
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Tue Jan 24 20:34:16 2017 (1485290056)
+Build timestamp: 1485290056
+Build timestamp as int: 1485290056
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+We downloaded the files from https://github.com/tensorflow/models/tree/master/tutorials/image/cifar10
+and tried to run the cifar10_multi_gpu example using four P100 gpus.
+What other attempted solutions have you tried?
+We tried removing the calls from measuring time, logging etc, but the problem remains.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+When it blocks, it simply hangs
+2017-03-16 12:09:56.391752: step 800, loss = 3.33 (2982.8 examples/sec; 0.011 sec/batch)
+2017-03-16 12:09:57.002419: step 810, loss = 3.49 (3998.9 examples/sec; 0.008 sec/batch)
+2017-03-16 12:09:57.476172: step 820, loss = 3.24 (3003.8 examples/sec; 0.011 sec/batch)
+and the result from strace when it blocks:
+strace: Process 111228 attached
+futex(0x3fffd5d49744, FUTEX_WAIT_PRIVATE, 1, NULL
+Otherwise, when it gives the error :
+futex(0x10013f8cf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = 0
+futex(0x10013f8cf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = 0
+futex(0x10013f8cf10, FUTEX_WAKE_PRIVATE, 1) = 1
+futex(0x10013f8cf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = 0
+futex(0x10013f8cf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = 0
+futex(0x10013f8cf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = -1 EAGAIN (Resource temporarily unavailable)
+futex(0x10013f8cf10, FUTEX_WAKE_PRIVATE, 1) = 1
+futex(0x3fffd1afc324, FUTEX_WAIT_PRIVATE, 1, NULL) = 0
+futex(0x3fffd1afc2f8, FUTEX_WAKE_PRIVATE, 1) = 0
+futex(0x3fffd1afc324, FUTEX_WAIT_PRIVATE, 1, NULL <unfinished ...>
++++ killed by SIGABRT (core dumped) +++
+strace gives as last lines:
+futex(0x1001efacf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = 0
+futex(0x1001efacf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = 0
+futex(0x1001efacf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = -1 EAGAIN (Resource temporarily unavailable)
+futex(0x3ffff8dbd184, FUTEX_WAIT_PRIVATE, 1, NULL) = 0
+futex(0x3ffff8dbd158, FUTEX_WAKE_PRIVATE, 1) = 0
+futex(0x3ffff8dbd184, FUTEX_WAIT_PRIVATE, 1, NULL) = 0
+futex(0x3ffff8dbd158, FUTEX_WAKE_PRIVATE, 1) = 0
+futex(0x3ffff8dbd184, FUTEX_WAIT_PRIVATE, 1, NULL) = 0
+futex(0x3ffff8dbd158, FUTEX_WAKE_PRIVATE, 1) = 0
+futex(0x3ffff8dbd184, FUTEX_WAIT_PRIVATE, 1, NULL) = 0
+futex(0x3ffff8dbd158, FUTEX_WAKE_PRIVATE, 1) = 0
+futex(0x3ffff8dbd184, FUTEX_WAIT_PRIVATE, 1, NULL) = 0
+futex(0x3ffff8dbd158, FUTEX_WAKE_PRIVATE, 1) = 0
+futex(0x1001efacf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = 0
+futex(0x3ffff8dbd184, FUTEX_WAIT_PRIVATE, 1, NULL) = 0
+futex(0x3ffff8dbd158, FUTEX_WAKE_PRIVATE, 1) = 0
+futex(0x3bff90000020, FUTEX_WAKE_PRIVATE, 1) = 1
+futex(0x3ffff8dbd184, FUTEX_WAIT_PRIVATE, 1, NULL) = 0
+futex(0x3ffff8dbd158, FUTEX_WAKE_PRIVATE, 1) = 0
+stat("/etc/localtime", {st_mode=S_IFREG|0644, st_size=2692, ...}) = 0
+write(1, "2017-03-16 12:22:38.084717: step"..., 90) = 90
+futex(0x1001efacf10, FUTEX_WAKE_PRIVATE, 1) = 1
+futex(0x1001efacf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = 0
+futex(0x1001efacf10, FUTEX_WAIT_BITSET_PRIVATE|FUTEX_CLOCK_REALTIME, 0, NULL, ffffffff) = -1 EAGAIN (Resource temporarily unavailable)
+futex(0x3ffff8dbd184, FUTEX_WAIT_PRIVATE, 1, NULL

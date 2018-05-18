@@ -1,0 +1,46 @@
+Add a GPU kernel for tf.dynamic_partition.
+
+This PR partially addresses issue #5965.
+The implementation follows closely the outline proposed by @ekelsen in the comments:
+
+use cub to radix-sort the information in partitions,
+compute the dimension of the output and allocate it,
+use tf.gather to move data to the correct output tensor.
+
+I wrote a benchmark test to compare it to the CPU implementation. The speedup is substantial:
+Benchmark                          Time(ns) Iterations
+------------------------------------------------------
+BM_cpu_dynpart_float_2/1         2124112900        100	 15.8M items/s
+BM_cpu_dynpart_float_2/256         28420220        100	 1180.7M items/s
+BM_cpu_dynpart_float_100/1       1944110960        100	 17.3M items/s
+BM_cpu_dynpart_float_100/256       48420780        100	 693.0M items/s
+BM_cpu_dynpart_double_2/1         976543960        100	 17.2M items/s
+BM_cpu_dynpart_double_2/256        24370610        100	 688.4M items/s
+BM_cpu_dynpart_double_100/1       905003160        100	 18.5M items/s
+BM_cpu_dynpart_double_100/256      50220970        100	 334.1M items/s
+BM_cpu_dynpart_complex64_2/1     1065424130        100	 15.7M items/s
+BM_cpu_dynpart_complex64_2/256     24578800        100	 682.6M items/s
+BM_cpu_dynpart_complex64_100/1    991734960        100	 16.9M items/s
+BM_cpu_dynpart_complex64_100/256   50632520        100	 331.4M items/s
+
+BM_gpu_dynpart_float_2/1           57177980        100	 586.8M items/s
+BM_gpu_dynpart_float_2/256          5857340        100	 5728.6M items/s
+BM_gpu_dynpart_float_100/1         66666680        100	 503.3M items/s
+BM_gpu_dynpart_float_100/256        6203580        100	 5408.9M items/s
+BM_gpu_dynpart_double_2/1          30886780        100	 543.2M items/s
+BM_gpu_dynpart_double_2/256         3717482        164	 4513.1M items/s
+BM_gpu_dynpart_double_100/1        37068810        100	 452.6M items/s
+BM_gpu_dynpart_double_100/256       4507507        142	 3722.1M items/s
+BM_gpu_dynpart_complex64_2/1       32092400        100	 522.8M items/s
+BM_gpu_dynpart_complex64_2/256      3940877        154	 4257.2M items/s
+BM_gpu_dynpart_complex64_100/1     38496700        100	 435.8M items/s
+BM_gpu_dynpart_complex64_100/256    5081670        100	 3301.5M  #items/s
+
+The gpu version runs 4.8 - 37 times faster, with the biggest gain obtained for 1D data.
+The benchmark tests used a 128MD data buffer, either 1D or with 256 columns, and num_partitions was either 2 or 100.
+The drawback to the implementation is that it requires some additional device memory.
+If I is the size of the input, O the size of the output, N the size of partitions, and P the number of partitions, the total memory cost is roughly
+I + P + max(5N, O + N),
+so about 4N additional memory is needed in the worst-case.
+Most of it comes from using cub::RadixSort.
+However, N is large only if data is 1D, and this additional memory cost becomes prohibitive only for gigantic 1D vectors (>= 512MB), which I don't think is a common use case.

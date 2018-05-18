@@ -1,0 +1,98 @@
+tf.Session.reset crashes after starting the chief queue runner
+
+Code to reproduce:
+import tempfile
+import time
+
+import tensorflow as tf
+
+
+def main(_):
+    sync = True
+    start_chief_queue_runners = True
+
+    is_chief = True
+    server = tf.train.Server.create_local_server()
+    logdir = tempfile.mkdtemp()
+
+    graph = tf.Graph()
+
+    device_setter = tf.train.replica_device_setter(worker_device='/job:worker/task:0')
+    with graph.as_default(), tf.device(device_setter):
+        # Build loss op.
+        x = tf.random_normal([100, 128])
+        y = tf.Variable(initial_value=tf.random_normal([100, 128]))
+        global_step = tf.Variable(0)
+        loss = tf.reduce_sum(tf.squared_difference(x, y), name='loss')
+
+        # Set up optimizer.
+        optim = tf.train.GradientDescentOptimizer(0.001)
+        if sync:
+            optim = tf.train.SyncReplicasOptimizerV2(optim, 1)
+        minimize = optim.minimize(loss, global_step=global_step, name='train_op')
+
+        ready_for_local_init = None
+        local_step_init = None
+        if sync:
+            init_tokens = optim.get_init_tokens_op()
+            chief_qr = optim.get_chief_queue_runner()
+            ready_for_local_init = optim.ready_for_local_init_op
+            local_step_init = optim.local_step_init_op
+        init_op = tf.initialize_all_variables()
+
+    sv = tf.train.Supervisor(graph=graph,
+                             is_chief=is_chief,
+                             ready_for_local_init_op=ready_for_local_init,
+                             init_op=init_op,
+                             local_init_op=local_step_init,
+                             recovery_wait_secs=1,
+                             global_step=global_step,
+                             logdir=logdir)
+
+    config = server.server_def.default_session_config
+    sess = sv.prepare_or_wait_for_session(server.target, config=config,
+                                          start_standard_services=False)
+
+    with sess.as_default():
+        if is_chief and sync and start_chief_queue_runners:
+            sv.start_queue_runners(sess, [chief_qr])
+            init_tokens.run()
+
+    # Wait for the queue runner to start.
+    time.sleep(2)
+
+    tf.Session.reset(server.target)
+
+    time.sleep(1)
+    print('restarted session')
+
+    server.join()
+
+
+if __name__ == '__main__':
+    tf.app.run(main)
+What I see:
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:197] Initialize GrpcChannelCache for job local -> {0 -> localhost:33954}
+I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:211] Started server with target: grpc://localhost:33954
+I tensorflow/core/distributed_runtime/master_session.cc:869] Start master session 3d7c628e8fd8d707 with config: 
+
+*** Error in `/home/daeyun/anaconda3/bin/python': double free or corruption (fasttop): 0x00007f2000087ca0 ***
+======= Backtrace: =========
+/lib/x86_64-linux-gnu/libc.so.6(+0x77725)[0x7f20f0d35725]
+/lib/x86_64-linux-gnu/libc.so.6(+0x7ff4a)[0x7f20f0d3df4a]
+/lib/x86_64-linux-gnu/libc.so.6(cfree+0x4c)[0x7f20f0d41abc]
+/home/daeyun/anaconda3//lib/python3.4/site-packages/tensorflow/python/_pywrap_tensorflow.so(+0x11ae503)[0x7f20c471b503]
+/home/daeyun/anaconda3//lib/python3.4/site-packages/tensorflow/python/_pywrap_tensorflow.so(_ZN10tensorflow26ConditionalAccumulatorBase16TryAttemptLockedEPSt6vectorINS0_7CleanUpESaIS2_EE+0x6c)[0x7f20c471be2c]
+/home/daeyun/anaconda3/lib/python3.4/site-packages/tensorflow/python/_pywrap_tensorflow.so(_ZN10tensorflow26ConditionalAccumulatorBase13FlushUnlockedEv+0x7b)[0x7f20c471c0fb]
+/home/daeyun/anaconda3/lib/python3.4/site-packages/tensorflow/python/_pywrap_tensorflow.so(_ZN10tensorflow26ConditionalAccumulatorBase6CancelEPNS_19CancellationManagerEx+0xde)[0x7f20c471c33e]
+/home/daeyun/anaconda3/lib/python3.4/site-packages/tensorflow/python/_pywrap_tensorflow.so(_ZN10tensorflow19CancellationManager11StartCancelEv+0x28b)[0x7f20c59a5bab]
+/home/daeyun/anaconda3/lib/python3.4/site-packages/tensorflow/python/_pywrap_tensorflow.so(+0xc51a16)[0x7f20c41bea16]
+/home/daeyun/anaconda3/lib/python3.4/site-packages/tensorflow/python/_pywrap_tensorflow.so(+0xc5d743)[0x7f20c41ca743]
+/home/daeyun/anaconda3/lib/python3.4/site-packages/tensorflow/python/_pywrap_tensorflow.so(+0xc62704)[0x7f20c41cf704]
+/usr/lib/x86_64-linux-gnu/libstdc++.so.6(+0xb8c80)[0x7f20c3045c80]
+/lib/x86_64-linux-gnu/libpthread.so.0(+0x76fa)[0x7f20f179e6fa]
+/lib/x86_64-linux-gnu/libc.so.6(clone+0x6d)[0x7f20f0dc4b5d]
+
+This seems to happen after SyncReplicasOptimizerV2's chief queue runner starts.
+This does not happen when start_chief_queue_runners or sync variable is False.
+System info: Nightly build (Python 3.4), Anaconda, Ubuntu 16.04

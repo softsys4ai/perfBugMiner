@@ -1,0 +1,67 @@
+Understanding cast() in tensorflow
+
+System Information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04 (ppc64le)
+TensorFlow installed from (source or binary):
+Installed from source (v1.0.1)
+TensorFlow version (use command below):
+('v1.0.1-0-ge895d5c-dirty', '1.0.1')
+Bazel version (if compiling from source):
+bazel release 0.4.4-2017-04-10 (@80a07b5)
+CUDA/cuDNN version:
+In disable mode
+Exact command to reproduce:
+bazel test //tensorflow/python/kernel_tests:cast_op_test
+
+Describe the problem clearly
+This is regarding failure of test case testInfNan in cast_op_test.py file.While executing this test case on ppc64le, it was observed that following line returns unexpected results:
+self._compare(np.inf, np.int32, i4.min, False)
+i4.min value on x86 as well as on ppc64le is -2147483648. However "np.inf" on x86 is "signed" by default whereas on ppc64le it is "unsigned" by default. To make the results compatible with x86, somehow np.inf should be cast as "signed" on ppc64le. In my opinion there could be two ways of doing this.
+
+Use a proper cast (python equivalent of "(signed int) var" in C) which    would always interprete np.inf as of type "signed" on ppc64le
+-- or --
+if we are on ppc64le platform, when dealing with np.inf, convert it explicitly to signed as "-np.inf" and then perform subsequent operations
+
+Though I have not yet decided on which one to implement, I am trying to find a right place first to put this fix in tensorflow code. I guess the right place would be somewhere in the code related to following 2 lines in cast_op_test.py (line# 57 and 58, in function _cast):
+val = constant_op.constant(x, self._toDataType(np.array([x]).dtype))
+return math_ops.cast(val, self._toDataType(dtype), name="cast").eval()
+
+
+However I am unable to grasp code details about constant() in python/framework/constant_op.py and cast() in python/ops/math_ops.py, similarly there is REGISTER_OP("Cast") in core/ops/math_ops.cc which I guess is the heart of cast functionality. Is my understanding correct?
+So if I have to implement the changes for ppc64le, which could be the right place to do so?
+Source Code / Logs
+`$ bazel test //tensorflow/python/kernel_tests:cast_op_test
+
+
+exec ${PAGER:-/usr/bin/less} "$0" || exit 1
+-----------------------------------------------------------------------------
+I tensorflow/compiler/xla/service/platform_util.cc:58] platform Host present with 16 visible devices
+I tensorflow/compiler/xla/service/service.cc:180] XLA service executing computations on platform Host. Devices:
+I tensorflow/compiler/xla/service/service.cc:187]   StreamExecutor device (0): <undefined>, <undefined>
+/root/.cache/bazel/_bazel_root/68a62076e91007a7908bc42a32e4cff9/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/kernel_tests/cast_op_test.runfiles/org_tensorflow/tensorflow/python/kernel_tests/cast_op_test.py:62: ComplexWarning: Casting complex values to real discards the imaginary part
+  np_ans = x.astype(dtype)
+....F.W tensorflow/core/framework/op_kernel.cc:983] Unimplemented: Cast int64 to string is not supported
+E tensorflow/core/common_runtime/executor.cc:594] Executor failed to create kernel. Unimplemented: Cast int64 to string is not supported
+         [[Node: Cast = Cast[DstT=DT_STRING, SrcT=DT_INT64, _device="/job:localhost/replica:0/task:0/cpu:0"](Cast/x)]]
+........
+======================================================================
+FAIL: testInfNan (__main__.CastOpTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.cache/bazel/_bazel_root/68a62076e91007a7908bc42a32e4cff9/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/kernel_tests/cast_op_test.runfiles/org_tensorflow/tensorflow/python/kernel_tests/cast_op_test.py", line 150, in testInfNan
+    self._compare(np.inf, np.int32, i4.min, False)
+  File "/root/.cache/bazel/_bazel_root/68a62076e91007a7908bc42a32e4cff9/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/kernel_tests/cast_op_test.runfiles/org_tensorflow/tensorflow/python/kernel_tests/cast_op_test.py", line 124, in _compare
+    x, dst_dtype, use_gpu=use_gpu), dst_dtype(expected))
+  File "/usr/lib64/python2.7/site-packages/numpy/testing/utils.py", line 425, in assert_equal
+    raise AssertionError(msg)
+AssertionError:
+Items are not equal:
+ ACTUAL: 2147483647
+ DESIRED: -2147483648
+
+----------------------------------------------------------------------
+Ran 14 tests in 2.485s
+
+FAILED (failures=1)`

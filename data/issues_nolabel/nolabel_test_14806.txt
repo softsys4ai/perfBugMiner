@@ -1,0 +1,67 @@
+Go TensorFlow 1.4.0: DataType 21 is not supported
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Arch linux
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): 1.4.0
+Python version: NA (using go)
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 9.0.176-4 / 7.0.3-1
+GPU model and memory: GTX 1060 6GB
+Exact command to reproduce:
+
+Describe the problem
+Calling the Value() method on the evaluated output tensor of dataset related operations from the go package fails with the error DataType 21 is not supported. It looks like op.TextLineDataset() produces a tensor of type tf.Half can't be converted to a go type?
+I may be using the datasets wrong. If so, the error and/or documentation should be improved.
+Source code / logs
+package main
+
+import (
+	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	"github.com/tensorflow/tensorflow/tensorflow/go/op"
+)
+
+func main() {
+	s := op.NewScope()
+	textLineHandle := op.TextLineDataset(s,
+		op.Const(s.SubScope("filename"), "dataset.txt"),
+		op.Const(s.SubScope("compression_type"), ""),
+		op.Const(s.SubScope("buffer_size"), int64(1)),
+	)
+	graph, err := s.Finalize()
+	if err != nil {
+		panic(err)
+	}
+	sess, err := tf.NewSession(graph, nil)
+	if err != nil {
+		panic(err)
+	}
+	results, err := sess.Run(nil, []tf.Output{textLineHandle}, []*tf.Operation{})
+	if err != nil {
+		panic(err)
+	}
+	_ = results[0].Value()
+}
+
+Produces:
+[isaac@d6-arch tfes]$ go run dataset_demo.go 
+2017-11-22 11:06:36.945842: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2017-11-22 11:06:37.042484: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:892] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-11-22 11:06:37.042786: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Found device 0 with properties: 
+name: GeForce GTX 1060 6GB major: 6 minor: 1 memoryClockRate(GHz): 1.7085
+pciBusID: 0000:01:00.0
+totalMemory: 5.93GiB freeMemory: 4.58GiB
+2017-11-22 11:06:37.042801: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+panic: BUG: Please report at https://github.com/tensorflow/tensorflow/issues with the note: Go TensorFlow 1.4.0: DataType 21 is not supported
+
+goroutine 1 [running]:
+github.com/tensorflow/tensorflow/tensorflow/go.typeOf(0xc400000015, 0x0, 0x0, 0x0, 0x49d72d, 0x4c6e40)
+	/home/isaac/go/src/github.com/tensorflow/tensorflow/tensorflow/go/tensor.go:273 +0x14d
+github.com/tensorflow/tensorflow/tensorflow/go.(*Tensor).Value(0xc42000c0e0, 0x0, 0xc420057f60)
+	/home/isaac/go/src/github.com/tensorflow/tensorflow/tensorflow/go/tensor.go:175 +0x8d
+main.main()
+	/home/isaac/go/src/github.com/is8ac/tfes/dataset_demo.go:27 +0x2b0
+exit status 2

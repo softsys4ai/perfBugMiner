@@ -1,0 +1,25 @@
+tf.transpose error when trying to transpose matrix of bools (workaround below), also recommend adding tf.repeat
+
+I'm trying to implement some conditioning flows when training RNNs.  Basically, once an end-of-sequence event has been detected, I reset the RNN state to zeros, and have been able to build in this logic successfully I think with tf.greater() and tf.select()
+I implemented a numpy.repeat(a, repeats) sort of equivalent in tensorflow.  I recommend in the future, this can be also added as a tf.repeat() function repeating a bunch of boolean values across a tensor for control flows.
+Here's my implementation of a repeater (it only works for non-generalised case, for my problem, so I need to generalise it for higher dimensional tensors in the future):
+def tfrepeat(a, repeats):
+    num_row = a.get_shape()[0].value
+    num_col = a.get_shape()[1].value
+    assert(num_col == 1)
+    result = [a for i in range(repeats)]
+    result = tf.concat(0, result)
+    result = tf.reshape(result, [repeats, num_row])
+    result = tf.transpose(result)
+    return result
+
+The issue I have is I needed to transpose the result in the end to have the dimensions line up, and the results are all boolean values, and currently I noticed tf.transpose doesn't transpose a matrix of bool's
+The workaround I have was to apply the functions to real numbers, and afterwards, make the end result into a large bool matrix, although this isn't ideal.
+Workaround:
+eoc_detection = inp[:,eoc_column]
+eoc_detection = tf.reshape(eoc_detection, [num_batches, 1])
+eoc_detection_state = tfrepeat(eoc_detection, num_state)
+eoc_detection_state = tf.greater(eoc_detection_state, tf.zeros_like(eoc_detection_state,dtype=tf.float32))
+new_state = tf.select(eoc_detection_state, initial_state, new_state)
+
+new_state is the lstm state to be fed in next time. If the end of content state is detected in training, we reset it.  This way, I can allow batches of the same length to be trained.

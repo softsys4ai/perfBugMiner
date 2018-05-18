@@ -1,0 +1,34 @@
+tf.gradients runtime scales suboptimally with size of the graph
+
+tf.gradients can be inefficient on large graphs and it runtime increases with size of the graph, even when the amount of work it needs to do is constant. This inefficiency is apparent when trying to differentiate small parts of large graph many times.
+Discovered when trying to scale to 8 GPUs using data parallelism using 8 identical copies of model -- time spent inside gradients grows for each new replica even though replicas are identical and independent. We are calling tf.gradients many times (calling tf.gradients on parts of model in order to do memory saving gradients trick), our largest models spend >2 hours inside tf.gradients.
+I've profiled the runs and saw that most of the time is spent inside
+_MarkReachedOps(from_ops, reached_ops) inside gradients_impl.py
+It's called as follows
+  reached_ops = [False] * (graph._last_id + 1)
+  for op in to_ops:
+    reached_ops[op._id] = True
+
+You can see that it's using Python list initialized with the size of the entire graph so this initialization step would grow with size of the graph.
+
+Profile of the _MarkReachedOps when calling when calling tf gradients 560 times, with each gradient call adding 35 nodes on average, and total size of the graph being 200k nodes
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+   101                                           @profile
+   102                                           def _MarkReachedOps(from_ops, reached_ops):
+   103                                             """Mark all ops reached from "from_ops".
+   104                                           
+   105                                             Args:
+   106                                               from_ops: list of Operations.
+   107                                               reached_ops: list of booleans, indexed by operation id.
+   108                                             """
+   109       568         1967      3.5      0.0    queue = collections.deque()
+   110       568         4835      8.5      0.0    queue.extend(from_ops)
+   111  39912648     14661885      0.4      8.4    while queue:
+   112  39912080     17079278      0.4      9.8      op = queue.popleft()
+   113  39912080     41203709      1.0     23.7      if not reached_ops[op._id]:
+   114  28997056     21267924      0.7     12.2        reached_ops[op._id] = True
+   115  58483932     42196549      0.7     24.2        for output in op.outputs:
+   116  29486876     37595214      1.3     21.6          queue.extend(output.consumers())
+
+Possible solutions could be a more efficient implementation of _PendingCount, or a different algorithm for tf.gradients which is more efficient for large graphs

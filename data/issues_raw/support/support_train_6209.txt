@@ -1,0 +1,79 @@
+Bug: while_loop gives invalid gradients (NaN) even when loss is computed using only non NaNs
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+#2540 is the only thing that is seemingly related, but it's a different issue.
+Environment info
+Operating System: Ubuntu 14.04
+Installed version of CUDA and cuDNN: This bug occurs even if I only use CPUs.
+Compiled from source. Commit hash: a507438
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Overview: Build a minimalist RNN-like model and compute derivatives with respect to the loss. Allow the ability to specify invalid time steps using NaNs.
+Behavior:
+
+If no NaNs are included, it works
+If only one invalid time step is included, it still works (odd)
+If two or more invalid time steps are included, it fails.
+If we change INVALID_FLOAT_SYMBOL to, say, 0.12345, then it works as expected.
+
+import tensorflow as tf
+import numpy as np
+
+INVALID_FLOAT_SYMBOL = np.nan
+
+w = tf.Variable(1.0)
+inputs = tf.placeholder(tf.float32, shape=[None])
+targets = tf.placeholder(tf.float32, shape=[None])
+T = tf.size(inputs)
+
+x_ta = tf.TensorArray(tf.float32, size=T).unpack(inputs)
+h_ta = tf.TensorArray(tf.float32, size=T)
+
+def cond(t, h, h_ta):
+  return tf.less(t, T)
+
+def body(t, h, h_ta):
+  x = x_ta.read(t)
+  h = w * h + x
+  h_ta = h_ta.write(t, h)
+  return t + 1, h, h_ta
+
+t = tf.constant(0)
+h = tf.constant(0.0)
+_, _, h_ta = tf.while_loop(cond, body, [t, h, h_ta])
+outputs = h_ta.pack()
+
+invalid_mask = tf.is_nan(inputs) if np.isnan(INVALID_FLOAT_SYMBOL) else tf.equal(inputs, INVALID_FLOAT_SYMBOL)
+valid_mask = tf.logical_not(invalid_mask)
+
+valid_outputs = tf.boolean_mask(outputs, valid_mask)
+valid_targets = tf.boolean_mask(targets, valid_mask)
+
+valid_losses = tf.nn.sigmoid_cross_entropy_with_logits(valid_outputs, valid_targets)
+valid_loss = tf.reduce_sum(valid_losses)
+
+grad, = tf.gradients(valid_loss, w)
+
+sess = tf.Session()
+sess.run(tf.initialize_all_variables())
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+# Case 1: INVALID_FLOAT_SYMBOL = np.nan, but no INVALID symbol is used.
+print(sess.run(grad, feed_dict={inputs: [1.0, 2.0, 3.0],
+                                targets: [1.0, 1.0, 1.0]}))
+# Correctly prints -0.0573164
+
+# Case 2: INVALID_FLOAT_SYMBOL = np.nan, and one INVALID symbol is used.
+print(sess.run(grad, feed_dict={inputs: [1.0, 2.0, 3.0, INVALID_FLOAT_SYMBOL],
+                                targets: [1.0, 1.0, 1.0, INVALID_FLOAT_SYMBOL]}))
+# Correctly prints -0.0573164
+
+# Case 3: INVALID_FLOAT_SYMBOL = np.nan, and two INVALID symbols are used.
+print(sess.run(grad, feed_dict={inputs: [1.0, 2.0, 3.0, INVALID_FLOAT_SYMBOL, INVALID_FLOAT_SYMBOL],
+                                targets: [1.0, 1.0, 1.0, INVALID_FLOAT_SYMBOL, INVALID_FLOAT_SYMBOL]}))
+# Incorrectly prints nan
+
+# Case 4: INVALID_FLOAT_SYMBOL = 0.12345, and two INVALID symbols are used.
+print(sess.run(grad, feed_dict={inputs: [1.0, 2.0, 3.0, INVALID_FLOAT_SYMBOL, INVALID_FLOAT_SYMBOL],
+                                targets: [1.0, 1.0, 1.0, INVALID_FLOAT_SYMBOL, INVALID_FLOAT_SYMBOL]}))
+# Correctly prints -0.0573164

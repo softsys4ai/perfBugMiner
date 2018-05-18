@@ -1,0 +1,61 @@
+No OpKernel was registered to support Op 'GatherNd' with these attrs
+
+env: macOS
+tf version: master brunch
+I built tensorflow on macOS using build_all_ios.sh. Then I tried to load frozen.pb data created by python program. Here is a code to load graph in iOS:
+    Status status;
+    Session *session;
+    
+    status = NewSession(SessionOptions(), &session);
+    if (!status.ok()) {
+        return NO;
+    }
+    
+    GraphDef graph;
+    NSString *modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"frozen" ofType:@"pb"];
+    status = ReadBinaryProto(Env::Default(), modelPath.fileSystemRepresentation, &graph);
+    if (!status.ok()) {
+        return NO;
+    }
+    
+    status = session->Create(graph);
+    if (!status.ok()) {
+        std::cout << status.ToString() << "\n";
+        return NO;
+    }
+
+First thing is with default build settings libtensorflow-core.a is extremely large - more then 400 MB that is not applicable for using in mobile devices. In any case while loading graph I got and error:
+Invalid argument: No OpKernel was registered to support Op 'Less' with these attrs.  Registered devices: [CPU], Registered kernels:
+     device='CPU'; T in [DT_FLOAT]
+     
+     [[Node: GRU-RNN/rnn/while/Less = Less[T=DT_INT32](GRU-RNN/rnn/while/Merge, GRU-RNN/rnn/while/Less/Enter)]]
+
+I could not find how to solve it except manually change next files:
+
+added next code to cwise_op_less.cc
+
+#if defined(__ANDROID_TYPES_SLIM__)
+// We only register the first type when we have multi-argument calls in the
+// case where we're trying to reduce executable size, but it turns out that the
+// int32 version of this op is needed, so explicitly include it.
+REGISTER(BinaryOp, CPU, "Less", functor::less, int32);
+#endif  // __ANDROID_TYPES_SLIM__
+
+
+added next code to cwise_op_add_2.cc
+
+#if defined(__ANDROID_TYPES_SLIM__)
+    // We only register the first type when we have multi-argument calls in the
+    // case where we're trying to reduce executable size, but it turns out that the
+    // int32 version of this op is needed, so explicitly include it.
+    REGISTER(BinaryOp, CPU, "Add", functor::add, int32);
+#endif  // __ANDROID_TYPES_SLIM__
+
+The second change was added because of the same error but for Add operation.
+Then, I have got another error:
+Invalid argument: No OpKernel was registered to support Op 'GatherNd' with these attrs.  Registered devices: [CPU], Registered kernels:
+  <no registered kernels>
+
+	 [[Node: GatherNd = GatherNd[Tindices=DT_INT32, Tparams=DT_FLOAT](GRU-RNN/rnn/transpose, stack)]]
+
+I think this is because python script contains tf.gather_nd function. I found that tf_op_files.txt does not contain any gather* functions, so I tried to add them manually but I don't know that exactly should I add and where. Can you please provide some information about that and probably add some issues about Less and Add operations for Int32 type?

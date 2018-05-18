@@ -1,0 +1,72 @@
+Go: Unable to import bool tensors in Go
+
+Hi Tensorflow/Go team,
+Following python code writes a graph with a bool tensor "z", which fails to import from a Go code.
+
+import tensorflow as tf
+z = tf.equal(0, 0, name="z")
+sess = tf.Session()
+print sess.run(z)
+tf.train.write_graph(sess.graph_def, "/tmp/load", "boolTest.pb", False)
+
+And here is the Go code
+
+package bugs
+
+import (
+	"fmt"
+	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	"io/ioutil"
+	"testing"
+)
+
+func TestBoolTest(t *testing.T) {
+	model, err := ioutil.ReadFile("/tmp/load/boolTest.pb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := tf.NewGraph()
+	if err := graph.Import(model, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	z := graph.Operation("z").Output(0)
+	sess, err := tf.NewSession(graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	zOut, err := sess.Run(nil, []tf.Output{z}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Println(zOut[0].Value().(bool))
+}
+
+
+Returns error:
+=== RUN   TestBoolTest
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+--- FAIL: TestBoolTest (0.04s)
+panic: BUG: Please report at https://github.com/tensorflow/tensorflow/issues with the note: Go TensorFlow 0.12.head: unable to decode Tensor of type 10 and shape [] - unsupported type bool [recovered]
+panic: BUG: Please report at https://github.com/tensorflow/tensorflow/issues with the note: Go TensorFlow 0.12.head: unable to decode Tensor of type 10 and shape [] - unsupported type bool
+goroutine 5 [running]:
+panic(0x5087c0, 0xc420012720)
+/usr/lib/golang/src/runtime/panic.go:500 +0x1a1
+testing.tRunner.func1(0xc4200b8180)
+/usr/lib/golang/src/testing/testing.go:579 +0x25d
+panic(0x5087c0, 0xc420012720)
+/usr/lib/golang/src/runtime/panic.go:458 +0x243
+github.com/tensorflow/tensorflow/tensorflow/go.(*Tensor).Value(0xc420010300, 0x0, 0xc420065f38)
+/home/sdeoras/go/src/github.com/tensorflow/tensorflow/tensorflow/go/tensor.go:176 +0x411
+bitbucket.hgst.com/x/tensorflow.git/bugs.TestBoolTest(0xc4200b8180)
+/home/sdeoras/go/src/bitbucket.hgst.com/x/tensorflow.git/bugs/boolTest_test.go:32 +0x25c
+testing.tRunner(0xc4200b8180, 0x53b728)
+/usr/lib/golang/src/testing/testing.go:610 +0x81
+created by testing.(*T).Run
+/usr/lib/golang/src/testing/testing.go:646 +0x2ec
+exit status 2
+FAIL    bitbucket.hgst.com/x/tensorflow.git/bugs        0.143s

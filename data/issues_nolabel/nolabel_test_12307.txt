@@ -1,0 +1,24 @@
+Exception when shutting down TensorFlow after running some ops
+
+Error
+The following error appears when exiting the Python session after a TensorFlow op has been run in a session:
+Exception TypeError: "'NoneType' object is not callable" in <bound method Context.__del__ of <tensorflow.python.eager.context.Context object at 0x7fcd7f98b450>> ignored
+
+The Python session still exits cleanly (status 0).
+Repro
+$ cat test.py
+import sys
+import tensorflow as tf
+tf.Session().run(tf.square(0))
+sys.stderr.write("Done.\n")
+$ . tensorflow-nightly-20170814/bin/activate
+$ python test.py 2>&1 | grep -Fv 'could speed up CPU computations'
+Done.
+$ . tensorflow-nightly-20170815/bin/activate
+$ python test.py 2>&1 | grep -Fv 'could speed up CPU computations'
+Done.
+Exception TypeError: "'NoneType' object is not callable" in <bound method Context.__del__ of <tensorflow.python.eager.context.Context object at 0x7f9d8795c450>> ignored
+
+Most ops seem to trigger this: I tried tf.square, tf.add, and tf.summary.scalar and tf.summary.text, and they all do. However, tf.constant does not.
+Introduction
+Bug introduced between 20170814 and 20170815 nightlies. (In particular, build 588 does not have the bug, while build 589 does.) The changelog for these two builds is b93fd37...1d33a59, which does include changes to eager.

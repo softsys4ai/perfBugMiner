@@ -1,0 +1,33 @@
+Moved eightbit graph trimming to before output_nodes definition
+
+Currently fails when output_nodes have inputs that are removed by graph trimming. Example below:
+import tensorflow as tf
+from quantize_graph import GraphRewriter
+from tensorflow.python.framework.graph_util import \
+    convert_variables_to_constants
+
+g = tf.Graph()
+with g.as_default():
+    x = tf.placeholder(shape=(2,), dtype=tf.float32, name='input_node')
+    y = tf.get_variable(name='quantize_target', shape=(2,), dtype=tf.float32,
+                        initializer=tf.random_normal_initializer(0., 1.))
+    z = tf.add(x, y, name='output_node')
+    init = tf.initialize_all_variables()
+
+with tf.Session(graph=g) as sess:
+    sess.run(init)
+    frozen_def = convert_variables_to_constants(
+        sess, g.as_graph_def(), ['output_node'])
+
+rewriter = GraphRewriter(frozen_def, 'eightbit')
+output_def = rewriter.rewrite(['output_node'])
+
+Traceback:
+Traceback (most recent call last):
+  File "quantize.py", line 22, in <module>
+    output_def = rewriter.rewrite(['output_node'])
+  File "<path>/quantize_graph.py", line 333, in rewrite
+    self.eightbitize_nodes_recursively(output_node)
+  File "<path>/quantize_graph.py", line 455, in eightbitize_nodes_recursively
+    input_node = self.nodes_map[input_node_name]
+KeyError: u'quantize_target/read'

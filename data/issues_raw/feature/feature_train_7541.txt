@@ -1,0 +1,32 @@
+Fatal messages mixing C libtensorflow with python tensorflow
+
+I'm trying to write mixed C tensorflow code with python tensorflow code by
+embedding the CPython interpreter in my application.
+I'm mainly doing this because defining the model is only really possible in
+Python at the moment due to the lack of gradients (#6268), and I want to define
+new models from the C side at speed without needing to invoke or
+communicate to an external python process to get a new model.
+To reproduce the problem is quite straightforward, simply import tensorflow
+in python after the libtensorflow library has already been dynamically linked.
+Here is a quick reproducer in pure python which will not run:
+import ctypes
+
+tf_dll = ctypes.CDLL("/usr/local/lib/libtensorflow.so")
+
+import tensorflow
+libtensorflow can be obtained like so:
+TF_TYPE=cpu # Set to gpu for GPU support
+TF_OS=linux
+curl -L \
+  "https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-${TF_TYPE}-${TF_OS}-x86_64-1.0.0.tar.gz" |
+sudo tar -C /usr/local -xz
+
+Here are two fatal messages I have encountered (the first from the Python reproducer above, the second from a C program):
+F tensorflow/stream_executor/cuda/cuda_platform.cc:180] Check failed: ::perftools::gputools::port::Status::OK() == (MultiPlatformManager::RegisterPlatform(std::move(platform))) (OK vs. Internal: platform is already registered with name: "CUDA")
+
+F tensorflow/core/lib/monitoring/collection_registry.cc:77] Cannot register 2 metrics with the same name: /tensorflow/cc/saved_model/load_attempt_count
+
+I assume the problem is that the _pywrap_tensorflow.so has tensorflow
+statically linked into them, so they don't use libtensorflow. Then you have
+two shared libraries conflicting with one another.
+Is there a way to avoid this conflict?

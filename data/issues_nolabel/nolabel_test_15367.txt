@@ -1,0 +1,100 @@
+tf.keras.backend.set_learning_phase doesn't work during evaluating model
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): pip install tensorflow-gpu
+TensorFlow version (use command below): 1.4.0
+Python version: 3.5.2
+Exact command to reproduce:
+
+Describe the problem
+When I run following script，error  InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'block1_conv1_bn/keras_learning_phase' with dtype bool  occured.  After searching in keras repository and stackoverflow, I find it is caused by the design of learning phase parameter of BN layers which behave differently at training and testing time (See here). fchollet have added K.set_learning_phase() for tensorflow to solve this problem. So when I use keras instead of tf.keras, no issue is reported. I wonder if this part is still not integrated into tensorflow completely.
+Source code / logs
+import tensorflow as tf
+# import keras  # work normally
+keras = tf.keras
+Xception = keras.applications.Xception
+from keras import backend as K
+
+data_path = "val.tfrecord"
+if not isinstance(data_path, (tuple, list)):
+    data_path = [data_path]
+feature = {'image/encoded': tf.FixedLenFeature([], tf.string),
+           'image/class_id': tf.FixedLenFeature([], tf.int64)}
+# create file queue
+filename_queue = tf.train.string_input_producer(data_path)
+# tfrecord file reader
+reader = tf.TFRecordReader()
+_, example_string = reader.read(filename_queue)
+# decode record
+features = tf.parse_single_example(example_string, features=feature)
+image = tf.decode_raw(features['image/encoded'], out_type=tf.uint8)
+image = tf.cast(image, dtype=tf.float32)
+# restore shape
+image = tf.reshape(image, (96, 96, 3))
+label = tf.cast(features['image/class_id'], dtype=tf.int64)
+image_batch, label_batch = tf.train.shuffle_batch(tensors=[image, label],
+                                                  batch_size=128,
+                                                  capacity=10000,
+                                                  min_after_dequeue=3000,
+                                                  num_threads=8,
+                                                  allow_smaller_final_batch=True)
+
+# convert label to one hot label
+sess = K.get_session()
+# declare learning phase for BN/dropout
+K.set_learning_phase(0)
+label_batch = tf.one_hot(label_batch, 2, dtype=tf.float32)
+model_input = keras.layers.Input(tensor=image_batch)
+base_model = Xception(include_top=True,
+                      weights=None,   # no pre-trained weights used
+                      pooling="avg",
+                      input_shape=(96, 96, 3),  # modify first layer
+                      classes=2)
+model_output = base_model(model_input)
+test_model = keras.models.Model(inputs=model_input, outputs=model_output)
+test_model.load_weights("weights.h5")
+optimizer = tf.train.RMSPropOptimizer(learning_rate=2e-3, decay=0.9)
+test_model.compile(optimizer=optimizer,
+                   loss="categorical_crossentropy",
+                   metrics=['accuracy'])
+acc_value = keras.metrics.categorical_accuracy(label_batch, model_output)
+# Fit model using data from tf records queue
+coord = tf.train.Coordinator()
+threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+acc_value_batch = sess.run([acc_value])
+print(acc_value_batch)
+coord.request_stop()
+# wait for threads to stop
+coord.join(threads=threads)
+sess.close()
+logs:
+Caused by op 'block1_conv1_bn/keras_learning_phase', defined at:
+  File "/home/arkenstone/PycharmProjects/startdt/face_liveness_detect/model/patch_based_cnn/test_image.py", line 66, in <module>
+    classes=2)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/keras/_impl/keras/applications/xception.py", line 161, in Xception
+    x = BatchNormalization(name='block1_conv1_bn')(x)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/keras/_impl/keras/engine/topology.py", line 252, in __call__
+    output = super(Layer, self).__call__(inputs, **kwargs)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/layers/base.py", line 575, in __call__
+    outputs = self.call(inputs, *args, **kwargs)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/keras/_impl/keras/layers/normalization.py", line 109, in call
+    training = K.learning_phase()
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/keras/_impl/keras/backend.py", line 325, in learning_phase
+    phase = array_ops.placeholder(dtype='bool', name='keras_learning_phase')
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/array_ops.py", line 1599, in placeholder
+    return gen_array_ops._placeholder(dtype=dtype, shape=shape, name=name)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/gen_array_ops.py", line 3091, in _placeholder
+    "Placeholder", dtype=dtype, shape=shape, name=name)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'block1_conv1_bn/keras_learning_phase' with dtype bool
+	 [[Node: block1_conv1_bn/keras_learning_phase = Placeholder[dtype=DT_BOOL, shape=<unknown>, _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+	 [[Node: Cast_2/_23 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device_incarnation=1, tensor_name="edge_1603_Cast_2", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"]()]]

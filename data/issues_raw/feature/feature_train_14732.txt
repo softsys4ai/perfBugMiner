@@ -1,0 +1,108 @@
+Eager: Eager execution of tf.data pipelines
+
+System information
+Tensorflow version:
+1.5.0-dev20171120
+Python version:
+python 3.6.3 |Anaconda, Inc.| (default, Nov  8 2017, 15:10:56) [MSC v.1900 64 bit (AMD64)]
+Problem
+When debugging, calling the numpy() method on a Tensor object results in AttributeError: 'Tensor' object has no attribute 'numpy' in certain situations.
+Steps to reproduce
+
+Put this code in a script:
+
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+import numpy as np
+import tensorflow as tf
+from collections import defaultdict, Counter
+
+tfe.enable_eager_execution()
+
+class_probs = dict(
+    a=0.15,
+    b=0.3,
+    c=0.8,
+    d=0.9,
+    e=0.2,
+    f=0.02
+)
+num_classes = len(class_probs)
+
+class_probs = {k: v / sum(class_probs.values()) for k, v in class_probs.items()}
+class_mapping = {n: i for i, n in enumerate(class_probs.keys())}
+
+class_names = list(class_probs.keys())
+class_weights = list(class_probs.values())
+sampled_dataset = np.random.choice(class_names, size=1000, p=class_weights)
+
+dataset_data = defaultdict(list)
+for i, d in enumerate(sampled_dataset):
+    dataset_data['class_name'].append(d)
+    dataset_data['class_id'].append(class_mapping[d])
+    dataset_data['data'].append(np.array([i]))
+    dataset_data['class_prob'].append(class_probs[d])
+
+    dataset_data['class_target_prob'].append(1 / num_classes)
+
+for k, v in dataset_data.items():
+    dataset_data[k] = np.array(dataset_data[k])
+
+class_counts = Counter(sampled_dataset)
+
+oversampling_coef = 0.9
+
+
+def oversample_classes(example):
+    """
+    Returns the number of copies of given example
+    """
+    class_prob = example['class_prob']
+    class_target_prob = example['class_target_prob']
+    prob_ratio = tf.cast(class_target_prob / class_prob, dtype=tf.float32)
+
+    prob_ratio = prob_ratio ** oversampling_coef
+
+    prob_ratio = tf.maximum(prob_ratio, 1)
+    # Breakpoint 1
+    repeat_count = tf.floor(prob_ratio)
+
+    repeat_residual = prob_ratio - repeat_count  # a number between 0-1
+    residual_acceptance = tf.less_equal(
+        tf.random_uniform([], dtype=tf.float32), repeat_residual
+    )
+
+    residual_acceptance = tf.cast(residual_acceptance, tf.int64)
+    repeat_count = tf.cast(repeat_count, dtype=tf.int64)
+
+    return repeat_count + residual_acceptance
+
+
+dataset = tf.data.Dataset.from_tensor_slices(dict(dataset_data))
+
+dataset = dataset.flat_map(
+    lambda x: tf.data.Dataset.from_tensors(x).repeat(oversample_classes(x))
+)
+
+i = tfe.Iterator(dataset)
+x = i.next()['class_id']
+
+# Breakpoint 2
+print('end')
+
+
+
+Insert the breakpoints in the lines following the comments Breakpoint 1 and Breakpoint 2
+
+
+Debug the script
+
+
+When breakpoint 1 is reached, evaluate the following:
+prob_ratio.numpy()
+This will result in the attribute error message.
+
+
+When breakpoint 2 is reached, evaluate the following:
+x.numpy()
+This will not result in the attribute error message.

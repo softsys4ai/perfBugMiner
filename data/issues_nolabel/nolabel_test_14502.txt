@@ -1,0 +1,24 @@
+Estimator does not not support sparse jobs
+
+You need sparse jobs (8177edd) if you want async training to proceed without having all workers available.
+This currently doesn't work because estimator uses json to dump values into TF_CONFIG env var, and json does not allow numeric keys. json.dumps automatically converts numeric keys into strings.
+However, clusterspec for sparse job must have integers like {"local": {37: "localhost:0"}} and will crash if we have "37" instead of 37.
+Suggestion 1: Modify sparse job support to allow strings as task indices
+Suggestion 2: use pickle + base16 encoding to transmit these values
+Base16 is shell-friendly, it allows you to copy paste the value into "export TF_...." in terminal
+ # saving
+ cluster_config = {'cluster': cluster_spec, 'task': task_spec}
+ pickle_string = pickle.dumps(sparse_cluster_config)
+ pickle_string_encoded = base64.b16encode(pickle_string)
+ pickle_string_encoded = pickle_string_encoded.decode('ascii')
+ export_command = "export TF_PICKLE_BASE16=%s"%(pickle_string_encoded,)
+ os.system(export_command)
+
+# loading
+config_dict = pickle.loads(base64.b16decode(os.environ["TF_PICKLE_BASE16"]))
+config.task_type = config_dict["task"]["type"]
+config.task_id = config_dict["task"]["index"]
+config.cluster_spec = config_dict["cluster"]
+return config
+
+cc @ispirmustafa

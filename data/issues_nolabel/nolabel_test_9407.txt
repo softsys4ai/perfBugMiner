@@ -1,0 +1,71 @@
+Usage of float64 with version >0.11
+
+System information
+
+Tensorflow is used as a backend for Keras library with setup "floatx":"float64", i.e. this is default float type
+OS X El Capitan operational system
+TensorFlow was installed via pip
+Tensorflow version 0.12.1
+
+My custom loss function includes exponent and it gets overflowed very easily, that is why I have to use float64. But after updating TensorFlow from 0.11 to 0.12 (I needed tensorboard) I started to get error while creating the model, when convolutional layer is added.
+Traceback of the error when I am adding a Conv layer to my model:
+miniconda/lib/python2.7/site-packages/keras/models.pyc in add(self, layer)
+    330                  output_shapes=[self.outputs[0]._keras_shape])
+    331         else:
+--> 332             output_tensor = layer(self.outputs[0])
+    333             if isinstance(output_tensor, list):
+    334                 raise TypeError('All layers in a Sequential model '
+
+miniconda/lib/python2.7/site-packages/keras/engine/topology.pyc in __call__(self, x, mask)
+    570         if inbound_layers:
+    571             # This will call layer.build() if necessary.
+--> 572             self.add_inbound_node(inbound_layers, node_indices, tensor_indices)
+    573             # Outputs were already computed when calling self.add_inbound_node.
+    574             outputs = self.inbound_nodes[-1].output_tensors
+
+miniconda/lib/python2.7/site-packages/keras/engine/topology.pyc in add_inbound_node(self, inbound_layers, node_indices, tensor_indices)
+    633         # creating the node automatically updates self.inbound_nodes
+    634         # as well as outbound_nodes on inbound layers.
+--> 635         Node.create_node(self, inbound_layers, node_indices, tensor_indices)
+    636 
+    637     def get_output_shape_for(self, input_shape):
+
+miniconda/lib/python2.7/site-packages/keras/engine/topology.pyc in create_node(cls, outbound_layer, inbound_layers, node_indices, tensor_indices)
+    164 
+    165         if len(input_tensors) == 1:
+--> 166             output_tensors = to_list(outbound_layer.call(input_tensors[0], mask=input_masks[0]))
+    167             output_masks = to_list(outbound_layer.compute_mask(input_tensors[0], input_masks[0]))
+    168             # TODO: try to auto-infer shape
+
+miniconda/lib/python2.7/site-packages/keras/layers/convolutional.pyc in call(self, x, mask)
+    161         output = K.conv2d(x, self.W, strides=self.subsample,
+    162                           border_mode=self.border_mode,
+--> 163                           dim_ordering='tf')
+    164         output = K.squeeze(output, 2)  # remove the dummy dimension
+    165         if self.bias:
+
+miniconda/lib/python2.7/site-packages/keras/backend/tensorflow_backend.pyc in conv2d(x, kernel, strides, border_mode, dim_ordering, image_shape, filter_shape, filter_dilation)
+   2689     if filter_dilation == (1, 1):
+   2690         strides = (1,) + strides + (1,)
+-> 2691         x = tf.nn.conv2d(x, kernel, strides, padding=padding)
+   2692     else:
+   2693         assert filter_dilation[0] == filter_dilation[1]
+
+miniconda/lib/python2.7/site-packages/tensorflow/python/ops/gen_nn_ops.pyc in conv2d(input, filter, strides, padding, use_cudnn_on_gpu, data_format, name)
+    394                                 strides=strides, padding=padding,
+    395                                 use_cudnn_on_gpu=use_cudnn_on_gpu,
+--> 396                                 data_format=data_format, name=name)
+    397   return result
+    398 
+
+miniconda/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.pyc in apply_op(self, op_type_name, name, **keywords)
+    519                   "%s type %s of argument '%s'." %
+    520                   (prefix, dtypes.as_dtype(attrs[input_arg.type_attr]).name,
+--> 521                    inferred_from[input_arg.type_attr]))
+    522 
+    523           types = [values.dtype]
+
+TypeError: Input 'filter' of 'Conv2D' Op has type float64 that does not match type float32 of argument 'input'.
+
+As I understood, float64 is simply not supported as it is considered to be not needed to have that much of precision, but I need this format because of the numbers that are calculated.
+Is there any solution to this problem?

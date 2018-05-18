@@ -1,0 +1,76 @@
+Naming issue of tensorflow.python.layers.core.Dense
+
+Since I think this issue has nothing to do with the system information, I would temporarily ignore them.
+
+TensorFlow version (use command below):v1.2.1-4-g4acb96a 1.2.1
+
+Describe the problem
+The Dense layers defined in tensorflow.python.layers.core build kernel and bias in build function, while the build function is called in __call__ function. The may cause that sometime one define a layer, but not call it immediately which causes an unexpected variable naming issue.
+Source code / logs
+For example, when I try to implement a toy seq2seq model, the following code
+            with tf.variable_scope('output'):
+                self._output_layer = _core_layers.Dense(
+                    self._vocab_size, name='output_layer')
+
+            if targets is not None: # TRAINING
+                embedding_targets = tf.nn.embedding_lookup(
+                    self._embedding, targets)
+
+                outputs, final_state, = tf.nn.dynamic_rnn(
+                    cell=self._cell,
+                    inputs=embedding_targets,
+                    sequence_length=lengths,
+                    dtype=_FLOAT,
+                    time_major=True)
+
+                logits = self._output_layer(outputs)
+            else: # INFER, or sampling
+                _, batch_size, _ = tf.unstack(tf.shape(encoder_outputs))
+                eos_ids = tf.ones([batch_size], dtype=tf.int32, name='EOS')
+                eos_step_embedded = tf.nn.embedding_lookup(
+                    self._embedding, eos_ids)
+
+                def loop_fn_transition(time, cell_output, cell_state,
+                                       loop_state):
+
+                    def get_input():
+                        output_logits = self._output_layer(cell_output)  #<----- kernel/bias of dense defined here
+                        predictions = tf.argmax(output_logits, axis=1)
+                        next_input = tf.nn.embedding_lookup(
+                            self._embedding, predictions)
+                        return next_input
+
+                    elements_finished = (time >= lengths)
+                    emit_output = cell_output
+                    cell_state = cell_state
+                    loop_state = None
+
+                    return (elements_finished, get_input(), cell_state,
+                            emit_output, loop_state)
+
+                def loop_fn(time, cell_output, cell_state, loop_state):
+                    if cell_state is None:
+                        elements_finished = (0 >= lengths)
+                        next_input = eos_step_embedded
+                        cell_state = encoder_final_state
+                        emit_output = None
+                        loop_state = None
+
+                        return (elements_finished, next_input, cell_state,
+                                emit_output, loop_state)
+                    else:
+                        return loop_fn_transition(time, cell_output, cell_state,
+                                                  loop_state)
+
+                cell_outputs, final_state, _ = tf.nn.raw_rnn(
+                    self._cell, loop_fn)
+
+I got (by inspecting the checkpoint file)
+basic_seq2seq/decoder/output_layer/bias (DT_FLOAT) [1301]
+basic_seq2seq/decoder/output_layer/kernel (DT_FLOAT) [200,1301]
+
+in training mode while got
+basic_seq2seq/decoder/rnn/output_layer/bias (DT_FLOAT) [1301]
+basic_seq2seq/decoder/rnn/output_layer/kernel (DT_FLOAT) [200,1301]
+
+in inference mode. So I can't restore a training checkpoint when inference due to NotFoundError (see above for traceback): Key basic_seq2seq/decoder/rnn/output_layer/kernel not found in checkpoint

@@ -1,0 +1,112 @@
+Problems with AOT-Compiled Inception V3 model (runtime crash / nonsense output)
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Mac OS X 10.12.5
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): ('v1.2.0-rc2-21-g12f033d', '1.2.0')
+Python version: 2.7.13
+Bazel version (if compiling from source): bazel release 0.5.1-homebrew
+CUDA/cuDNN version: n/a (CPU only build)
+GPU model and memory: n/a
+Exact command to reproduce: See description below.
+
+Describe the problem
+I've successfully built the AOT compiler and all its tests pass fine. I'm trying to do the analogous thing as in the matmul example to build an AOT-compiled library for a frozen Inception V3 graph: specifically, inception_v3_2016_08_28_frozen.pb, which I hope to incorporate into my larger C++ project.
+The bazel build goes fine, and I get a (large) library and header file. I can successfully compile and link that into my larger project. When I Run() it, however, I get a EXC_BAD_ACCESS on this line of disassembly:
+0x10143f55f <+143>: movq   (%rax), %rax
+
+with this stack trace from a call to Run():
+#0	0x000000010143f55f in Eigen::TensorEvaluator<Eigen::TensorContractionOp<Eigen::array<Eigen::IndexPair<long long>, 1ul> const, Eigen::TensorReshapingOp<Eigen::DSizes<long long, 2> const, Eigen::TensorImagePatchOp<-1l, -1l, Eigen::TensorMap<Eigen::Tensor<float const, 4, 1, long>, 16, Eigen::MakePointer> const> const> const, Eigen::TensorReshapingOp<Eigen::DSizes<long long, 2> const, Eigen::TensorMap<Eigen::Tensor<float const, 4, 1, long>, 16, Eigen::MakePointer> const> const> const, Eigen::ThreadPoolDevice>::Context<Eigen::internal::gemm_pack_lhs<float, long, Eigen::internal::TensorContractionSubMapper<float, long, 1, Eigen::TensorEvaluator<Eigen::TensorReshapingOp<Eigen::DSizes<long long, 2> const, Eigen::TensorMap<Eigen::Tensor<float const, 4, 1, long>, 16, Eigen::MakePointer> const> const, Eigen::ThreadPoolDevice>, Eigen::array<long, 1ul>, Eigen::array<long, 1ul>, 4, true, false, 0, Eigen::MakePointer>, 8, 4, 0, false, false>, Eigen::internal::gemm_pack_rhs<float, long, Eigen::internal::TensorContractionSubMapper<float, long, 0, Eigen::TensorEvaluator<Eigen::TensorReshapingOp<Eigen::DSizes<long long, 2> const, Eigen::TensorImagePatchOp<-1l, -1l, Eigen::TensorMap<Eigen::Tensor<float const, 4, 1, long>, 16, Eigen::MakePointer> const> const> const, Eigen::ThreadPoolDevice>, Eigen::array<long, 1ul>, Eigen::array<long, 1ul>, 4, true, false, 0, Eigen::MakePointer>, 4, 0, false, false>, Eigen::internal::gebp_kernel<float, float, long, Eigen::internal::blas_data_mapper<float, long, 0, 0>, 8, 4, false, false>, Eigen::internal::TensorContractionInputMapper<float, long, 1, Eigen::TensorEvaluator<Eigen::TensorReshapingOp<Eigen::DSizes<long long, 2> const, Eigen::TensorMap<Eigen::Tensor<float const, 4, 1, long>, 16, Eigen::MakePointer> const> const, Eigen::ThreadPoolDevice>, Eigen::array<long, 1ul>, Eigen::array<long, 1ul>, 4, true, false, 0, Eigen::MakePointer>, Eigen::internal::TensorContractionInputMapper<float, long, 0, Eigen::TensorEvaluator<Eigen::TensorReshapingOp<Eigen::DSizes<long long, 2> const, Eigen::TensorImagePatchOp<-1l, -1l, Eigen::TensorMap<Eigen::Tensor<float const, 4, 1, long>, 16, Eigen::MakePointer> const> const> const, Eigen::ThreadPoolDevice>, Eigen::array<long, 1ul>, Eigen::array<long, 1ul>, 4, true, false, 0, Eigen::MakePointer>, Eigen::internal::blas_data_mapper<float, long, 0, 0> >::enqueue_packing_helper(long, long, long, bool) ()
+#7	0x00000001012ff70b in __tensorflow_aot_test__aot_test ()
+
+Furthermore, when I write my own simple binary, separate from my larger project, along the lines of the matmul test example for AOT, I can build and run it without the above crash, but no matter what input I feed in, I get the same output: the 1001-element results vector is all zeros except entry 429, which is exactly 1.0. My guess was that the image data I'm feeding in was somehow garbage, but I've verified (?) that I can read in the same binary blob of pre-processed image data in Matlab and it looks reasonable. (Pre-processing here includes resizing the image to the required size (299x299), dividing each element by 255, and storing as floats.)
+Is something going wrong in AOT-compiling the graph here, or am I doing something wrong or missing something totally stupid? Is there something used in the Inception architecture that's not supported? Should I be trying with another frozen graph? Note that I'm on the r1.2 branch, but may try switching to master next to see if it's something that's been changed/fixed since r1.2. See below for source.
+Source code / logs
+BUILD file for my aot_test library and a simple binary to run it:
+load("//tensorflow/compiler/aot:tfcompile.bzl", "tf_library")
+
+tf_library(
+    name = "aot_test",
+    cpp_class = "TF_TestAOT",
+    graph = "inception_v3_2016_08_28_frozen.pb",
+    config = "aot_test.config.pbtxt",
+)
+
+cc_binary(
+    name = "my_binary",
+    srcs = [
+        "my_binary.cc", 
+    ],
+    deps = [
+        ":aot_test",  
+        "//third_party/eigen3",
+    ],
+    # I've tried with or without this
+    #linkopts = [
+    #      "-lpthread",
+    #]
+)
+
+Contents of aot_test.config.pbtxt referenced above:
+feed {
+  id { node_name: "input" }
+  shape {
+    dim { size: 1   }
+    dim { size: 299 }
+    dim { size: 299 }
+    dim { size: 3   }
+  }
+}
+
+fetch {
+  id { node_name: "InceptionV3/Predictions/Reshape_1" }
+}
+
+Contents of my_binary.cc referenced above:
+#define EIGEN_USE_THREADS
+#define EIGEN_USE_CUSTOM_THREAD_POOL
+
+#include <cstdlib>
+#include <iostream>
+#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "tensorflow/aot_test/aot_test.h" // generated
+
+int main(int argc, char** argv) {
+  Eigen::ThreadPool tp(1);  // Size the thread pool as appropriate. (I've tried various options here)
+  Eigen::ThreadPoolDevice device(&tp, tp.NumThreads());
+
+  TF_TestAOT test;
+  test.set_thread_pool(&device);
+
+  // Set up args and run the computation. 
+  // Printing out the data shows it is valid. I've also tried random input data and multiple images.
+  FILE* file = fopen("/tmp/img_norm.bin", "rb");
+  const size_t n = fread(test.arg0_data(), sizeof(float), 299*299*3, file); 
+  fclose(file);
+  std::cout << "Read " << n << " floats" << std::endl;
+  
+  test.Run();
+
+  std::cout << "Status: " << test.error_msg() << std::endl;
+  
+  // Check result
+  const float* output_data = test.result0_data();
+  float maxScore = -1.f;
+  int maxIndex = -1;
+  for(int i=0; i<1001; ++i)
+  {
+     // If I print this, i'll see all zeros except entry 429, which is one
+    //std::cout << "Score[" << i << "]=" << output_data[i] << std::endl;
+    if(output_data[i] > maxScore)
+    {
+      maxScore = output_data[i];
+      maxIndex = i;
+    }
+  }
+
+  std::cout << "Max score = " << maxScore << " at index " << maxIndex << std::endl;
+
+  return 0;
+}

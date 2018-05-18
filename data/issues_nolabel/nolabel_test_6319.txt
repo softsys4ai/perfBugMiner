@@ -1,0 +1,41 @@
+Occasional "Connection timed out" in distributed TensorFlow
+
+We are occasionally observing crashes like below (training on AWS, seeing couple of crashes per day). It looks like in gRPC, recvmsg returns with "Connection timed out". The error points to this line. Default behavior in TensorFlow seems to be "wait forever", is there way to have same behavior for slow grpc connections?
+@mrry
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 972, in _do_call
+    return fn(*args)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 954, in _run_fn
+    status, run_metadata)
+  File "/usr/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/errors.py", line 463, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors.UnavailableError: {"created":"@1481750298.553120216","description":"OS Error","errno":110,"file":"external/grpc/src/core/lib/iomgr/tcp_posix.c","file_line":229,"grpc_status":14,"os_error":"Connection timed out","syscall":"recvmsg"}
+     [[Node: ExponentialMovingAverage/decay_S37 = _Recv[client_terminated=false, recv_device="/job:ps/replica:0/task:0/cpu:0", send_device="/job:worker/replica:0/task:2/cpu:0", send_device_incarnation=3009888913849196393, tensor_name="edge_1032_ExponentialMovingAverage/decay", tensor_type=DT_FLOAT, _device="/job:ps/replica:0/task:0/cpu:0"]()]]
+     [[Node: gradients/truediv_grad/Shape_1_S63 = _HostRecv[client_terminated=false, recv_device="/job:worker/replica:0/task:2/cpu:0", send_device="/job:ps/replica:0/task:0/cpu:0", send_device_incarnation=-6688974477600735349, tensor_name="edge_115_gradients/truediv_grad/Shape_1", tensor_type=DT_INT32, _device="/job:worker/replica:0/task:2/cpu:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "bin/worker", line 231, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+    sys.exit(main(sys.argv[:1] + flags_passthrough))
+  File "bin/worker", line 228, in main
+    run_generic(server, args, trainer, num_global_steps=num_global_steps)
+  File "bin/worker", line 152, in run_generic
+    trainer.process(sess)
+  File "/experiment/vnc-agents/trainers/base.py", line 351, in process
+    fetched = sess.run(fetches, feed_dict=feed_dict)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 717, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 915, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 965, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 985, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.UnavailableError: {"created":"@1481750298.553120216","description":"OS Error","errno":110,"file":"external/grpc/src/core/lib/iomgr/tcp_posix.c","file_line":229,"grpc_status":14,"os_error":"Connection timed out","syscall":"recvmsg"}
+     [[Node: ExponentialMovingAverage/decay_S37 = _Recv[client_terminated=false, recv_device="/job:ps/replica:0/task:0/cpu:0", send_device="/job:worker/replica:0/task:2/cpu:0", send_device_incarnation=3009888913849196393, tensor_name="edge_1032_ExponentialMovingAverage/decay", tensor_type=DT_FLOAT, _device="/job:ps/replica:0/task:0/cpu:0"]()]]
+     [[Node: gradients/truediv_grad/Shape_1_S63 = _HostRecv[client_terminated=false, recv_device="/job:worker/replica:0/task:2/cpu:0", send_device="/job:ps/replica:0/task:0/cpu:0", send_device_incarnation=-6688974477600735349, tensor_name="edge_115_gradients/truediv_grad/Shape_1", tensor_type=DT_INT32, _device="/job:worker/replica:0/task:2/cpu:0"]()]]

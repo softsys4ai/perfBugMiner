@@ -1,0 +1,60 @@
+tf.layers.conv3d_transpose with channels_first flips the last two dimensions of the gradient
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): pip3 install --upgrade tf-nightly-gpu
+TensorFlow version (use command below): 1.8.0-dev20180329
+Python version: 3.6.4
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source):N/A
+CUDA/cuDNN version: 9.0/7.1.2
+GPU model and memory: NVIDIA Geforce 940M/2GB
+Exact command to reproduce:
+
+import tensorflow as tf
+a = tf.placeholder(tf.float32, [None, 16, 4, 8, 16])
+b = tf.layers.conv3d_transpose(a, 16, [1, 1, 1], (1, 2, 1), 'same', 'channels_first')
+c = tf.placeholder(tf.float32, [None, 16, 4, 16, 16])
+loss = tf.reduce_mean(tf.squared_difference(b, c))
+train = tf.train.AdamOptimizer().minimize(loss)
+
+Describe the problem
+When using tf.layers.conv3d_transpose with 'channels_first', gradients are calculated with the last two dimensions flipped. The only workaround I currently know is to split the 3d convolution into 2d convolutions with the parameters shared.
+Source code / logs
+Error message below.
+Traceback (most recent call last):
+  File "C:\Users\julia\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 667, in merge_with
+    new_dims.append(dim.merge_with(other[i]))
+  File "C:\Users\julia\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 140, in merge_with
+    self.assert_is_compatible_with(other)
+  File "C:\Users\julia\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 113, in assert_is_compatible_with
+    other))
+ValueError: Dimensions 16 and 8 are not compatible
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\julia\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\ops\gradients_impl.py", line 648, in _GradientsHelper
+    in_grad.set_shape(t_in.get_shape())
+  File "C:\Users\julia\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\framework\ops.py", line 471, in set_shape
+    self._shape_val = self._shape_val.merge_with(shape)
+  File "C:\Users\julia\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 670, in merge_with
+    raise ValueError("Shapes %s and %s are not compatible" % (self, other))
+ValueError: Shapes (?, 16, 4, 16, 8) and (?, 16, 4, 8, 16) are not compatible
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<pyshell#5>", line 1, in <module>
+    train = tf.train.AdamOptimizer().minimize(loss)
+  File "C:\Users\julia\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\training\optimizer.py", line 390, in minimize
+    grad_loss=grad_loss)
+  File "C:\Users\julia\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\training\optimizer.py", line 483, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "C:\Users\julia\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\ops\gradients_impl.py", line 488, in gradients
+    gate_gradients, aggregation_method, stop_gradients)
+  File "C:\Users\julia\AppData\Local\Programs\Python\Python36\lib\site-packages\tensorflow\python\ops\gradients_impl.py", line 655, in _GradientsHelper
+    (op.name, i, t_in.shape, in_grad.shape))
+ValueError: Incompatible shapes between op input and calculated input gradient.  Forward operation: conv3d_transpose/conv3d_transpose.  Input index: 2. Original input shape: (?, 16, 4, 8, 16).  Calculated input gradient shape: (?, 16, 4, 16, 8)

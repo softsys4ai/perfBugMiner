@@ -1,0 +1,45 @@
+Failure in TestNewTensor when running go test
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): source (branch 1.4)
+TensorFlow version (use command below): 1.4.0-dev
+Python version: 3.5
+Bazel version (if compiling from source): 5.4.0
+CUDA/cuDNN version: 8.0/6.0
+GPU model and memory: nVidia 1080Ti 11G
+Exact command to reproduce: go test -v github.com/tensorflow/tensorflow/tensorflow/go
+
+Describe the problem
+I'm trying to use the go bindings to the tensorflow c library. When I run the tests, I get a nil pointer dereference and a segfault. The details are below. Note that I've built the c library from source using the following options:
+bazel build -c opt --config=cuda --config=mkl -c opt --copt=-mavx --copt=-mavx2 --copt=-mfma --copt=-mfpmath=both --copt=-msse4.2 -c opt --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0" //tensorflow:libtensorflow.so
+Source code / logs
+When I run go test -v github.com/tensorflow/tensorflow/tensorflow/go I get the following error:
+2017-10-16 17:12:30.568054: E tensorflow/core/common_runtime/bfc_allocator.cc:244] tried to allocate 0 bytes
+2017-10-16 17:12:30.568065: W tensorflow/core/common_runtime/allocator_retry.cc:32] Request to allocate 0 bytes
+--- FAIL: TestNewTensor (0.00s)
+panic: runtime error: invalid memory address or nil pointer dereference [recovered]
+        panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x536098]
+
+goroutine 168 [running]:
+testing.tRunner.func1(0xc42059c4e0)
+        /usr/lib/go-1.8/src/testing/testing.go:622 +0x29d
+panic(0x6a0b80, 0xa18e80)
+        /usr/lib/go-1.8/src/runtime/panic.go:489 +0x2cf
+github.com/tensorflow/tensorflow/tensorflow/go.tensorData(0x7fa8f40195b0, 0xc420595900, 0x688a80, 0x6ffb90)
+        /home/vishvananda/go/src/github.com/tensorflow/tensorflow/tensorflow/go/tensor.go:209 +0x48
+github.com/tensorflow/tensorflow/tensorflow/go.NewTensor(0x683d20, 0xc4205945e0, 0xc42004d9a0, 0x2, 0x2)
+        /home/vishvananda/go/src/github.com/tensorflow/tensorflow/tensorflow/go/tensor.go:92 +0x221
+github.com/tensorflow/tensorflow/tensorflow/go.TestNewTensor(0xc42059c4e0)
+        /home/vishvananda/go/src/github.com/tensorflow/tensorflow/tensorflow/go/tensor_test.go:92 +0x2526
+testing.tRunner(0xc42059c4e0, 0x6ffbd0)
+        /usr/lib/go-1.8/src/testing/testing.go:657 +0x96
+created by testing.(*T).Run
+        /usr/lib/go-1.8/src/testing/testing.go:697 +0x2ca
+exit status 2
+FAIL    github.com/tensorflow/tensorflow/tensorflow/go  0.443s
+
+Adding some debugging, it turns out that the TestNewTensor test fails when attempting to create the following tensor {[]int64{2, 0}, [][]int64{{}, {}}}. If I comment out that line, the tests pass.

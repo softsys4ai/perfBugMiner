@@ -1,0 +1,170 @@
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Shape mismatch in tuple component 0
+
+When I use tensorflow to build my own neural network and run it, I meet a very strange error. The error is that tensorflow.python.framework.errors_impl.InvalidArgumentError: Shape mismatch in tuple component 0. Expected [400], got [3200]. I have no idea about how [3200] comes, could anyone can help to fix this problem? The input of the neural network is a 400-dimension vector.
+Here is my code:
+tf.logging.set_verbosity(tf.logging.INFO)
+def _cnn_model_fn(features,labels,mode):
+input_layer = tf.reshape(features['inputs'],[-1,400])
+print(features['inputs'].shape)
+fc1 = tf.layers.dense(input_layer,1024,activation=tf.nn.relu)
+fc2 = tf.layers.dense(fc1,1024,activation=tf.nn.relu)
+fc3 = tf.layers.dense(fc2,1024,activation=tf.nn.relu)
+fc4 = tf.layers.dense(fc3,1,activation=tf.nn.sigmoid)
+print(fc4.shape)
+labels = tf.reshape(labels,[-1,1])
+fc4 = tf.reshape(fc4,[-1,1])
+print(labels.shape)
+print(fc4.shape)
+if mode in (Modes.PREDICT,Modes.EVAL):
+print("P and E")
+pre = fc4
+if mode in (Modes.TRAIN,Modes.EVAL):
+print('T and E')
+global_step = tf.contrib.framework.get_or_create_global_step()
+loss = tf.losses.mean_squared_error(labels=labels,predictions=fc4)
+tf.summary.scalar('OptimizeLoss',loss)
+if mode == Modes.PREDICT:
+print('P')
+predictions = {
+'vaule': pre
+}
+export_outputs = {
+'prediction': tf.estimator.export.PredictOutput(predictions)
+}
+return tf.estimator.EstimatorSpec(
+mode, predictions=predictions, export_outputs=export_outputs)
+if mode == Modes.TRAIN:
+print('T')
+optimizer = tf.train.AdamOptimizer(learning_rate=0.01)
+print('optimizer')
+train_op = optimizer.minimize(loss)
+print('train_op')
+return tf.estimator.EstimatorSpec(mode,loss=loss,train_op=train_op)
+if mode == Modes.EVAL:
+print('E')
+eval_metric_ops = {
+'accuracy':tf.metrics.accuray(labels,pre)
+}
+return tf.estimator.EstimatorSpec(mode,loss=loss,eval_metric_ops=eval_metric_ops)
+def build_estimator(model_dir):
+return tf.estimator.Estimator(
+model_fn=_cnn_model_fn,
+model_dir=model_dir,
+config=tf.contrib.learn.RunConfig(save_checkpoints_secs=60))
+def serving_input_fn():
+inputs = {'inputs': tf.placeholder(tf.float32, [None, 400])}
+return tf.estimator.export.ServingInputReceiver(inputs, inputs)
+def read_and_decode(filename_queue):
+reader = tf.TFRecordReader()
+_, serialized_example = reader.read(filename_queue)
+features = tf.parse_single_example(
+serialized_example,
+features={
+'image_raw': tf.FixedLenFeature([], tf.string),
+'label': tf.FixedLenFeature([], tf.float32),
+})
+image = tf.decode_raw(features['image_raw'], tf.uint8)
+image.set_shape([400])
+print('image')
+print(image.shape)
+image = tf.cast(image, tf.float32)
+label = tf.cast(features['label'], tf.float32)
+return image, label
+def input_fn(filename, batch_size=100):
+filename_queue = tf.train.string_input_producer([filename])
+image, label = read_and_decode(filename_queue)
+images, labels = tf.train.batch(
+[image, label], batch_size=batch_size)
+print(images.shape)
+return {'inputs': images}, labels
+def get_input_fn(filename, batch_size=100):
+return lambda: input_fn(filename, batch_size)
+def generate_experiment_fn(data_dir,
+train_batch_size=100,
+eval_batch_size=100,
+train_steps=5000,
+eval_steps=100,
+**experiment_args):
+def _experiment_fn(output_dir):
+return Experiment(
+build_estimator(output_dir),
+train_input_fn=get_input_fn(
+filename=os.path.join(data_dir, 'train.tfrecords'),
+batch_size=train_batch_size),
+eval_input_fn=get_input_fn(
+filename=os.path.join(data_dir, 'test.tfrecords'),
+batch_size=eval_batch_size),
+export_strategies=[saved_model_export_utils.make_export_strategy(
+serving_input_fn,
+default_output_alternative_key=None,
+exports_to_keep=1)],
+train_steps=train_steps,
+eval_steps=eval_steps,
+**experiment_args
+)
+return _experiment_fn
+if name == 'main':
+parser = argparse.ArgumentParser()
+parser.add_argument(
+'--data_dir',
+help='GCS or local path to training data',
+type = str,
+default = '/Users/hanjun/Desktop/OS/scripts'
+#required=True
+)
+parser.add_argument(
+'--train_batch_size',
+help='Batch size for training steps',
+type=int,
+default=100
+)
+parser.add_argument(
+'--eval_batch_size',
+help='Batch size for evaluation steps',
+type=int,
+default=100
+)
+parser.add_argument(
+'--train_steps',
+help='Steps to run the training job for.',
+type=int,
+default=5000
+)
+parser.add_argument(
+'--eval_steps',
+help='Number of steps to run evalution for at each checkpoint',
+default=100,
+type=int
+)
+parser.add_argument(
+'--output_dir',
+help='GCS location to write checkpoints and export models',
+type = str,
+default = '/Users/hanjun/Desktop/OS/Model'
+#required=True
+)
+parser.add_argument(
+'--job-dir',
+help='this model ignores this field, but it is required by gcloud',
+default='junk'
+)
+parser.add_argument(
+'--eval_delay_secs',
+help='How long to wait before running first evaluation',
+default=10,
+type=int
+)
+parser.add_argument(
+'--min_eval_frequency',
+help='Minimum number of training steps between evaluations',
+default=1,
+type=int
+)
+args = parser.parse_args()
+arguments = args.dict
+unused args provided by service
+arguments.pop('job_dir', None)
+arguments.pop('job-dir', None)
+output_dir = arguments.pop('output_dir')
+Run the training job
+learn_runner.run(generate_experiment_fn(**arguments), output_dir)

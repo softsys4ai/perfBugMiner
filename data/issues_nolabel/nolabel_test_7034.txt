@@ -1,0 +1,73 @@
+QueueRunner hanging
+
+I find the queuerunner is hanging in the code below unless I uncomment the line
+#threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+This isn't mentioned on the documentation
+[https://www.tensorflow.org/versions/r0.10/how_tos/threading_and_queues/]
+import time
+import tensorflow as tf
+import numpy as np
+import string
+
+def run_training():
+  # Tell TensorFlow that the model will be built into the default Graph.
+  with tf.Graph().as_default():
+    with tf.name_scope('input'):
+      alph_initializer = tf.placeholder(
+          dtype=tf.string,
+          shape=[26,1])
+      input_alph = tf.Variable(
+          alph_initializer, trainable=False, collections=[])
+
+      alph = tf.train.slice_input_producer(
+          [input_alph], shuffle=False, capacity=1,num_epochs=1)
+      alphs = tf.PaddingFIFOQueue(26,
+                              tf.string,
+                              [[1]])
+
+      alphs_qr = tf.train.QueueRunner(queue=alphs,enqueue_ops=[alphs.enqueue(alph)] )
+
+    my_list_val = np.array(list(string.ascii_lowercase)).reshape(26,1)
+
+
+    # Create the op for initializing variables.
+    init_op = tf.initialize_all_variables()
+
+    # Create a session for running Ops on the Graph.
+    sess = tf.Session()
+
+    # the Op to initialize the variables.
+    sess.run(init_op)
+
+    sess.run(tf.local_variables_initializer())
+    sess.run(tf.global_variables_initializer())
+    # Start input enqueue threads.
+
+    coord = tf.train.Coordinator()
+
+    sess.run(input_alph.initializer,
+             feed_dict={alph_initializer: my_list_val})
+    collection = []
+    #If I uncomment the below line then 
+    #threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+    enqueue_threads = alphs_qr.create_threads(sess, coord=coord, start=True)
+    try:
+        while not coord.should_stop():
+            char =  sess.run(alphs.dequeue())
+            collection.append(char[0])
+            print("String val", char)
+    except tf.errors.OutOfRangeError:
+        print('here')
+    finally:
+        coord.request_stop()
+    coord.join(enqueue_threads)
+
+    sess.close()
+
+
+def main(_):
+  run_training()
+
+
+if __name__ == '__main__':
+    tf.app.run()

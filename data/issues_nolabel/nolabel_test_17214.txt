@@ -1,0 +1,36 @@
+Unimplemented: TensorArray has size zero, but element shape [24,24,?] is not fully defined. Currently only static shapes are supported when packing zero-size TensorArrays.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): python version - pip, c++ version - makefile
+TensorFlow version (use command below): r1.5
+Python version: 3.5.2
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source): 5.4.0
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+I have tensorflow frozen graph. When I read it using python api everything is good but if I do it via c++ api it fails with the error:
+Unimplemented: TensorArray has size zero, but element shape [24,24,?] is not fully defined. Currently only static shapes are supported when packing zero-size TensorArrays.
+	 [[Node: TensorArrayStack/TensorArrayGatherV3 = TensorArrayGatherV3[_class=["loc:@TensorArray"], dtype=DT_INT32, element_shape=[24,24,?], _device="/job:localhost/replica:0/task:0/device:CPU:0"](TensorArray, TensorArrayStack/range, while/Exit_1)]]
+
+Source code / logs
+I guess this is the problem related with while_loop op. This is some part of code that constructs tensorflow graph:
+dets = convert_to_square(boxes_c)
+num_box = tf.shape(dets)[0]
+h = tf.shape(x)[0]
+w = tf.shape(x)[1]
+x0, y0, dy, dx, ex, ey, edx, edy, tmpw, tmph = pad(dets, h, w, num_box)
+x_int = tf.cast(x, tf.int32)
+ims_resized = tf.TensorArray(tf.int32, num_box)
+i = 0
+[i, ims_resized, x_int, tmph, tmpw, dy, edy, dx, edx, y0, ey, x0, ex] = tf.while_loop(cond, generate,
+                            [i, ims_resized, x_int, tmph, tmpw, dy, edy, dx, edx, y0, ey, x0, ex])
+
+ims_resized_normal_tensor0 = ims_resized.stack()
+ims_resized_normal_tensor = (tf.cast(ims_resized_normal_tensor0, tf.float32) - 127.5) / 128.0
+ims_resized = ims_resized.close()

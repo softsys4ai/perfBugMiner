@@ -1,0 +1,83 @@
+Problems about loading SavedModelBundle
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04.3 LTS
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+1.6
+Python version:
+2.7.12
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+CUDA Version 9.0.176
+GPU model and memory:
+Tesla K80, total memory 11.17GiB
+Exact command to reproduce:
+
+Describe the problem
+
+
+Definitions:
+Update N - Update status of proposed issues.
+Additional N - New relevant issues met during development.
+
+
+Background:
+I saved a trained model under Tensorflow 1.0 using Saver.save(), then updated some variables and loaded it into Tensorflow 1.6. Now I saved it again using SavedModelBundle APIs and want to load it in Java.
+
+
+Current Status:
+The model has been exported as .pb and variables files, with tags and SignatureDefs. But when I tried to SavedModelBundle.load() it in Java, it seemed to be blocked until manually terminated. Prompts after termination was like:
+
+Update 1: (transfer the import procedure from Win to Ubuntu)
+Exception in thread "main" java.lang.IllegalArgumentException: Cannot assign a device for operation ... : Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+Registered kernels:
+device='CPU'
+
+
+Further Description:
+What I want to emphasize is that, speaking of the SignatureDef settings, I attempted to give several inputs and outputs at one time, in which case some outputs may also be inputs again.
+More clearly in Seq2Seq model, I have outputs from the encoder which may also be inputs to the decoder. It also means that I want to fetch, modify and feed some intermediate variables of the model instead of playing with a simple model just with 1 input and 1 output. Hence the situation now is a little complex.
+I read the documents but still have not found information describing this situation. Also searching the community gave no suitable answer. Therefore, could you help me to figure out if my implementation is right? or how to use the APIs to serve this situation?
+Thank you!
+Update 1:
+It seems like SavedModelBundle failed to register GPU device for operations? or there are some configurations I should do before using it?
+Besides, I have set "tf.ConfigProto(allow_soft_placement=True)".
+Thanks.
+
+
+Source code / logs
+Python codes:
+saved_model_builder = tf.saved_model.builder.SavedModelBuilder(export_dir)
+a = tf.saved_model.utils.build_tensor_info(model.a)
+b = tf.saved_model.utils.build_tensor_info(model.b)
+c = tf.saved_model.utils.build_tensor_info(model.c)
+d = tf.saved_model.utils.build_tensor_info(model.d)
+e = tf.saved_model.utils.build_tensor_info(model.e)
+signature = tf.saved_model.signature_def_utils.build_signature_def(
+        inputs = {
+            "a": a,
+            "b": b,
+            "c": c},
+        outputs = {
+            "d": d,
+            "e": e,
+            "a": a,
+            "b": b},
+        method_name = tf.saved_model.signature_constants.PREDICT_METHOD_NAME)
+asset_file = tf.constant(FLAGS.vocab_path, name="Vocabulary")
+tf.add_to_collection(tf.GraphKeys.ASSET_FILEPATHS, asset_file)
+saved_model_builder.add_meta_graph_and_variables(
+        self._sess, [tf.saved_model.tag_constants.SERVING],
+        signature_def_map = {tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY: signature},
+            assets_collection = tf.get_collection(tf.GraphKeys.ASSET_FILEPATHS))
+saved_model_builder.save()
+Java code:
+private static final String MODEL_TAG = "serve";
+SavedModelBundle model = SavedModelBundle.load(modelDir, MODEL_TAG);

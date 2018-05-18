@@ -1,0 +1,100 @@
+TFRecordReader keeps files locked after session closes
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):windows 7 64bit
+TensorFlow installed from (source or binary): pip install
+TensorFlow version (use command below): 1.4.0
+Python version: 3.5.2
+Bazel version (if compiling from source):-
+GCC/Compiler version (if compiling from source):-
+CUDA/cuDNN version:-
+GPU model and memory:-
+Exact command to reproduce:
+
+Running this script (you need some tfrecords from here):
+import os
+import shutil
+import sys
+import tempfile
+
+import tensorflow as tf
+
+data_dir = r'/path/to/tfrecords'
+
+def test_generate_tfrecords_from_csv():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        filenames = os.listdir(data_dir)
+        for f in filenames:
+            shutil.copy(os.path.join(data_dir, f), os.path.join(tmpdirname, f))
+        filenames = sorted([os.path.join(tmpdirname, f) for f in filenames])
+        # Create a queue that produces the filenames to read.
+        queue = tf.train.string_input_producer(filenames, num_epochs=1,
+                                               shuffle=False)
+        with tf.Session() as sess:
+            sess.run(tf.local_variables_initializer()) # Local !
+            tf.train.start_queue_runners(sess=sess)
+            reader = tf.TFRecordReader()
+            for j in range(len(filenames)):
+                key, value = reader.read(queue)
+                features_dict = tf.parse_single_example(value, features={
+                    'label': tf.FixedLenFeature([], tf.string),})
+                # the decode call below is needed, if you replace it with
+                # label = tf.constant(0) no files are locked
+                label = tf.decode_raw(features_dict['label'], tf.float32)
+                _ = sess.run([label]) # files are locked here
+        listdir = os.listdir(tmpdirname)
+        print(tmpdirname, listdir)
+        for f in sorted(listdir):
+            os.remove(os.path.join(tmpdirname, f))
+
+print(tf.__version__)
+print(sys.version)
+test_generate_tfrecords_from_csv()
+Produces:
+C:\_\Python35>python.exe C:\Users\MrD\.PyCharm2017.2\config\scratches\so_46259067.py
+1.4.0
+3.5.2 (v3.5.2:4def2a2901a5, Jun 25 2016, 22:18:55) [MSC v.1900 64 bit (AMD64)]
+C:\Users\MrD\AppData\Local\Temp\tmp3hqhkgy0 ['img_2013-01-01-00-00.tfrecords', 'img_2013-01-01-00-01.tfrecords', 'img_2013-01-01-00-02.tfrecords']
+Traceback (most recent call last):
+  File "C:\Users\MrD\.PyCharm2017.2\config\scratches\so_46259067.py", line 38, in <module>
+    test_generate_tfrecords_from_csv()
+  File "C:\Users\MrD\.PyCharm2017.2\config\scratches\so_46259067.py", line 34, in test_generate_tfrecords_from_csv
+    os.remove(os.path.join(tmpdirname, f))
+  File "C:\_\Python35\lib\tempfile.py", line 808, in __exit__
+    self.cleanup()
+  File "C:\_\Python35\lib\tempfile.py", line 812, in cleanup
+    _shutil.rmtree(self.name)
+  File "C:\_\Python35\lib\shutil.py", line 488, in rmtree
+    return _rmtree_unsafe(path, onerror)
+  File "C:\_\Python35\lib\shutil.py", line 383, in _rmtree_unsafe
+    onerror(os.unlink, fullname, sys.exc_info())
+  File "C:\_\Python35\lib\shutil.py", line 381, in _rmtree_unsafe
+    os.unlink(fullname)
+PermissionError: [WinError 5] Access is denied: 'C:\\Users\\MrD\\AppData\\Local\\Temp\\tmp3hqhkgy0\\img_2013-01-01-00-02.tfrecords'
+
+(I had also asked at stack overflow here. Unless I am doing something stupid shouldn't the tfrecord file be free for deleting after the session closes ? Do I have to explicitly close it (is it even possible) ?
+The equivalent dataset code has the same issue:
+def test_generate_tfrecords_from_csv_dataset():
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        filenames = os.listdir(data_dir)
+        for f in filenames:
+            shutil.copy(os.path.join(data_dir, f), os.path.join(tmpdirname, f))
+        filenames = sorted([os.path.join(tmpdirname, f) for f in filenames])
+        def _parse_rec(value):
+            features_dict = tf.parse_single_example(value, features={
+                    'label': tf.FixedLenFeature([], tf.string),})
+            # return tf.constant(0, tf.float32)  # files are locked all the same
+            return tf.decode_raw(features_dict['label'], tf.float32)
+        dataset = tf.data.TFRecordDataset(filenames).map(_parse_rec)
+        get_next = dataset.make_one_shot_iterator().get_next
+        with tf.Session() as sess:
+            for j in range(len(filenames)):
+                label = get_next()
+                _ = sess.run([label]) # files are locked here
+        listdir = os.listdir(tmpdirname)
+        print(tmpdirname, listdir)
+        for f in sorted(listdir):
+            os.remove(os.path.join(tmpdirname, f))
+It seems in both cases it locks the last file - the others are removed ok.

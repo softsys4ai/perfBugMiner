@@ -1,0 +1,81 @@
+Reading .tfrecords files greater than 64mb brings up errors
+
+I have already read this thread: #7311 but I am still encountering this issue with version 1.3.0. Was wondering if anyone knows why?
+Tested on 2 systems:
+OS: Windows 10, Ubuntu 16.04
+Tensorflow installed from source,
+Tensorflow version: 1.3.0
+One system running tensorflow non gpu and another system running CUDA 8 and cuDNN v6
+GPU model: none and GTX Titan Z
+The error I get is:
+`  File "C:\Users\benja\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\errors_impl.py", line 466, in raise_exception_on_not_ok_status
+pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Could not parse example input, value: '
+�ם9
+ѻ�
+�csv�Ȼ�
+Ļ�
+���@cq��.�������M�B
+During handling of the above exception, another exception occurred:
+Traceback (most recent call last):
+File "D:\write_to_tfrecords.py", line 581, in 
+main()
+File "D:\write_to_tfrecords.py", line 577, in main
+read_dataset_from_tfrecords()
+File "D:\write_to_tfrecords.py", line 554, in read_dataset_from_tfrecords
+image_dataset, csv_dataset = sess.run([image_out_reshaped, csv_out_reshaped])
+File "C:\Users\benja\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 895, in run
+run_metadata_ptr)
+File "C:\Users\benja\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1124, in _run
+feed_dict_tensor, options, run_metadata)
+File "C:\Users\benja\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1321, in _do_run
+options, run_metadata)
+File "C:\Users\benja\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1340, in _do_call
+raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Could not parse example input, value: '
+�ם9
+ѻ�
+�csv�Ȼ�
+Ļ�
+���@cq��.�������M�B
+
+
+
+
+
+
+`
+When I try to read .tfrecords files that are less than 64mb this error does not occur.
+My code is here:
+`        with tf.Session() as sess:
+try:
+feature = {'images': tf.FixedLenFeature([], tf.string),
+'csv': tf.FixedLenFeature([], tf.string)
+}
+            filename_queue = tf.train.string_input_producer([data_path], num_epochs=1)
+
+            reader = tf.TFRecordReader()
+
+            _, serialized_example = reader.read(filename_queue)
+
+            features = tf.parse_single_example(serialized_example, features=feature)
+
+            image_out = tf.decode_raw(features['images'], tf.uint8)
+            csv_out = tf.decode_raw(features['csv'], tf.float32)
+
+            image_out_reshaped = tf.reshape(image_out, [1000, 200, 200, 3])
+            csv_out_reshaped = tf.reshape(csv_out, [1000, 6])
+
+            sess.run(tf.global_variables_initializer())
+            sess.run(tf.local_variables_initializer())
+
+            # Create a coordinator and run all QueueRunner objects
+            coord = tf.train.Coordinator()
+            threads = tf.train.start_queue_runners(coord=coord)
+
+            image_dataset, csv_dataset = sess.run([image_out_reshaped, csv_out_reshaped])
+
+            coord.request_stop()
+            coord.join(threads)
+
+`

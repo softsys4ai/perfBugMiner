@@ -1,0 +1,78 @@
+Invalid argument error from tf.gather_nd after upgrade to r1.0
+
+I just upgraded to r1.0 and ran into an issue which I find hard to dissect further. The issue did not occur before when I was using version r0.12. The error message is the following:
+InvalidArgumentError (see above for traceback): Must have updates.shape = indices.shape[:IXDIM] + params_shape[IXDIM:], got updates.shape [1,4,1700], indices.shape [1,4,2], params_shape [1,73,1700]
+	 [[Node: gradients/GatherNd_5_grad/ScatterNd = ScatterNd[T=DT_FLOAT, Tindices=DT_INT32, _device="/job:localhost/replica:0/task:0/cpu:0"](GatherNd_5/indices/_77, gradients/AddN_9/_79, gradients/GatherNd_5_grad/Shape)]]
+
+and the stack trace tells me it stems from the last of the following lines:
+def positional(visible):
+    """
+    :param visible: a tensor of size (batch_size, input_dim, sequence_length) representing the sequence to be optimized
+    """
+    FEET = np.array([4, 5, 8, 9])
+    feet_idx = np.array([range(i, i+3) for i in FEET*3])
+    batch_size = visible.get_shape()[0].value
+    dim = visible.get_shape()[1].value
+    seq_length = visible.get_shape()[2].value
+    idx_x, idx_y, idx_z = feet_idx[:, 0], feet_idx[:, 1], feet_idx[:, 2]
+    idx_x_t = [[[j, i] for i in idx_x] for j in range(batch_size)]
+    idx_y_t = [[[j, i] for i in idx_y] for j in range(batch_size)]
+    v_feet_x = tf.gather_nd(visible, idx_x_t)
+    v_feet_y = tf.gather_nd(visible, idx_y_t) #  stack trace points here
+    ...
+
+This function is called to calculate a cost function which is used during an optimization procedure. See below for a minimum working example.  The error, as far as I can tell from the stack trace, does not happen when the graph is built, but when the computation is executed, which is why I'm not sure how I can further narrow down the problem.
+Environment info
+Operating System: Ubuntu 14.04, x64
+Installed version of CUDA and cuDNN: 8.0 and cuDNN 5.1
+-rw-r--r-- 1 root root   556000 Jan 27 00:48 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Jan 27 00:51 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root       19 Jan 27 00:51 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.61
+-rw-r--r-- 1 root root   415432 Jan 27 00:48 /usr/local/cuda/lib64/libcudart.so.8.0.61
+-rw-r--r-- 1 root root   775162 Jan 27 00:48 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 root root       13 Nov 30 11:39 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 root root       17 Nov 30 11:39 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+-rwxr-xr-x 1 root root 79337624 Nov 30 11:39 /usr/local/cuda/lib64/libcudnn.so.5.1.5
+-rw-r--r-- 1 root root 69756172 Nov 30 11:39 /usr/local/cuda/lib64/libcudnn_static.a
+
+Installed from source from revision 16485a3fb5ffcbaa244e55c388e43279d2770982 using bazel 0.4.4
+Build label: 0.4.4
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Feb 1 18:54:21 2017 (1485975261)
+Build timestamp: 1485975261
+Build timestamp as int: 1485975261
+
+Minimum working example
+import tensorflow as tf
+import numpy as np
+
+def get_costs(velos, seq_length):
+    velo_diff = tf.subtract(tf.slice(velos, [0, 0, 1], [-1, -1, seq_length-1]),
+                            tf.slice(velos, [0, 0, 0], [-1, -1, seq_length-1]))
+    velo_diff_sq = tf.multiply(velo_diff, velo_diff)
+    return tf.reduce_mean(velo_diff_sq)
+
+
+def positional(visible):
+    """
+    :param visible: a tensor of size (batch_size, input_dim, sequence_length) representing the sequence to be optimized
+    """
+    FEET = np.array([4, 5, 8, 9])
+    feet_idx = np.array([range(i, i+3) for i in FEET*3])
+    batch_size = visible.get_shape()[0].value
+    dim = visible.get_shape()[1].value
+    seq_length = visible.get_shape()[2].value
+    idx_x, idx_y, idx_z = feet_idx[:, 0], feet_idx[:, 1], feet_idx[:, 2]
+    idx_x_t = [[[j, i] for i in idx_x] for j in range(batch_size)]
+    idx_y_t = [[[j, i] for i in idx_y] for j in range(batch_size)]
+    v_feet_x = tf.gather_nd(visible, idx_x_t)
+    v_feet_y = tf.gather_nd(visible, idx_y_t)
+    return get_costs(v_feet_y, seq_length)
+
+
+visible = tf.Variable(np.reshape(np.arange(365), [1, 73, 5]), dtype=tf.float32)
+cost_op = positional(visible)
+train_op = tf.train.AdamOptimizer(0.01).minimize(cost_op)
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    sess.run([train_op])

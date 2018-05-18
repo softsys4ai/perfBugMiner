@@ -1,0 +1,44 @@
+Shape inference crashes in SpaceToBatch when padding input is a persistent tensor
+
+TLDR; is there a way to turn off shape inference, or allow support SpaceToBatch getting padding from GetSessionTensor op, which has unknown shape?
+To reproduce
+(holder1, input) = tf.get_session_tensor(tf.float32)
+(holder2, paddings) = tf.get_session_tensor(tf.int32)
+tf.space_to_batch(input, paddings, 2)
+
+
+TypeError: 'NoneType' object has no attribute '__getitem__'
+
+
+
+SpaceToBatch inputs are GetSessionTensor ops.
+_SpaceToBatchShape calls tensor_util.constant_value
+that goes to _ConstantValue which checks op.type, and returns None since GetSessionTensor not recognized
+That goes back to _SpaceToBatchShape and crashes with
+TypeError: 'NoneType' object has no attribute '__getitem__'
+in this line because paddings is None
+
+  paddings = tensor_util.constant_value(op.inputs[1])
+  if (paddings[0, 0] < 0 or paddings[0, 1] < 0 or
+      paddings[1, 0] < 0 or paddings[1, 1] < 0):
+    raise ValueError("paddings cannot be negative.")
+
+
+I got this when trying to use atrous convolution
+File "/private/var/tmp/_bazel_yaroslavvb/ea642be0829ea15e6d2092d22e894d3d/tensorflow/bazel-out/local_darwin-opt/bin/tensorflow/contrib/immediate/nn_test.runfiles/tensorflow/contrib/immediate/python/immediate/ops/nn_test.py", line 304, in testAtrousSequence
+    y1 = tf.nn.atrous_conv2d(x, f, rate, padding=padding)
+  File "/private/var/tmp/_bazel_yaroslavvb/ea642be0829ea15e6d2092d22e894d3d/tensorflow/bazel-out/local_darwin-opt/bin/tensorflow/contrib/immediate/nn_test.runfiles/tensorflow/python/ops/nn_ops.py", line 205, in atrous_conv2d
+    block_size=rate)
+  File "/private/var/tmp/_bazel_yaroslavvb/ea642be0829ea15e6d2092d22e894d3d/tensorflow/bazel-out/local_darwin-opt/bin/tensorflow/contrib/immediate/nn_test.runfiles/tensorflow/python/ops/gen_array_ops.py", line 1471, in space_to_batch
+    block_size=block_size, name=name)
+  File "/private/var/tmp/_bazel_yaroslavvb/ea642be0829ea15e6d2092d22e894d3d/tensorflow/bazel-out/local_darwin-opt/bin/tensorflow/contrib/immediate/nn_test.runfiles/tensorflow/contrib/immediate/python/immediate/op.py", line 315, in apply_op
+    **keywords)
+  File "/private/var/tmp/_bazel_yaroslavvb/ea642be0829ea15e6d2092d22e894d3d/tensorflow/bazel-out/local_darwin-opt/bin/tensorflow/contrib/immediate/nn_test.runfiles/tensorflow/python/ops/op_def_library.py", line 702, in apply_op
+    op_def=op_def)
+  File "/private/var/tmp/_bazel_yaroslavvb/ea642be0829ea15e6d2092d22e894d3d/tensorflow/bazel-out/local_darwin-opt/bin/tensorflow/contrib/immediate/nn_test.runfiles/tensorflow/python/framework/ops.py", line 2188, in create_op
+    set_shapes_for_outputs(ret)
+  File "/private/var/tmp/_bazel_yaroslavvb/ea642be0829ea15e6d2092d22e894d3d/tensorflow/bazel-out/local_darwin-opt/bin/tensorflow/contrib/immediate/nn_test.runfiles/tensorflow/python/framework/ops.py", line 1635, in set_shapes_for_outputs
+    shapes = shape_func(op)
+  File "/private/var/tmp/_bazel_yaroslavvb/ea642be0829ea15e6d2092d22e894d3d/tensorflow/bazel-out/local_darwin-opt/bin/tensorflow/contrib/immediate/nn_test.runfiles/tensorflow/python/ops/array_ops.py", line 1632, in _SpaceToBatchShape
+    if (paddings[0, 0] < 0 or paddings[0, 1] < 0 or
+TypeError: 'NoneType' object has no attribute '__getitem__'

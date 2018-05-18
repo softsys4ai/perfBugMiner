@@ -1,0 +1,101 @@
+Cannot convert a string input to combination of tensors as defined in the Input function
+
+While working on the tensor flow java api, I trained a model in python and saved it using the code below -
+There are two problems I'm facing now while making predictions in Python and Java as below -
+
+Making predictions in Python
+Making prediction in Java with input as string
+How to convert data to complex input types like CrossColumn tensors, bucketized tensors, embedding tensors etc in Java
+
+1] Making predictions in Python -
+Gist for training code can be found at - https://gist.github.com/gaganmalhotra/8c40e7650f27cf3f894bad092fbe01ab
+While loading the model using the Predictor and making predictions as :
+# Preparing the single test dataframe to be used for prediction
+input_single_predict = df_test[2:3] #this is just a single row from the test dataframe I'm using to test for prediction
+
+K_CATEGORICAL_COLUMNS = ["gender", "native_country", "education", "occupation", "workclass", "marital_status", "race"]
+
+def predict_ip_fn(df):
+  categorical_cols = {k: tf.SparseTensor(
+      indices=[[i, 0] for i in range(df[k].size)],
+      values=df[k].values,
+      dense_shape=[df[k].size, 1])
+                      for k in K_CATEGORICAL_COLUMNS}
+  return categorical_cols
+
+dict_predict = predict_ip_fn(input_single_predict)
+
+# Loading the model from disk
+from tensorflow.contrib import predictor
+export_dir = "/Users/Documents/SampleTF_projects/temp/1510957027"
+predict_fn = predictor.from_saved_model(export_dir, signature_def_key=None)
+
+predictions = predict_fn(dict_predict) . #<<<<<< ****** Error is caused here ******
+print(predictions['probabilities'])
+
+
+But it leads to the error as below -
+ValueError: Got unexpected keys in input_dict: set(['workclass', 'gender', 'marital_status', 'race', 'native_country', 'education', 'occupation'])
+Just to cross verify with the model features, you can find the feature columns used in the model as below -
+LinearClassifier(params = {
+	'gradient_clip_norm': None,
+	'head': < tensorflow.contrib.learn.python.learn.estimators.head._BinaryLogisticHead object at 0x121e5a310 > ,
+	'joint_weights': False,
+	'optimizer': None,
+	'feature_columns': [_SparseColumn(column_name = 'gender', is_integerized = False, bucket_size = None, lookup_config = _SparseIdLookupConfig(vocabulary_file = None, keys = ('Female', 'Male'), num_oov_buckets = 0, vocab_size = 2, default_value = -1), combiner = 'sum', dtype = tf.string), 
+  _SparseColumn(column_name = 'native_country', is_integerized = False, bucket_size = 1000, lookup_config = None, combiner = 'sum', dtype = tf.string),
+  _SparseColumn(column_name = 'education', is_integerized = False, bucket_size = 1000, lookup_config = None, combiner = 'sum', dtype = tf.string), 
+  _SparseColumn(column_name = 'occupation', is_integerized = False, bucket_size = 1000, lookup_config = None, combiner = 'sum', dtype = tf.string), 
+  _SparseColumn(column_name = 'workclass', is_integerized = False, bucket_size = 100, lookup_config = None, combiner = 'sum', dtype = tf.string), 
+  _SparseColumn(column_name = 'marital_status', is_integerized = False, bucket_size = 1000, lookup_config = None, combiner = 'sum', dtype = tf.string), 
+  _SparseColumn(column_name = 'race', is_integerized = False, bucket_size = 1000, lookup_config = None, combiner = 'sum', dtype = tf.string)]
+})
+
+2] Making predictions in Java
+Below is the java code for making the predictions from the loaded model:
+
+public static void main(String[] args) throws UnsupportedEncodingException {
+TensorFlow.loadLibrary("/Users/gagandeep.malhotra/Documents/gcTensorFlowPredictIncome/census_keras/lib/python2.7/site-packages/tensorflow/contrib/layers/python/ops/_sparse_feature_cross_op.so");
+		
+		  try (SavedModelBundle b = SavedModelBundle.load("/Users/Documents/SampleTF_projects/temp/1510957027/", "serve")) {
+
+	          
+	          /**
+			 * 
+			 * The given SavedModel SignatureDef contains the following input(s):
+			 * inputs['inputs'] tensor_info: dtype: DT_STRING shape: (-1) name:
+			 * input_example_tensor:0 The given SavedModel SignatureDef contains the
+			 * following output(s): outputs['classes'] tensor_info: dtype: DT_STRING shape:
+			 * (-1, -1) name:
+			 * linear/binary_logistic_head/_classification_output_alternatives/classes_tensor:0
+			 * outputs['scores'] tensor_info: dtype: DT_FLOAT shape: (-1, 2) name:
+			 * linear/binary_logistic_head/predictions/probabilities:0 Method name is:
+			 * tensorflow/serving/classify
+			 * 
+			 * 
+			 */
+			String[] inputs = new String[] { "HS-grad", "Male", "Divorced", "United-States", "Handlers-cleaners",
+					"White", "Private" };
+
+			byte[][][] stringMatrix = new byte[7][1][];
+			for (int i = 0; i < 7; ++i) {
+				stringMatrix[i][0] = String.format(inputs[i]).getBytes("UTF-8");
+			}
+
+			Tensor<String> t = Tensors.create(stringMatrix);
+
+			Session sess = b.session();
+
+			final String xName = "input_example_tensor:0";
+			final String scoresName = "linear/binary_logistic_head/predictions/probabilities:0";
+			List<Tensor<?>> outputs = s.runner().feed(xName, t).fetch(scoresName).run();
+
+			float[][] classes = new float[2][2];
+			outputs.get(0).copyTo(classes);
+
+	      }
+		  
+
+3] How to create a Complex Input data types in JAVA
+In python, we can create different input tensors like CrossedColumn, Bucketized etc , Is there a way that we can convert similarly in Java as we dont have estimators or contrib libraries present in JAVA API.
+If anyone you could help or guide in the right direction.. @eggie5 @asimshankar @ry

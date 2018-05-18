@@ -1,0 +1,32 @@
+A very strange bug with tf.cond, update_ops and global_step
+
+I'm using tf.Estimator with custom model_fn. When training, the estimator usually outputs log like:
+INFO:tensorflow:loss = 1109.14, step = 1
+INFO:tensorflow:loss = 937.876, step = 101 (6.245 sec)
+INFO:tensorflow:loss = 632.192, step = 201 (6.195 sec)
+By default, the printed steps should be 1, 101, 201... However, when I use the following function (which is simplified to reproduce the bug) in any place of the model:
+def my_op(inputs, name=None):
+  with tf.variable_scope(name, default_name='my_scope', reuse=False):
+    count = tf.get_variable('count', shape=[],
+      initializer=tf.zeros_initializer(), trainable=False)
+
+    def myfunc1():
+      return 1
+
+    def myfunc2():
+      tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, count.assign_add(10.0))
+      return 1
+
+    tf.cond(tf.less(1, 2), myfunc1, myfunc2)
+    return inputs
+
+
+The log becomes something like:
+INFO:tensorflow:loss = 1130.58, step = 0
+INFO:tensorflow:loss = 940.298, step = 0 (6.352 sec)
+The global step is always 0. After some tests, I found that the global step is not updated if myfunc2 is not executed. For example, if I write
+tf.cond(tf.less(count, 2), myfunc1, myfunc2)
+then the global step is always 1.
+I suspect that this is caused by the tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, ...) in myfunc2, in which my intend is to update a variable when some condition holds. Maybe op created inside tf.cond can not be used as a dependency outside, but no error message is reported.
+If I cannot add ops to UPDATE_OPS inside tf.cond, does this imply that stateful operations (like tf.layers.batch_normalization) can not be used inside tf.cond? So I cannot dynamically choose a network module from a set of network modules to execute if the network modules use any stateful operations like tf.layers.batch_normalization?
+my tensorflow version: ('v1.4.0-rc0-10-g756a7fc', '1.4.0-rc1')

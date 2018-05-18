@@ -1,0 +1,104 @@
+QueueRunner deadlock when using all CPUs
+
+I'm building an input pipeline following the guidelines here.  The pipeline needs to queue up a bunch of input examples, process each example using a python function (inserted into the tensorflow computation graph using tf.py_func), and return the processed results to an output queue.  I'd like to use QueueRunner's ability to process multiple examples in parallel by launching one processing thread per CPU core.  Here's a simplified example of what I'm trying to do:
+import numpy as np
+import multiprocessing
+import tensorflow as tf
+
+n_cpus = multiprocessing.cpu_count()
+
+sess = tf.Session()
+a = tf.placeholder(tf.float32)
+b = tf.placeholder(tf.float32)
+mult = tf.mul(a, b)
+
+def python_op(x):
+    print "python_op called with {}".format(x)
+    # In my real function, the np.cos and np.sin calls are replaced by
+    # python calculations I can't do in tensorflow
+    y = np.cos(x)
+    z = sess.run(mult, feed_dict={a: y, b: x})
+    print "intermediate result is {}".format(z)
+    return np.sin(z)
+
+n_inputs = n_cpus
+input_queue = tf.FIFOQueue(10000, [tf.float32], shapes=[1])
+load_input = input_queue.enqueue_many(np.random.random((n_inputs, 1)))
+
+output_queue = tf.FIFOQueue(10000, [tf.float32], shapes=[1])
+get_result = output_queue.dequeue_many(n_inputs)
+
+def processing_pipeline():
+    input_value = input_queue.dequeue()
+    return output_queue.enqueue(tf.py_func(python_op, [input_value], [tf.float32], False))
+
+# Here's the problem: If we use all CPUs here, the program will deadlock.
+# If we change cpus to (cpus-1), it works as expected.
+runner = tf.train.QueueRunner(output_queue, [processing_pipeline()] * (n_cpus))
+
+coord = tf.train.Coordinator()
+runner.create_threads(sess, coord=coord, start=True)
+
+print "Loading input"
+sess.run(load_input)
+sess.run(input_queue.close())
+
+try:
+    print "waiting for result"
+    result = sess.run(get_result)
+    print "RESULT: {}".format(result)
+except tf.errors.OutOfRangeError:
+    print "Input exhausted"
+
+coord.request_stop()
+coord.join()
+print "Done"
+The program above deadlocks waiting for sess.run to complete in python_op:
+$ python queuetest.py                                                                                                                                                                                                                                                  
+Loading input
+python_op called with [ 0.65624136]
+ python_op called with [ 0.80651367]
+python_op called with [ 0.31998941]
+ python_op called with [ 0.726421]
+ python_op called with [ 0.33133706]
+python_op called with [ 0.4912357]
+python_op called with [ 0.27365881]
+python_op called with [ 0.32846987]
+
+This is running on an 8-core machine; you can see that 8 python_ops are currently running but are failing to finish.  If, however, we don't use all CPUs (by changing (n_cpus) to (n_cpus-1) in the line that creates the tf.train.QueueRunner, then the program runs to completion:
+$ python queuetest.py                                                                                                                                                                                                                                                        
+Loading input
+python_op called with [ 0.40804103]
+python_op called with [ 0.0182138]
+python_op called with [ 0.17579727]
+ python_op called with [ 0.29143187]
+python_op called with [ 0.11612369]
+ intermediate result is [ 0.37454084]
+python_op called with [ 0.679506]
+python_op called with [ 0.50754625]
+intermediate result is [ 0.01821078]
+intermediate result is [ 0.52857631]
+ intermediate result is [ 0.27914321]
+waiting for result
+python_op called with [ 0.68288684]
+ intermediate result is [ 0.44356483]
+intermediate result is [ 0.11534163]
+ intermediate result is [ 0.17308778]
+intermediate result is [ 0.52975237]
+RESULT: [[ 0.36584523]
+ [ 0.01820978]
+ [ 0.50430447]
+ [ 0.42916203]
+ [ 0.11508605]
+ [ 0.27553213]
+ [ 0.1722248 ]
+ [ 0.50531965]]
+Done
+
+The program also completes successfully if we pass in fewer examples than CPUs in the input queue.
+I realize it's somewhat awkward for python_op to call back into the tensorflow session.  However, the threading and queues section of the manual states:
+"The TensorFlow Session object is multithreaded, so multiple threads can easily use the same session and run ops in parallel."
+So, I assumed that the use case I've outlined above should be supported, and it seems surprising that it works in some cases (fewer threads than CPUs) and doesn't in others (one thread per CPU).  Is this a bug, or is there some reason I shouldn't expect it to work?
+As a side note, one option to work around my problems would be to break python_op into several smaller pieces and chain the intermediate results together in the tensorflow computation graph.  However, in my real pipeline, this isn't straightforward to do, since python_op's real output depends on a number of intermediate, native python data structures that aren't easily converted into tensors that could be spliced into the tensorflow graph.
+OS: Linux
+Tensorflow versions: 0.10.0, 0.11.0-rc0 (CPU-only version)

@@ -1,0 +1,51 @@
+Eager execution breaks fit_generator in tf.keras
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS 10.12.6
+TensorFlow installed from (source or binary): binary
+TensorFlow version: 1.7.0
+Python version: 3.6.3
+Numpy version: 1.14.2
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: not installed
+GPU model and memory: CPU only
+Exact command to reproduce: Run code below
+
+Describe the problem
+tf.enable_eager_execution() leads to a RuntimeError: You must compile your model before using it. when calling Keras's model.fit_generator, even if the model has already been compiled. Calling model.fit works on the other hand.
+Source code / logs
+Minimum reproducible test case:
+import numpy as np
+import tensorflow as tf
+
+tf.enable_eager_execution()  # It works without this line
+
+x, y = np.random.randn(100, 10), np.random.randn(100, 4)
+model = tf.keras.models.Sequential([tf.keras.layers.Dense(4, input_dim=10)])
+model.compile(tf.train.RMSPropOptimizer(0.001), 'mse')
+
+model.fit(x, y)  # Fitting without a generator works in eager mode
+
+class Iterator:
+    def __next__(self):
+        return x, y
+
+model.fit_generator(Iterator(), steps_per_epoch=10)
+Log:
+Epoch 1/1
+100/100 [==============================] - 0s 445us/step - loss: 2.1153
+Traceback (most recent call last):
+  File "tmp.py", line 16, in <module>
+    model.fit_generator(Iterator(), steps_per_epoch=10)
+  File "/Users/kilian/.pyenv/versions/3.6.3/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/engine/sequential.py", line 860, in fit_generator
+    initial_epoch=initial_epoch)
+  File "/Users/kilian/.pyenv/versions/3.6.3/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/engine/training.py", line 1603, in fit_generator
+    initial_epoch=initial_epoch)
+  File "/Users/kilian/.pyenv/versions/3.6.3/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/engine/training_generator.py", line 52, in fit_generator
+    model._make_train_function()
+  File "/Users/kilian/.pyenv/versions/3.6.3/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/engine/training.py", line 578, in _make_train_function
+    raise RuntimeError('You must compile your model before using it.')
+RuntimeError: You must compile your model before using it.

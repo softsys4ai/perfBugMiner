@@ -1,0 +1,69 @@
+Tensorflow lite: crash when use the op tf.gather()
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug, a feature request, or a significant problem with documentation (for small docs fixes please send a PR instead).
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Mac OS X 10.12.6
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.6.0
+Python version: 2.7
+Bazel version (if compiling from source): 0.11.0
+GCC/Compiler version (if compiling from source): 4.2
+CUDA/cuDNN version: no
+GPU model and memory: no
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+I build the tensorflow lite demo in Android Studio using TensorFlow Lite AAR from JCenter. It works perfect on ARM v7a devices. Then I put my model to the tflitecamerademo projects, but I encounter a crash issue. The crash stack is:
+E/AndroidRuntime: FATAL EXCEPTION: CameraBackground Process: android.example.com.tflitecamerademo, PID: 23731 java.lang.IllegalArgumentException: Invalid handle to Interpreter. at org.tensorflow.lite.NativeInterpreterWrapper.getInputDims(Native Method) at org.tensorflow.lite.NativeInterpreterWrapper.run(NativeInterpreterWrapper.java:85) at org.tensorflow.lite.Interpreter.runForMultipleInputsOutputs(Interpreter.java:118) at org.tensorflow.lite.Interpreter.run(Interpreter.java:96) at com.example.android.tflitecamerademo.ImageClassifierFloatInception.runInference(ImageClassifierFloatInception.java:104) at com.example.android.tflitecamerademo.ImageClassifier.classifyFrame(ImageClassifier.java:110) at com.example.android.tflitecamerademo.Camera2BasicFragment.classifyFrame(Camera2BasicFragment.java:664) at com.example.android.tflitecamerademo.Camera2BasicFragment.access$900(Camera2BasicFragment.java:69) at com.example.android.tflitecamerademo.Camera2BasicFragment$5.run(Camera2BasicFragment.java:560) at android.os.Handler.handleCallback(Handler.java:743) at android.os.Handler.dispatchMessage(Handler.java:95) at android.os.Looper.loop(Looper.java:150) at android.os.HandlerThread.run(HandlerThread.java:61)
+The crash occurred only at the time I used tf.gather() or tf.nn.embedding_lookup(). The tflite model conversion seems to be completed without any errors. I visualize the model.tflite by running:
+bazel run tensorflow/contrib/lite/tools:visualize -- model.tflite model_viz.html
+the result show that tf.gather() use builtin code.
+
+I see the similar issue in #16308, but no solution.
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+The tensorflow code:
+import tensorflow as tf
+import pdb
+import tempfile
+import subprocess
+import numpy as np
+tf.contrib.lite.tempfile = tempfile
+tf.contrib.lite.subprocess = subprocess
+img = tf.placeholder(name="img", dtype=tf.float32, shape=(1, 299, 299, 3))
+with tf.name_scope("MobileNet"):
+temp = tf.constant( 1, shape=[299*3], dtype=tf.int32 )
+embs = tf.get_variable( 'embs', shape=(10, 299) )
+emb = tf.nn.embedding_lookup(embs, temp)   ### this line leads to crash ###
+img = img * 0  + tf.reshape(emb, [1, 299, 299, 3])
+out = tf.nn.avg_pool(img, [1, 1, 1, 1], [1, 299, 299, 1], 'VALID')
+out = tf.layers.conv2d(
+inputs=out,
+filters=1001,
+kernel_size=[5, 5],
+padding="same",
+activation=tf.nn.relu)
+out = tf.squeeze(out, [0, 1])
+out = tf.contrib.layers.softmax(out, scope='Predictions')
+saver = tf.train.Saver(tf.all_variables())
+with tf.Session() as sess:
+tf.global_variables_initializer().run()
+saver.save(sess, "model/model.ckpt")
+tf.train.write_graph(sess.graph_def, 'model', 'train.pb', as_text=False)

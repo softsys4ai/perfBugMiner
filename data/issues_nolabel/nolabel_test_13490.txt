@@ -1,0 +1,142 @@
+tf.sparse_add doesn't work for tf.SparseTensor that has tf.Variable as values
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.3.0
+Python version: 3.6.2
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: CUDA 8.0 / cuDNN7
+GPU model and memory: 4x GTX1080ti
+Exact command to reproduce: see below
+
+Describe the problem
+tf.sparse_add raises RuntimeError for tf.SparseTensor that has tf.Variable as values.
+Simplest example code to reproduce the problem:
+import numpy as np
+import scipy.sparse as sp
+import tensorflow as tf
+
+A = sp.random(100, 100)
+vals = tf.Variable(tf.ones([A.nnz]))
+A_tf = tf.SparseTensor(np.column_stack([A.row, A.col]), vals, A.shape)
+tf.sparse_add(A_tf, A_tf)  # raises RuntimeError
+
+Running this snippet produces the following error message
+--------------------------------------------------------------
+RuntimeError                 Traceback (most recent call last)
+<ipython-input-177-3d37a994a045> in <module>()
+      6 vals = tf.Variable(tf.ones([A.nnz]))
+      7 A_tf = tf.SparseTensor(np.column_stack([A.row, A.col]), vals, A.shape)
+----> 8 tf.sparse_add(A_tf, A_tf)  # raises RuntimeError
+
+~/.conda/envs/rml/lib/python3.6/site-packages/tensorflow/python/ops/sparse_ops.py in sparse_add(a, b, thresh)
+    297     b = _convert_to_sparse_tensor(b)
+    298     thresh = ops.convert_to_tensor(
+--> 299         thresh, dtype=a.values.dtype.real_dtype, name="thresh")
+    300     output_ind, output_val, output_shape = (gen_sparse_ops._sparse_add(
+    301         a.indices, a.values, a.dense_shape,
+
+~/.conda/envs/rml/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in convert_to_tensor(value, dtype, name, preferred_dtype)
+    609       name=name,
+    610       preferred_dtype=preferred_dtype,
+--> 611       as_ref=False)
+    612 
+    613 
+
+~/.conda/envs/rml/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in internal_convert_to_tensor(value, dtype, name, as_ref, preferred_dtype)
+    688               "dtype: requested = %s, actual = %s"
+    689               % (error_prefix, conversion_func, base_type,
+--> 690                  dtype.name, ret.dtype.name))
+    691         return ret
+    692   raise TypeError("%sCannot convert %r with type %s to Tensor: "
+
+RuntimeError: thresh: Conversion function <function _constant_tensor_conversion_function at 0x7fe50a9c0ea0> for type <class 'object'> returned incompatible dtype: requested = float32_ref, actual = float32
+
+I found a workaround, but I strongly believe that this is not the intended behavior
+zero_tensor = tf.SparseTensor(np.column_stack([0, 0]), [0.0], A.shape)
+# A_tf = tf.sparse_add(A_tf, zero_tensor)  # still same RuntimeError
+A_tf = tf.sparse_add(zero_tensor, A_tf)  # doesn't change the value of A_tf
+tf.sparse_add(A_tf, A_tf)  # works
+
+Source code / logs
+Output of the log file
+== cat /etc/issue ===============================================
+Linux ************** 4.10.0-33-generic #37~16.04.1-Ubuntu SMP Fri Aug 11 14:07:24 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+
+== cat /etc/issue ===============================================
+Linux ************** 4.10.0-33-generic #37~16.04.1-Ubuntu SMP Fri Aug 11 14:07:24 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="16.04.3 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+c++ (Ubuntu 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+== uname -a =====================================================
+Linux ************** 4.10.0-33-generic #37~16.04.1-Ubuntu SMP Fri Aug 11 14:07:24 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+
+== check pips ===================================================
+numpy (1.13.1)
+protobuf (3.4.0)
+tensorflow-gpu (1.3.0)
+tensorflow-tensorboard (0.1.6)
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.3.0
+tf.GIT_VERSION = v1.3.0-rc2-20-g0787eee
+tf.COMPILER_VERSION = v1.3.0-rc2-20-g0787eee
+Sanity check: array([1], dtype=int32)
+
+== env ==========================================================
+LD_LIBRARY_PATH /usr/local/cuda-8.0/lib64
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+Wed Oct  4 17:59:42 2017       
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 375.82                 Driver Version: 375.82                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 108...  Off  | 0000:02:00.0     Off |                  N/A |
+| 20%   33C    P2    58W / 250W |    445MiB / 11172MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   1  GeForce GTX 108...  Off  | 0000:03:00.0     Off |                  N/A |
+| 20%   32C    P2    57W / 250W |    153MiB / 11172MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   2  GeForce GTX 108...  Off  | 0000:83:00.0     Off |                  N/A |
+| 20%   31C    P8    10W / 250W |   8671MiB / 11172MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   3  GeForce GTX 108...  Off  | 0000:84:00.0     Off |                  N/A |
+| 20%   37C    P8     9W / 250W |    153MiB / 11172MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0     19158    C   ****************************************       443MiB |
+|    1     19158    C   ****************************************       151MiB |
+|    2     20686    C   ********************************************  8669MiB |
+|    3     20686    C   ********************************************   151MiB |
++-----------------------------------------------------------------------------+
+
+== cuda libs  ===================================================
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart_static.a
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart.so.8.0.61
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7

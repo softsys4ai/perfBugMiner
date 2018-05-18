@@ -1,0 +1,27 @@
+Extend existing ops to complex128
+
+This is a follow-up to #1420.
+Now that complex128 is supported in tensorflow, we should extend existing ops like complex, real, imag, … to support complex128 as well.
+I've already done some work on this, but I'm currently stuck on expressing dependencies between input and output types.
+For example, the spec for the Real op is currently
+REGISTER_OP("Real")
+    .Input("in: complex64")
+    .Output("out: float");
+I've extended this to
+REGISTER_OP("Real")
+    .Input("in: T")
+    .Output("out: Tout")
+    .Attr("T: {complex64, complex128} = DT_COMPLEX64")
+    .Attr("Tout: {float, double} = DT_FLOAT");
+and specified corresponding Tout constraints when registering the kernels.
+The problem is that the auto-generated Python op will default to float32 for the output.
+(It also turns Tout into an optional argument).
+I'd like to express "If T==complex128, then Tout==float64" somehow.
+The only way of doing it that I could come up with is by writing a Python wrapper that essentially does
+def real(in):
+    if in.dtype == tf.complex64:
+        Tout = tf.float32
+    elif in.dtype == tf.complex128:
+        Tout = tf.float64
+    return generated_real(in, Tout=Tout)
+Would that be an acceptable solution, or is there a better one?

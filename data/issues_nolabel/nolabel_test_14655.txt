@@ -1,0 +1,32 @@
+Support dynamic partition in loss function
+
+System information
+Python 3.6.1, Ubuntu 16.04, TF 1.3
+Describe the problem
+I am trying to implement a loss function in Tensorflow similar to the Theano loss function described here: Lasagne/Lasagne#767
+I have tried several code but they all lead to runtime error.  Seems that dynamically sized tensors aren't supported in loss function.  I have tried various optimizers, including adam, without success.
+When tested standalone, the function works fine and produces results similar to a numpy based implementation.
+Source code / logs
+Here is one code I tried:
+import tensorflow as tf
+
+def pair_loss(y_true, y_pred):
+    y_true = tf.cast(y_true, tf.int32)
+    parts = tf.dynamic_partition(y_pred, y_true, 2)
+    y_pos = parts[1]
+    y_neg = parts[0]
+    y_pos = tf.expand_dims(y_pos, 0)
+    y_neg = tf.expand_dims(y_neg, -1)
+    out = tf.sigmoid(y_neg - y_pos)
+    return tf.reduce_mean(out, axis=-1)
+
+Here is the theano code for reference:
+import theano
+
+def calc_auroc_loss(pred_vr, y_vr):
+    pos_pred_vr = pred_vr[y_vr.nonzero()]
+    neg_pred_vr = pred_vr[theano.tensor.eq(y_vr, 0).nonzero()]
+    pred_diffs_vr = pos_pred_vr.dimshuffle(0, 'x') - neg_pred_vr.dimshuffle('x', 0)
+    num_pairs_vr = theano.tensor.sum(theano.tensor.eq(y_vr, 1)) * theano.tensor.sum(theano.tensor.eq(y_vr, 0))
+    auroc_vr = theano.tensor.sum(theano.tensor.nnet.sigmoid(pred_diffs_vr)) / num_pairs_vr
+    return -auroc_vr

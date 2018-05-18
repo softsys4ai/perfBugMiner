@@ -1,0 +1,62 @@
+Write to tensor array fails within while loop
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes I am writing a while loop that reads and also updates the tensor array that's being passed to it.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04
+TensorFlow installed from (source or binary):
+Binary
+TensorFlow version (use command below):
+1.3
+Python version:
+3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+When I attempt to write to a tensor array within a while loop, it leads me to an error
+"Could not write to TensorArray index 0 because it has already been read."
+Source code
+def tf_soft_nms(boxes,scores,nms_t,dt_t):
+
+  sigma = tf.constant(0.3)
+  y1 = tf.gather(boxes,0,axis=1)
+  x1 = tf.gather(boxes,1,axis=1)
+  y2 = tf.gather(boxes,2,axis=1)
+  x2 = tf.gather(boxes,3,axis=1)
+  area = tf.multiply((y2-y1) , (x2-x1))
+
+
+  picked_ixs = tf.TensorArray(tf.int32,clear_after_read=False,size=0,dynamic_size=True)
+  scores_ta = tf.TensorArray(scores.dtype,clear_after_read=False,size=scores.shape[0],colocate_with_first_write_call=False)
+  scores_ta = scores_ta.unstack(scores)
+  loop_vars = (picked_ixs,scores_ta,nms_t,dt_t)
+  score_p = tf.Print(scores,[scores],"all_Scores")
+
+  def cond(picked_ixs,scores,nms_t,dt_t):
+    scores_tf = scores.stack()
+    valid_indexes = tf.greater(scores_tf,dt_t)
+    valid = tf.Print(valid_indexes,[valid_indexes],"Conditional check")
+    #scores = scores.write(0,tf.constant(0.0))
+    return tf.reduce_any(valid_indexes)
+
+  def nms_iter(picked_ixs,scores_ta,nms_t,dt_t):
+    global area
+    global boxes
+    #sort scores pick top score
+    scores_tf = scores_ip.stack()
+    scores_ixs = tf.nn.top_k(scores_tf,tf.shape(scores_tf)[0]).indices
+    pick = scores_ixs[0]
+
+
+    #write top score to picked
+    write_index = picked_ixs.size()
+    picked_ixs = picked_ixs.write(write_index,pick)
+    scores_ta = scores_ta.write(pick,tf.constant(0.2))
+    picked_tf = picked_ixs.stack()
+     return picked_ixs,scores_ta,nms_t,dt_t

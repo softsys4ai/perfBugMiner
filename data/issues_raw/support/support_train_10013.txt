@@ -1,0 +1,59 @@
+GPU resources not released when session is closed
+
+This is a possible duplicate of #1727. Posting here as there is no way to re-open or comment on the previous bug.
+The comments suggests that the updating the driver would most probably fix the issue but its not the case.
+Environment info
+Distributor ID:	Ubuntu
+Description:	Ubuntu 16.04.2 LTS
+Release:	16.04
+Codename:	xenial
+
+python3 -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+v1.1.0-rc0-61-g1ec6ed5 1.1.0
+
+
+nvidia-smi
+NVIDIA-SMI 375.51 Driver Version: 375.51
+
+Before starting the service
+0     27825    C   /usr/bin/python3                                35MiB
+After deleting the session
+Note that I am creating the session and loading a checkpoint, running the session and then closing it explicitly with session.close(). I am also resetting the graph by calling tf.reset_default_graph() after closing the session.
+0     27825    C   /usr/bin/python3                              1435MiB
+device_t='/gpu:0'
+graph = tf.Graph()
+soft_config = tf.ConfigProto(allow_soft_placement=True)
+soft_config.gpu_options.allow_growth = True . #tried both True and False and doesn't seem to help
+with graph.as_default(), graph.device(device_t), tf.Session(config=soft_config) as sess:
+    batch_shape = (batch_size,) + img.shape
+    img_placeholder = tf.placeholder(tf.float32, shape=batch_shape,
+                                     name="img_placeholder")
+    preds = transform.net(img_placeholder)
+    saver = tf.train.Saver()
+    saver.restore(sess, checkpoint_dir)
+
+    content = np.zeros(batch_shape, dtype=np.float32)
+    content[0] = img
+
+    _preds = sess.run(preds, feed_dict={img_placeholder: content})
+    result = crop_img(_preds[0].astype(data_in.dtype))
+    sess.close()   #Explicitly closing the session and deleting does not help as well. 
+    del sess
+tf.reset_default_graph()
+return result
+
+Here are some of the relevant logs.
+2017-05-18 18:49:16.556719: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-18 18:49:16.556757: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-18 18:49:16.556775: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-18 18:49:16.584028: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:901] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-05-18 18:49:16.584295: I tensorflow/core/common_runtime/gpu/gpu_device.cc:887] Found device 0 with properties: 
+name: GRID K520
+major: 3 minor: 0 memoryClockRate (GHz) 0.797
+pciBusID 0000:00:03.0
+Total memory: 3.94GiB
+Free memory: 3.87GiB
+2017-05-18 18:49:16.584326: I tensorflow/core/common_runtime/gpu/gpu_device.cc:908] DMA: 0 
+2017-05-18 18:49:16.584344: I tensorflow/core/common_runtime/gpu/gpu_device.cc:918] 0:   Y 
+2017-05-18 18:49:16.584368: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GRID K520, pci bus id: 0000:00:03.0)
+2017-05-18 18:49:16.585190: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GRID K520, pci bus id: 0000:00:03.0)

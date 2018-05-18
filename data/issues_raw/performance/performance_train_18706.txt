@@ -1,0 +1,53 @@
+Wrong variance from initialisers
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): N/A
+TensorFlow installed from (source or binary): N/A
+TensorFlow version (use command below): 1.3, 1.4, 1.5, 1.6, 1.7, 1.8
+Python version: N/A
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: See Source Code section
+
+Describe the problem
+Probably the best known fact about weight initialisation is that initial weights should have small values, close to zero. Probably, a lot of people, especially those that read [1] by LeCun et al., also know that also some properties of the distribution from which the initial values are drawn matters. This has been discussed in great detail in the literature. Xavier Glorot argued in [2] that the variance of the (initial) weights should have zero mean and a variance of 1/(fan_in + fan_out) for sigmoid activation functions (focusing on tanh). He et al. [3] noted that  for ReLUs, the weights should have zero mean and a variance of 2/fan_in in order to correct for the variance that gets lost in the negative part. Finally, the entire theory of self-normalizing networks, introduced in [4] by Klambauer et al., and the parameters for alpha and gamma for SELU activation functions, is built upon the assumptions that the weights have mean 0 and variance 1/fan_in.
+The truncated normal distribution is a commonly used distribution for initialising weights in a neural network. After all, it looks like a Gaussian, but does not allow outliers, which could cause saturation for certain activation function from the start. It also has a mean and variance that depend on the four parameters of the truncated normal distribution: mean, standard deviation, lower boundary and upper boundary. This distribution is implemented in tf.truncated_normal and allows to create a truncated normal distribution with arguments for its mean and standard deviation, i.e. the standard distribution of the Gaussian before truncating (I know that this is confusing #13686). Note that the boundaries are fixed to be at 2 standard deviations at each side of the mean.
+This is all fine, until one wants to create a truncated normal distribution with a specific standard deviation, which happens to be the case for the initialisers. Although the well-studied initialisers, mentioned earlier, tell us exactly what the best variances are, the <name>_normal_initializer lead to wrong initialisations (for examples, see below). The problem can be brought back to the VarianceScaling initialiser, which allows to choose between a normal and uniform distribution. When using distribution='normal', a truncated normal is used under the hood. Because there is no compensation for the truncation of the normal distribution (which would have had the correct standard deviation), the variance of the generated samples do not have the required variance. This has been resolved in Theano from the start (see issue theano/theano#6381) and I wanted to tackle this problem in Keras (see issue keras-team/keras#8048), where I was redirected here (keras-team/keras#9963).
+It should be possible to map the solution implemented in keras-team/keras#9963 directly to the tensorflow code. I hope this gets fixed soon, because there are probably plenty of people using wrong initialisations due to this faulty implementation.
+PS: I am not eager to accept all these terms to issue a pull request for making this minor contribution directly. Thanks to anybody who would take this fix upon him/her.
+TL;DR; The default initialisers using truncated normal distributions are simply wrong. By truncating a normal distribution, variance gets lost and the entire theoretical foundations of the initialisers disappear. I believe that this issue can be fixed by accounting for the truncation in the VarianceScaling initialiser.
+Source code / logs
+import tensorflow as tf
+import numpy as np
+
+fan_in, fan_out = 1000, 100
+
+uniform_init = tf.variance_scaling_initializer(distribution='uniform')
+normal_init = tf.variance_scaling_initializer(distribution='normal')
+
+print("expected variance: {:f}".format(1. / fan_in))
+with tf.Session() as sess:
+     print(" uniform variance: {:f}".format(
+         np.var(sess.run(uniform_init((fan_in, fan_out))))))
+     print("  normal variance: {:f}".format(
+         np.std(sess.run(normal_init((fan_in, fan_out))))))
+
+uniform_init = tf.glorot_uniform_initializer()
+normal_init = tf.glorot_normal_initializer()
+
+print("expected variance: {:f}".format(2. / (fan_in + fan_out)))
+with tf.Session() as sess:
+     print(" uniform variance: {:f}".format(
+         np.var(sess.run(uniform_init((fan_in, fan_out))))))
+     print("  normal variance: {:f}".format(
+         np.std(sess.run(normal_init((fan_in, fan_out))))))
+
+References
+[1] LeCun, Yann, Léon Bottou, Genevieve B. Orr, and Klaus-Robert Müller. "Efficient backprop." In Neural networks: Tricks of the trade, pp. 9-50. Springer, Berlin, Heidelberg, 1998.
+[2] Glorot, Xavier, and Yoshua Bengio. "Understanding the difficulty of training deep feedforward neural networks." In Proceedings of the thirteenth international conference on artificial intelligence and statistics, pp. 249-256. 2010.
+[3] He, Kaiming, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. "Delving deep into rectifiers: Surpassing human-level performance on imagenet classification." In Proceedings of the IEEE international conference on computer vision, pp. 1026-1034. 2015.
+[4] Klambauer, Günter, Thomas Unterthiner, Andreas Mayr, and Sepp Hochreiter. "Self-normalizing neural networks." Advances in Neural Information Processing Systems (2017): 972-981.

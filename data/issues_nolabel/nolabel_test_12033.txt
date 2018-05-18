@@ -1,0 +1,76 @@
+read batch file using filename queue when fit wide and deep model
+
+Describe the problem
+I read records from files using typical pipeline:
+filename_queue = tf.train.string_input_producer(file_list, num_epochs=num_epochs)
+reader = tf.TextLineReader()
+ _, value = reader.read_up_to(filename_queue, num_records=num_records)
+data_batch = tf.train.batch([value]...)
+record_defaults = [['string'] for _ in range(len(COLUMNS))]
+col = tf.decode_csv(records=data_batch,
+                    record_defaults=record_defaults,
+                    field_delim=',')
+Then, creates a dictionary mapping from each feature column name (k) to the values of that column stored in a Tensor.
+feature_dict = dict()
+label = None
+for i, cname in enumerate(COLUMNS):
+    c = tf.slice(col, begin=[i, 0], size=[1, -1])
+    if cname in CONTINUOUS_COLUMNS:
+        c = tf.string_to_number(c, tf.float64)
+        c = tf.transpose(c)
+        feature_dict[cname] = c
+    elif cname in CATEGORICAL_COLUMNS:
+        c = dense_to_sparse(c[0])
+        feature_dict[cname] = c
+    elif cname == 'click':
+        label = tf.string_to_number(c[0], tf.int64)
+Creating threads to prefetch using QueueRunner objects
+model = DNNLinearCombinedClassifier(...)
+config = tf.ConfigProto(allow_soft_placement=True)
+config.gpu_options.allow_growth = True
+with tf.Session(config=config) as sess:
+    sess.run(tf.global_variables_initializer())
+    sess.run(tf.local_variables_initializer())
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
+    try:
+        while not coord.should_stop():
+            model.fit(input_fn=lambda: (feature_dict, label), steps=FLAGS.train_step)
+        except tf.errors.OutOfRangeError:
+            print('Done training, epoch reached')
+        finally:
+            coord.request_stop()
+        coord.join(threads)
+The error is:
+Traceback (most recent call last):
+File "/Users/houxue/workspace/Python/dnn-tf/v2/dnntf.py", line 262, in <module>
+    main(FLAGS)
+File "/Users/houxue/workspace/Python/dnn-tf/v2/dnntf.py", line 145, in main
+    train_v2(FLAGS)
+File "/Users/houxue/workspace/Python/dnn-tf/v2/dnntf.py", line 128, in train_v2
+    model.fit(input_fn=lambda: (feature_dict, label), steps=FLAGS.train_step)
+File "/usr/local/devtools/anaconda3/envs/tf/lib/python2.7/site-packages/tensorflow/python/util/deprecation.py", line 289, in new_func
+    return func(*args, **kwargs)
+File "/usr/local/devtools/anaconda3/envs/tf/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 455, in fit
+    loss = self._train_model(input_fn=input_fn, hooks=hooks)
+File "/usr/local/devtools/anaconda3/envs/tf/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1003, in _train_model
+    config=self._session_config
+File "/usr/local/devtools/anaconda3/envs/tf/lib/python2.7/site-packages/tensorflow/python/training/monitored_session.py", line 352, in MonitoredTrainingSession
+    stop_grace_period_secs=stop_grace_period_secs)
+File "/usr/local/devtools/anaconda3/envs/tf/lib/python2.7/site-packages/tensorflow/python/training/monitored_session.py", line 648, in __init__
+    stop_grace_period_secs=stop_grace_period_secs)
+File "/usr/local/devtools/anaconda3/envs/tf/lib/python2.7/site-packages/tensorflow/python/training/monitored_session.py", line 470, in __init__
+    h.begin()
+File "/usr/local/devtools/anaconda3/envs/tf/lib/python2.7/site-packages/tensorflow/python/training/basic_session_run_hooks.py", line 163, in begin
+    for (tag, tensor) in self._tensors.items()}
+File "/usr/local/devtools/anaconda3/envs/tf/lib/python2.7/site-packages/tensorflow/python/training/basic_session_run_hooks.py", line 163, in <dictcomp>
+    for (tag, tensor) in self._tensors.items()}
+File "/usr/local/devtools/anaconda3/envs/tf/lib/python2.7/site-packages/tensorflow/python/training/basic_session_run_hooks.py", line 685, in _as_graph_element
+    "to current graph %s." % (obj, graph))
+ValueError: Passed Tensor("binary_logistic_head/log_loss_with_two_classes/loss:0", shape=(), dtype=float32) should have graph attribute that is equal to current graph <tensorflow.python.framework.ops.Graph object at 0x1131f3610>.
+
+Googleing the error, I found that ValueError: Passed Tensor(...) should have graph attribute that is equal to current graph
+
+Returning the features or labels from a closure fails because a new tf.Graph is created when you call model.fit, so any modifications to the graph (e.g. tf.contrib calls) need to be made from within the input_fn (and therefore after the new graph has been instantiated).                                    -alcorn
+
+How to read batch data using filename queue when fit DNNLinearCombinedClassifier model? Thanks!

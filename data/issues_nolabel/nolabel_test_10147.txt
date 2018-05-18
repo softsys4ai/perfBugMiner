@@ -1,0 +1,33 @@
+Strange Behavior During Grid Search
+
+I implemented a customized grid search wrapper for a sequence-to-sequence model. The implementation is extremely simple:
+def single_round_model_eval(train_fun, decode_fun, eval_fun,
+                            train_set, dev_set, metrics):
+    # Train the model with a certain set of hyperparameters and evaluate on the
+    # development set.
+
+    # :param train_fun: Function to train the model.
+    # :param decode_fun: Function to decode from the trained model.
+    # :param eval_fun: Function to evaluate the decoding results.
+    # :param train_set: Training dataset.
+    # :param dev_set: Development dataset.
+    # :param metrics: Name of the evaluation metrics to be tuned.
+
+    # :return: The metrics being tuned.
+
+    tf.reset_default_graph()
+    train_fun(train_set, dev_set)
+
+    tf.reset_default_graph()
+    decode_sig = decode_fun(dev_set, verbose=False)
+
+    M = eval_fun(dev_set, decode_sig, verbose=False)
+
+    return M[metrics]
+
+The algorithm basically calls the above function every time it moves to a new point in the grid (a new set of hyperparameters).
+The complete implementation can be found here:
+https://github.com/TellinaTool/awesome_nmt/blob/master/encoder_decoder/grid_search.py
+The single_round_model_eval creates a training graph, trains the model; then creates a "forward only" decoding graph, and decode the predictions on the dev set; finally evaluates the newly decoded predictions (no graph operations is used in the evaluation step).
+Yet I encountered a strange behavior that my subsequent runs always achieve much worse numbers compared to the first run. I didn't find problems in hyperparameter settings, and think this may be caused by that some variables carries residue values from the previous run. I tried to use tf.reset_default_graph() to force reset but that also doesn't help. I'm also wondering if it is caused by missing resets of the optimizer I used (tf.train.AdamOptimizer).
+Could anyone offer some help? Thanks!

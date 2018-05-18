@@ -1,0 +1,21 @@
+tfcompile with --config=monolithic and -fvisibility=hidden results in undefined reference __xla_cpu_runtime_EigenMatMulF32
+
+Some background first. For DeepSpeech, I have been experimenting simplification of our set of dependencies, trying to do a --config=monolithic build. The root cause for that was being able to run a SYCL-enabled build on my system (Ubuntu 17.10). Using OpenCL on this would trigger dependency load-chain that in the end loads libmirprotobuf. This would clash with the protobuf symbols already built in our libtensorflow_framework / libtensorflow_cc. To avoid this, monolithic build and forcing visibility=hidden seemed to be the best solution.
+This allows us to move from those libraries (non tfcompile build, tfcompile adds libdeepspeech_model.so and all the XLA dependencies):
+
+libdeepspeech.so
+libdeepspeech_utils.so
+libtensorflow_cc.so
+libtensorflow_framework.so
+
+To just:
+
+libdeepspeech.so
+libdeepspeech_utils.so
+
+This way, we have all needed TensorFlow bits within libdeepspeech.so, and those symbols are not re-exported thus avoiding any unwanted interaction. I could get SYCL build nearly working on Intel GPU.
+Adding tfcompile in the equation, however, lead to linking issues. Symptom would be that build completes, but when one links binary against the model's .so, then it fails with:
+undefined reference __xla_cpu_runtime_EigenMatMulF32
+
+Checking with objdump -t bazel-bin/tensorflow/compiler/xla/service/cpu/_objs/runtime_matmul/tensorflow/compiler/xla/service/cpu/runtime_matmul*.o | grep EigenMatMul would show that the symbol is properly built into runtime_matmul, but that it is hidden.
+I would be able to solve that by exposing __xla_cpu_runtime_EigenMatMulF32 and __xla_cpu_runtime_EigenMatMulF64 through TF_EXPORT.

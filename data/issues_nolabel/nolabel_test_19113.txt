@@ -1,0 +1,50 @@
+[AdamOptimizer]Failed precondition: Attempting to use uninitialized value model_2/beta1_power
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu
+TensorFlow version (use command below): r1.3
+Python version: 3.6
+
+Describe the problem
+I write a model class that use a AdamOptimizer to update the parameters. It is a joint model so that there are two losses. It works well as I update all the parameters by the joint loss. But then I want to updated a subset of parameters by each of the loss respectively, that is , I had to call the apply_gradients() twice, it raised errors when I restore the model from .ckpt file: 'Failed precondition: Attempting to use uninitialized value model_2/beta1_power'.
+Source code / logs
+This is the original source code when I update the model with the whole loss.
+	taggingloss = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(labels = self.tag, logits = self.tagginglogits))
+	classifyloss = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(labels = self.label, logits = self.logits))
+	self.loss = (1 - alpha) * classifyloss + alpha * taggingloss
+	# Gradients
+	params = tf.trainable_variables()
+	opt = tf.train.AdamOptimizer(learning_rate = self.learning_rate)
+	gradient = tf.gradients(self.loss, params)
+	clipped_gradients, norm = tf.clip_by_global_norm(gradient, max_gradient_norm)
+	self.gradient_norm = norm
+	self.update = opt.apply_gradients(zip(clipped_gradients, params), global_step = self.global_step)
+	save_list = params
+	save_list.append(self.global_step)
+	self.saver = tf.train.Saver(save_list)
+
+then I  revised it into:
+	# Gradients
+	params = tf.trainable_variables()
+	opt = tf.train.AdamOptimizer(learning_rate = self.learning_rate)
+	tag_gradient = tf.gradients(taggingloss, params)
+	tag_clipped_gradients, tag_norm = tf.clip_by_global_norm(tag_gradient, max_gradient_norm)
+	self.tag_gradient_norm = tag_norm
+	self.tag_update = opt.apply_gradients(zip(tag_clipped_gradients, params), global_step = self.global_step)
+	
+	classify_gradient = tf.gradients(classifyloss, params)
+	classify_clipped_gradients, classify_norm = tf.clip_by_global_norm(classify_gradient, max_gradient_norm)
+	self.classify_gradient_norm = classify_norm
+	self.classify_update = opt.apply_gradients(zip(classify_clipped_gradients, params), global_step = self.global_step)
+
+	save_list = tf.trainable_variables()
+	save_list.append(self.global_step)
+	self.saver = tf.train.Saver(save_list)
+
+The rest are all the same, except that, I used to run the self.update operation in the train() call. Now I first run self.tag_update in the tagging() call and then run self.classify_update in the train() call.
+I have read the closed issue of #8057. it said in it that
+
+I understood here such a thing: variables beta1_power and beta2_power are specific to each call to apply_gradients, but not to the whole graph. So if we want to call apply_gradients twice, two separate pairs of beta accumulators should be created, even if both calls are made within the single graph. This does not fit into the concept of "graph slots". Definitely, we should separate these slots by graphs, but we cannot simply key these slots by graphs only.
+
+But I still have no idea how ti fix it.

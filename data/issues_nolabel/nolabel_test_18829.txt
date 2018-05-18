@@ -1,0 +1,67 @@
+How to quantify ssd_mobilenet_v1_coco model and toco to .tflite ?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.8.0
+Python version:2.7.12
+Bazel version (if compiling from source): 0.12.0
+CUDA/cuDNN version: cuda-9.0/7.0
+GPU model and memory: GeForce GTX 1080/8105MiB
+Exact command to reproduce: N/A
+Phone: Moto G4 Play (need to use Camera, not Camera2)
+
+Hi,  guys,
+I am trying to quantify ssd_mobilenet_v1 using tensorflow object detection api, according to @coutner post .
+First, I replace all the graph_hook_fn in
+trainer.py tf.contrib.quantize.create_training_graph and enable fused batch norm in ssd_mobilenet_v1_feature_extractor.py
+After training, I used the following script to transform the model.
+
+when running optimize_for_inference, some warning had arisen.
+
+$ bazel run -c opt tensorflow/python/tools/optimize_for_inference -- \
+>     --input=$DETECT_PB --output=$STRIPPED_PB --frozen_graph=True \
+>     --input_names=Preprocessor/sub --output_names=concat,concat_1 \
+>     --toco_compatible=True \
+>     --alsologtostderr
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_1_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_2_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_3_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_4_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_5_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_6_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_7_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_8_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_9_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_10_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_11_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_12_depthwise/BatchNorm/FusedBatchNorm'
+WARNING:tensorflow:Didn't find expected Conv2D input to 'FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_13_depthwise/BatchNorm/FusedBatchNorm'
+
+When Running toco,
+$ bazel run tensorflow/contrib/lite/toco:toco -- 
+>   --input_file=$STRIPPED_PB \
+>   --output_file=$DETECT_FB \
+>   --input_format=TENSORFLOW_GRAPHDEF \
+>   --output_format=TFLITE \
+>   --inference_type=QUANTIZED_UINT8 \
+>   --input_shapes=1,300,300,3 \
+>   --input_arrays=Preprocessor/sub \
+>   --output_arrays=concat,concat_1 \
+>   --std_values=128 \
+>   --mean_values=127 \
+>   --dump_graphviz=/tmp
+2018-04-24 18:51:51.645315: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before Removing unused ops: 253 operators, 450 arrays (0 quantized)
+2018-04-24 18:51:51.686011: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before general graph transformations: 253 operators, 450 arrays (0 quantized)
+2018-04-24 18:51:51.774563: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] After general graph transformations pass 1: 62 operators, 169 arrays (1 quantized)
+2018-04-24 18:51:51.775525: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before pre-quantization graph transformations: 62 operators, 169 arrays (1 quantized)
+2018-04-24 18:51:51.776094: F tensorflow/contrib/lite/toco/tooling_util.cc:1464] Array FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_0/Relu6, which is an input to the DepthwiseConv operator producing the output array FeatureExtractor/MobilenetV1/MobilenetV1/Conv2d_1_depthwise/Relu6, is lacking min/max data, 
+which is necessary for quantization. Either target a non-quantized output format, or change the input 
+graph to contain min/max information, or pass --default_ranges_min= and --default_ranges_max= if you 
+do not care about the accuracy of results.
+Aborted (core dumped)
+
+Is there anyone who can help ? @andrewharp ,
+thanks.

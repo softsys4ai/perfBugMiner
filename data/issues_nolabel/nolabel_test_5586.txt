@@ -1,0 +1,59 @@
+AttributeError: 'LSTMStateTuple' object has no attribute 'get_shape'
+
+My code
+cell = cell_fn(args.rnn_size)
+
+        self.cell = cell = rnn_cell.MultiRNNCell([cell] * args.num_layers, state_is_tuple=True)
+
+        self.input_data = tf.placeholder(tf.int32, [args.batch_size, args.seq_length])
+        self.targets = tf.placeholder(tf.int32, [args.batch_size, args.seq_length])
+        self.initial_state = cell.zero_state(args.batch_size, tf.float32)
+
+        with tf.variable_scope('rnnlm'):
+            softmax_w = tf.get_variable("softmax_w", [args.rnn_size, args.vocab_size])
+            softmax_b = tf.get_variable("softmax_b", [args.vocab_size])
+            with tf.device("/cpu:0"):
+                embedding = tf.get_variable("embedding", [args.vocab_size, args.rnn_size])
+                inputs = tf.split(1, args.seq_length, tf.nn.embedding_lookup(embedding, self.input_data))
+                inputs = [tf.squeeze(input_, [1]) for input_ in inputs]
+
+        def loop(prev, _):
+            prev = tf.matmul(prev, softmax_w) + softmax_b
+            prev_symbol = tf.stop_gradient(tf.argmax(prev, 1))
+            return tf.nn.embedding_lookup(embedding, prev_symbol)
+
+        initial_input = self.initial_state[0]
+        beam_decoder = BeamDecoder(num_classes=3, stop_token=2, beam_size=7, max_len=5)
+        _, final_state = tf.nn.seq2seq.rnn_decoder(
+                                [beam_decoder.wrap_input(initial_input)] + [None] * 4,
+                                beam_decoder.wrap_state(self.initial_state),
+                                beam_decoder.wrap_cell(cell),
+                                #loop_function = lambda prev_symbol, i: tf.reshape(prev_symbol, [-1, 1])
+                                loop_function=loop if infer else None, scope='rnnlm'
+                            )
+
+there is a problem appeared when I try to run ,the traceback info is as follows
+[sun ~/workspace/sunxiaobiu/word-rnn-tensorflow 20:23:05]$ python sample.py
+Traceback (most recent call last):
+  File "sample.py", line 42, in <module>
+    main()
+  File "sample.py", line 25, in main
+    sample(args)
+  File "sample.py", line 32, in sample
+    model = Model(saved_args, True)
+  File "/Users/sun/workspace/sunxiaobiu/word-rnn-tensorflow/model.py", line 53, in __init__
+    loop_function=loop if infer else None, scope='rnnlm'
+  File "/Library/Python/2.7/site-packages/tensorflow/python/ops/seq2seq.py", line 146, in rnn_decoder
+    output, state = cell(inp, state)
+  File "/Users/sun/workspace/sunxiaobiu/word-rnn-tensorflow/beam_decoder.py", line 172, in __call__
+    cell_outputs, raw_cell_state = self.cell(cell_inputs, past_cell_state)
+  File "/Library/Python/2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 813, in __call__
+    cur_inp, new_state = cell(cur_inp, cur_state)
+  File "/Library/Python/2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 310, in __call__
+    concat = _linear([inputs, h], 4 * self._num_units, True)
+  File "/Library/Python/2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 889, in _linear
+    shapes = [a.get_shape().as_list() for a in args]
+AttributeError: 'LSTMStateTuple' object has no attribute 'get_shape'
+
+I have tried to put the state_is_tuple=True , but it still not work~
+@lukaszkaiser

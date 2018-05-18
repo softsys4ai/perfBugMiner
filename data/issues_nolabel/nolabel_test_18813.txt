@@ -1,0 +1,53 @@
+Support in the Dataset API for sharding dataset used in stateful LSTMs
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+ubuntu 16.04
+TensorFlow installed from (source or binary):
+using docker from google container registry
+TensorFlow version (use command below):
+1.7.0
+Python version:
+3.5
+Bazel version (if compiling from source):
+n/a
+GCC/Compiler version (if compiling from source):
+n/a
+CUDA/cuDNN version:
+n/a
+GPU model and memory:
+n/a
+Exact command to reproduce:
+n/a
+
+Hi,
+I was wondering if there will ever be support for sharding a dataset where the order matters? As an example, consider the ptb_word_lm.py script. In the training of the LSTM, batches must be kept in order since the hidden/cell state is never reset (until the end of the epoch). If we use tf.data, we wouldn't be able to use Dataset.shard(...) on the examples themselves because we would get batches like this (assuming 4 workers in a distributed training and batch_size=3):
+worker0_batch0 = [example_0, example_4, example_8]
+worker0_batch1 = [example_12, example_16, example_20]
+...
+worker1_batch0 = [example_1, example_5, example_9]
+worker1_batch1 = [example_13, example_17, example_21]
+...
+worker2_batch0 = [example_2, example_6, example_10]
+worker2_batch1 = [example_14, example_18, example_22]
+...
+worker3_batch0 = [example_3, example_7, example_11]
+worker3_batch1 = [example_15, example_19, example_23]
+...
+Assuming the size of the dataset is N, then what we really want is
+worker0_batch0 = [example_0, example_1, example_2]
+worker0_batch1 = [example_3, example_4, example_5]
+...
+worker1_batch0 = [example_(N/4)+0, example_(N/4)+1, example_(N/4)+2]
+worker1_batch1 = [example_(N/4)+3, example_(N/4)+4, example_(N/4)+5]
+...
+worker2_batch0 = [example_2*(N/4)+0, example_2*(N/4)+1, example_2*(N/4)+2]
+worker2_batch1 = [example_2*(N/4)+3, example_2*(N/4)+4, example_2*(N/4)+5]
+...
+worker3_batch0 = [example_3*(N/4)+0, example_3*(N/4)+1, example_3*(N/4)+2]
+worker3_batch1 =[example_3*(N/4)+3, example_3*(N/4)+4, example_3*(N/4)+5]
+...
+Even sharding the batches instead of the examples would lead to a similar picture.
+So I guess if I had a list of TFRecord filenames, I could split the filenames, but I have a concern in the context of synchronous training. Suppose I have 10 tfrecord files (each with 10k examples) and 4 workers. The first two workers would get 3 files and the other two would get 2 files. If my understanding of SyncReplicasOptimizer is correct, I would either have to toss each of the 10k examples on the first two workers, or create a barrier for the second two workers to not proceed until the first two are done. Is there another solution here aside from equally splitting up my training data among files?
+I can think of a couple of workarounds to this problem, but I'd like to know if this problem has been, or will be, solved?

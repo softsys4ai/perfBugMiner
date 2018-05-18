@@ -1,0 +1,31 @@
+after ops_to_register.h changed, IOS camera example still return No OpKernel support 'Less' op
+
+System information
+Run on MacOS 10.12
+Xcode 8.3.3
+Python 3.5
+tensorflow 1.2.1 installed with anaconda
+bazel 0.5.2-homebrew
+Main Problem:
+Although I changed ops_to_register.h file and recompile the static library, IOS camera example code still returned No OpKernel support 'Less' op error. The same library works fine in another project JieHe's ios-tensorflow object detection project when I replace the model load the model. I can't tell why I got the issues with official tensorflow ios code.
+Describe the problem
+I trained my model based on the ssd_mobilenet network. T hen the model was optimized for usage on ios. Freeze it with export_inference_graph.py, optimize it withoptimize_for_inference.py, and then binary reduced the size with bazel build -c tensorflow/tools/graph_transforms:transform_graph
+In that, the model was well-generated as desired.
+For the static library:
+And then I try to import the model into my app. So I print all the ops and put the file under tensorflow/core/framework.
+
+bazel build tensorflow/python/tools:print_selective_registration_header
+bazel-bin/tensorflow/python/tools/print_selective_registration_header 
+    --graphs=path/to/graph.pb > ops_to_register.h
+
+In the Makefile, first delete the line "-D__ANDROID_TYPES_SLIM__ " under "# Settings for iOS." for all "$(IOS_ARCH)". And run
+tensorflow/contrib/makefile/download_dependencies.sh
+tensorflow/contrib/makefile/compile_ios_protobuf.sh 
+tensorflow/contrib/makefile/compile_ios_tensorflow.sh "-O3  -DANDROID_TYPES=ANDROID_TYPES_FULL -DSELECTIVE_REGISTRATION -DSUPPORT_SELECTIVE_REGISTRATION"
+
+After I generated the static tensorflow library, I pod install the podfile in camera example as required. Modified the input/output tensor and try to build the app. However, the same error with "No kernel registed XXX" still occurs .
+I also tried my model and the same library on JieHe's ios-tensorflow code, it can run smoothly. So I assumed] my static library was well generated to including all the ops I need. So I don't really know how to solve it with the example code?
+My error log:
+
+2017-08-24 17:21:18.679927: F /Users/yingjie/tensorflow-master/tensorflow/examples/ios/App-test/camera/CameraExampleViewController.mm:730] Couldn't load model: Invalid argument: No OpKernel was registered to support Op 'Less' with these attrs.  Registered devices: [CPU], Registered kernels:
+device='CPU'; T in [DT_FLOAT]

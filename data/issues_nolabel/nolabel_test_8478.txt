@@ -1,0 +1,16 @@
+synchronous posix file mmap
+
+TensorFlow's PosixFileSystem::NewReadOnlyMemoryRegionFromFile method calls mmap with only the MAP_PRIVATE flag specified.
+Having the ability to specify that flag, at least to specify MAP_POPULATE would be very useful for many applications with high disk I/O throughput. For the MAP_POPULATE case, I sped up one of my graphs by ~4x by adding that flag because I have a pipeline that:
+
+reads in a file of N chunks in size
+enqueues a pointer to each of those N chunks in an output queue
+downstream nodes process one chunk at a time
+
+Because of the lack of coordination between the downstream nodes (each being independent), they would take page faults in an uncoordinated manner. When I added MAP_POPULATE this went away.
+I have a patch to add this feature where I change the base method to look like this:
+virtual Status NewReadOnlyMemoryRegionFromFile(
+  const string& fname, std::unique_ptr<ReadOnlyMemoryRegion>* result, bool synchronous = false) = 0;
+
+and then changed each corresponding subclass method signature. For the Posix subclass, I added MAP_POPULATE to the flags if synchronous == true.
+I can submit a pull request for this, but I find this approach hacky (e.g. that flag might not have the same meaning in non-Posix contexts). If there is a better approach to do this, I'm happy to work on it.

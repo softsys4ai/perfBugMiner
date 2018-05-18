@@ -1,0 +1,57 @@
+Training using multiple GPUs returns Inf values for loss and Nan for grads.
+
+I have two Tesla K80 cards (2 GPUs per card) and I spent few days testing a MNIST classification model using multiple GPUs. What I found is that the training process would always diverge (got Nan for grads and Inf for loss) when I use two GPUs which are in the same card, however when I allocated two GPUs to my training operation from different cards, it would lead to convergence. By the way, everything worked well on a single GPU.
+I am not sure about how GPUs compute those networks and it is really weird two GPUs from the same card make my model diverge and from different cards can make it converge.
+The output for divergence is like the below:
+2017-02-13 12:30:11.255323: step 10, loss = 5799703749333771039308345507840.00 (980.7 examples/sec; 0.102 sec/batch)
+2017-02-13 12:30:14.131089: step 20, loss = 2102245862526597403246592.00 (793.5 examples/sec; 0.126 sec/batch)
+2017-02-13 12:30:16.995940: step 30, loss = 2.30 (787.6 examples/sec; 0.127 sec/batch)
+W tensorflow/core/framework/op_kernel.cc:975] Invalid argument: Nan in summary histogram for: layer2/weights_1
+	 [[Node: layer2/weights_1 = HistogramSummary[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"](layer2/weights_1/tag, layer2/weights/read/_117)]]
+I used cpu to preprocess the input data read from tfreords. My code for computing the average grads:
+def average_gradients(tower_grads):
+    average_grads = []
+    for grad_and_vars in zip(*tower_grads):
+        grads = []
+        for g, _ in grad_and_vars:
+            expanded_g = tf.expand_dims(g, 0)
+            grads.append(expanded_g)
+        grad = tf.concat(0, grads)
+        grad = tf.reduce_mean(grad, 0)
+        v = grad_and_vars[0][1]
+        grad_and_var = (grad, v)
+        average_grads.append(grad_and_var)
+    return average_grads 
+The training_op:
+def main(argv=None): 
+    with tf.Graph().as_default(), tf.device('/cpu:0'):
+        x, y_ = get_input()
+        regularizer = tf.contrib.layers.l2_regularizer(REGULARAZTION_RATE)
+        
+        global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0), trainable=False)
+        learning_rate = tf.train.exponential_decay(
+            LEARNING_RATE_BASE, global_step, 60000 / BATCH_SIZE, LEARNING_RATE_DECAY)       
+        
+        opt = tf.train.GradientDescentOptimizer(learning_rate)
+        
+        tower_grads = []
+        for i in range(N_GPU):
+            with tf.device('/gpu:%d' % i):
+                with tf.name_scope('GPU_%d' % i) as scope:
+                    cur_loss = get_loss(x, y_, regularizer, scope)
+                    tf.get_variable_scope().reuse_variables()
+                    grads = opt.compute_gradients(cur_loss)
+                    tower_grads.append(grads)
+        
+        grads = average_gradients(tower_grads)
+        for grad, var in grads:
+            if grad is not None:
+            	tf.summary.histogram('gradients_on_average/%s' % var.op.name, grad)
+
+        apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
+        for var in tf.trainable_variables():
+            tf.summary.histogram(var.op.name, var)
+
+        variable_averages = tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY, global_step)
+        variables_averages_op = variable_averages.apply(tf.trainable_variables())
+        train_op = tf.group(apply_gradient_op, variables_averages_op)

@@ -1,0 +1,58 @@
+bug about tensorflow can not call opencv imread properly
+
+System information
+**- Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): ubuntu 14.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.4
+Python version: 2.7(but actually i am talking about c++ code)
+Bazel version (if compiling from source): 0.5.4/0.7.0 all tried
+GCC/Compiler version (if compiling from source):  4.8.4
+CUDA/cuDNN version: N/A
+GPU model and memory: CPU mode
+Exact command to reproduce: bazel run -c opt //tensorflow/cc/face:face**
+
+Describe the problem
+i add opencv as a third party lib to tensorflow, and modify the workspace and BUILD file to include it to the project. it works well when i use tensorflow 1.2.1 or version before it. recently i update my tensorflow to the newest version, it recommand i must update my bazel at least 0.5.4(i use 0.5.2 with jdk7 before).
+and when i update bazel, and move my own code to the new project, compiling seems ok. but when i run the binary, it seems not right. i can not load a jpeg file when i use cv::imread, it doesn't crash, but return a cv::Mat with size 0. in the new project, i can load a bmp file properly, so i guess it is because the project does not link the libjpeg.
+but i never need to link the libjpeg manually, because it is included in the opencv library. so i guess there is a bug in the new version of tensorflow.
+i have tried the linkopt with -ljpeg, but it does not work.
+Source code / logs
+WORKSPACE File:
+new_local_repository(
+name = "opencv",
+path = "/usr/local",
+build_file = "opencv.BUILD",
+)
+BUILD file of opencv:
+cc_library(
+name = "opencv",
+srcs = glob(["lib/.so"]),
+hdrs = glob(["include/**/*.hpp"]),
+includes = ["include"],
+visibility = ["//visibility:public"],
+linkstatic = 1,
+)
+BUILD file of my code
+tf_cc_binary(
+name = "face",
+srcs = ["face.cc"],
+includes = ["."],
+deps = [
+"//tensorflow/cc:cc_ops",
+"//tensorflow/cc:client_session",
+"//tensorflow/core:tensorflow",
+"@opencv//:opencv",
+],
+copts = ["-fopenmp"],
+linkopts = ["-lgomp", "-ljpeg"],
+)
+my code:
+cv::Mat img = cv::imread("pic.jpg");
+std::cout<<line<<" "<<img.channels()<<" "<<img.cols<<" "<<img.rows<<endl;
+the log will be: pic.jpg 1 0 0
+but if i read a bmp file:
+cv::Mat img = cv::imread("pic.bmp");
+std::cout<<line<<" "<<img.channels()<<" "<<img.cols<<" "<<img.rows<<endl;
+the log will be: pic.bmp 3 500 355

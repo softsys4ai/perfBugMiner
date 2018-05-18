@@ -1,0 +1,83 @@
+Save and restore feature request
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug or a feature request.
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): NO
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 14.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.2.1
+Python version: 3.5
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 8.0/v5.1
+GPU model and memory: GeForce GTX TITAN X / 12205MiB
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+I am sorry to bother you all, here this is not a bug but, in my view, a feature request.
+I have trained a model and initialized a Saver instance by defining
+
+value_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='global/old_scope')
+value_list.extend(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='global/actor_critic'))
+saver = tf.train.Saver(value_list, max_to_keep=100)
+
+with tf.Session(config=tf_configs) as sess:
+    coord = tf.train.Coordinator()
+    if load_model:
+        print('Loading Model...')
+        ckpt = tf.train.get_checkpoint_state(model_path)
+        saver.restore(sess, ckpt.model_checkpoint_path)
+    else:
+        sess.run(tf.global_variables_initializer())
+
+And later in a new sub-scope, I added a new layer, with the same saver defined above, I trained the model, however, I found that weights of the new layer were not saved.
+Here is my network
+
+with tf.variable_scope(scope):
+    with tf.variable_scope('old_scope'):
+        self.inputs = tf.placeholder(shape=[None, 80, 80, 1], dtype=tf.float32)
+        self.conv_1 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.inputs, num_outputs=32,
+                                  kernel_size=[8, 8], stride=4, padding='SAME')
+        self.conv_2 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv_1, num_outputs=64,
+                                  kernel_size=[4, 4], stride=2, padding='SAME')
+        self.conv_3 = slim.conv2d(activation_fn=tf.nn.relu, inputs=self.conv_2, num_outputs=64,
+                                  kernel_size=[3, 3], stride=1, padding='SAME')
+        self.fc = slim.fully_connected(slim.flatten(self.conv_3), 512, activation_fn=tf.nn.elu)
+
+    with tf.variable_scope('added_layer'):
+        self.fc_1 = slim.fully_connected(self.fc, 512, activation_fn=tf.nn.elu)
+
+    with tf.variable_scope('actor_critic'):
+        # Output layers for policy and value estimations
+        self.policy = slim.fully_connected(self.fc_1,
+                                         cfg.ACTION_DIM,
+                                         activation_fn=tf.nn.softmax, 
+                                         biases_initializer=None)
+        self.value = slim.fully_connected(self.fc_1,
+                                          1,
+                                          activation_fn=None,
+                                          biases_initializer=None)
+
+And I found that the var_list defines values to be restored and saved. But in my case, there is no checkpoint data of the new layer in the checkpoint file.
+Since before adding the new layer, I have trained the model and save the checkpoint data, and then after adding the new layer, I wanna train the network.
+And I can define a new instance of Saver to save the model
+new_saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=GLOBAL_SCOPE))
+However, I think it is not an elegant way to do so.
+And can you add a feature to restore some values specified by users and also save some specified values when saving?
+And in fact, it is a question asked by me on SO
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.

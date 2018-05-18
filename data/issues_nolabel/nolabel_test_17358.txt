@@ -1,0 +1,62 @@
+Distributed training: Evaluation and inference best practices
+
+I understand tensorflow distributed training and I implemented my own script.
+What I want to do now is to integrate the possibility of assigning some workers the task of asynchronously evaluate the model.
+Let's say we have 6 workers, what I want to do is to use 4 of them to do asynchronous training, one to periodically evaluate the model and another one to periodically make inference on it.
+My intuition to achieve this goal is to do the following:
+...
+elif FLAGS.job_name == "worker":
+
+    if FLAGS.task_index <= (len(cluster_dict["worker"][:-2]) - 1):
+         logging.info("Training worker started")
+         ...
+        with tf.device(tf.train.replica_device_setter(
+                worker_device="/job:worker/task:%d" % FLAGS.task_index,
+                cluster=cluster,
+                ps_tasks=len(cluster_dict["ps"])
+            )):
+                train_model = Model(
+                    mode=tf.contrib.learn.ModeKeys.TRAIN
+                )
+               with tf.train.MonitoredTrainingSession(
+                    is_chief=(FLAGS.task_index == 0),
+                    master=server.target,
+                    checkpoint_dir=ckpt_dir,
+                    config=config_proto,
+                    hooks=hooks
+                ) as mon_sess:
+                    while not mon_sess.should_stop():
+                        res = train_model.train(...)
+                        ...
+
+   elif FLAGS.task_index == (len(cluster_dict["worker"][-2]) - 1):
+         logging.info("Evaluation worker started")
+         ...
+        with tf.device(tf.train.replica_device_setter(
+                worker_device="/job:worker/task:%d" % FLAGS.task_index,
+                cluster=cluster,
+                ps_tasks=len(cluster_dict["ps"])
+            )):
+                eval_model = Model(
+                    mode=tf.contrib.learn.ModeKeys.EVAL
+                )
+                ...
+
+   elif FLAGS.task_index == (len(cluster_dict["worker"][-1]) - 1):
+        logging.info("Inference worker started")
+        ...
+        with tf.device(tf.train.replica_device_setter(
+                worker_device="/job:worker/task:%d" % FLAGS.task_index,
+                cluster=cluster,
+                ps_tasks=len(cluster_dict["ps"])
+            )):
+                infer_model = Model(
+                    mode=tf.contrib.learn.ModeKeys.INFER
+                )
+                ...
+
+Now, what about the evaluation and inference sessions?
+For training, I can use tf.train.MonitoredTrainingSession, but for evaluation and inference I don't see such a cozy solution and the only possibility that I see is to use tf.Session.
+Regarding the actual evaluation and inference loop, I thought to use a while loop inside which the worker periodically calls  eval_model.eval(...) or  infer_model.infer(...), but this means that the evaluation is performed considering the time and not considering the global_step and the only meaning that I can give to "periodically" is to sleep the thread.
+What do you think about this solution? Is it the correct way to asynchronously perform training, evaluation, and inference?
+Alberto

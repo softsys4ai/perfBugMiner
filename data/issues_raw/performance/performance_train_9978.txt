@@ -1,0 +1,39 @@
+graph_editor.copy_with_input_replacements crashes for some orderings of inputs
+
+Graph editor copy_with_input_replacements  visits nodes in order provided, and assumes that op referenced by "op._original_op" has already already been visited. When this assumption is false, it fails with KeyError inside transform.py
+Reproducible case
+import tensorflow as tf
+import numpy as np
+import tensorflow.contrib.graph_editor as ge
+
+if __name__=='__main__':
+  params = tf.Variable(1, dtype=np.float32, name="params")
+  temp = tf.reduce_sum(params, name="sum_temp")
+  cost1 = tf.square(temp, name="cost1")
+  gradients1 = tf.gradients([cost1], [params])
+  ops = tf.get_default_graph().get_operations()
+  ops = list(sorted(ops, key=lambda op: op.name))
+  copied_sgv, info = ge.copy_with_input_replacements(ge.sgv(ops), {})
+
+It fails with following error
+Traceback (most recent call last):
+  File "graph_editor_test.py", line 13, in <module>
+    copied_sgv, info = ge.copy_with_input_replacements(ge.sgv(ops), {})
+  File "/Users/yaroslav/anaconda/envs/memory/lib/python3.5/site-packages/tensorflow/contrib/graph_editor/transform.py", line 620, in copy_with_input_replacements
+    sgv, dst_graph, dst_scope, src_scope, reuse_dst_scope=reuse_dst_scope)
+  File "/Users/yaroslav/anaconda/envs/memory/lib/python3.5/site-packages/tensorflow/contrib/graph_editor/transform.py", line 436, in __call__
+    self._copy_ops(info)
+  File "/Users/yaroslav/anaconda/envs/memory/lib/python3.5/site-packages/tensorflow/contrib/graph_editor/transform.py", line 450, in _copy_ops
+    op_, op_outputs_ = self.transform_op_handler(info, op)
+  File "/Users/yaroslav/anaconda/envs/memory/lib/python3.5/site-packages/tensorflow/contrib/graph_editor/transform.py", line 173, in copy_op_handler
+    original_op = info.transform_original_op_handler(info, op._original_op)
+  File "/Users/yaroslav/anaconda/envs/memory/lib/python3.5/site-packages/tensorflow/contrib/graph_editor/transform.py", line 125, in transform_op_if_inside_handler
+    return info.transformed_ops[op]
+KeyError: <tf.Operation 'sum_temp' type=Sum>
+
+A work-around is to clear _original_op entries for all ops
+def clear_original_ops(ops):
+  for op in ops:
+    op._original_op = None
+
+@purpledog

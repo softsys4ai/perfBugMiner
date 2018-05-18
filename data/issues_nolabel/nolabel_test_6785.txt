@@ -1,0 +1,320 @@
+Bug with TensorFlow Serving in TensorFlow 0.12
+
+I have found the following code works fine when using TensorFlow 0.11, installed using:
+export TF_BINARY_URL=https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.11.0rc2-cp27-none-linux_x86_64.whl
+However when using TensorFlow 0.12 installed using:
+export TF_BINARY_URL=https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-0.12.1-cp27-none-linux_x86_64.whl
+I get the following issue when loading the model:
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:937] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties: 
+name: GeForce GTX 960M
+major: 5 minor: 0 memoryClockRate (GHz) 1.176
+pciBusID 0000:02:00.0
+Total memory: 3.95GiB
+Free memory: 3.92GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 960M, pci bus id: 0000:02:00.0)
+Traceback (most recent call last):
+  File "./demo2.py", line 101, in <module>
+    outp = sess.run(out, feed_dict={inp: [v]})[0]
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 766, in run
+    run_metadata_ptr)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 964, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.FailedPreconditionError: Attempting to use uninitialized value convolution2d_1_W_1
+	 [[Node: convolution2d_1_W_1/read = Identity[T=DT_FLOAT, _class=["loc:@convolution2d_1_W_1"], _device="/job:localhost/replica:0/task:0/gpu:0"](convolution2d_1_W_1)]]
+	 [[Node: Reshape_9/_7 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_2_Reshape_9", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+Caused by op u'convolution2d_1_W_1/read', defined at:
+  File "./demo2.py", line 32, in <module>
+    sess,inp,out,classes = load_graph("/tmp/cnn/00000001/")
+  File "./demo2.py", line 18, in load_graph
+    sess, meta_graph_def = session_bundle.load_session_bundle_from_path(output_graph_path)
+  File "/usr/lib/python2.7/site-packages/tensorflow/contrib/session_bundle/session_bundle.py", line 95, in load_session_bundle_from_path
+    saver = tf.train.import_meta_graph(meta_graph_def)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1526, in import_meta_graph
+    **kwargs)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/meta_graph.py", line 502, in import_scoped_meta_graph
+    producer_op_list=producer_op_list)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/importer.py", line 285, in import_graph_def
+    op_def=op_def)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2240, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1128, in __init__
+    self._traceback = _extract_stack()
+
+FailedPreconditionError (see above for traceback): Attempting to use uninitialized value convolution2d_1_W_1
+	 [[Node: convolution2d_1_W_1/read = Identity[T=DT_FLOAT, _class=["loc:@convolution2d_1_W_1"], _device="/job:localhost/replica:0/task:0/gpu:0"](convolution2d_1_W_1)]]
+	 [[Node: Reshape_9/_7 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_2_Reshape_9", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+Create model:
+#!/usr/bin/env python2
+
+from __future__ import division, print_function, absolute_import
+import tensorflow as tf
+import numpy as np
+import keras
+from tensorflow.contrib.session_bundle import exporter
+
+from keras.optimizers  import Adam
+from keras.constraints import MaxNorm
+
+import keras.models as models
+from keras.layers.core import Reshape,Dense,Dropout,Activation,Flatten
+from keras.layers.noise import GaussianNoise
+from keras.layers.convolutional import Convolution2D, MaxPooling2D, ZeroPadding2D
+from keras.regularizers import *
+from keras.optimizers import adam
+
+
+from keras.layers.core import Dense, Dropout, Activation, Flatten, Reshape, Merge
+from keras import backend as K
+from keras.callbacks import TensorBoard
+from keras.preprocessing.image import ImageDataGenerator
+from keras.regularizers import l2
+
+
+mods = ["psk","fm"]
+
+sess = tf.Session()
+
+init_op = tf.group(tf.initialize_all_variables(), tf.initialize_local_variables())
+
+K.set_session(sess)
+K.set_learning_phase(1)
+
+classes = mods
+
+X_train = np.array([[[  1.23725709e-04,   3.21811251e-03,   8.11603665e-03,  -3.23975401e-04,
+    1.07787224e-02,   2.94970046e-03,   4.02887911e-03,  -1.88605103e-03,
+    1.07172830e-03,  -4.49557183e-03,   4.48013563e-03,  -4.36049374e-03,
+    2.03782506e-03,   3.55514325e-03,  -6.66785333e-03,   1.42298348e-03,
+   -1.50406240e-02,  -2.57269153e-03,   5.56691317e-03,   1.13693373e-02,
+    2.71817949e-03,   5.25468131e-05,  -3.36736324e-03,  -9.75306786e-04,
+    3.72400926e-03,   1.18668824e-02,  -1.42240804e-03,   1.44388294e-02,
+    8.27464042e-04,   6.72260066e-03,  -5.76557242e-04,   1.67079712e-03,
+   -1.02783879e-02,  -6.51435228e-04,  -1.59728453e-02,  -2.92223319e-03,
+   -9.65267327e-03,   8.49308504e-04,  -4.86527057e-03,  -2.24598357e-03,
+   -6.85441250e-04,  -7.86077511e-03,   8.25393759e-03,  -8.98091588e-03,
+   -4.13634349e-03,   5.30316820e-03,  -2.96568638e-03,   7.47767324e-03,
+    7.87805114e-03,   3.33608547e-03,   6.81637728e-04,  -3.26122390e-03,
+   -5.83499251e-03,   6.05301978e-03,   3.19009693e-03,  -4.02274629e-04,
+   -1.09375454e-02,   1.74824963e-03,   1.75286271e-03,  -1.26824277e-02,
+    7.39318645e-03,   3.90595663e-03,   1.98931666e-03,   6.12980360e-03,
+   -1.79607305e-03,   1.40197761e-02,  -9.81968828e-03,   5.02704596e-03,
+    3.01699433e-03,  -6.52436400e-03,  -1.62929588e-03,   7.39145232e-03,
+   -9.01302416e-03,   3.07239546e-03,  -1.82828668e-03,  -5.16610499e-03,
+    2.61074631e-03,  -1.33442272e-05,   5.14040841e-03,  -6.64286781e-03,
+    1.71982939e-03,  -4.85043926e-03,  -3.97882238e-03,  -1.37700920e-03,
+   -1.10943802e-02,   2.20915396e-03,  -3.39583290e-04,   4.58237901e-03,
+    4.64649638e-03,  -2.94209481e-03,  -1.55386878e-02,   5.68915205e-03,
+   -5.80187945e-04,  -5.83021576e-03,  -3.40874423e-04,  -1.83014176e-03,
+    3.61575768e-03,  -8.90286360e-03,  -4.51745838e-03,   1.93125161e-03,
+   -8.45910795e-03,  -5.77241089e-03,   8.37801304e-03,  -1.38715087e-02,
+   -3.31607228e-03,   5.12827048e-03,   9.08580422e-03,   1.84341776e-03,
+   -8.04373343e-03,  -9.29000136e-03,  -9.47526656e-04,   4.20172885e-03,
+   -5.26063796e-03,  -6.72675669e-03,  -3.59727233e-03,   4.08909051e-03,
+    7.33140949e-03,  -7.76879140e-04,  -2.54971418e-03,  -8.70507117e-03,
+    7.90149346e-03,   7.96920154e-03,   2.96101277e-03,  -5.38653834e-03,
+   -4.88629332e-04,   1.00093251e-02,  -4.25783452e-03,  -5.71854087e-03],
+ [ -6.87929394e-04,   4.60408907e-03,   7.26573868e-04,   4.26992076e-03,
+   -7.02272868e-03,   2.22673942e-03,   1.22035667e-02,  -8.09120014e-03,
+    1.39266049e-04,  -1.15088280e-02,   5.04087773e-04,  -2.15286622e-03,
+   -7.33058015e-03,  -9.15534515e-03,  -5.08288946e-03,  -1.30671002e-02,
+    1.47830602e-03,   1.16440572e-03,   4.02440550e-03,   8.58596340e-03,
+    3.03325080e-03,  -2.05237372e-03,   1.05325170e-02,  -1.80078077e-03,
+    4.63060196e-03,   1.23807620e-02,  -6.47541787e-03,  -4.13759379e-03,
+   -2.83148466e-03,   7.43190618e-03,  -1.15842454e-03,   6.59148069e-03,
+    5.59045048e-03,   3.75851267e-03,  -3.95106524e-03,  -2.56526005e-03,
+    6.27654884e-03,  -1.24440319e-03,   3.46388144e-04,  -1.55166397e-03,
+    1.04056811e-02,   1.30844014e-02,  -6.36276463e-03,  -6.97820855e-04,
+   -3.15165240e-03,  -1.41060480e-03,   1.38492498e-03,   8.64384789e-03,
+   -7.11268140e-03,  -1.76842324e-03,  -1.25329485e-02,  -4.83873859e-03,
+   -5.18619781e-03,   1.30472714e-02,  -5.54988487e-03,   8.61867797e-03,
+   -3.99610912e-03,   6.70848880e-04,  -9.35312640e-03,   1.23843951e-02,
+   -3.27547453e-03,   4.86938097e-03,  -2.92926189e-03,   2.20531784e-03,
+    4.75586858e-03,   3.00767994e-03,   7.01231230e-03,   1.93257479e-03,
+    5.04882913e-03,  -1.04642799e-02,   7.11998856e-03,  -2.53466447e-03,
+    1.29708648e-03,   1.07713938e-02,  -2.99122441e-03,   5.51079051e-04,
+    5.26238093e-03,  -8.22351780e-04,   5.74991386e-03,   8.99204868e-04,
+    1.13037638e-02,  -1.46015978e-03,   6.79054251e-03,  -2.91314325e-03,
+    6.34925021e-03,   4.45276871e-03,   7.88977742e-03,  -5.24963858e-03,
+   -2.57161981e-03,   5.67252794e-03,  -2.77268351e-03,   2.27351789e-03,
+    3.13360780e-03,   9.63459164e-03,   3.79459164e-03,   2.40193959e-03,
+    3.09617817e-03,   5.46766398e-03,  -1.21412217e-03,  -7.90829584e-03,
+   -1.29530125e-03,  -7.43942289e-03,   3.87186417e-03,  -8.09667457e-04,
+    1.91524532e-03,  -3.64716118e-03,   8.53588711e-03,  -5.08366944e-03,
+    1.74835534e-03,   7.45685189e-04,  -4.69580526e-03,  -1.06729409e-02,
+   -4.90031298e-03,  -2.10527773e-03,  -1.65928528e-02,  -9.58569441e-03,
+    4.94536944e-03,   6.38392800e-03,  -1.75752665e-03,  -2.40226928e-03,
+    4.23104968e-03,   4.33860486e-03,   4.77843359e-03,   4.94898483e-03,
+    8.75659316e-05,   6.20994205e-03,   1.03254039e-02,   1.75160269e-04]]])
+
+Y_train = np.array([[1.,0.]])
+#X_test = test_i
+#Y_test = test_o
+in_shp = list(X_train.shape[1:])
+
+dr = 0.5 # dropout rate (%)
+model = models.Sequential()
+model.add(Reshape([1]+in_shp, input_shape=in_shp))
+model.add(ZeroPadding2D((0, 2)))
+model.add(Convolution2D(256, 1, 3, border_mode='valid', activation="relu", init='glorot_uniform'))
+model.add(Dropout(dr))
+model.add(ZeroPadding2D((0, 2)))
+model.add(Convolution2D(80, 2, 3, border_mode="valid", activation="relu",  init='glorot_uniform'))
+model.add(Dropout(dr))
+model.add(Flatten())
+model.add(Dense(256, activation='relu', init='he_normal'))
+model.add(Dropout(dr))
+model.add(Dense( len(classes), init='he_normal' ))
+model.add(Activation('softmax',name="out"))
+model.add(Reshape([len(classes)]))
+model.compile(loss='categorical_crossentropy', optimizer='adam')
+model.summary()
+
+batch_size=1
+nb_epoch = 1
+
+sess.run([init_op])
+
+
+history = model.fit(X_train,Y_train,batch_size=batch_size,nb_epoch=nb_epoch,show_accuracy=False,verbose=2,callbacks = [])
+
+K.set_learning_phase(0)
+
+config = model.get_config()
+weights = model.get_weights()
+
+new_model = models.Sequential.from_config(config)
+new_model.set_weights(weights)
+
+export_path = "/tmp/cnn"
+export_version = 1
+
+labels_tensor = tf.constant(mods)
+
+saver = tf.train.Saver(sharded=True)
+model_exporter = exporter.Exporter(saver)
+signature = exporter.classification_signature(
+input_tensor=new_model.input,classes_tensor=labels_tensor, scores_tensor=new_model.output)
+model_exporter.init(sess.graph.as_graph_def(),
+                    default_graph_signature=signature)
+model_exporter.export(export_path, tf.constant(export_version), sess)
+
+Load model
+#!/usr/bin/python2
+
+from __future__ import division, print_function, absolute_import
+import tensorflow as tf    
+from tensorflow.contrib.session_bundle import manifest_pb2
+from tensorflow.contrib.session_bundle import constants
+from tensorflow.contrib.session_bundle import session_bundle
+ 
+import pmt
+import numpy as np
+from gnuradio import gr
+import tensorflow as tf
+from numpy import zeros, newaxis
+import collections
+
+def load_graph(output_graph_path):
+
+    sess, meta_graph_def = session_bundle.load_session_bundle_from_path(output_graph_path)
+    with sess.as_default():
+        collection_def = meta_graph_def.collection_def
+        signatures_any = collection_def[
+        constants.SIGNATURES_KEY].any_list.value
+        signatures = manifest_pb2.Signatures()
+        signatures_any[0].Unpack(signatures)
+        default_signature = signatures.default_signature
+        input_name = default_signature.classification_signature.input.tensor_name
+        output_name = default_signature.classification_signature.scores.tensor_name
+        classes = default_signature.classification_signature.classes.tensor_name
+        classes = sess.run(sess.graph.get_tensor_by_name(classes))
+        return (sess, input_name, output_name,classes)
+
+sess,inp,out,classes = load_graph("/tmp/cnn/00000001/")
+
+
+v = np.array([[  1.23725709e-04,   3.21811251e-03,   8.11603665e-03,  -3.23975401e-04,
+    1.07787224e-02,   2.94970046e-03,   4.02887911e-03,  -1.88605103e-03,
+    1.07172830e-03,  -4.49557183e-03,   4.48013563e-03,  -4.36049374e-03,
+    2.03782506e-03,   3.55514325e-03,  -6.66785333e-03,   1.42298348e-03,
+   -1.50406240e-02,  -2.57269153e-03,   5.56691317e-03,   1.13693373e-02,
+    2.71817949e-03,   5.25468131e-05,  -3.36736324e-03,  -9.75306786e-04,
+    3.72400926e-03,   1.18668824e-02,  -1.42240804e-03,   1.44388294e-02,
+    8.27464042e-04,   6.72260066e-03,  -5.76557242e-04,   1.67079712e-03,
+   -1.02783879e-02,  -6.51435228e-04,  -1.59728453e-02,  -2.92223319e-03,
+   -9.65267327e-03,   8.49308504e-04,  -4.86527057e-03,  -2.24598357e-03,
+   -6.85441250e-04,  -7.86077511e-03,   8.25393759e-03,  -8.98091588e-03,
+   -4.13634349e-03,   5.30316820e-03,  -2.96568638e-03,   7.47767324e-03,
+    7.87805114e-03,   3.33608547e-03,   6.81637728e-04,  -3.26122390e-03,
+   -5.83499251e-03,   6.05301978e-03,   3.19009693e-03,  -4.02274629e-04,
+   -1.09375454e-02,   1.74824963e-03,   1.75286271e-03,  -1.26824277e-02,
+    7.39318645e-03,   3.90595663e-03,   1.98931666e-03,   6.12980360e-03,
+   -1.79607305e-03,   1.40197761e-02,  -9.81968828e-03,   5.02704596e-03,
+    3.01699433e-03,  -6.52436400e-03,  -1.62929588e-03,   7.39145232e-03,
+   -9.01302416e-03,   3.07239546e-03,  -1.82828668e-03,  -5.16610499e-03,
+    2.61074631e-03,  -1.33442272e-05,   5.14040841e-03,  -6.64286781e-03,
+    1.71982939e-03,  -4.85043926e-03,  -3.97882238e-03,  -1.37700920e-03,
+   -1.10943802e-02,   2.20915396e-03,  -3.39583290e-04,   4.58237901e-03,
+    4.64649638e-03,  -2.94209481e-03,  -1.55386878e-02,   5.68915205e-03,
+   -5.80187945e-04,  -5.83021576e-03,  -3.40874423e-04,  -1.83014176e-03,
+    3.61575768e-03,  -8.90286360e-03,  -4.51745838e-03,   1.93125161e-03,
+   -8.45910795e-03,  -5.77241089e-03,   8.37801304e-03,  -1.38715087e-02,
+   -3.31607228e-03,   5.12827048e-03,   9.08580422e-03,   1.84341776e-03,
+   -8.04373343e-03,  -9.29000136e-03,  -9.47526656e-04,   4.20172885e-03,
+   -5.26063796e-03,  -6.72675669e-03,  -3.59727233e-03,   4.08909051e-03,
+    7.33140949e-03,  -7.76879140e-04,  -2.54971418e-03,  -8.70507117e-03,
+    7.90149346e-03,   7.96920154e-03,   2.96101277e-03,  -5.38653834e-03,
+   -4.88629332e-04,   1.00093251e-02,  -4.25783452e-03,  -5.71854087e-03],
+ [ -6.87929394e-04,   4.60408907e-03,   7.26573868e-04,   4.26992076e-03,
+   -7.02272868e-03,   2.22673942e-03,   1.22035667e-02,  -8.09120014e-03,
+    1.39266049e-04,  -1.15088280e-02,   5.04087773e-04,  -2.15286622e-03,
+   -7.33058015e-03,  -9.15534515e-03,  -5.08288946e-03,  -1.30671002e-02,
+    1.47830602e-03,   1.16440572e-03,   4.02440550e-03,   8.58596340e-03,
+    3.03325080e-03,  -2.05237372e-03,   1.05325170e-02,  -1.80078077e-03,
+    4.63060196e-03,   1.23807620e-02,  -6.47541787e-03,  -4.13759379e-03,
+   -2.83148466e-03,   7.43190618e-03,  -1.15842454e-03,   6.59148069e-03,
+    5.59045048e-03,   3.75851267e-03,  -3.95106524e-03,  -2.56526005e-03,
+    6.27654884e-03,  -1.24440319e-03,   3.46388144e-04,  -1.55166397e-03,
+    1.04056811e-02,   1.30844014e-02,  -6.36276463e-03,  -6.97820855e-04,
+   -3.15165240e-03,  -1.41060480e-03,   1.38492498e-03,   8.64384789e-03,
+   -7.11268140e-03,  -1.76842324e-03,  -1.25329485e-02,  -4.83873859e-03,
+   -5.18619781e-03,   1.30472714e-02,  -5.54988487e-03,   8.61867797e-03,
+   -3.99610912e-03,   6.70848880e-04,  -9.35312640e-03,   1.23843951e-02,
+   -3.27547453e-03,   4.86938097e-03,  -2.92926189e-03,   2.20531784e-03,
+    4.75586858e-03,   3.00767994e-03,   7.01231230e-03,   1.93257479e-03,
+    5.04882913e-03,  -1.04642799e-02,   7.11998856e-03,  -2.53466447e-03,
+    1.29708648e-03,   1.07713938e-02,  -2.99122441e-03,   5.51079051e-04,
+    5.26238093e-03,  -8.22351780e-04,   5.74991386e-03,   8.99204868e-04,
+    1.13037638e-02,  -1.46015978e-03,   6.79054251e-03,  -2.91314325e-03,
+    6.34925021e-03,   4.45276871e-03,   7.88977742e-03,  -5.24963858e-03,
+   -2.57161981e-03,   5.67252794e-03,  -2.77268351e-03,   2.27351789e-03,
+    3.13360780e-03,   9.63459164e-03,   3.79459164e-03,   2.40193959e-03,
+    3.09617817e-03,   5.46766398e-03,  -1.21412217e-03,  -7.90829584e-03,
+   -1.29530125e-03,  -7.43942289e-03,   3.87186417e-03,  -8.09667457e-04,
+    1.91524532e-03,  -3.64716118e-03,   8.53588711e-03,  -5.08366944e-03,
+    1.74835534e-03,   7.45685189e-04,  -4.69580526e-03,  -1.06729409e-02,
+   -4.90031298e-03,  -2.10527773e-03,  -1.65928528e-02,  -9.58569441e-03,
+    4.94536944e-03,   6.38392800e-03,  -1.75752665e-03,  -2.40226928e-03,
+    4.23104968e-03,   4.33860486e-03,   4.77843359e-03,   4.94898483e-03,
+    8.75659316e-05,   6.20994205e-03,   1.03254039e-02,   1.75160269e-04]])
+
+
+outp = sess.run(out, feed_dict={inp: [v]})[0]
+
+print(outp)
+
+Thanks in advance!

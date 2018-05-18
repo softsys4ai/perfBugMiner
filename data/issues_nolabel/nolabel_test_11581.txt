@@ -1,0 +1,82 @@
+Model average replicas optimizer
+
+We have implemented a new replicas_optimizer "ModelAverageOptimizer" to reduce cross-node communication cost. It is mentioned in the following issue:
+#10449
+Model Average
+In a typical synchronous training environment (N-replica synchronous training), gradients will be averaged each step, and then applied to the variables, after that replicas can fetch the new variables and continue. However, in a model-average training environment, model parameters will be averaged every 'ma_intervals' steps. In the interval between two "average operation", each worker trained its local model, there are no data transfer at all between workers or ps, which can significantly accerlate parallel training.
+Reference:  https://arxiv.org/pdf/1410.7455v8.pdf
+BMUF
+Reference:  http://www.microsoft.com/en-us/research/wp-content/uploads/2016/08/0005880.pdf
+BMUF brings in 'Momentum' and can also work with a Nesterov momentum scheme on the based of Model Average method.
+block_momentum_rate: It brings in the historical blockwise gradients. The block momentum is usually set according to the number of workers: block_momentum = 1.0 - 1.0/num_of_workers. The default value is 0.0. When using default value, the naive ModelAverage method is applied, the original learning rate of local optimizer should be multiply by num_of_workers. While when the value is (0.0,1.0), the BMUF method is applied, the learning rate of local optimizer can be unchanged.
+use_Nesterov: means the Nesterov-style momentum update is applied on the block level. The default value is true. This can accelerate training with non-zero block_momentum_rate.
+block_learning_rate: block_learning_rate is always 1.0 or slightly higher than 1.0.
+  def __init__(self,
+               replicas_to_aggregate,                                                                 
+               ma_intervals,
+               total_num_replicas=None,
+               block_momentum_rate=0.0,
+               use_Nesterov=True,
+               block_learning_rate=1.0):
+    """Construct a model_average optimizer.
+Result
+We have benchmarked it on several in-house models, the results showed a good convergence speedup and training-data processing almostly reaches linear speedup.
+
+
+
+device config (GPU M40)
+convergence speed-up
+computation speed-up
+
+
+
+
+4 GPUs within 2 nodes
+3.4
+3.9
+
+
+8 GPUs within 4 nodes
+5.7
+7.5
+
+
+16 GPUs within 8 nodes
+9.2
+14.6
+
+Also，we made a experiment with ResNet on cifar10 (baseline code is from: https://github.com/tensorflow/models/tree/master/resnet):
+
+
+
+device config (GPU P100)
+convergence speed-up
+
+
+
+
+2 GPUs within 1 nodes
+2.03
+
+
+4 GPUs within 1 nodes
+3.67
+
+
+8 GPUs within 1 nodes
+6.57
+
+API
+By now, it is implemented as a tensorflow API using Python， doesn't have to change the core/distributed runtime code.
+  # Create any optimizer to update the variables, say a simple SGD:
+  opt = GradientDescentOptimizer(learning_rate=0.1)
+             
+  # Create a ModelAverageOptimizer to update the global variables:
+  ma = tf.contrib.model_average.ModelAverageOptimizer(replicas_to_aggregate=50, 
+                                                      ma_intervals=100)
+             
+  # create the hook which handles model average operations.
+  ma_replicas_hook = ma.make_ma_run_hook()
+  # And also, create the hook which handles initialization and queues.
+  ma_hook = ma.make_session_run_hook(is_chief)
+Thanks.

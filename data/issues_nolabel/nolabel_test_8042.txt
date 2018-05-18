@@ -1,0 +1,75 @@
+Estimator Tensor not from same graph for predict()
+
+I run Tensorflow 1.0.
+I use Mac OSX Sierra.
+I use the Estimator and Layers api.
+This is the first part of my model_fn which I pass to .Estimator(model_fn=...).
+class Model(object):
+
+  def __init__(self):
+    ...
+    self._estimator = learn.Estimator(
+        model_fn=self.model_fn,
+        model_dir=modeldir,
+        params={
+            'width': width,
+            'height': height,
+            'classes': classes
+        },
+        config=RunConfig(save_checkpoints_secs=30, gpu_memory_fraction=0.75)
+    )
+
+  def model_fn(self, features, labels, mode, params):
+    input_layer = tf.reshape(features, [-1, width, height, 1], name='fitinput')
+
+    conv1 = tf.layers.conv2d(
+        inputs=input_layer,
+        filters=32,
+        kernel_size=[5, 5],
+        padding="same",
+        activation=tf.nn.relu,
+        name="conv1"
+    )
+...
+
+I only use input_fn to pass data to the individual steps (images, labels).
+I train with estimator.fit(...) and evaluate with estimator.evaluate(...). Both work fine and create summaries and checkpoints in my model directory.
+After that I run estimator.predict(...) with the same data that I trained on (just to troubleshoot this problem). For predict I only pass images.
+Calling predict results in the following error:
+...
+    estimator.predict(input_fn=predict_data_fn)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/python/util/deprecation.py", line 280, in new_func
+    return func(*args, **kwargs)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 561, in predict
+    as_iterable=as_iterable)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 865, in _infer_model
+    infer_ops = self._call_legacy_get_predict_ops(features)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 996, in _call_legacy_get_predict_ops
+    infer_ops = self._get_predict_ops(features)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1217, in _get_predict_ops
+    return self._call_model_fn(features, labels, model_fn_lib.ModeKeys.INFER)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1133, in _call_model_fn
+    model_fn_results = self._model_fn(features, labels, **kwargs)
+  File "ocrcnn.py", line 197, in cnn_model_fn
+    name="conv1"
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/python/layers/convolutional.py", line 509, in conv2d
+    return layer.apply(inputs)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/python/layers/base.py", line 303, in apply
+    return self.__call__(inputs, **kwargs)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/python/layers/base.py", line 273, in __call__
+    outputs = self.call(inputs, **kwargs)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/python/layers/convolutional.py", line 156, in call
+    data_format=utils.convert_data_format(self.data_format, self.rank + 2))
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/python/ops/nn_ops.py", line 586, in convolution
+    with ops.name_scope(name, "convolution", [input, filter]) as name:
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/contextlib.py", line 59, in __enter__
+    return next(self.gen)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 4219, in name_scope
+    g = _get_graph_from_inputs(values)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 3968, in _get_graph_from_inputs
+    _assert_same_graph(original_graph_element, graph_element)
+  File "/users/anaconda/envs/ocnncr/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 3907, in _assert_same_graph
+    "%s must be from the same graph as %s." % (item, original_item))
+ValueError: Tensor("conv1/kernel:0", shape=(5, 5, 1, 32), dtype=float32_ref) must be from the same graph as Tensor("fitinput:0", shape=(50, 28, 28, 1), dtype=float32).
+
+I have no idea if this is a bug or I did something wrong. So I am sorry if this should have been a Stackoverflow issue instead.

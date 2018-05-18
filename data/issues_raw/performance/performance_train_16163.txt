@@ -1,0 +1,47 @@
+Dataset.from_generator doesn't release memory after recreating the session
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 17.10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.5.0-rc0
+Python version: Python 3.6
+Bazel version (if compiling from source): -
+GCC/Compiler version (if compiling from source): -
+CUDA/cuDNN version: -
+GPU model and memory: -
+Exact command to reproduce: see below
+
+Describe the problem
+After closing the session and creating new one an iterator creates the generator instance but doesn't free the memory of the previous one.
+Every calling of the line session.run(x) (see below) increases memory consumption of the script:
+
+519 MiB after the first,
+600 MiB after the second,
+681 MiB after the third and so on.
+
+As you can see the delta is equal to 80 MiB = N * sizeof(data.dtype). (data.dtype is float64 here)
+Source code / logs
+import numpy as np
+import tensorflow as tf
+
+N = 10 * 1024 * 1024
+
+def generate():
+  data = np.random.rand(N)
+  for k in range(N):
+    yield data[k].copy()
+
+graph = tf.Graph()
+with graph.as_default():
+  x = tf.data.Dataset\
+    .from_generator(generate, tf.float32)\
+    .make_one_shot_iterator()\
+    .get_next()
+
+while True:
+  session = tf.Session(graph=graph)
+  session.run(x) # <--- PUT A BREAKPOINT HERE!
+                 #  Be careful running the code without it!
+  session.close()

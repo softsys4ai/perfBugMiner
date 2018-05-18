@@ -1,0 +1,103 @@
+ABI for `tensorflow::core::RefCounted` is error-prone
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): tf-nightly
+Python version: 2.7
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: (see above)
+
+Describe the problem
+For performance, the implementation of RefCounted comprises a set of inline methods. Furthermore, it contains a cunning optimization that avoids updating the refcount when the caller to Unref() is the only owner:
+
+  
+    
+      tensorflow/tensorflow/core/lib/core/refcount.h
+    
+    
+        Lines 88 to 89
+      in
+      3ba1f72
+    
+    
+    
+    
+
+        
+          
+           // If ref_==1, this object is owned only by the caller. Bypass a locked op 
+        
+
+        
+          
+           // in that case. 
+        
+    
+  
+
+
+It also includes some DCHECK macros to ensure that various invariants hold:
+
+  
+    
+      tensorflow/tensorflow/core/lib/core/refcount.h
+    
+    
+         Line 79
+      in
+      3ba1f72
+    
+    
+    
+    
+
+        
+          
+           inline RefCounted::~RefCounted() { DCHECK_EQ(ref_.load(), 0); } 
+        
+    
+  
+
+
+
+  
+    
+      tensorflow/tensorflow/core/lib/core/refcount.h
+    
+    
+        Lines 90 to 92
+      in
+      3ba1f72
+    
+    
+    
+    
+
+        
+          
+           if (RefCountIsOne() || ref_.fetch_sub(1) == 1) { 
+        
+
+        
+          
+             // Make DCHECK in ~RefCounted happy 
+        
+
+        
+          
+             DCHECK((ref_.store(0), true)); 
+        
+    
+  
+
+
+Note that that second DCHECK performs a side-effect to make the first one succeed.
+The release build is built with NDEBUG defined, so the DCHECK code doesn't execute. However, the default flags you get when following the Adding an New Op tutorial to build an extension do not include -DNDEBUG.
+Recall that the methods are marked inline.  This means that some code in the release binary might call (an inlined version of) Unref() and the store to ref_ will be elided, but some code in an extension (e.g. one that creates a custom ResourceBase, which inherits from RefCounted) might call ~RefCounted() and the DCHECK will be performed, leading to a failure.
+The workaround is to add -DNDEBUG to the compiler flags when adding a new op. Should we update the documentation, update the tf.sysconfig.get_compile_flags() implementation, or modify how RefCounted is implemented to avoid this problem altogether?

@@ -1,0 +1,83 @@
+tf.Session() freezes on GPU nodes of a SGE cluster
+
+Hello,
+I'm trying to run the following script on the GPU nodes of my university's SGE cluster:
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import os
+import sys
+
+import tensorflow as tf
+
+var1 = tf.get_variable('var1', [1024, 32], initializer=tf.random_normal_initializer())
+var2 = tf.get_variable('var2', [32, 1024], initializer=tf.random_normal_initializer())
+
+m = tf.matmul(var1, var2)
+
+init_op = tf.global_variables_initializer()
+
+with tf.Session() as session:
+	session.run(init_op)
+	session.run(m)
+Everything works if, either:
+
+I allocate obscene amounts of memory, like 60GB, to the job;
+Or if I run it from the command line on the cluster nodes.
+
+However, if I allocate a reasonable amount of memory to the job (8GB), it freezes on the tf.Session() call. A strace -p <pid> on the process gives the following trace, over and over, endlessly:
+open("/proc/self/maps", O_RDONLY)       = 18
+fstat(18, {st_mode=S_IFREG|0444, st_size=0, ...}) = 0
+mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x2ab462000000
+read(18, "00400000-00634000 r-xp 00000000 "..., 1024) = 1024
+read(18, "001d000 09:01 1056305           "..., 1024) = 1024
+read(18, "0 r--p 001b9000 09:01 1583003   "..., 1024) = 1024
+read(18, " ---p 00041000 09:01 1056331    "..., 1024) = 1024
+read(18, "b4aa02000-3b4aa03000 rw-p 000020"..., 1024) = 1024
+close(18)                               = 0
+munmap(0x2ab462000000, 4096)            = 0
+mmap(0x36be1200000, 4294967296, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 1103806595072, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 554050781184, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 279172874240, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 141733920768, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 73014444032, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 38654705664, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 21474836480, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 12884901888, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 8589934592, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 6442450944, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 5368709120, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4831838208, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4563402752, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4429185024, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4362076160, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4328521728, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4311744512, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4303355904, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4299161600, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4297064448, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4296015872, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4295491584, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4295229440, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4295098368, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4295032832, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4295000064, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294983680, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294975488, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294971392, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294969344, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294968320, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294967808, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294967552, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294967424, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294967360, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294967328, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294967312, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294967304, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294967300, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294967298, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+mmap(0x36be1200000, 4294967297, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = -1 ENOMEM (Cannot allocate memory)
+
+How comes TensorFlow (unsuccessfully) tries to allocate obscene amount of memory when instantiating a new session? It only happens when I run the script as a cluster GPU job, without an obscene amount of memory.
+Thank you in advance for all your help.

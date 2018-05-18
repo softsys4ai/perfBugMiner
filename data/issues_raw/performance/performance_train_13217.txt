@@ -1,0 +1,52 @@
+Fixes #12401: Use traceback instead of inspect for frame information
+
+#12401 - import tensorflow.contrib.layers takes a very long time
+I learned (while rebasing this diff) that the issue of slow imports of tensorflow.contrib.layers was fixed earlier this week: #11830. 🎉 Since the diff is ready,  I want to put up the diff for the sake of history, but I understand if at this point the further speedup is minor enough to ignore.
+The speedup is a factor of 2, while the original fix is a factor of 100.
+
+My performance tests compared three versions:
+
+original implementation with inspect.stack()
+traceback(limit)
+current_frame + inspect
+
+I also found that the original implementation was sensitive to the depth of the current stack, and a file importing another file generally increased that call depth by 5.  Which is to say, in practice, my code importing tensorflow.config at an import depth of 7 had much worse performance than the baseline test of just importing tensorflow.config
+
+
+
+Test
+Timing
+
+
+
+
+python2 - inspect.stack
+7.8 sec
+
+
+python2 - inspect.getframeinfo
+0.12 sec
+
+
+python2 - traceback.extract_stack
+0.04 sec
+
+
+python3 - inspect.stack
+22.8 sec
+
+
+python3 - inspect.getframeinfo
+0.14 sec
+
+
+python3 - traceback.extract_stack
+0.07 sec
+
+^ tests are the total of 1000 runs with a stack of 200, to give easy to compare numbers.
+https://gist.github.com/JettJones/c236494013f22723c1822126df944b12
+This functionality of adding a decorator name from the call stack is covered by the existing unit test:
+
+testSetsDecoratorNameToFunctionThatCallsMakeDecoratorIfAbsent
+
+And pylint did not report any issues on these changes

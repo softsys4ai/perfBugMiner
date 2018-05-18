@@ -1,0 +1,47 @@
+dynamic_rnn after reshape seems impossible
+
+I need to multiply a 3D tensor by a 2D weight matrix, then feed it to dynamic_rnn.
+Below is the code.
+inputSize = 1000
+embeddingSize = 100
+
+batchX = tf.placeholder(tf.float32, [None, None, inputSize])
+#The maximum length of the sequences and the size of the mini-batch are dynamic
+#batchX is a time-major 3D tensor
+
+batchXLenghts = tf.placeholder(tf.int32, [None,])
+#A list of integers indicating the length of each sequence in batchX
+
+maxLength = tf.shape(batchX)[0]
+batchSize = tf.shape(batchX)[1]
+
+with tf.variable_scope('embedding') as scope:
+    W_emb = tf.get_variable('W_emb', [inputDimSize, embDimSize], initializer=tf.truncated_normal_initializer())
+    b_emb = tf.get_variable('b_emb', [embDimSize,], initializer=tf.constant_initializer())
+
+emb = tf.reshape(tf.matmul(tf.reshape(batchX, [maxLength*batchSize, inputDimSize]), W_emb) + b_emb, [maxLength, batchSize, embDimSize])
+#embedding step. There are two reshape operations because I am doing np.dot(3D, 2D)
+
+cell = GRUCell(embDimSize)
+outputs, states = rnn.dynamic_rnn(cell, emb, sequence_length=batchXLengths, time_major=True, parallel_iterations=256, dtype='float32')
+
+# calculating logits, loss, etc.
+...
+...
+
+When I run this code, I get the following error
+Traceback (most recent call last):
+  File "feedTestDynamicRnn.py", line 127, in <module>
+    train(xFile=xFile, yFile=yFile)
+  File "feedTestDynamicRnn.py", line 98, in train
+    batchX, batchXLengths, batchY, logits, mean_loss = inference(options)
+  File "feedTestDynamicRnn.py", line 57, in inference
+    outputs, states = rnn.dynamic_rnn(cell, emb, sequence_length=batchXLengths, time_major=True, parallel_iterations=256, dtype='float32')
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.py", line 580, in dynamic_rnn
+    swap_memory=swap_memory, sequence_length=sequence_length)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.py", line 630, in _dynamic_rnn_loop
+    "Input size (depth of inputs) must be accessible via shape inference, "
+ValueError: Input size (depth of inputs) must be accessible via shape inference, but saw value None.
+
+When I comment out the embedding step, and feed batchX directly to dynamic_rnn, there is no problem. So it seems that tf.reshape() loses shape information as told by this post.
+The problem is, I cannot fix maxLength and batchSize to a static value, because they need to change. Also, I need to do embedding, so directly feeding batchX to the RNN is not an option. Is there a work around for this?

@@ -1,0 +1,66 @@
+How to set include path and lib path when building custom code on macOS
+
+Firstly, I set CC=/usr/local/bin/gcc-6 and CXX=/usr/local/bin/g++-6. Then I built tensorflow from source using sh tensorflow/contrib/makefile/build_all_ios.sh on macOS 10.12.5 and it done successfully. Lastly, I built a test cpp using CMake but it failed.
+The reasons I guess maybe:
+
+Tensorflow built using default clang but not g++-6. So how to set compiler when using tensorflow/contrib/makefile/build_all_ios.sh?
+The include and lib path in CMakeLists.txt may be wrong.
+
+#include "tensorflow/core/public/session.h"
+#include "tensorflow/core/platform/env.h"
+using namespace tensorflow;
+int main(int argc, char* argv[]) {
+  // Initialize a tensorflow session
+  Session* session;
+  Status status = NewSession(SessionOptions(), &session);
+  if (!status.ok()) {
+    std::cout << status.ToString() << "\n";
+    return 1;
+  }
+  session->Close();
+  return 0;
+}
+
+In my CMakeLists.txt, I set include path
+${PROJECT_SOURCE_DIR}/../tensorflow
+${PROJECT_SOURCE_DIR}/../tensorflow/tensorflow/contrib/makefile/gen/proto
+${PROJECT_SOURCE_DIR}/../tensorflow/tensorflow/contrib/makefile/gen/protobuf-host/include
+${PROJECT_SOURCE_DIR}/../tensorflow/tensorflow/contrib/makefile/downloads/eigen
+${PROJECT_SOURCE_DIR}/../tensorflow/tensorflow/contrib/makefile/downloads/nsync/public
+
+and the library path
+link_directories(
+	${PROJECT_SOURCE_DIR}/../tensorflow/tensorflow/contrib/makefile/gen/lib/ios_X86_64
+	${PROJECT_SOURCE_DIR}/../tensorflow/tensorflow/contrib/makefile/gen/protobuf_ios/lib/iossim_x86_64/lib)
+set(DEMO_LINKER_LIBS "")
+list(APPEND DEMO_LINKER_LIBS libtensorflow-core-x86_64.a libprotobuf-lite.a libprotobuf.a)
+
+Compile ok but errors occur when linking. What's wrong in my use? Thanks.
+ld: warning: URGENT: building for OSX, but linking in object file (/Users/formath/github/tensorflow/tensorflow/contrib/makefile/gen/lib/ios_X86_64/libtensorflow-core-x86_64.a(session.o)) built for iOS. Note: This will be an error in the future.
+ld: warning: URGENT: building for OSX, but linking in object file (/Users/formath/github/tensorflow/tensorflow/contrib/makefile/gen/lib/ios_X86_64/libtensorflow-core-x86_64.a(config.pb.o)) built for iOS. Note: This will be an error in the future.(/Users/formath/github/tensorflow/tensorflow/contrib/makefile/gen/lib/libtensorflow-core.a(config.pb.o)) built for iOS. Note: This will be an error in the future.
+Undefined symbols for architecture x86_64:
+  "tensorflow::internal::CheckOpMessageBuilder::NewString[abi:cxx11]()", referenced from:
+      std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >* tensorflow::internal::MakeCheckOpString<int, int>(int const&, int const&, char const*) in test.cc.o
+  "nsync::nsync_mu_init(nsync::nsync_mu_s_*)", referenced from:
+      tensorflow::SessionFactory::Register(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, tensorflow::SessionFactory*) in libtensorflow-core-x86_64.a(session_factory.o)
+      tensorflow::SessionFactory::GetFactory(tensorflow::SessionOptions const&, tensorflow::SessionFactory**) in libtensorflow-core-x86_64.a(session_factory.o)
+      tensorflow::Env::Env()   in libtensorflow-core-x86_64.a(env.o)
+  "nsync::nsync_mu_lock(nsync::nsync_mu_s_*)", referenced from:
+      tensorflow::SessionFactory::Register(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, tensorflow::SessionFactory*) in libtensorflow-core-x86_64.a(session_factory.o)
+      tensorflow::SessionFactory::GetFactory(tensorflow::SessionOptions const&, tensorflow::SessionFactory**) in libtensorflow-core-x86_64.a(session_factory.o)
+      tensorflow::FileSystemRegistryImpl::Register(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::function<tensorflow::FileSystem* ()>) in libtensorflow-core-x86_64.a(env.o)
+      tensorflow::FileSystemRegistryImpl::Lookup(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&) in libtensorflow-core-x86_64.a(env.o)
+      tensorflow::FileSystemRegistryImpl::GetRegisteredFileSystemSchemes(std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > >*) in libtensorflow-core-x86_64.a(env.o)
+  "nsync::nsync_mu_unlock(nsync::nsync_mu_s_*)", referenced from:
+      tensorflow::SessionFactory::Register(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, tensorflow::SessionFactory*) in libtensorflow-core-x86_64.a(session_factory.o)
+      tensorflow::SessionFactory::GetFactory(tensorflow::SessionOptions const&, tensorflow::SessionFactory**) in libtensorflow-core-x86_64.a(session_factory.o)
+      tensorflow::FileSystemRegistryImpl::Register(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::function<tensorflow::FileSystem* ()>) in libtensorflow-core-x86_64.a(env.o)
+      tensorflow::FileSystemRegistryImpl::Lookup(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&) in libtensorflow-core-x86_64.a(env.o)
+      tensorflow::FileSystemRegistryImpl::GetRegisteredFileSystemSchemes(std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > >*) in libtensorflow-core-x86_64.a(env.o)
+  "tensorflow::Status::ToString[abi:cxx11]() const", referenced from:
+      _main in test.cc.o
+  "std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >::at(unsigned long) const", referenced from:
+      google::protobuf::io::Tokenizer::IsIdentifier(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&) in libprotobuf.a(tokenizer.o)
+  "std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >::find(char const*, unsigned long, unsigned long) const", referenced from:
+      google::protobuf::GlobalReplaceSubstring(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*) in libprotobuf-lite.a(strutil.o)
+      tensorflow::str_util::StringReplace(tensorflow::StringPiece, tensorflow::StringPiece, tensorflow::StringPiece, bool) in libtensorflow-core-x86_64.a(str_util.o)

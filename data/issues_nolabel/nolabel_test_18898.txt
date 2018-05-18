@@ -1,0 +1,53 @@
+[r1.7][TensorRT] INT8 mode calibration is not worked
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Red Hat 4.8.5-16, Linux version 3.10.0-693.5.2.el7.x86_64
+TensorFlow installed from (source or binary): pip (python 2.7)
+TensorFlow version (use command below): tensorflow-gpu==1.7.0
+Python version: python 2.7
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): gcc 5.3
+CUDA/cuDNN version:  CUDA9.0, cuDNN7.0.5
+GPU model and memory: Tesla P4, 8GB
+Exact command to reproduce: My own script is coded based on the official test "tensorflow/tensorflow/contrib/tensorrt/test/test_tftrt.py", so I think you can reproduce this problem with this test.
+
+Describe the problem
+I tried to use Tensorflow 1.7 to do the prediction under Python environment, which can integrate the TensorRT to optimize the GraphDef.
+The optimization in FP32 mode is successfully done, but when I tried the INT8 mode, I'm confused about how to do the calibration. I checked the examples both from tensorflow source code and the NVidia dev guide but still not sure.
+Below is part of the example that contained within tensorflow.
+def run_calibration(gdef, dumm_inp):
+  """Run given calibration graph multiple times."""
+  gpu_options = cpb2.GPUOptions(per_process_gpu_memory_fraction=0.50)
+  ops.reset_default_graph()
+  g = ops.Graph()
+  with g.as_default():
+    inp, out = importer.import_graph_def(
+        graph_def=gdef, return_elements=["input", "output"])
+    inp = inp.outputs[0]
+    out = out.outputs[0]
+  with csess.Session(
+      config=cpb2.ConfigProto(gpu_options=gpu_options), graph=g) as sess:
+    # run over real calibration data here, we are mimicking a calibration set of
+    # 30 different batches. Use as much calibration data as you want
+    for _ in range(30):
+      val = sess.run(out, {inp: dumm_inp})
+  return val
+############################
+ int8_calib_gdef = trt.create_inference_graph(
+     input_graph_def=orig_graph,
+     outputs=["output"],
+     max_batch_size=inp_dims[0],
+     max_workspace_size_bytes=1 << 25,
+     precision_mode="INT8",  # TRT Engine precision "FP32","FP16" or "INT8"
+     minimum_segment_size=2  # minimum number of nodes in an engine
+ )
+ _ = run_calibration(int8_calib_gdef, dummy_input)
+ int8_graph = trt.calib_graph_to_infer_graph(int8_calib_gdef)
+ o5 = run_graph(int8_graph, dummy_input)
+
+Above code is copied from tensorflow/tensorflow/contrib/tensorrt/test/test_tftrt.py
+The function run_calibration seems just create a session and run 30 times with the same input, and the return of run_calibration seems not used at all.
+How could the calibration be done in this way?
+Thanks,

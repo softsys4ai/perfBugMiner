@@ -1,0 +1,65 @@
+Possible way to apply gradients using tf.identity()?
+
+Environment info
+Operating System: Ubuntu 14.04
+Installed version of CUDA and cuDNN: 7.5 and R4
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+The output from python -c "import tensorflow; print(tensorflow.version)".
+
+If installed from sources, provide the commit hash: 79174af
+Steps to reproduce
+import tensorflow as tf
+
+a = tf.constant(1.)
+b = tf.Variable(2.)
+c = a * b
+grad_symbolic = tf.gradients(c, tf.trainable_variables())
+grad_vars = [tf.Variable(tf.zeros_like(_)) for _ in tf.trainable_variables()]
+grad_zero_ops = [_.assign(tf.zeros_like(_)) for _ in grad_vars]
+grad_accum_ops = [grad_vars[i].assign_add(grad_symbolic[i])
+                  for i in xrange(len(grad_vars))]
+opt = tf.train.GradientDescentOptimizer(1.)
+train_op = opt.apply_gradients(zip(
+    [tf.identity(_) for _ in grad_vars], tf.trainable_variables()))
+sess = tf.Session()
+sess.run(tf.initialize_all_variables()) # This will cause error.
+# This will run successfully.
+# for _ in tf.all_variables():
+#     sess.run(tf.initialize_variables([_]))
+What have you tried?
+
+workaround
+But in my real project code, the program stucks into the variable initialization for too many minutes if I initialize variables one by one.
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+Traceback (most recent call last):
+  File "test_identity_gradient_apply.py", line 26, in <module>
+    sess.run(tf.initialize_all_variables()) # This will cause error.
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 333, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 573, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 648, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 668, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.FailedPreconditionError: Attempting to use uninitialized value Variable
+     [[Node: Variable/read = Identity[T=DT_FLOAT, _class=["loc:@Variable"], _device="/job:localhost/replica:0/task:0/cpu:0"](Variable)]]
+Caused by op u'Variable/read', defined at:
+  File "test_identity_gradient_apply.py", line 15, in <module>
+    b = tf.Variable(2.)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 211, in __init__
+    dtype=dtype)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 319, in _init_from_args
+    self._snapshot = array_ops.identity(self._variable, name="read")
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_array_ops.py", line 788, in identity
+    result = _op_def_lib.apply_op("Identity", input=input, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 704, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2249, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1224, in __init__
+    self._traceback = _extract_stack()

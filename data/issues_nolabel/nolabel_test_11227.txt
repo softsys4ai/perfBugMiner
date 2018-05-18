@@ -1,0 +1,126 @@
+Configure script code reduction (no merge please)
+
+Please don't merge yet.
+The configure script has a lot of repetition. Adding functions can reduce the number of lines of code, help prevent errors, and make life easier.
+I noticed it was kind of long when editing another part.
+This adds two functions: build_with and get_path
+function build_with {
+  # don't change value if it is already set
+  if [[ "$(eval echo \"\$$1\")" ]] ; then
+    return
+  fi
+  local needed="$1"
+  local build_ask="$2"
+  # default is 'enabled' or 'disabled'
+  local default="$3"
+
+  if [[ "$4" ]] ; then
+    local build_ans_yes="$4"
+    local build_ans_no="$5"
+  else
+    local build_ans_yes="$build_ask support will be enabled for TensorFlow."
+    local build_ans_no="No $build_ans_yes"
+    local build_ask="Do you wish to build TensorFlow with $build_ask support?"
+  fi
+
+  if [[ "$default" == "enabled" ]] ; then
+    local build_ask="$build_ask [Y/n] "
+  else
+    local build_ask="$build_ask [y/N] "
+  fi
+
+  while true; do
+    read -p "$build_ask" user_input
+
+    case "$user_input" in
+      [Yy]* ) echo "$build_ans_yes"
+        eval $needed=1
+        break;;
+      [Nn]* ) echo "$build_ans_no"
+        eval $needed=0
+        break;;
+      "" ) if [[ "$default" == "enabled" ]] ; then
+          echo "$build_ans_yes"
+          eval $needed=1
+        else
+          echo "$build_ans_no"
+          eval $needed=0
+        fi
+        break;;
+      * ) echo "Invalid selection: $user_input";;
+    esac
+  done
+}
+function get_path {
+  if [[ "$(eval echo \"\$$1\")" ]] ; then
+    return
+  fi
+  local sys_path="$1"
+  local path_for="$2"
+  # looking for a path for a bin or lib
+  local type_of_path="$3"
+  # optional search for bin, array of paths for lib
+  local generic_path="$4"
+  local default_path=""
+
+  if [[ "$type_of_path" == "bin" ]] ; then
+    local default_path="$(which $path_for || true)"
+    if [[ !"$default_path" ]] && [[ "$generic_path" ]] ; then
+      local default_path="$(which $generic_path || true)"
+    fi
+    local ask_for_path="Please specify the location of $path_for. [Default is $default_path]:"
+  else
+    echo "Possible library path(s): "
+    for x in "${generic_path[@]}" ; do
+      if [[ "$x" ]] && [[ ! "$default_path" ]] ; then
+        local default_path="$x"
+      fi
+      echo "    $x"
+    done
+    local ask_for_path="Please input the desired $path_for library path to use. [Default is $default_path]:"
+  fi
+
+  while true; do
+    read -p "$ask_for_path " $sys_path
+
+    if [[ ! "$(eval echo \$$sys_path)" ]] ; then
+      if [[ -e "$default_path" ]] ; then
+        eval $sys_path="$default_path"
+      elif [[ -e "$generic_path" ]] && [[ "$type_of_path" == "bin" ]] ; then
+        eval $sys_path="$default_path"
+      else
+        echo "ERROR! I cannot find a default path and one was not specified." 1>&2
+      fi
+    fi
+
+    if [[ -e "$(eval echo \$$sys_path)" ]] ; then
+      if [[ "$type_of_path" == "bin" ]] && [[ ! -x "$(eval echo \$$sys_path)" ]] ; then
+        echo "ERROR! \$$sys_path is not executable." 1>&2
+      else
+        break
+      fi
+    else
+      echo "ERROR! $(eval echo \$$sys_path) does not seem to be a valid path to $path_for." 1>&2
+    fi
+  done
+}
+Those functions alone kill ~150 or so lines of code. I was going to do more reducing MKL, but I believe I rebased those changes away due to the discussion in  #11212
+If possible, I'd like to run tests on this to see if there's any issue with cross compatibility. (I'm not sure what permissions are, and if I can run the tests myself?) I killed another 50 or so from the CUDA area, but I want to try it on a machine with CUDA before running it.
+The selection below is just to see what versions you're supporting. TensorFlow is pretty new, and you're already using some more recent options in the script. I just wanted to test it to be sure.
+declare -A array_test=( [one]="position_one" [two]="position_two" [three]="position_three" )
+array_ans=""
+positional_test=( one two three )
+positional_ans="position_oneposition_twoposition_three"
+
+for x in "${positional_test[@]}" ; do
+  array_ans+="$(eval echo \${array_test[$x]})"
+done
+
+if [[ ! "$array_ans" == "$positional_ans" ]] ; then
+  echo "dec arrays not supported"
+  exit 1
+fi
+If that is successful, I can remove another 100 or so lines. It'll (probably) be more readable too, for instance you can just add something like:
+declare -A GCP=( [tf_needs]="TF_NEED_GCP" [name]="Google Cloud Platform" [default]="disabled" \
+                                [write_opts]="write_gcp" [enabled]=0 )
+And have it iterate over fields instead of having an entire section of the script that has the same install process as TF_NEED_HDFS.

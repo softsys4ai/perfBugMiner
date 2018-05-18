@@ -1,0 +1,32 @@
+Defun grad_func should accept the outputs of the function being differentiated
+
+When dealing with discrete stochastic units, one often wants to define custom gradients. It seems like the most legitimate way to it in Tensorflow is to use grad_func keyword argument of function.Defun from tensorflow.python.framework.  However, the gradient function is only given the inputs of the function defined and the gradients, whereas it would be often very convenient to also use the outputs.
+For example, see the code below.
+# In current Tensorflow I have to do like this:
+
+@function.Defun(*(3 * [tf.float32]))
+def oneovertwo_unit_bprop(probs, noise, grads):
+  outcome = tf.to_float(tf.less(noise, probs))
+  outcome_probs = outcome * probs + (1 - outcome) * (1 - probs)
+  return grads / 2. / outcome_probs, tf.zeros_like(noise)
+
+
+@function.Defun(*(2 * [tf.float32]), grad_func=oneovertwo_unit_bprop)
+def oneovertwo_unit_fprop(probs, noise):
+  return tf.to_float(tf.less(noise, probs))
+
+
+def oneovertwo_unit(probs):
+  return oneovertwo_unit_fprop(probs, tf.random_uniform(tf.shape(probs)))
+
+# I would like to do like this
+
+def oneovertwo_unit_bprop(probs, outcome, grads):
+  outcome_probs = outcome * probs + (1 - outcome) * (1 - probs)
+  return grads / 2. / outcome_probs
+
+
+@function.Defun(*(2 * [tf.float32]), grad_func=oneovertwo_unit_bprop)
+def oneovertwo_unit(probs):
+  return tf.to_float(tf.less(tf.random_uniform(probs.get_shape()), probs))
+FYI, this an implementation of the gradient estimator from the DARN paper (https://arxiv.org/pdf/1310.8499v2.pdf).

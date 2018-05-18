@@ -1,0 +1,290 @@
+local distributed tensorflow async btw graph multigpu example is extremely slow
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Not really, this primarily a copy and paste of the distributed tensorflow example
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.2 GPU
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 8.0
+GPU model and memory: Titan X Pascal, 12G, 4 total
+Exact command to reproduce:
+
+python async_btwgraph_launcher.py
+async_btwgraph_launcher.py
+from async_btwgraph_dist_trainer import train
+import os
+from multiprocessing import Process
+import time
+from tensorflow.contrib.training import HParams
+import tensorflow as tf
+# Set up configurations to sweep
+output_dir ='tfprojects/output_dir_debug'
+
+cluster_spec ={"ps": ["localhost:2227"
+                      ],
+    "worker": [
+        "localhost:2223",
+        "localhost:2224",
+        "localhost:2225",
+        "localhost:2226"
+        ]
+    }
+
+cluster = tf.train.ClusterSpec(cluster_spec)
+def worker(device):
+    params = HParams(cluster=cluster,
+                     job_name = device[0],
+                     task_index = device[1])
+
+    if device[0]=='worker':
+        # allow each worker to see only 1 of the 4 GPUS
+        os.environ["CUDA_VISIBLE_DEVICES"]=str(params.task_index)
+
+    else:
+        # hide all 4 GPUS from ps
+        os.environ["CUDA_VISIBLE_DEVICES"]=''
+
+
+    train(output_dir, params)
+
+if __name__ == '__main__':
+    devices = [['ps',0],
+               ['worker',0],
+               ['worker',1],
+               ['worker',2],
+               ['worker',3]
+               ]
+
+    processes = []
+    for d in devices:
+
+        p = Process(target=worker, args=(d,))
+        p.start()
+        processes.append(p)
+
+    for p in processes:
+        p.join()
+async_btwgraph_dist_trainer.py
+import os
+import numpy as np
+import tensorflow as tf
+import time
+
+tf.logging.set_verbosity(tf.logging.INFO)  # enables training error print out during training
+
+def model_fn(features,labels,mode,params):
+
+
+    outputs = layers.fully_connected(
+                    inputs = features,
+                    num_outputs = 4096)
+    outputs = layers.fully_connected(
+                    inputs = outputs,
+                    num_outputs = 4096)
+    outputs = layers.fully_connected(
+                    inputs = outputs,
+                    num_outputs = 256)
+
+    loss = tf.losses.mean_squared_error(outputs, labels)
+
+
+    train_op = tf.contrib.layers.optimize_loss(
+              loss, None, optimizer='Adam',
+                        learning_rate = .0001)
+
+
+    predictions = {"predictions":tf.identity(outputs,name = 'predictions')}
+    return predictions, loss, train_op
+
+
+def dumb_input_fn():
+
+    x = tf.random_normal([128,256], dtype=tf.float32)
+    y = tf.random_normal([128,256], dtype=tf.float32)
+
+    return [x,y]
+
+#
+def train(output_dir, params={}):
+    print('***JOBNAME**:',params.job_name)
+    cluster = params.cluster
+    job_name = params.job_name
+    task_index = params.task_index
+    gpu = task_index
+    # Create and start a server for the local task.
+    server = tf.train.Server(cluster,
+                           job_name=job_name,
+                           task_index=task_index)
+
+    if job_name == "ps":
+        server.join()
+    elif job_name == "worker":
+
+        # Assigns ops to the local worker by default.
+        with tf.device(tf.train.replica_device_setter(
+            worker_device="/job:worker/replica:0/task:%d" % task_index,
+            cluster=cluster)):
+
+            # Build model...
+            x,y = dumb_input_fn()
+            _, _, train_op = model_fn(x,y,None,params)
+
+        global_step = tf.contrib.framework.get_or_create_global_step()
+        # The StopAtStepHook handles stopping after running given steps.
+        hooks=[tf.train.StopAtStepHook(last_step=100000)]
+
+        step = 0
+        start_time = time.time()
+
+        with tf.train.MonitoredTrainingSession(master=server.target,
+                                               is_chief=(task_index == 0),
+                                               checkpoint_dir=output_dir,
+                                               hooks=hooks) as mon_sess:
+            while not mon_sess.should_stop():
+
+                _ = mon_sess.run(train_op)
+
+                if step % 10 == 0:
+                    print("Step:", step,10/(time.time()-start_time),'steps/sec')
+                    start_time = time.time()
+
+                step+=1
+
+Describe the problem
+I'm trying to use the distributed tensorflow example to do async between graph replication on a 4 Titan X machine, with 1 GPU per worker.  Without distributed TF and using a single GPU, the same code trains at ~150-200 steps/sec.  As shown at the end of the log below, this distributed trainer clocks at ~ 2 steps/sec.  The 4 GPUs are barely utilized,
+
+with plenty of  CPU headroom,
+
+Also, if I simply remove the parameter server from this example, but keeping all 4 workers, they all grab GPU:0 maxing it out, and each worker process running at ~50steps/sec, and GPUs 1-3 are unused.
+
+However, see that I'm setting os.environ["CUDA_VISIBLE_DEVICES"] to enable only 1 unique GPU per worker.
+Is this expected behavior?
+Thanks,
+Luke
+Source code / logs
+python async_btwgraph_launcher.py
+***JOBNAME**: ps
+2017-05-23 15:06:16.761116: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.761187: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.761200: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.761212: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.761225: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+***JOBNAME**: worker
+2017-05-23 15:06:16.763172: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.763247: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.763259: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.763269: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.763280: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+***JOBNAME**: worker
+2017-05-23 15:06:16.765599: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.765671: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.765684: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.765693: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.765705: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+***JOBNAME**: worker
+2017-05-23 15:06:16.767881: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.767951: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.767983: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.768005: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.768024: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+***JOBNAME**: worker
+2017-05-23 15:06:16.771552: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.771617: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.771638: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.771649: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.771660: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+2017-05-23 15:06:16.885876: E tensorflow/stream_executor/cuda/cuda_driver.cc:406] failed call to cuInit: CUDA_ERROR_NO_DEVICE
+2017-05-23 15:06:16.885946: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:158] retrieving CUDA diagnostic information for host: mlearn2
+2017-05-23 15:06:16.885961: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:165] hostname: mlearn2
+2017-05-23 15:06:16.886027: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:189] libcuda reported version is: 375.39.0
+2017-05-23 15:06:16.886800: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:369] driver version file contents: """NVRM version: NVIDIA UNIX x86_64 Kernel Module  375.39  Tue Jan 31 20:47:00 PST 2017
+GCC version:  gcc version 5.4.0 20160609 (Ubuntu 5.4.0-6ubuntu1~16.04.4)
+"""
+2017-05-23 15:06:16.886835: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:193] kernel reported version is: 375.39.0
+2017-05-23 15:06:16.886848: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:300] kernel version seems to match DSO: 375.39.0
+2017-05-23 15:06:16.898031: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:2227}
+2017-05-23 15:06:16.898063: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:2223, 1 -> localhost:2224, 2 -> localhost:2225, 3 -> localhost:2226}
+2017-05-23 15:06:16.908193: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:316] Started server with target: grpc://localhost:2227
+2017-05-23 15:06:18.817380: I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] Found device 0 with properties:
+name: TITAN X (Pascal)
+major: 6 minor: 1 memoryClockRate (GHz) 1.911
+pciBusID 0000:02:00.0
+Total memory: 11.90GiB
+Free memory: 11.60GiB
+2017-05-23 15:06:18.817433: I tensorflow/core/common_runtime/gpu/gpu_device.cc:927] DMA: 0
+2017-05-23 15:06:18.817443: I tensorflow/core/common_runtime/gpu/gpu_device.cc:937] 0:   Y
+2017-05-23 15:06:18.817581: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:0) -> (device: 0, name: TITAN X (Pascal), pci bus id: 0000:02:00.0)
+2017-05-23 15:06:18.859150: I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] Found device 0 with properties:
+name: TITAN X (Pascal)
+major: 6 minor: 1 memoryClockRate (GHz) 1.911
+pciBusID 0000:03:00.0
+Total memory: 11.90GiB
+Free memory: 11.76GiB
+2017-05-23 15:06:18.859216: I tensorflow/core/common_runtime/gpu/gpu_device.cc:927] DMA: 0
+2017-05-23 15:06:18.859227: I tensorflow/core/common_runtime/gpu/gpu_device.cc:937] 0:   Y
+2017-05-23 15:06:18.859274: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:0) -> (device: 0, name: TITAN X (Pascal), pci bus id: 0000:03:00.0)
+2017-05-23 15:06:18.900436: I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] Found device 0 with properties:
+name: TITAN X (Pascal)
+major: 6 minor: 1 memoryClockRate (GHz) 1.911
+pciBusID 0000:81:00.0
+Total memory: 11.90GiB
+Free memory: 11.76GiB
+2017-05-23 15:06:18.900506: I tensorflow/core/common_runtime/gpu/gpu_device.cc:927] DMA: 0
+2017-05-23 15:06:18.900520: I tensorflow/core/common_runtime/gpu/gpu_device.cc:937] 0:   Y
+2017-05-23 15:06:18.900562: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:0) -> (device: 0, name: TITAN X (Pascal), pci bus id: 0000:81:00.0)
+2017-05-23 15:06:18.922840: I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] Found device 0 with properties:
+name: TITAN X (Pascal)
+major: 6 minor: 1 memoryClockRate (GHz) 1.911
+pciBusID 0000:82:00.0
+Total memory: 11.90GiB
+Free memory: 11.76GiB
+2017-05-23 15:06:18.922898: I tensorflow/core/common_runtime/gpu/gpu_device.cc:927] DMA: 0
+2017-05-23 15:06:18.922913: I tensorflow/core/common_runtime/gpu/gpu_device.cc:937] 0:   Y
+2017-05-23 15:06:18.922954: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:0) -> (device: 0, name: TITAN X (Pascal), pci bus id: 0000:82:00.0)
+2017-05-23 15:06:18.947847: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:2227}
+2017-05-23 15:06:18.947913: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:2223, 1 -> localhost:2224, 2 -> localhost:2225, 3 -> localhost:2226}
+2017-05-23 15:06:18.954688: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:316] Started server with target: grpc://localhost:2223
+2017-05-23 15:06:19.008071: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:2227}
+2017-05-23 15:06:19.008132: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:2223, 1 -> localhost:2224, 2 -> localhost:2225, 3 -> localhost:2226}
+2017-05-23 15:06:19.016316: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:316] Started server with target: grpc://localhost:2224
+2017-05-23 15:06:19.052548: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:2227}
+2017-05-23 15:06:19.052589: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:2223, 1 -> localhost:2224, 2 -> localhost:2225, 3 -> localhost:2226}
+2017-05-23 15:06:19.056154: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:2227}
+2017-05-23 15:06:19.056176: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:2223, 1 -> localhost:2224, 2 -> localhost:2225, 3 -> localhost:2226}
+2017-05-23 15:06:19.060973: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:316] Started server with target: grpc://localhost:2225
+2017-05-23 15:06:19.063039: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:316] Started server with target: grpc://localhost:2226
+2017-05-23 15:06:19.444002: I tensorflow/core/distributed_runtime/master_session.cc:999] Start master session 6bd586237b42120b with config:
+
+2017-05-23 15:06:19.458159: I tensorflow/core/distributed_runtime/master_session.cc:999] Start master session 924ffab74f941016 with config:
+
+2017-05-23 15:06:19.478740: I tensorflow/core/distributed_runtime/master_session.cc:999] Start master session c85138445cc12f91 with config:
+
+2017-05-23 15:06:19.481805: I tensorflow/core/distributed_runtime/master_session.cc:999] Start master session c77091e3456c2d32 with config:
+
+Step: 0 5.582075516520828 steps/sec
+Step: 10 2.1573368439379705 steps/sec
+Step: 20 2.2082990011777794 steps/sec
+Step: 30 2.1863694281593564 steps/sec
+Step: 40 2.254566631295363 steps/sec
+Step: 50 2.2088188362675036 steps/sec
+Step: 60 2.163473831162752 steps/sec
+2017-05-23 15:06:49.920556: I tensorflow/core/distributed_runtime/master_session.cc:999] Start master session 617cf268cb5a24e3 with config:
+
+2017-05-23 15:06:49.952686: I tensorflow/core/distributed_runtime/master_session.cc:999] Start master session 9b89c26b8c702b9f with config:
+
+2017-05-23 15:06:49.955667: I tensorflow/core/distributed_runtime/master_session.cc:999] Start master session b8d674f54212032f with config:
+
+Step: 0 0.30616911528363916 steps/sec
+Step: 0 0.30273764853875 steps/sec
+Step: 0 0.3023278973613949 steps/sec
+Step: 70 1.7908409267412564 steps/sec
+Step: 10 1.4149145268366454 steps/sec
+Step: 10 1.4475748080324984 steps/sec
+Step: 10 1.3904163169606496 steps/sec
+Step: 80 1.486386761414297 steps/sec
+Step: 20 1.4357212501056003 steps/sec
+Step: 20 1.4629177065889272 steps/sec
+Step: 20 1.4312276702523932 steps/sec
+Step: 90 1.4173087487398812 steps/sec

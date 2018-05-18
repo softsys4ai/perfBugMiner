@@ -1,0 +1,74 @@
+TensorFlow drops the first batch?
+
+Description
+I'm trying to understand how TF generates batches from TFRecord file format, how to implement the basic idea of evaluate the whole validation dataset after a full epoch so I've done a small experiment.
+Basically I've added an image/id key in the TFRecord file that looks like this:
+'image/id': tf.FixedLenFeature(shape=[], dtype=tf.int64)
+'id': slim.tfexample_decoder.Tensor('image/id')
+
+The values of these ids are just numbers increasing from 0 to num_samples - 1. Then I'm reading the data like this:
+...
+data_provider = slim.dataset_data_provider.DatasetDataProvider(dataset=dataset, shuffle=False)
+raw_image, instance_id, label = data_provider.get(items=['image', 'id', 'label'])
+...
+num_threads = 1
+images, instance_ids, labels = tf.train.batch(tensors=[image, instance_id, label],
+                                                      batch_size=batch_size,
+                                                      num_threads=num_threads,
+                                                      capacity = batch_size,
+                                                      allow_smaller_final_batch=False)        
+...
+
+I've used shuffle=False, num_threads=1 and capacity=batch_size to ensure we are reading the instances in the validation set in order.
+I've then defined a train_step_fn that evaluates a mini-batch from the validation set after each step. I'm doing this to check and test we are not returning instances with duplicate ids in the same batch. The code looks like this:
+    def train_step_fn(session, *args, **kwargs):
+        total_loss, should_stop = train_step(session, *args, **kwargs)
+        curr_global_step = tf.train.global_step(session, global_step)
+        curr_epoch = curr_global_step / validation_every_n_steps
+        image, val_ids, val_loss, accuracy = session.run([validation_images, validation_ids, total_validation_loss, validation_accuracy])
+        print(val_ids)
+        def float_formatter(x): return "%.4f" % x
+        tf.logging.info('after global step {} (epoch {}): validation loss = {}, validation accuracy = {}'
+                            .format(curr_global_step, curr_epoch, float_formatter(val_loss), float_formatter(accuracy)))
+        return [total_loss, should_stop]
+
+Most of the output I'm seeing makes sense but the output from the first batch looks weird.
+INFO:tensorflow:Starting Session.
+INFO:tensorflow:Starting Queues.
+INFO:tensorflow:global_step/sec: 0
+INFO:tensorflow:global step 1: loss = 4.1099 (3.70 sec/step)
+[17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32]
+INFO:tensorflow:after global step 1 (epoch 0): validation loss = 4.6337, validation accuracy = 0.0000
+INFO:tensorflow:global step 2: loss = 4.2118 (0.52 sec/step)
+[33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48]
+INFO:tensorflow:after global step 2 (epoch 0): validation loss = 3.9538, validation accuracy = 0.0625
+INFO:tensorflow:global step 3: loss = 4.0593 (0.75 sec/step)
+[49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64]
+INFO:tensorflow:after global step 3 (epoch 0): validation loss = 4.0773, validation accuracy = 0.0000
+INFO:tensorflow:global step 4: loss = 3.7749 (0.64 sec/step)
+[65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80]
+INFO:tensorflow:after global step 4 (epoch 0): validation loss = 4.0847, validation accuracy = 0.0625
+INFO:tensorflow:global step 5: loss = 3.7973 (0.68 sec/step)
+[81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96]
+INFO:tensorflow:after global step 5 (epoch 0): validation loss = 3.5591, validation accuracy = 0.1875
+INFO:tensorflow:global step 6: loss = 3.5584 (0.72 sec/step)
+[ 97  98  99 100 101 102 103 104 105 106 107 108 109 110 111 112]
+INFO:tensorflow:after global step 6 (epoch 0): validation loss = 3.6849, validation accuracy = 0.1250
+INFO:tensorflow:global step 7: loss = 3.5303 (0.70 sec/step)
+[113 114 115 116 117 118 119 120 121 122 123 124 125 126 127 128]
+INFO:tensorflow:after global step 7 (epoch 0): validation loss = 3.7812, validation accuracy = 0.1875
+INFO:tensorflow:global step 8: loss = 3.2698 (0.85 sec/step)
+[129 130 131 132 133 134 135 136 137 138 139 140 141 142 143 144]
+INFO:tensorflow:after global step 8 (epoch 0): validation loss = 3.3004, validation accuracy = 0.1875
+INFO:tensorflow:global step 9: loss = 3.4842 (0.94 sec/step)
+INFO:tensorflow:global_step/sec: 0.915008
+[145 146 147 148 149 150 151 152 153 154 155 156 157 158 159 160]
+INFO:tensorflow:after global step 9 (epoch 0): validation loss = 4.0377, validation accuracy = 0.1875
+INFO:tensorflow:global step 10: loss = 3.5635 (1.48 sec/step)
+[178 179 180 181 182 183 184 185 186 187 188 189 190 191 192 193]
+INFO:tensorflow:after global step 10 (epoch 0): validation loss = 3.7854, validation accuracy = 0.1875
+INFO:tensorflow:global step 11: loss = 3.1773 (0.65 sec/step)
+[194 195 196 197 198 199 200 201 202 203 204 205 206 207 208 209]
+
+I'm assuming the first mini-batch returned should be [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15] instead of [17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32]. Plus the fact that we are starting from 17 instead of 16 also bothers me a bit. It seems for some unknown reason TF is dropping a batch.
+I understand this probably won't affect the model training / validation process at all but I'm still pointing this out in case this is hiding a more serious root cause.

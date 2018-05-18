@@ -1,0 +1,28 @@
+Tensorflow: cannot install custom user_op for roi_pooling
+
+I experimented with a user-op for ROI_pooling in this fork: https://github.com/yuxng/tensorflow/,
+I tried several ways to make it work:
+Attempt 1:
+
+uninstalled tensorflow
+placed the roi_pooling files (roi_pooling_op.cc, roi_pooling_op_gpu.cu.cc, roi_pooling_op_gpu.h, roi_pooling_op_grad.py, roi_pooling_op_test.py) in //tensorflow/core/user_ops/ (without BUILD so that they get incorporated with the install)
+reinstalled tensorflow using bazel with bazel build -c opt --config=cuda ...
+
+I then get this error with attempt 1:
+ERROR: /home/fishdrop/tensorflow/tensorflow/cc/BUILD:116:1: Linking of rule '//tensorflow/cc:ops/user_ops_gen_cc' failed: crosstool_wrapper_driver_is_not_gcc failed: error executing command third_party/gpus/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc -o bazel-out/host/bin/tensorflow/cc/ops/user_ops_gen_cc ... (remaining 41 argument(s) skipped): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+bazel-out/host/bin/tensorflow/core/libuser_ops_op_lib.lo(roi_pooling_op.o): In function RoiPoolGradOp<Eigen::GpuDevice, float>::Compute(tensorflow::OpKernelContext*)': roi_pooling_op.cc:(.text._ZN13RoiPoolGradOpIN5Eigen9GpuDeviceEfE7ComputeEPN10tensorflow15OpKernelContextE[_ZN13RoiPoolGradOpIN5Eigen9GpuDeviceEfE7ComputeEPN10tensorflow15OpKernelContextE]+0x3ea): undefined reference toROIPoolBackwardLaucher(float const_, float, int, int, int, int, int, int, int, float const_, float_, int const_, Eigen::GpuDevice const&)'
+bazel-out/host/bin/tensorflow/core/libuser_ops_op_lib.lo(roi_pooling_op.o): In function RoiPoolOp<Eigen::GpuDevice, float>::Compute(tensorflow::OpKernelContext*)': roi_pooling_op.cc:(.text._ZN9RoiPoolOpIN5Eigen9GpuDeviceEfE7ComputeEPN10tensorflow15OpKernelContextE[_ZN9RoiPoolOpIN5Eigen9GpuDeviceEfE7ComputeEPN10tensorflow15OpKernelContextE]+0x392): undefined reference toROIPoolForwardLaucher(float const_, float, int, int, int, int, int, int, float const_, float_, int_, Eigen::GpuDevice const&)'
+collect2: error: ld returned 1 exit status
+Target //tensorflow/cc:tutorials_example_trainer failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+ERROR: /home/fishdrop/tensorflow/tensorflow/cc/BUILD:116:1 Linking of rule '//tensorflow/cc:ops/user_ops_gen_cc' failed: crosstool_wrapper_driver_is_not_gcc failed: error executing command third_party/gpus/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc -o bazel-out/host/bin/tensorflow/cc/ops/user_ops_gen_cc ... (remaining 41 argument(s) skipped): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+Attempt 2:
+
+re-install tensorflow
+place files (with BUILD) in //tensorflow/core/user_ops/
+use bazel build -c opt //tensorflow/core/user_ops:roi_pooling.so
+
+This successfully built roi_pooling.so, but when I tried to load the module with tf.load_op_library, I get this error:
+tensorflow.python.framework.errors.NotFoundError: /home/fishdrop/tensorflow/bazel-bin/tensorflow/core/user_ops/roi_pooling.so: undefined symbol: _Z21ROIPoolForwardLaucherPKffiiiiiiS0_PfPiRKN5Eigen9GpuDeviceE
+The error seems to be related with Eigen, but I read in this Link: http://stackoverflow.com/questions/38618960/tensorflow-how-to-insert-custom-input-to-existing-graph, that the user_op is supposed to work..
+I am using Ubuntu 14.04 LTS, and I tried these procedures in both Tensorflow 0.10 and Tensorflow 0.08, and got the same errors.. Anyone who could help?

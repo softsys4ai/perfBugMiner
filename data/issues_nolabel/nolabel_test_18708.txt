@@ -1,0 +1,48 @@
+Placeholder shape checking inside tf.cond not properly enforced
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Tensorflow 1.7 Docker under CentOS 7.3
+TensorFlow installed from (source or binary): Tensorflow 1.7 Docker
+TensorFlow version (use command below):  1.7
+Python version: 3.6
+Bazel version (if compiling from source):  N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: 9.0
+GPU model and memory: Quadro M4000
+Exact command to reproduce:
+
+Describe the problem
+When a placeholder is defined in a tf.cond statement, shape checking is not enforced until the merge, and ends up being only rank checking.
+Source code / logs
+Consider the following toy graph/session, developed in the pursuit of a larger issue.  I suspect this entire approach of trying to have differently shaped placeholders is doomed to failure.  But, the graph produced clearly shows placeholders of appropriate shape inside the conditional; shows appropriately sized tensors flowing into the merge, but shows the merge itself as shape (?,?) and that is where the shape checking happens.  As a result, you can put just about any rank two tensor in and set the boolean to anything you like and tensorflow doesn't care.
+Heck, you can make another op completely outside the conditional to compute matmul (a, matrix_inverse(a)) and it'll chug merrily along.
+Is this the desired behavior?
+with graph.as_default():
+    pred   = tf.placeholder(tf.bool, shape=[])
+
+    def fnTrue():
+        a      = tf.placeholder(tf.float32, shape=[5, 1], name="column")
+        return a
+
+    def fnFalse():
+        a      = tf.placeholder(tf.float32, shape=[1, 5], name="row")
+        return a
+
+    a = tf.cond(pred, fnTrue, fnFalse, name="my_conditional")
+graphWriter = tf.summary.FileWriter(logdir='logdir', graph=graph)
+graphWriter.flush()
+
+with tf.Session(graph=graph) as session:
+    writer_graph         = tf.summary.FileWriter(LogPath , session.graph)
+    writer_graph.flush()
+    writer_graph.close()
+    plTrue       = np.ones((15, 2)) * 2     # column
+    plFalse      = np.ones((12, 15)) * 3     # row
+    feed_dict = {
+        a            : plTrue,
+        pred         : False
+    }
+
+    d = session.run( a , feed_dict = feed_dict)
+    print(d)
+    print(d.shape)

@@ -1,0 +1,78 @@
+Problem with Keras sparse_categorical_crossentropy
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary (pip install)
+TensorFlow version (use command below): 1.5.0 (Keras 2.1.2-tf)
+Python version: 3.6
+Bazel version (if compiling from source): NA
+GCC/Compiler version (if compiling from source): NA
+CUDA/cuDNN version: Can't remember.
+GPU model and memory: GTX 1070
+Exact command to reproduce: See below.
+
+Background
+This issue seems to be specifically about Keras with TensorFlow so I have posted it here.
+I have a Keras model for doing Machine Translation of human languages. It has an encoder and decoder each of which use the Embedding and GRU layers from Keras. The output of the decoder is a one-hot encoded array.
+My data-set is from Europarl so it is very large already and converting the target-data from integer-tokens to one-hot-encoded labels would be extremely wasteful and take many GB of memory.
+One solution would be to write my own data-generator and only convert integer-tokens to one-hot-labels for a batch at a time. But that's not a very elegant solution.
+The correct solution is of course to use a sparse version of the crossentropy-loss which automatically converts the integer-tokens to a one-hot-encoded label for comparison to the model's output. Keras' has a built-in loss-function for doing exactly this called sparse_categorical_crossentropy. However, it doesn't seem to work as intended.
+Error
+The following shows the essential parts of the code.
+# (Omitted code for building neural network ...)
+
+# Output of the decoder-part of the neural network.
+decoder_dense = Dense(num_words,
+                      activation='softmax',
+                      name='decoder_output')
+decoder_output = decoder_dense(decoder_gru_output)
+
+model = Model(inputs=[encoder_input, decoder_input],
+              outputs=[decoder_output])
+
+model.compile(optimizer='adam',
+              loss='sparse_categorical_crossentropy')
+
+model.fit(x=x_data, y=y_data, batch_size=128, epochs=3)
+
+Everything runs fine except model.fit() at the end which gives this error:
+ValueError: Error when checking target: expected decoder_output to have 3 dimensions, but got array with shape (20000, 67)
+
+This is the shape of the model's output:
+>>> decoder_output.get_shape()
+TensorShape([Dimension(None), Dimension(None), Dimension(10000)])
+
+This is the shape of the target-data, which is a 2-dim array of integer-values:
+y_data['decoder_output'].shape
+>>> (20000, 67)
+
+Note that I only allow sequences of length 67 for the decoder's output.
+Working Solution
+We can use TensorFlow's implementation of sparse cross-entropy, which seems to work as intended.
+First we need to have a linear activation on the output of the decoder:
+decoder_dense = Dense(num_words,
+                      activation='linear', # NOTE: changed from 'softmax'
+                      name='decoder_output')
+
+Then we need a wrapper-function for the loss that is compatible with Keras:
+def sparse_loss(y_true, y_pred):
+    return tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y_true,
+                                                          logits=y_pred)
+
+Then we need to create a placeholder variable for the batch of target-values. Once again I only allow sequences of length 67 (this is of course a variable in my own code).
+decoder_target = tf.placeholder(dtype='int32', shape=(None, 67))
+
+model_train.compile(optimizer='adam,
+                    loss=sparse_loss,
+                    target_tensors=[decoder_target])
+
+This works fine and we can train it by calling:
+model.fit(x=x_data, y=y_data, batch_size=128, epochs=3)
+
+Maybe Keras should use TensorFlow's sparse-cross-entropy more directly, because it seems to handle higher-dim data better?
+Documentation
+Looking at the implementation of sparse_categorical_crossentropy in Keras there is actually some reshaping going on there, but the doc-string doesn't make clear what is assumed of the input/output dims and when/how reshaping is supposed to be done, so it's impossible to know whether it is a bug or a feature I am experiencing, and how to deal with it properly.
+The doc-string needs to be made more clear by someone who understands the intention of this code.
+Furthermore, the doc-string needs to be "exported" somehow to the online docs because it is not shown here: https://keras.io/losses/#sparse_categorical_crossentropy

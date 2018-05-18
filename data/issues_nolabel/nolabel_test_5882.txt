@@ -1,0 +1,76 @@
+TF sometimes hangs indefinitely when initializing variables
+
+When doing a hyperoptimization TF hangs sometimes (once every 30 times) when initializing variables.
+There are no error messages and it stalls for hours so I have to kill it manually.
+I have included information below. Please let me know if there's anything else you need.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+#2788
+#5448
+Environment info
+Operating System:
+Debian 8.6
+Kernel: Linux 3.16.0-4-amd64
+Installed version of CUDA and cuDNN:
+/usr/local/cuda/lib64/libcudadevrt.a    /usr/local/cuda/lib64/libcudart.so.8.0.44  /usr/local/cuda/lib64/libcudnn.so.5
+/usr/local/cuda/lib64/libcudart.so      /usr/local/cuda/lib64/libcudart_static.a   /usr/local/cuda/lib64/libcudnn.so.5.1.5
+/usr/local/cuda/lib64/libcudart.so.8.0  /usr/local/cuda/lib64/libcudnn.so          /usr/local/cuda/lib64/libcudnn_static.a
+If installed from binary pip package, provide:
+
+
+A link to the pip package you installed:
+https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.11.0-cp34-cp34m-linux_x86_64.whl
+
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.11.0
+
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+# clean up from previous trial
+self.sess.close()
+tf.reset_default_graph()
+
+# initialize model
+tf_config = tf.ConfigProto()
+tf_config.gpu_options.per_process_gpu_memory_fraction = 0.45
+self.sess = tf.Session(config=tf_config)
+
+*** create model ***
+
+self.sess.run(tf.initialize_all_variables())
+
+<--- HANGS HERE
+What other attempted solutions have you tried?
+initialize variables one by one --> hangs at first variable
+config.operation_timeout_in_ms=60000 (as a temporary workaround)
+Logs or other output that would be helpful
+tail -n 2 nohup.log:
+
+2016-11-26 23:48:13.170 |  INFO |         create_model | tf_model.py:277 | 47.9 | Initializing all variables...
+Initializing: learning_rate:0
+
+
+strace -p 15477 --> 
+
+Process 15477 attached
+futex(0x7ffc1aabd91c, FUTEX_WAIT_PRIVATE, 1, NULL
+
+
+nvidia-smi -->
+
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 367.48                 Driver Version: 367.48                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 980 Ti  Off  | 0000:01:00.0     Off |                  N/A |
+|  1%   60C    P2    44W / 275W |   2901MiB /  6077MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0     15477    C   python                                        2899MiB |
++-----------------------------------------------------------------------------+

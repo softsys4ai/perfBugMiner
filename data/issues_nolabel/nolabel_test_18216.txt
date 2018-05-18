@@ -1,0 +1,118 @@
+tf.space_to_depth alters input type if its quantized.  But why?
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug, a feature request, or a significant problem with documentation (for small docs fixes please send a PR instead).
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):  stock from the tf.space_to_depth() example as given on tensorflow.org, with output directed to tf.quantize()
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+
+
+TensorFlow installed from (source or binary): binary
+
+
+TensorFlow version (use command below):
+
+
+
+
+
+tf.GIT_VERSION
+"b'unknown'"
+tf.VERSION
+'1.6.0'
+
+
+
+
+Python version: , Python 3.5.4 Tk 8.6.4
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce: dst = tf.dequantize(qstd,qmin,qmax)  see the script below please.
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+tf.depth_to_space() doesnt return the input dtype when it is dtype=tf.qint8.  The type is changed to tf.int8.
+Source code / logs
+
+
+
+
+
+
+Source:
+
+import tensorflow as tf
+sess = tf.Session()
+dt=tf.float32
+box=2
+slist = [(1,2,2,1),(1,2,2,3),(1,4,4,1),(2,2,4,1,)]
+dlist = [(1,1,1,4),(1,1,1,12),(1,2,2,4)]
+sshape=2
+space_t=tf.random_uniform(slist[sshape],minval=-10, maxval=10,dtype=tf.float32)
+print(sess.run(space_t))
+ftin = tf.reshape(space_t,[-1])
+max=ftin[tf.argmax(ftin)]
+min=ftin[tf.argmin(ftin)]
+aq_op = tf.quantize(space_t,min,max,tf.qint8,name="TFQuantize")
+aq_space_t = sess.run(aq_op)
+The following qstd op should yield a type the same as aq_space_t.output, but does not, according to documentation.
+qstd = tf.space_to_depth(aq_space_t.output, box,name = 'TestOut')
+out1 = sess.run(qstd)
+qftin = tf.reshape(out1,[-1])
+qmax=ftin[tf.argmax(qftin)]
+qmin=ftin[tf.argmin(qftin)]
+dst = tf.dequantize(qstd,qmin,qmax)   ### This is the failing command
+out2 = sess.run(dqstd)
+The NON quantized original space_to_depth
+std = tf.space_to_depth(space_t, box,name = 'TestOut')
+
+
+
+LOG:
+== RESTART: C:/Users/c_jrost/projects/tensorTest/py_tests/autoQuantize3.py ==
+[[[[-6.970806 ]
+[-8.151844 ]
+[ 1.0674906]
+[-2.021196 ]]
+
+
+
+[[-6.90624  ]
+[ 7.7964478]
+[ 8.286434 ]
+[ 5.0095863]]
+[[-0.5847721]
+[ 7.9649334]
+[-1.1554356]
+[ 8.961611 ]]
+[[ 1.2922192]
+[-5.9919786]
+[-5.741205 ]
+[ 5.86102  ]]]]
+Traceback (most recent call last):
+File "C:/Users/c_jrost/projects/tensorTest/py_tests/autoQuantize3.py", line 33, in 
+dst = tf.dequantize(qstd,qmin,qmax)
+File "c:\Users\c_jrost\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\gen_array_ops.py", line 1319, in dequantize
+mode=mode, name=name)
+File "c:\Users\c_jrost\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 609, in _apply_op_helper
+param_name=input_name)
+File "c:\Users\c_jrost\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 60, in _SatisfiesTypeConstraint
+", ".join(dtypes.as_dtype(x).name for x in allowed_list)))
+TypeError: Value passed to parameter 'input' has DataType int8 not in list of allowed values: qint8, quint8, qint32, qint16, quint16

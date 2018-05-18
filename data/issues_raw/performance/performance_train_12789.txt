@@ -1,0 +1,42 @@
+Zero accuracy if shuffle is False in TF Keras ImageDataGenerator
+
+If I use the TF Keras reimplementation (tensorflow.contrib.keras) and set the ImageDataGenerator's shuffle param to False, I get zero accuracy every time. Also this:
+I've just used for the first time the ModelCheckpoint from function to save the best model (best_model = True) and wanted to test its performance. When the model was saved it said that the "val_acc" was at 83.3% before saving. I loaded the model and used the evaluate_generator on validation_generator but the result for "val_acc" was 0.639. I got confused and used it again and got 0.654 and then 0.647, 0.744 and so on. Questions are:
+
+Am I loading the model correctly, and if not what did I miss? Why is the result so much different?
+Why are the results between different evaluate_generator executions different (no retraining is happening, just shear execution of predict_generator multiple times in a row)?
+important part of the code (ResNet50 fine-tuning):
+
+model.compile(loss='categorical_crossentropy',
+              optimizer=optimizers.SGD(lr=1e-4, momentum=0.9),
+              metrics=['accuracy'])
+checkpointer = ModelCheckpoint(filepath='/tmp/weights.hdf5', monitor = "val_acc", verbose=1, save_best_only=True)
+# prepare data augmentation configuration
+train_datagen = ImageDataGenerator(
+    rescale = 1./ 255,
+    shear_range = 0.2,
+    zoom_range = 0.2,
+    horizontal_flip = True)
+test_datagen = ImageDataGenerator(rescale=1. / 255)
+train_generator = train_datagen.flow_from_directory(
+    train_data_dir,
+    target_size = (img_height, img_width),
+    batch_size = batch_size)
+validation_generator = test_datagen.flow_from_directory(
+    validation_data_dir,
+    target_size = (img_height, img_width),
+    batch_size = batch_size)
+# fine-tune the model
+model.fit_generator(
+    train_generator,
+    steps_per_epoch = math.ceil(train_samples/batch_size),
+    epochs=100,
+    workers = 120,
+    validation_data=validation_generator,
+    validation_steps=math.ceil(val_samples/batch_size),
+    callbacks=[checkpointer])
+model.load_weights(filepath='/tmp/weights.hdf5')
+model.predict_generator(validation_generator, steps = math.ceil(val_samples/batch_size) )
+>> 0.62
+model.predict_generator(validation_generator, steps = math.ceil(val_samples/batch_size) )
+>> 0.587

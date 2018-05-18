@@ -1,0 +1,74 @@
+Blocking of tf.contrib.StagingArea get() and put() operations
+
+Work Environment
+TensorFlow release version : 1.3.0-rc2
+TensorFlow git version : v1.3.0-rc1-994-gb93fd37
+Operating System : CentOS Linux release 7.2.1511 (Core)
+I am using TensorFlow StagingArea ops for increasing the efficiency of my input pipeline. Here is a part of my code snippet which constructs the input pipeline :
+    train_put_op_list = []
+    train_get_op_list = []
+    val_put_op_list = []
+    val_get_op_list = []
+    with tf.variable_scope(tf.get_variable_scope()) as vscope:
+        for i in range(4):
+            with tf.device('/gpu:%d'%i):
+                with tf.name_scope('GPU-Tower-%d'%i) as scope:
+                    trainstagingarea = tf.contrib.staging.StagingArea(dtypes=[tf.float32, tf.int32],
+                                                                 shapes=[[64, 221, 221, 3],[64]],
+                                                                      capacity=0)
+                    valstagingarea = tf.contrib.staging.StagingArea(dtypes=[tf.float32, tf.int32],
+                                                                      shapes=[[128, 221, 221, 3],[128]],
+                                                                      capacity=0)
+                    train_put_op_list.append(trainstagingarea.put(train_iterator.get_next()))
+                    val_put_op_list.append(valstagingarea.put(val_iterator.get_next()))
+                    train_get_op_list.append(trainstagingarea.get())
+                    val_get_op_list.append(valstagingarea.get())
+                    with tf.device('/cpu:0'):
+                        worktype = tf.get_variable("wt",[], initializer=tf.zeros_initializer(), trainable=False)
+                    workcondition = tf.equal(worktype, 1)
+                    #elem = tf.cond(workcondition, lambda: train_iterator.get_next(), lambda: val_iterator.get_next())
+                    elem = tf.cond(workcondition, lambda: train_get_op_list[i], lambda: val_get_op_list[i])
+                    # This is followed by the network construction and optimizer 
+
+Now at the time of execution, I first run the put() ops a couple of times and then go on to run the iterations. It is shown below :
+with tf.Session(config=config) as sess:
+        sess.run(init_op)
+        sess.run(iterator_training_op)
+        sess.run(iterator_validation_op)
+        sess.run(tf.assign(worktype, 0))
+        for i in range(4):
+            sess.run(train_put_op_list)
+            sess.run(val_put_op_list)
+        writer = tf.summary.FileWriter('.', graph=tf.get_default_graph())
+        epoch = 0
+        iter = 0
+        previous = 0
+        while(epoch<10):
+            try:
+                if(PROCESSINGTYPE is 'validation'):
+                    sess.run(val_put_op_list)
+                    [val_accu, summaries, numsamp] = sess.run([running_accuracy, validation_summary_op, processed])
+                    previous+=numsamp
+                    print("Running Accuracy = {} : Number of sample processed = {} ".format(val_accu, previous))
+                else:
+                    sess.run(train_put_op_list)
+                    [loss_value, _, train_accu, summaries, batch_accu, numsamp] = sess.run([total_loss, apply_gradient_op, running_accuracy, training_summary_op, batch_accuracy, pr\
+ocessed])
+                    #Remaining part of the code (not important for question)
+
+
+The use of StagingArea improves the speed substantially (almost 3-4 times). However, the code hangs due to some block. I am not sure if the block comes from get() or put() operations. Here is the actual output :
+
+# Validation is done first and the following is the output
+Running Accuracy = 0.0 : Number of sample processed = 512
+Running Accuracy = 0.00390625 : Number of sample processed = 1024
+Running Accuracy = 0.0 : Number of sample processed = 1536
+Running Accuracy = 0.001953125 : Number of sample processed = 2048
+# The code hangs here
+
+You can notice that in the beginning of tf.Session() as sess:, the get() and put() ops were run for 4 times. The output is limited to 4 lines as well. This means that,
+sess.run(val_put_op_list) within the while loop does not do anything. So, when the get() is called by sess.run(running_accuracy)..., the StagingArea is found empty after 4 lines and hence a blocking happens.
+
+Am I correct in my analysis of the problem ?
+What is the correct way to use the get() and put() ops here ?
+If StagingArea is full and put() is blocked, would that also block the whole code ? TensorFlow documentation does not say anything about it.

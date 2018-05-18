@@ -1,0 +1,141 @@
+imagenet_distributed_train using inception v3 stuck on saving check points forever.
+
+System information
+== cat /etc/issue ===============================================
+Linux ip-172-30-4-87 3.10.0-514.16.1.el7.x86_64 #1 SMP Wed Apr 12 15:04:24 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="7 (Core)"
+VERSION_ID="7"
+CENTOS_MANTISBT_PROJECT_VERSION="7"
+REDHAT_SUPPORT_PRODUCT_VERSION="7"
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+c++ (GCC) 4.8.5 20150623 (Red Hat 4.8.5-11)
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+== uname -a =====================================================
+Linux ip-172-30-4-87 3.10.0-514.16.1.el7.x86_64 #1 SMP Wed Apr 12 15:04:24 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+
+== check pips ===================================================
+numpy (1.13.0)
+protobuf (3.3.0)
+tensorflow-gpu (1.2.0)
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.2.0
+tf.GIT_VERSION = v1.2.0-rc2-21-g12f033d
+tf.COMPILER_VERSION = v1.2.0-rc2-21-g12f033d
+Sanity check: array([1], dtype=int32)
+
+== env ==========================================================
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+Mon Aug  7 21:00:40 2017
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 375.51                 Driver Version: 375.51                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  Tesla K80           On   | 0000:00:1E.0     Off |                    0 |
+| N/A   51C    P0    72W / 149W |  10944MiB / 11439MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0      2886    C   /bin/python                                  10938MiB |
++-----------------------------------------------------------------------------+
+
+== cuda libs  ===================================================
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart.so.8.0.61
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart_static.a
+I am running the imagenet_distributed_train.py of inception: https://github.com/tensorflow/models/tree/master/inception, with 16 AWS p2x2 machines. I didn't change any code of inception and follow the guidance to run imagenet_distributed_train using parallel-ssh.
+The script I use to run parallel-ssh:
+from pssh.pssh_client import ParallelSSHClient
+import datetime
+from pprint import pprint
+from pssh.utils import load_private_key
+
+output_ps = []
+output_worker = []
+some host ip here
+ps = [host1,host2,host3]
+worker = [host0,host1,host2,host3,host4,host5,host6,host7,host8,host9,host10,host11,host12,host13,host14,host15]
+client_ps = ParallelSSHClient(ps, user='centos')
+client_worker = ParallelSSHClient(worker, user='centos')
+
+output_ps = client_ps.run_command('%s', host_args=(
+    ('/imagenet/run_ps.sh --job_name ps --task_id 0 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_ps.sh --job_name ps --task_id 1 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_ps.sh --job_name ps --task_id 2 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ))
+
+output_worker = client_worker.run_command( '%s', host_args=(
+    ('/imagenet/run_worker.sh --job_name worker --task_id 0 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 1 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 2 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 3 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 4 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 5 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 6 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 7 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 8 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 9 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 10 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 11 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 12 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 13 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 14 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+    ('/imagenet/run_worker.sh --job_name worker --task_id 15 --batch_size 32 --num_ps 3 --num_workers 16 --ps_hosts ******* --worker_hosts *******'),
+       ))
+
+client_ps.join(output_ps)
+#client_worker.join(output_worker)
+pprint(output_ps.values()[0].exit_code)
+#pprint(output_worker.values()[0].exit_code)
+
+for host, host_output in output_ps.items():
+    for line in host_output.stdout:
+        print("Host [%s] - %s" % (host, line))
+I think this script worked fine because I logged in every machine and checked with ps command and ensured the program was running with correct parameters. Then the program just worked fine but to some point, it started to save checkpoints forever(here is the output of worker0):
+INFO:tensorflow:Worker 0: 2017-08-04 06:46:08.510727: step 2340, loss = 11.22(2.0 examples/sec; 15.788  sec/batch)
+INFO:tensorflow:Running Summary operation on the chief.
+INFO:tensorflow:Finished running Summary operation.
+INFO:tensorflow:Running Summary operation on the chief.
+INFO:tensorflow:Finished running Summary operation.
+INFO:tensorflow:Saving checkpoint to path /home/centos/experiment_16W_2P_32BS_2017-08-03_IMAGENET_W0/model.ckpt
+INFO:tensorflow:Running Summary operation on the chief.
+INFO:tensorflow:Finished running Summary operation.
+INFO:tensorflow:Worker 0: 2017-08-04 06:53:55.553703: step 2370, loss = 10.30(2.1 examples/sec; 15.573  sec/batch)
+INFO:tensorflow:Running Summary operation on the chief.
+INFO:tensorflow:Finished running Summary operation.
+INFO:tensorflow:Running Summary operation on the chief.
+INFO:tensorflow:Finished running Summary operation.
+INFO:tensorflow:Worker 0: 2017-08-04 07:01:44.226068: step 2400, loss = 10.84(2.1 examples/sec; 15.421  sec/batch)
+INFO:tensorflow:Saving checkpoint to path /home/centos/experiment_16W_2P_32BS_2017-08-03_IMAGENET_W0/model.ckpt
+INFO:tensorflow:Running Summary operation on the chief.
+INFO:tensorflow:Finished running Summary operation.
+INFO:tensorflow:Saving checkpoint to path /home/centos/experiment_16W_2P_32BS_2017-08-03_IMAGENET_W0/model.ckpt
+INFO:tensorflow:Saving checkpoint to path /home/centos/experiment_16W_2P_32BS_2017-08-03_IMAGENET_W0/model.ckpt
+INFO:tensorflow:Saving checkpoint to path /home/centos/experiment_16W_2P_32BS_2017-08-03_IMAGENET_W0/model.ckpt
+INFO:tensorflow:Saving checkpoint to path /home/centos/experiment_16W_2P_32BS_2017-08-03_IMAGENET_W0/model.ckpt
+INFO:tensorflow:Saving checkpoint to path /home/centos/experiment_16W_2P_32BS_2017-08-03_IMAGENET_W0/model.ckpt
+INFO:tensorflow:Saving checkpoint to path /home/centos/experiment_16W_2P_32BS_2017-08-03_IMAGENET_W0/model.ckpt
+INFO:tensorflow:Saving checkpoint to path /home/centos/experiment_16W_2P_32BS_2017-08-03_IMAGENET_W0/model.ckpt
+INFO:tensorflow:Saving checkpoint to path /home/centos/experiment_16W_2P_32BS_2017-08-03_IMAGENET_W0/model.ckpt
+(same saving checkpoint output forever)
+I ran nvidia-smi and found the GPU wasn't working and same with other nodes. The output of worker 1-15 just stucked on step 2400 and didn't do any progress. I tried this several time on new set of 16 machines but it all stucked on saving checkpoint forever problem at some time. I guess it might be a bug in tensorflow? Or does this caused network failure? but it didn't retrun any network failure error.

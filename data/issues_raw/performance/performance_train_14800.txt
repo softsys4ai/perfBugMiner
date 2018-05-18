@@ -1,0 +1,344 @@
+Potential memory leak from deleting array and closing file handler
+
+Here are couple of minor memory leak for review.
+
+
+
+  
+    
+      tensorflow/tensorflow/c/c_api.cc
+    
+    
+        Lines 569 to 593
+      in
+      6c95675
+    
+    
+    
+    
+
+        
+          
+           char* base = new char[size]; 
+        
+
+        
+          
+           char* data_start = base + sizeof(tensorflow::uint64) * srcarray.size(); 
+        
+
+        
+          
+           char* dst = data_start;  // Where next string is encoded. 
+        
+
+        
+          
+           size_t dst_len = size - static_cast<size_t>(data_start - base); 
+        
+
+        
+          
+           tensorflow::uint64* offsets = reinterpret_cast<tensorflow::uint64*>(base); 
+        
+
+        
+          
+           for (int i = 0; i < srcarray.size(); ++i) { 
+        
+
+        
+          
+             *offsets = (dst - data_start); 
+        
+
+        
+          
+             offsets++; 
+        
+
+        
+          
+             const string& s = srcarray(i); 
+        
+
+        
+          
+             size_t consumed = TF_StringEncode(s.data(), s.size(), dst, dst_len, status); 
+        
+
+        
+          
+             if (!status->status.ok()) { 
+        
+
+        
+          
+               status->status = InvalidArgument( 
+        
+
+        
+          
+                   "invalid string tensor encoding (string #", i, " of ", 
+        
+
+        
+          
+                   srcarray.size(), "): ", status->status.error_message()); 
+        
+
+        
+          
+               return nullptr; 
+        
+
+        
+          
+             } 
+        
+
+        
+          
+             dst += consumed; 
+        
+
+        
+          
+             dst_len -= consumed; 
+        
+
+        
+          
+           } 
+        
+
+        
+          
+           if (dst != base + size) { 
+        
+
+        
+          
+             status->status = InvalidArgument( 
+        
+
+        
+          
+                 "invalid string tensor encoding (decoded ", (dst - base), 
+        
+
+        
+          
+                 " bytes, but the tensor is encoded in ", size, " bytes"); 
+        
+
+        
+          
+             return nullptr; 
+        
+
+        
+          
+           } 
+        
+    
+  
+
+ "delete []base;" looks missing.
+
+
+
+  
+    
+      tensorflow/tensorflow/core/lib/io/snappy/snappy_outputbuffer.cc
+    
+    
+        Lines 164 to 173
+      in
+      6c95675
+    
+    
+    
+    
+
+        
+          
+           char* compressed_length_array = new char[4]; 
+        
+
+        
+          
+           std::fill(compressed_length_array, compressed_length_array + 4, 0); 
+        
+
+        
+          
+           for (int i = 0; i < 4; i++) { 
+        
+
+        
+          
+             // Little endian. 
+        
+
+        
+          
+             compressed_length_array[i] = output.size() >> (8 * (3 - i)); 
+        
+
+        
+          
+           } 
+        
+
+        
+          
+           TF_RETURN_IF_ERROR(AddToOutputBuffer(compressed_length_array, 4)); 
+        
+
+        
+          
+            
+        
+
+        
+          
+           // Write compressed output to buffer. 
+        
+
+        
+          
+           TF_RETURN_IF_ERROR(AddToOutputBuffer(output.data(), output.size())); 
+        
+    
+  
+
+  "delete []compressed_length_array;" looks missing when macro TF_RETURN_IF_ERROR() fails.
+
+
+
+  
+    
+      tensorflow/tensorflow/core/platform/profile_utils/android_armv7a_cpu_utils_helper.cc
+    
+    
+        Lines 113 to 123
+      in
+      6c95675
+    
+    
+    
+    
+
+        
+          
+           FILE *fp = fopen(file_path.c_str(), "r"); 
+        
+
+        
+          
+           if (fp == nullptr) { 
+        
+
+        
+          
+             return INVALID_CPU_FREQUENCY; 
+        
+
+        
+          
+           } 
+        
+
+        
+          
+           int64 freq_in_khz = INVALID_CPU_FREQUENCY; 
+        
+
+        
+          
+           const int retval = fscanf(fp, "%lld", &freq_in_khz); 
+        
+
+        
+          
+           if (retval < 0) { 
+        
+
+        
+          
+             LOG(WARNING) << "Failed to \"" << file_path << "\""; 
+        
+
+        
+          
+             return INVALID_CPU_FREQUENCY; 
+        
+
+        
+          
+           } 
+        
+
+        
+          
+           pclose(fp); 
+        
+    
+  
+
+ Two potential problems:
+a. There is no "fclose()" being called after fscanf() fails
+b. "fclose()" could be called instead of "pclose()"
+
+
+
+  
+    
+      tensorflow/tensorflow/tools/proto_text/gen_proto_text_functions.cc
+    
+    
+        Lines 132 to 137
+      in
+      6c95675
+    
+    
+    
+    
+
+        
+          
+           FILE* f = fopen(path.c_str(), "w"); 
+        
+
+        
+          
+           if (f == nullptr) return -1; 
+        
+
+        
+          
+           if (fwrite(data.c_str(), 1, data.size(), f) != data.size()) { 
+        
+
+        
+          
+             return -1; 
+        
+
+        
+          
+           } 
+        
+
+        
+          
+           if (fclose(f) != 0) { 
+        
+    
+  
+
+ When "fwrite() fails", "fclose()" could be called before "return -1".
+
+
+PS: I don't have handy working environment setup yet, currently browsing code may be better fit for me.

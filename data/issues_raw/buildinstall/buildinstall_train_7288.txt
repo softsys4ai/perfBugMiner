@@ -1,0 +1,36 @@
+Are linkopts propagated from copts and/or deps ?
+
+The linker complains about not finding -lpthread, while I didn't add this flag to linkopts.
+I've checked the executed command, and in fact there is extra flags on it -lz -lpthread ....
+Where did they came from ? Is there a workaround for this ?
+More details
+BUILD file
+cc_binary(
+    name = "libfoo.so",
+    srcs = glob([
+         "jni/**/*.cc",
+         "jni/**/*.h",
+    ]),
+    copts = [ "-fexceptions", "-DEIGEN_AVOID_STL_ARRAY",
+              "-mfpu=neon", "-std=c++11",
+              "-DMIN_LOG_LEVEL=0", "-DTF_LEAN_BINARY",
+              "-O2", ],
+    linkopts = [
+        "-llog",
+        "-lm",
+    ],
+    linkshared = 1,
+    deps = [
+        "@org_tensorflow//tensorflow/core:android_tensorflow_lib",
+        "@boringssl//:crypto",
+    ],
+)
+
+Command
+bazel build -c opt //:libfoo.so --crosstool_top=//external:android/crosstool --cpu=armeabi-v7a --host_crosstool_top=@bazel_tools//tools/cpp:toolchain --verbose_failures --sandbox_debug --strategy=CppLink=standalone
+Full error
+...
+  external/bazel_tools/tools/cpp/link_dynamic_library.sh no ignored ignored ignored external/androidndk/ndk/toolchains/arm-linux-androideabi-4.9/prebuilt/darwin-x86_64/bin/arm-linux-androideabi-gcc -shared -o bazel-out/arm-linux-androideabi-4.9-v7a-gnu-libstdcpp-opt/bin/libfoo.so -Wl,-whole-archive bazel-out/arm-linux-androideabi-4.9-v7a-gnu-libstdcpp-opt/bin/external/org_tensorflow/tensorflow/core/libandroid_tensorflow_lib.lo -Wl,-no-whole-archive -Wl,-whole-archive bazel-out/arm-linux-androideabi-4.9-v7a-gnu-libstdcpp-opt/bin/external/org_tensorflow/tensorflow/core/kernels/libandroid_tensorflow_kernels.lo -Wl,-no-whole-archive -Wl,-whole-archive bazel-out/arm-linux-androideabi-4.9-v7a-gnu-libstdcpp-opt/bin/external/org_tensorflow/tensorflow/core/libandroid_tensorflow_lib_lite.lo -Wl,-no-whole-archive -Wl,-whole-archive bazel-out/arm-linux-androideabi-4.9-v7a-gnu-libstdcpp-opt/bin/external/org_tensorflow/tensorflow/core/libprotos_all_cc.a -Wl,-no-whole-archive -Wl,-whole-archive bazel-out/arm-linux-androideabi-4.9-v7a-gnu-libstdcpp-opt/bin/external/protobuf/libprotobuf.a -Wl,-no-whole-archive -Wl,-whole-archive bazel-out/arm-linux-androideabi-4.9-v7a-gnu-libstdcpp-opt/bin/external/protobuf/libprotobuf_lite.a -Wl,-no-whole-archive -Wl,-whole-archive bazel-out/arm-linux-androideabi-4.9-v7a-gnu-libstdcpp-opt/bin/external/boringssl/libcrypto.a -Wl,-no-whole-archive external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/libs/armeabi-v7a/libgnustl_static.a external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/libs/armeabi-v7a/libsupc++.a -llog -lm -lz -lpthread -static-libgcc -no-canonical-prefixes '-march=armv7-a' -Wl,--fix-cortex-a8 '--sysroot=external/androidndk/ndk/platforms/android-21/arch-arm'): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+external/androidndk/ndk/toolchains/arm-linux-androideabi-4.9/prebuilt/darwin-x86_64/bin/../lib/gcc/arm-linux-androideabi/4.9.x/../../../../arm-linux-androideabi/bin/ld: error: cannot find -lpthread
+collect2: error: ld returned 1 exit status
+Target //:libfoo.so failed to build

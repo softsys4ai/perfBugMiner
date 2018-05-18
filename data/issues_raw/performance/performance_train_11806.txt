@@ -1,0 +1,70 @@
+sparse ClusterSpec fails when using tf.cond
+
+Here's the minimal code to reproduce.
+on machine 1 and machine 2
+import sys
+import tensorflow as tf
+
+cluster_spec = tf.train.ClusterSpec({
+  "a": { 0: "machine1:8000" },
+  "b": { 0: "machine2:8001" },
+})
+jobname = sys.argv[1]
+taskid = int(sys.argv[2])
+server = tf.train.Server(cluster_spec, jobname, taskid)
+
+with tf.device("/job:a/task:0/cpu:0"):
+  queue = tf.FIFOQueue(
+    capacity=100, dtypes=[tf.int64],
+    shapes=[[]], shared_name="a_queue", name="a_queue")
+
+if jobname == "a" and taskid == 0:
+  enqueue_op = queue.enqueue(10)
+  sess = tf.Session(server.target)
+  while True:
+    sess.run(enqueue_op)
+else:
+  dequeue_op = queue.dequeue()
+  sess = tf.Session(server.target)
+  while True:
+    print(sess.run(dequeue_op))
+on machine 3:
+import sys
+import tensorflow as tf
+
+cluster_spec = tf.train.ClusterSpec({
+  "a": { 0: "machine1:8000" },
+  "b": { 1: "machine3:8001" },
+})
+jobname = sys.argv[1]
+taskid = int(sys.argv[2])
+server = tf.train.Server(cluster_spec, jobname, taskid)
+
+with tf.device("/job:a/task:0/cpu:0"):
+  queue = tf.FIFOQueue(
+    capacity=100, dtypes=[tf.int64],
+    shapes=[[]], shared_name="a_queue", name="a_queue")
+
+if jobname == "a" and taskid == 0:
+  enqueue_op = queue.enqueue(10)
+  sess = tf.Session(server.target)
+  while True:
+    sess.run(enqueue_op)
+else:
+  with tf.device("/job:b/task:1"):
+    out = queue.dequeue()
+    queue_b = tf.FIFOQueue(capacity=100, dtypes=[tf.int64], shapes=[[]], name="b_queue")
+    # 1.
+    # enq = queue_b.enqueue(out)
+    # no_op = tf.no_op()
+    # out = tf.cond(tf.equal(out, 10), lambda: enq, lambda: no_op)
+    # 2.
+    out = tf.cond(tf.equal(out, 10), lambda: queue_b.enqueue(out), lambda: tf.no_op())
+
+  sess = tf.Session(server.target)
+  while True:
+    print(sess.run(out))
+On machine3, it crashes complaining
+tensorflow.python.framework.errors_impl.InternalError: No worker known as /job:b/replica:0/task:1
+	 [[Node: cond/pred_id_S5 = _HostRecv[client_terminated=false, recv_device="/job:a/replica:0/task:0/cpu:0", send_device="/job:b/replica:0/task:1/gpu:0", send_device_incarnation=720279685140440577, tensor_name="edge_8_cond/pred_id", tensor_type=DT_BOOL, _device="/job:a/replica:0/task:0/cpu:0"]()]]
+There is no problem if the true_fn and false_fn just returns a already constructed op, like in the commented code.

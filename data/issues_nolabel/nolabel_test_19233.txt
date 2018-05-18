@@ -1,0 +1,66 @@
+`foldl` disallows mixing different types of `elems`
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Redhat
+TensorFlow installed from (source or binary):
+conda-forge
+TensorFlow version (use command below):
+1.6
+Python version:
+3.6
+Bazel version (if compiling from source):
+N/A
+GCC/Compiler version (if compiling from source):
+N/A
+CUDA/cuDNN version:
+N/A (cpu only)
+GPU model and memory:
+N/A (cpu only)
+Exact command to reproduce:
+
+Describe the problem
+Source code / logs
+Look at the following two code snippets.
+score = tf.foldl(lambda s, x: transitions[x[0], x[1]] + x[2][x[0]] + s, (label[1:], label[:-1], logits), initializer=np.zeros((), dtype=np.float64))
+score = tf.reduce_sum(tf.map_fn(lambda x: transitions[x[0], x[1]] + x[2][x[0]], (label[1:], label[:-1], logits), dtype=tf.float64))
+Long story short, the 1st one does not compile, while the second one does. From my view, these 2 operations essentially do the same thing. That said, from the error trace, it seems to me foldl disallows mixing different types for the argument of elems=, since indeed label is of type tf.int32, while logits is of type tf.float64. However the documentation does not indicate that is the case. Could you confirm if that is true ? If yes, can we update the documentation to make it explicit ?
+XXX/lib/python3.6/site-packages/tensorflow/python/ops/functional_ops.py in foldl(fn, elems, initializer, parallel_iterations, back_prop, swap_memory, name)
+    107 
+    108     # Convert elems to tensor array.
+--> 109     elems = ops.convert_to_tensor(elems, name="elems")
+    110     n = array_ops.shape(elems)[0]
+    111     elems_ta = tensor_array_ops.TensorArray(dtype=elems.dtype, size=n,
+
+XXX/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in convert_to_tensor(value, dtype, name, preferred_dtype)
+    944       name=name,
+    945       preferred_dtype=preferred_dtype,
+--> 946       as_ref=False)
+    947 
+    948 
+
+XXX/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in internal_convert_to_tensor(value, dtype, name, as_ref, preferred_dtype, ctx)
+   1034 
+   1035     if ret is None:
+-> 1036       ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+   1037 
+   1038     if ret is NotImplemented:
+
+XXX/lib/python3.6/site-packages/tensorflow/python/ops/array_ops.py in _autopacking_conversion_function(v, dtype, name, as_ref)
+   1018   if dtype is not None and dtype != inferred_dtype:
+   1019     return NotImplemented
+-> 1020   return _autopacking_helper(v, inferred_dtype, name or "packed")
+   1021 
+   1022 
+
+XXX/lib/python3.6/site-packages/tensorflow/python/ops/array_ops.py in _autopacking_helper(list_or_tuple, dtype, name)
+    960           raise TypeError("Cannot convert a list containing a tensor of dtype "
+    961                           "%s to %s (Tensor is: %r)" % (elem.dtype, dtype,
+--> 962                                                         elem))
+    963         converted_elems.append(elem)
+    964         must_pack = True
+
+TypeError: Cannot convert a list containing a tensor of dtype <dtype: 'float64'> to <dtype: 'int32'> (Tensor is: <tf.Tensor 'loss/BiasAdd:0' shape=(?, 5) dtype=float64>)

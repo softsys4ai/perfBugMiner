@@ -1,0 +1,63 @@
+Tensorboard "Color by" drop-down not showing up on multi-column .tsv
+
+System information
+
+using tensorboard to visualize some embeddings:
+OSX 10.12.4:
+installed from binary via pip:
+1.1.0:
+not using bazel for this install:
+no CUDA:
+no GPU:
+
+Describe the problem
+Tensorboard does not display the Color By dropdown menu on multi-columnar data. Label by and search by displaying columns normally.
+
+Source code / logs
+Sample of metadata.tsv file:
+Name	Genre
+(Sandy) Alex G	Alternative/Indie Rock	
+*NSYNC	Pop/Rock	
+Acollective	Pop/Rock	
+Ahmet Özhan	International	
+Ahu	Club/Dance	
+Alex Ferreira	Pop/Rock	
+Alex Winston	Pop/Rock	
+Ali Azimi	Pop/Rock	
+Alphamama	Pop/Rock	
+Amaryllis	International	
+...
+Yomo Toro	Latin
+Youssou N'Dour	International
+Zafra Negra	Latin
+Zany	Electronic	
+Zeki Müren	International
+iSHi	Electronic	
+
+Code to generate embeddings and metadata:
+def list_to_tsv(filenames, metadata_dir):
+    with open(os.path.join(metadata_dir,'metadata.tsv'), 'w') as tsvfile:
+        writer = csv.writer(tsvfile, delimiter = "\t")
+        for record in filenames:
+            writer.writerow(record)
+
+def save_down_tensors(tensor_dir, name_and_embedding):
+    embeddings = [i[2] for i in name_and_embedding] 
+    names = [[i[0],i[1]] for i in name_and_embedding]
+    names.insert(0,['Name','Genre'])
+    with tf.Session() as sess:
+        embeddings_tf = tf.Variable(np.array(embeddings), name = "embeddings")
+        tf.global_variables_initializer().run()
+        # save the tensor down
+        saver = tf.train.Saver(tf.global_variables())
+        saver.save(sess, tensor_dir, 0)
+        # associate metadata with the embedding
+        summary_writer = tf.summary.FileWriter(tensor_dir)
+        config = projector.ProjectorConfig()
+        embedding = config.embeddings.add()
+        embedding.tensor_name = embeddings_tf.name
+        #save filenames to tsv
+        list_to_tsv(names, metadata_dir)
+        embedding.metadata_path = os.path.join(metadata_dir, "metadata.tsv")
+        # save a configuration file that TensorBoard will read during startup.
+        projector.visualize_embeddings(summary_writer, config)

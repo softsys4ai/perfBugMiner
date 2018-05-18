@@ -1,0 +1,18 @@
+Running different parts of a graph at a time without recomputation
+
+Motivated by this StackOverflow question
+According to George Dahl's answer, there is currently no way to run part of a graph, then later run the entire graph without recomputing that part of the graph.  Couldn't you always just run the whole thing in the first place, you ask?  Consider this scenario:
+Context/Example
+You're using tensorflow to implement a reinforcement learning agent with value function approximation trained using stochastic gradient descent.  You're agent contains a method that is called once every iteration/timestep in the experiment.  The method takes an obervation and reward as input and outputs an action.  Consider this sequence of events (Say you're doing q-learning):
+
+At the end of an iteration, you compute your state-action values to choose an action and then return control to the calling program to simulate a step in the environment.
+At the beginning of the next iteration, it's time to update the parameters.  You want to use tensorflow's optimizer class to automatically calculate the gradients.  Here, you have three options:
+
+
+Just recompute the state-action values, so you can use the optimizer.  This option leaves you inefficiently calculating part of the graph twice.  This also might not even be viable if you were using something like recurrent neural networks, where calculating the activations changes the state of the nodes.
+Hardcode the gradients.  You could just write a function to calculate the gradients yourself and not even use optimizer.  However, if you were experimenting with different network architectures and activation functions in a big convolutional network, this could get pretty cumbersome.
+Call everything else from within your agent.  This sacrifices a lot of modularity and neatness in any framework bigger than a small experiment.
+
+So, in this case, the problem is that your graph (learning with SGD) depends on a value (observation/reward), calculated externally, that depends on the result of part of the graph (state-action values).  And we can't save the state-action values as variables to feed later as placeholders, because then they wouldn't be associated with the operations that produced them, which are required for automatic differentiation.
+Solution
+I'm not yet very familiar with the inner workings of tensorflow, so I'm not sure what the best solution would be.  It would need to be able to give Optimizer the tensors already calculated and the graph with the operations that produced them.  Maybe some kind of Session.partial_run() that saves the computed tensors associated with their nodes until a normal run is done?  Maybe a new method under Optimizer that returns an operation to calculate gradients, depending on a placeholder?  What do you think?

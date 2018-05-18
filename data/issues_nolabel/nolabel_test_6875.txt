@@ -1,0 +1,39 @@
+Tensorflow require Protobuf 3.1 while attempting to use incompatible 3.0 function calls
+
+Environment:
+Arch Linux with CUDA 8.0 and cuDNN 5.1
+/opt/cuda/lib64/libcudadevrt.a
+/opt/cuda/lib64/libcudart.so -> libcudart.so.8.0
+/opt/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+/opt/cuda/lib64/libcudart.so.8.0.44
+/opt/cuda/lib64/libcudart_static.a
+/opt/cuda/lib64/libcudnn.so -> libcudnn.so.5
+/opt/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+/opt/cuda/lib64/libcudnn.so.5.0.5
+/opt/cuda/lib64/libcudnn.so.5.1.5
+/opt/cuda/lib64/libcudnn_static.a
+
+Tensorflow was succesfully compiled from source for a C++ pipeline using
+Bazel 0.4.3
+Protobuf 3.1.x (also tried 3.2.x)
+Tensorflow r1.0 (as well as master <9830ed87d46245a72a9d0c2dce854e6732c5542a>)
+with the command:
+bazel build -c opt --config=cuda --copt=-march=native --verbose_failures //tensorflow/core:tensorflow //tensorflow/cc:cc_ops tensorflow:libtensorflow_cc.so
+In my CPP pipeline, the following include breaks the compile process
+#include <tensorflow/core/public/session.h>
+/srv/builds/tensorflow/bazel-genfiles/tensorflow/core/protobuf/config.pb.h:1490:95: error: no matching function for call to ‘google::protobuf::internal::ArenaStringPtr::Get(const string*) const’
+ return visible_device_list_.Get(&::google::protobuf::internal::GetEmptyStringAlreadyInited());
+                                                                                             ^
+In file included from /srv/builds/tensorflow/bazel-genfiles/tensorflow/core/framework/graph.pb.h:23:0,
+                 from /srv/builds/tensorflow/tensorflow/core/public/session.h:22,
+                 from src/fragments/tensorflow.h:48,
+                 from src/blocks/detector.h:27,
+                 from src/json_deserializer.h:22,
+                 from src/blocks/assign_camera.cpp:2:
+/usr/include/google/protobuf/arenastring.h:66:31: note: candidate: const string& google::protobuf::internal::ArenaStringPtr::Get() const
+   inline const ::std::string& Get() const { return *ptr_; }
+                               ^~~
+/usr/include/google/protobuf/arenastring.h:66:31: note:   candidate expects 0 arguments, 1 provided
+
+
+Digging in the documentation, I see for the python part that Protobuf 3.1.x is required, however 3.1.x had an API change from 3.0.X for the ArenaStringPtr::Get(), where the former takes a string as argument while the newer doesn't. I could downgrade to Protobuf 3.0.X, but macro's in e.g. error_codes.pb.h specifies a requirement for 3.1.X #if 3001000 < GOOGLE_PROTOBUF_MIN_PROTOC_VERSION

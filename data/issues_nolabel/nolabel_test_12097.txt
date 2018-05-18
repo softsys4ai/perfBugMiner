@@ -1,0 +1,234 @@
+I got a type error without rhyme or reason，when i rewrite a _linear function in the rnn_cell_impl.py
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):win64
+TensorFlow installed from (source or binary): pip
+TensorFlow version (use command below):1.2
+Python version:  3.6
+CUDA/cuDNN version:ONLY CPU
+GPU model and memory:ONLY CPU
+Exact command to reproduce: No
+
+Describe the problem
+I want to write a lstm with batch normalization . After , i read the code of BasicLSTMCell , i find i only need to wirte a _linear function acording to this paper https://arxiv.org/pdf/1603.09025.pdf section 3
+and the new _batchlinear function is  below here , the only difference between _batchlinear function  and
+_linear function is  the arg mul it's weights separately and do  it's batch normalization .when i build a  multi layer rnn like this
+cells       = [BatchLSTMCell(rnn_numhidden,forget_bias=0.,activation=tf.tanh) for _ in range(num_rnn)]
+stack       = tf.contrib.rnn.MultiRNNCell(cells,state_is_tuple=True)
+net, _      = tf.nn.dynamic_rnn(stack, net, seqlen_batch, dtype=tf.float32)
+
+TypeError: int() argument must be a string, a bytes-like object or a number, not 'TensorShape'
+Source code / logs
+source code are here
+def _batchlinear(   args,
+                    output_size,
+                    bias,
+                    xh_epsilon = 1e-3,
+                    hh_epsilon = 1e-3,
+                    bias_initializer=None,
+                    kernel_initializer= None):           
+  if args is None or (nest.is_sequence(args) and not args):
+    raise ValueError("`args` must be specified")
+  if not nest.is_sequence(args):
+    args = [args]
+
+  # Calculate the total size of arguments on dimension 1.
+  total_arg_size = 0
+  shapes = [a.get_shape() for a in args]
+  for shape in shapes:
+    if shape.ndims != 2:
+      raise ValueError("linear is expecting 2D arguments: %s" % shapes)
+    if shape[1].value is None:
+      raise ValueError("linear expects shape[1] to be provided for shape %s, "
+                       "but saw %s" % (shape, shape[1]))
+    else:
+      total_arg_size += shape[1].value
+
+  dtype = [a.dtype for a in args][0]
+
+  # Now the computation.
+  scope = vs.get_variable_scope()
+  with vs.variable_scope(scope) as outer_scope:
+    if len(args) == 1:
+        weights_xh = vs.get_variable('W_xh',
+            [shapes[0], output_size],
+            dtype = dtype,
+            initializer=kernel_initializer)
+        res = math_ops.matmul(args[0], weights_xh)
+    else:
+        weights_xh = vs.get_variable('W_xh',
+            [shapes[0], output_size],
+            dtype = dtype,
+            initializer=kernel_initializer)
+        xh = math_ops.matmul(args[0], weights_xh)
+        xh_scale = vs.get_variable('xh_scale', [output_size], initializer=init_ops.constant_initializer(0.1, dtype=dtype))
+        xh_offset = vs.get_variable('xh_offset', [output_size])
+        xh_batch_mean, xh_batch_var = nn_impl.moments(xh, [0])
+        xh = (xh - xh_batch_mean) / math_ops.sqrt(xh_batch_var + xh_epsilon)
+        xh = xh_scale*xh + xh_offset
+        if kernel_initializer is None:
+            weights_hh = vs.get_variable('W_hh',
+                [shapes[0], output_size],
+                dtype = dtype)
+        hh = math_ops.matmul(args[0],weights_hh)
+        hh_scale = vs.get_variable('hh_scale', [output_size], initializer=init_ops.constant_initializer(0.1, dtype=dtype))
+        hh_offset = vs.get_variable('hh_offset', [output_size])
+        hh_batch_mean, hh_batch_var = nn_impl.moments(hh, [0])
+        hh = (hh - hh_batch_mean) / math_ops.sqrt(hh_batch_var + hh_epsilon)
+        xh = hh_scale*hh + hh_offset
+        res = xh+hh
+    if not bias:
+      return res
+    with vs.variable_scope(outer_scope) as inner_scope:
+      inner_scope.set_partitioner(None)
+      if bias_initializer is None:
+        bias_initializer = init_ops.constant_initializer(0.0, dtype=dtype)
+      biases = vs.get_variable(
+          'bias', [output_size],
+          dtype=dtype,
+          initializer=bias_initializer)
+    return nn_ops.bias_add(res, biases)
+
+class BatchLSTMCell(RNNCell):
+  """Basic LSTM recurrent network cell.
+
+  The implementation is based on: http://arxiv.org/abs/1409.2329.
+
+  We add forget_bias (default: 1) to the biases of the forget gate in order to
+  reduce the scale of forgetting in the beginning of the training.
+
+  It does not allow cell clipping, a projection layer, and does not
+  use peep-hole connections: it is the basic baseline.
+
+  For advanced models, please use the full @{tf.nn.rnn_cell.LSTMCell}
+  that follows.
+  """
+
+  def __init__(self, num_units, forget_bias=1.0,
+               state_is_tuple=True, activation=None, reuse=None):
+    """Initialize the basic LSTM cell.
+
+    Args:
+      num_units: int, The number of units in the LSTM cell.
+      forget_bias: float, The bias added to forget gates (see above).
+      state_is_tuple: If True, accepted and returned states are 2-tuples of
+        the `c_state` and `m_state`.  If False, they are concatenated
+        along the column axis.  The latter behavior will soon be deprecated.
+      activation: Activation function of the inner states.  Default: `tanh`.
+      reuse: (optional) Python boolean describing whether to reuse variables
+        in an existing scope.  If not `True`, and the existing scope already has
+        the given variables, an error is raised.
+    """
+    super(BatchLSTMCell, self).__init__(_reuse=reuse)
+    if not state_is_tuple:
+      logging.warn("%s: Using a concatenated state is slower and will soon be "
+                   "deprecated.  Use state_is_tuple=True.", self)
+    self._num_units = num_units
+    self._forget_bias = forget_bias
+    self._state_is_tuple = state_is_tuple
+    self._activation = activation or math_ops.tanh
+
+  @property
+  def state_size(self):
+    return (LSTMStateTuple(self._num_units, self._num_units)
+            if self._state_is_tuple else 2 * self._num_units)
+
+  @property
+  def output_size(self):
+    return self._num_units
+
+  def call(self, inputs, state):
+    """Long short-term memory cell (LSTM)."""
+    sigmoid = math_ops.sigmoid
+    # Parameters of gates are concatenated into one multiply for efficiency.
+    if self._state_is_tuple:
+      c, h = state
+    else:
+      c, h = array_ops.split(value=state, num_or_size_splits=2, axis=1)
+
+      concat = _batchlinear(args=[inputs, h], output_size=4 * self._num_units, bias=True)
+
+    # i = input_gate, j = new_input, f = forget_gate, o = output_gate
+    i, j, f, o = array_ops.split(value=concat, num_or_size_splits=4, axis=1)
+
+    new_c = (
+        c * sigmoid(f + self._forget_bias) + sigmoid(i) * self._activation(j))
+    new_h = self._activation(new_c) * sigmoid(o)
+
+    if self._state_is_tuple:
+      new_state = LSTMStateTuple(new_c, new_h)
+    else:
+      new_state = array_ops.concat([new_c, new_h], 1)
+    return new_h, new_state
+
+logs are here
+Traceback (most recent call last):
+File "", line 1, in 
+runfile('C:/Users/Administrator/Test/char_rnn.py', wdir='C:/Users/Administrator/Test')
+File "C:\ProgramData\Miniconda3\lib\site-packages\spyder\utils\site\sitecustomize.py", line 688, in runfile
+execfile(filename, namespace)
+File "C:\ProgramData\Miniconda3\lib\site-packages\spyder\utils\site\sitecustomize.py", line 101, in execfile
+exec(compile(f.read(), filename, 'exec'), namespace)
+File "C:/Users/Administrator/Test/char_rnn.py", line 25, in 
+final_logits = charRnn(char_seq_batch,seqlen_batch,charsize=charsize,num_rnn=num_layers,rnn_numhidden = rnn_numhidden)
+File "C:\Users\Administrator\Test\networks.py", line 221, in charRnn
+net, _      = tf.nn.dynamic_rnn(stack, net, seqlen_batch, dtype=tf.float32)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\rnn.py", line 574, in dynamic_rnn
+dtype=dtype)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\rnn.py", line 737, in _dynamic_rnn_loop
+swap_memory=swap_memory)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\control_flow_ops.py", line 2770, in while_loop
+result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\control_flow_ops.py", line 2599, in BuildLoop
+pred, body, original_loop_vars, loop_vars, shape_invariants)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\control_flow_ops.py", line 2549, in _BuildLoop
+body_result = body(*packed_vars_for_body)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\rnn.py", line 720, in _time_step
+skip_conditionals=True)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\rnn.py", line 206, in _rnn_step
+new_output, new_state = call_cell()
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\rnn.py", line 708, in 
+call_cell = lambda: cell(input_t, state)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 181, in call
+return super(RNNCell, self).call(inputs, state)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\layers\base.py", line 441, in call
+outputs = self.call(inputs, *args, **kwargs)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 917, in call
+cur_inp, new_state = cell(cur_inp, cur_state)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 181, in call
+return super(RNNCell, self).call(inputs, state)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\layers\base.py", line 441, in call
+outputs = self.call(inputs, *args, **kwargs)
+File "C:\Users\Administrator\Test\networks.py", line 167, in call
+concat = _batchlinear(args=[inputs, h], output_size=4 * self._num_units, bias=True)
+File "C:\Users\Administrator\Test\networks.py", line 80, in _batchlinear
+initializer=kernel_initializer)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 1065, in get_variable
+use_resource=use_resource, custom_getter=custom_getter)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 962, in get_variable
+use_resource=use_resource, custom_getter=custom_getter)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 360, in get_variable
+validate_shape=validate_shape, use_resource=use_resource)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 1405, in wrapped_custom_getter
+*args, **kwargs)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 184, in _rnn_get_variable
+variable = getter(*args, **kwargs)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 184, in _rnn_get_variable
+variable = getter(*args, **kwargs)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 352, in _true_getter
+use_resource=use_resource)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 653, in _get_single_variable
+shape = tensor_shape.as_shape(shape)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 798, in as_shape
+return TensorShape(shape)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 434, in init
+self._dims = [as_dimension(d) for d in dims_iter]
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 434, in 
+self._dims = [as_dimension(d) for d in dims_iter]
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 376, in as_dimension
+return Dimension(value)
+File "C:\ProgramData\Miniconda3\lib\site-packages\tensorflow\python\framework\tensor_shape.py", line 32, in init
+self._value = int(value)
+TypeError: int() argument must be a string, a bytes-like object or a number, not 'TensorShape'

@@ -1,0 +1,50 @@
+Inception retraining / transfer learning fails when running with GPU
+
+Thanks so much for releasing TensorFlow.  We're experimenting with the image retraining example as described here: https://www.tensorflow.org/versions/r0.9/how_tos/image_retraining/index.html
+Everything in TensorFlow has worked perfectly for us, including the test and GPU setup validation samples.  However, when running the Inception retraining code and using the GPU, TensorFlow errors.  Since the error occurs in check_numerics_op.cc, I thought it might be worth reporting.
+For example, CPU-only bottleneck generation for 600 classes on a recent 36-core machine takes nearly a month, so working multi-GPU support for bottleneck creation would be really great.  It would help us learn faster and hopefully contribute to the project sooner.
+Abbreviated output (full output is attached):
+TensorFlow_Retraining_Error.txt
+python tensorflow/examples/image_retraining/retrain.py --image_dir ~/flower_photos
+Mon Jul 25 00:54:39 PDT 2016
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties:
+name: GeForce GTX 1080
+...
+Creating bottleneck at /tmp/bottleneck/dandelion/3365850019_8158a161a8_n.jpg.txt
+E tensorflow/core/kernels/check_numerics_op.cc:157] abnormal_detected_host @0x1000e000300 = {1, 0} activation input is not finite.
+Traceback (most recent call last):
+File "tensorflow/examples/image_retraining/retrain.py", line 824, in 
+tf.app.run()
+Environment info
+Operating System: Ubuntu 14.04
+GPU: GTX 1080 (two cards)
+Installed version of CUDA and cuDNN:
+/usr/local/cuda/lib/libcudadevrt.a
+/usr/local/cuda/lib/libcudart.so -> libcudart.so.7.5
+/usr/local/cuda/lib/libcudart.so.7.5 -> libcudart.so.7.5.18
+/usr/local/cuda/lib/libcudart.so.7.5.18
+/usr/local/cuda/lib/libcudart_static.a
+
+The commit hash (git rev-parse HEAD)
+v0.9.0 25023df
+The output of bazel version
+Build label: 0.2.3
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Tue May 17 14:21:13 2016 (1463494873)
+Build timestamp: 1463494873
+Build timestamp as int: 1463494873
+
+Steps to reproduce
+
+Build tensorflow from source with GPU support; all demos and tests working properly
+bazel-bin/tensorflow/examples/image_retraining/retrain --image_dir ~/flower_photos runs properly but only uses CPU when generating bottleneck files
+python tensorflow/examples/image_retraining/retrain.py --image_dir ~/flower_photos utilizes the GPU, but crashes during bottleneck file generation due to "irregular" response from GPU.  If the /tmp/bottlenecks directory has not yet been generated, image retraining using the gpu will fail almost immediately after processing a few files.
+
+What have you tried?
+
+If cached bottleneck files already exist in /tmp/bottlenecks, then the retraining on GPU works properly.  However, building those bottleneck files in the first place depends on the CPU to generate those bottlenecks, which takes forever (nearly a month for a dual socket E5-2699 v3 36-core machine for around 600 classes)

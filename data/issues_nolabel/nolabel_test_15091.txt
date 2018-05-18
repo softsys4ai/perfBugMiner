@@ -1,0 +1,182 @@
+GatherNd InvalidArgumentError: flat indices[8, :] = [8, -1] does not index into param
+
+System information
+
+OS Platform and Distribution: Ubuntu 17.10 (Linux-4.13.0-17-generic-x86_64-with-debian-stretch-sid)
+TensorFlow installed from: binary
+TensorFlow version: v1.3.0-rc2-20-g0787eee 1.3.0 (same on 1.4.0)
+Python version: 3.6.3
+GPU model and memory: N/A (CPU only)
+Numpy version: 1.13.3
+Bazel version: N/A
+CUDA/cuDNN version: N/A
+C++ compiler version: (Ubuntu 7.2.0-8ubuntu3) 7.2.0
+Have I written custom code: Yes
+Exact command to reproduce: There is no single command. The error arises when trying to fetch a TensorFlow tensor. Please see the description below.
+
+Describe the problem
+I am training a recurrent neural network (RNN) whereby I give it variable-length sequences of random steps in two dimensions and train it to recognize the quadrant in which the random walker ended up. This RNN works fine on a Windows machine with GPU (all other specs are otherwise the same as above). However, on a Linux machine with CPU only, I get an error which mysteriously traces back to a dimensionality hiccup with GatherNd.
+The code for the full RNN is too convoluted to post, but as you can see from below, I am printing out the fetches to two tensors tf_weights and tf_last at each iteration of the batching. (In this case the training data is consumed one batch at a time for a total of 28 batches). The batches are very basic loops so you'd think that if a fetch works in one iteration of the loop it should also work for the next. This is indeed the case for tf_weights but not for tf_last which, for no apparent reason, fails to evaluate at batch 7/28. tf_last can be traced to a GatherNd operation.
+I thoroughly inspected the data and it looks fine. Please keep in mind that my code does work under Windows with GPU with all other specs remaining the same, so it's hard to conceive of a bug from within the code itself.
+Source code
+import tensorflow as tf
+
+graph = tf.Graph()
+
+with graph.as_default():
+
+    tf_features = tf.placeholder(
+            tf.float32, [batch_size, max_seq_len, input_dim], 
+            name = 'tf_features')
+
+    tf_targets = tf.placeholder(
+            tf.float32, [batch_size, target_len],
+            name = 'tf_targets')
+
+    tf_seq_len = tf.placeholder(
+            tf.int32, [batch_size],
+            name = 'tf_seq_len')
+
+    tf_cell = 'tf.contrib.rnn.'+cell_type+'('+str(num_hidden)+')'
+    tf_cell = eval(tf_cell)
+
+    tf_output, tf_state = tf.nn.dynamic_rnn(
+            tf_cell, tf_features, sequence_length = tf_seq_len, 
+            dtype = tf.float32)
+  
+    tf_output = tf_output[:, :, :num_hidden]
+           
+    tf_last = tf.gather_nd(
+            tf_output, 
+            tf.stack([tf.range(batch_size), tf_seq_len-1], axis = 1), # batch_size
+            name = 'tf_last')
+
+Logs
+---------------- RUN 0/0
+ ---------------- FOLD 0/2
+  ---------------- TRAIN
+  Epoch 0
+  - Optimizing optimize
+   ---------------- BATCH 0/28 [0, 50], len_data = 1499
+   *** tf_weights: -0.563565
+   *** tf_last: -0.192192
+   ---------------- BATCH 1/28 [50, 100], len_data = 1499
+   *** tf_weights: -0.553565
+   *** tf_last: -0.0799878
+   ---------------- BATCH 2/28 [100, 150], len_data = 1499
+   *** tf_weights: -0.546777
+   *** tf_last: -0.118384
+   ---------------- BATCH 3/28 [150, 200], len_data = 1499
+   *** tf_weights: -0.538511
+   *** tf_last: -0.142531
+   ---------------- BATCH 4/28 [200, 250], len_data = 1499
+   *** tf_weights: -0.529593
+   *** tf_last: -0.147268
+   ---------------- BATCH 5/28 [250, 300], len_data = 1499
+   *** tf_weights: -0.520294
+   *** tf_last: -0.014847
+   ---------------- BATCH 6/28 [300, 350], len_data = 1499
+   *** tf_weights: -0.510754
+   *** tf_last: -0.094138
+   ---------------- BATCH 7/28 [350, 400], len_data = 1499
+   *** tf_weights: -0.504503
+   *** Failed to evaluate tf_last
+Traceback (most recent call last):
+
+  File "<ipython-input-25-49e8720a879a>", line 1, in <module>
+    runfile('/home/ala/Python/domains/main.py', wdir='/home/ala/Python/domains')
+
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/spyder/utils/site/sitecustomize.py", line 710, in runfile
+    execfile(filename, namespace)
+
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/spyder/utils/site/sitecustomize.py", line 101, in execfile
+    exec(compile(f.read(), filename, 'exec'), namespace)
+
+  File "/home/ala/Python/domains/main.py", line 166, in <module>
+    metrics_valid = RNN_object.validate(data_train, KFolds)
+
+  File "/home/ala/Python/domains/classifiers.py", line 727, in validate
+    reinitialize = True))
+
+  File "/home/ala/Python/domains/classifiers.py", line 366, in train
+    self.optimize(data)
+
+  File "/home/ala/Python/domains/classifiers.py", line 1102, in optimize
+    optimized_driving_metric = self.evaluate(data, driving_metric)
+
+  File "/home/ala/Python/domains/classifiers.py", line 1796, in evaluate
+    evaluated_tf_var = self.sess.run(eval(tf_var), feed_dict)
+
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 895, in run
+    run_metadata_ptr)
+
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1124, in _run
+    feed_dict_tensor, options, run_metadata)
+
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1321, in _do_run
+    options, run_metadata)
+
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1340, in _do_call
+    raise type(e)(node_def, op, message)
+
+InvalidArgumentError: flat indices[8, :] = [8, -1] does not index into param (shape: [50,300,2]).
+	 [[Node: tf_last = GatherNd[Tindices=DT_INT32, Tparams=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"](strided_slice_2, stack)]]
+
+Caused by op 'tf_last', defined at:
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/spyder/utils/ipython/start_kernel.py", line 245, in <module>
+    main()
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/spyder/utils/ipython/start_kernel.py", line 241, in main
+    kernel.start()
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/ipykernel/kernelapp.py", line 477, in start
+    ioloop.IOLoop.instance().start()
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/zmq/eventloop/ioloop.py", line 177, in start
+    super(ZMQIOLoop, self).start()
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tornado/ioloop.py", line 888, in start
+    handler_func(fd_obj, events)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tornado/stack_context.py", line 277, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/zmq/eventloop/zmqstream.py", line 440, in _handle_events
+    self._handle_recv()
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/zmq/eventloop/zmqstream.py", line 472, in _handle_recv
+    self._run_callback(callback, msg)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/zmq/eventloop/zmqstream.py", line 414, in _run_callback
+    callback(*args, **kwargs)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tornado/stack_context.py", line 277, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/ipykernel/kernelbase.py", line 283, in dispatcher
+    return self.dispatch_shell(stream, msg)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/ipykernel/kernelbase.py", line 235, in dispatch_shell
+    handler(stream, idents, msg)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/ipykernel/kernelbase.py", line 399, in execute_request
+    user_expressions, allow_stdin)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/ipykernel/ipkernel.py", line 196, in do_execute
+    res = shell.run_cell(code, store_history=store_history, silent=silent)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/ipykernel/zmqshell.py", line 533, in run_cell
+    return super(ZMQInteractiveShell, self).run_cell(*args, **kwargs)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2728, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2856, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2910, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-25-49e8720a879a>", line 1, in <module>
+    runfile('/home/ala/Python/domains/main.py', wdir='/home/ala/Python/domains')
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/spyder/utils/site/sitecustomize.py", line 710, in runfile
+    execfile(filename, namespace)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/spyder/utils/site/sitecustomize.py", line 101, in execfile
+    exec(compile(f.read(), filename, 'exec'), namespace)
+  File "/home/ala/Python/domains/main.py", line 109, in <module>
+    RNN_object.define(data_test)
+  File "/home/ala/Python/domains/classifiers.py", line 1514, in define
+    name = 'tf_last')
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/gen_array_ops.py", line 1338, in gather_nd
+    name=name)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 2630, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/ala/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1204, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): flat indices[8, :] = [8, -1] does not index into param (shape: [50,300,2]).
+	 [[Node: tf_last = GatherNd[Tindices=DT_INT32, Tparams=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"](strided_slice_2, stack)]]

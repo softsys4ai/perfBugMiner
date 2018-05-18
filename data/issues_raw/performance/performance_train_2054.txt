@@ -1,0 +1,107 @@
+Manual placement on GPU of a custom operator with both CPU and GPU implementation will always run the CPU version
+
+Environment info
+Operating System: ubuntu 14.04 64-bit
+Installed version of CUDA and cuDNN: 7.5 and 4
+$ ls -l /usr/local/cuda/lib64/libcud*
+-rw-r--r-- 1 root root   322936 Aug 15  2015 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root       19 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root   383336 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root   720192 Aug 15  2015 /usr/local/cuda/lib64/libcudart_static.a
+-rwxr-xr-x 1 root root 61453024 Feb 23 16:00 /usr/local/cuda/lib64/libcudnn.so
+-rwxr-xr-x 1 root root 61453024 Feb 23 16:00 /usr/local/cuda/lib64/libcudnn.so.4
+-rwxr-xr-x 1 root root 61453024 Feb 23 16:00 /usr/local/cuda/lib64/libcudnn.so.4.0.7
+-rw-r--r-- 1 root root 62025862 Feb 23 16:00 /usr/local/cuda/lib64/libcudnn_static.a
+If installed from binary pip package, provide:
+
+Which pip package you installed. tensorflow==0.8.0rc0
+The output from python -c "import tensorflow; print(tensorflow.version)".
+python -c "import tensorflow; print(tensorflow.version)"
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so locally
+0.8.0rc0
+
+Steps to reproduce
+
+Modify the How-to example cuda_op_kernel.cc to create both a CPU and GPU implementation for the AddOneOp operator
+Make the GPU version do a different operation - I added 2 instead of 1 - so you can verify which version is running
+Change the input and output type from int32 to float. This step is bizarre but critical!
+Test the operator with manual placement - ie. with tf.device('/gpu:0'). This has to be done NOT in the self.test_session as in the example, but rather with a regular tf session - ie:  with tf.Session(config=tf.ConfigProto(log_device_placement=True)). This step is also critical. The tf.test.TestCase.test_session()  masks the issue.
+The operator will run the CPU version despite the placer saying it is being placed on the GPU and the test fails.
+$ python cuda_op_unittest.py
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so locally
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties:
+name: GeForce GTX TITAN
+major: 3 minor: 5 memoryClockRate (GHz) 0.928
+pciBusID 0000:05:00.0
+Total memory: 6.00GiB
+Free memory: 5.29GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:755] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN, pci bus id: 0000:05:00.0)
+Device mapping:
+/job:localhost/replica:0/task:0/gpu:0 -> device: 0, name: GeForce GTX TITAN, pci bus id: 0000:05:00.0
+I tensorflow/core/common_runtime/direct_session.cc:149] Device mapping:
+/job:localhost/replica:0/task:0/gpu:0 -> device: 0, name: GeForce GTX TITAN, pci bus id: 0000:05:00.0
+
+AddOne/input: /job:localhost/replica:0/task:0/gpu:0
+I tensorflow/core/common_runtime/simple_placer.cc:388] AddOne/input: /job:localhost/replica:0/task:0/gpu:0
+AddOne: /job:localhost/replica:0/task:0/gpu:0
+I tensorflow/core/common_runtime/simple_placer.cc:388] AddOne: /job:localhost/replica:0/task:0/gpu:0
+*** running on CPU ***
+F
+FAIL: test (main.AddOneTest)
+Traceback (most recent call last):
+File "cuda_op_unittest.py", line 30, in test
+assert allclose(result.eval(), [7.0, 6.0, 5.0, 4.0, 3.0])
+AssertionError
+
+Ran 1 test in 0.342s
+FAILED (failures=1)
+What have you tried?
+We first noticed this on a much more complicated custom operator. This is a regression from the tensorflow version 0.7.1, which worked for us. The steps above are the result of several days spent trying to reproduce the problem with a minimal operator. The critical things seem to be using floats instead of ints and using the standard session instead of the tf test one.
+Note also, that if I comment out the REGISTER_KERNEL_BUILDER line for the CPU and try to run only on the gpu device, the test passes, but the executor is still trying to create a CPU version. Log looks like:
+$ python cuda_op_unittest.py
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so locally
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties:
+name: GeForce GTX TITAN
+major: 3 minor: 5 memoryClockRate (GHz) 0.928
+pciBusID 0000:05:00.0
+Total memory: 6.00GiB
+Free memory: 5.29GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:755] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN, pci bus id: 0000:05:00.0)
+Device mapping:
+/job:localhost/replica:0/task:0/gpu:0 -> device: 0, name: GeForce GTX TITAN, pci bus id: 0000:05:00.0
+I tensorflow/core/common_runtime/direct_session.cc:149] Device mapping:
+/job:localhost/replica:0/task:0/gpu:0 -> device: 0, name: GeForce GTX TITAN, pci bus id: 0000:05:00.0
+AddOne/input: /job:localhost/replica:0/task:0/gpu:0
+I tensorflow/core/common_runtime/simple_placer.cc:388] AddOne/input: /job:localhost/replica:0/task:0/gpu:0
+AddOne: /job:localhost/replica:0/task:0/gpu:0
+I tensorflow/core/common_runtime/simple_placer.cc:388] AddOne: /job:localhost/replica:0/task:0/gpu:0
+E tensorflow/core/common_runtime/executor.cc:332] Executor failed to create kernel. Not found: No registered 'AddOne' OpKernel for CPU devices compatible with node AddOne = AddOne_device="/job:localhost/replica:0/task:0/gpu:0"
+[[Node: AddOne = AddOne_device="/job:localhost/replica:0/task:0/gpu:0"]]
+*** running on GPU ***
+.
+Ran 1 test in 0.552s
+OK
+Logs or other output that would be helpful
+attaching source files. To build I do:
+/usr/local/cuda/bin/nvcc -std=c++11 -c -o cuda_op_kernel.cu.o cuda_op_kernel.cu.cc -I $TF_INC -D GOOGLE_CUDA=1 -x cu -Xcompiler -fPIC
+g++ -std=c++11 -shared -o cuda_op_kernel.so cuda_op_kernel.cc cuda_op_kernel.cu.o -I $TF_INC -fPIC -Wl,-rpath .
+python cuda_op_unittest.py
+I am running python 2.7.
+cuda_op.tar.gz

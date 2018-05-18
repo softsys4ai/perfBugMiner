@@ -1,0 +1,96 @@
+Race condition when initializing variables in control_dependencies
+
+System information
+== cat /etc/issue ===============================================
+Darwin Mikes-MBP.enversion.com 16.7.0 Darwin Kernel Version 16.7.0: Mon Nov 13 21:56:25 PST 2017; root:xnu-3789.72.11~1/RELEASE_X86_64 x86_64
+Mac OS X 10.12.6
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+Apple LLVM version 9.0.0 (clang-900.0.39.2)
+Target: x86_64-apple-darwin16.7.0
+Thread model: posix
+InstalledDir: /Library/Developer/CommandLineTools/usr/bin
+
+== uname -a =====================================================
+Darwin Mikes-MBP.enversion.com 16.7.0 Darwin Kernel Version 16.7.0: Mon Nov 13 21:56:25 PST 2017; root:xnu-3789.72.11~1/RELEASE_X86_64 x86_64
+
+== check pips ===================================================
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.8.0
+tf.GIT_VERSION = v1.8.0-0-g93bc2e2072
+tf.COMPILER_VERSION = v1.8.0-0-g93bc2e2072
+Sanity check: array([1], dtype=int32)
+
+== env ==========================================================
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+tf_env_collect.sh: line 105: nvidia-smi: command not found
+
+== cuda libs  ===================================================
+
+Describe the problem
+Given how Variable and control_dependencies are documented, I would expect the following to work:
+with tf.Session() as sess:
+    v = tf.Variable(tf.zeros([100,100]))
+    with tf.control_dependencies([v.initializer]):
+        d = tf.Print(v, [v])
+    print(sess.run(d))
+
+But this seems to create a race condition. Sometimes it executes fine, sometimes it errors with FailedPreconditionError: Attempting to use uninitialized value Variable. It is unclear to me if the use of initializers in control_dependencies is valid. If it is not, the documentation should probably better reflect this.
+Source code / logs
+Full traceback:
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1322, in _do_call
+    return fn(*args)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1307, in _run_fn
+    options, feed_dict, fetch_list, target_list, run_metadata)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1409, in _call_tf_sessionrun
+    run_metadata)
+tensorflow.python.framework.errors_impl.FailedPreconditionError: Attempting to use uninitialized value Variable
+         [[Node: Variable/read = Identity[T=DT_FLOAT, _class=["loc:@Variable/Assign"], _device="/job:localhost/replica:0/task:0/device:CPU:0"](Variable)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "test.py", line 105, in <module>
+    print(sess.run(d))
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 900, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1135, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1316, in _do_run
+    run_metadata)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1335, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.FailedPreconditionError: Attempting to use uninitialized value Variable
+         [[Node: Variable/read = Identity[T=DT_FLOAT, _class=["loc:@Variable/Assign"], _device="/job:localhost/replica:0/task:0/device:CPU:0"](Variable)]]
+
+Caused by op 'Variable/read', defined at:
+  File "test.py", line 101, in <module>
+    v = tf.Variable(tf.zeros([100,100]))
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/variables.py", line 235, in __init__
+    constraint=constraint)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/variables.py", line 397, in _init_from_args
+    self._snapshot = array_ops.identity(self._variable, name="read")
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/array_ops.py", line 142, in identity
+    return gen_array_ops.identity(input, name=name)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/gen_array_ops.py", line 3187, in identity
+    "Identity", input=input, name=name)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 3392, in create_op
+    op_def=op_def)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1718, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+FailedPreconditionError (see above for traceback): Attempting to use uninitialized value Variable
+         [[Node: Variable/read = Identity[T=DT_FLOAT, _class=["loc:@Variable/Assign"], _device="/job:localhost/replica:0/task:0/device:CPU:0"](Variable)]]

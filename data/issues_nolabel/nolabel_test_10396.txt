@@ -1,0 +1,98 @@
+inference require the old training datasets exist
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Ubuntu 1604
+TensorFlow installed from (source or binary):source
+TensorFlow version (use command below): r1.1
+Bazel version (if compiling from source): /
+CUDA/cuDNN version: 8.0/5.1
+GPU model and memory: GTX1080/8G
+
+Problem description
+The exact problem is Inference requires training dataset
+This may because some of the stuff in import_meta_graph(). After you create the training graph and op train_input/ReaderRead would save the 'file names' as const in the graph. And then use saver to save the model. The next time you retrain your model, the import_meta_graph() would requires training dataset existing, or you may found the error below.
+For example, such a case:
+when I build my graph, I use such code to generate input tensor:
+logging.info("Using batch size of " + str(batch_size) + " for training.")
+with tf.name_scope("train_input"):
+  files = gfile.Glob(data_pattern)
+  if not files:
+    raise IOError("Unable to find training files. data_pattern='" +
+                  data_pattern + "'.")
+  logging.info("Number of training files: %s.", str(len(files)))
+  filename_queue = tf.train.string_input_producer(
+      files, num_epochs=num_epochs, shuffle=True)
+  training_data = [
+      reader.prepare_reader(filename_queue) for _ in range(num_readers)
+  ]
+
+  return tf.train.shuffle_batch_join(
+      training_data,
+      batch_size=batch_size,
+      capacity=batch_size * 5,
+      min_after_dequeue=batch_size,
+      allow_smaller_final_batch=True,
+      enqueue_many=True)
+
+After trained the model , I want to inference the model then I rebuild my input tensor and recover my model like this:
+saver = tf.train.import_meta_graph(meta_graph_location, clear_devices=True)
+
+   saver.restore(sess, latest_checkpoint)
+
+Everything is ok when the training datasets could be found, However, after I train the model I remove the training data,  inference.py got error like this:
+Traceback (most recent call last):
+  File "inference.py", line 197, in <module>
+    app.run()
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "inference.py", line 193, in main
+    FLAGS.output_file, FLAGS.batch_size, FLAGS.top_k)
+  File "inference.py", line 166, in inference
+    coord.join(threads)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/training/coordinator.py", line 389, in join
+    six.reraise(*self._exc_info_to_raise)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/training/queue_runner_impl.py", line 234, in _run
+    sess.run(enqueue_op)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 778, in run
+    run_metadata_ptr)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 982, in _run
+    feed_dict_string, options, run_metadata)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1032, in _do_run
+    target_list, options, run_metadata)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1052, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.NotFoundError: /data_tmp/train1Z.tfrecord
+	 [[Node: train_input/ReaderReadV2_5 = ReaderReadV2[_device="/job:localhost/replica:0/task:0/cpu:0"](train_input/TFRecordReaderV2_5, train_input/input_producer)]]
+	 [[Node: train_input/DecodeRaw_11/_143 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_18_train_input/DecodeRaw_11", tensor_type=DT_UINT8, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+Caused by op u'train_input/ReaderReadV2_1', defined at:
+  File "inference.py", line 197, in <module>
+    app.run()
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "inference.py", line 193, in main
+    FLAGS.output_file, FLAGS.batch_size, FLAGS.top_k)
+  File "inference.py", line 122, in inference
+    saver = tf.train.import_meta_graph(meta_graph_location, clear_devices=True)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1595, in import_meta_graph
+    **kwargs)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/framework/meta_graph.py", line 499, in import_scoped_meta_graph
+    producer_op_list=producer_op_list)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/framework/importer.py", line 308, in import_graph_def
+    op_def=op_def)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2336, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/opt/tiger/keras2/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1228, in __init__
+    self._traceback = _extract_stack()
+
+NotFoundError (see above for traceback): 
+/data_tmp/traintY.tfrecord
+	 [[Node: train_input/ReaderReadV2_1 = ReaderReadV2[_device="/job:localhost/replica:0/task:0/cpu:0"](train_input/TFRecordReaderV2_1, train_input/input_producer)]]
+	 [[Node: train_input/DecodeRaw_2/_127 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_47_train_input/DecodeRaw_2", tensor_type=DT_UINT8, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+I wonder why train.import_meta_graph() does such check? Because after restore the weights I will run the graph by feeding a new input tensor, for example:
+video_id_batch_val, video_batch_val,num_frames_batch_val = sess.run([video_id_batch, video_batch, num_frames_batch])
+          predictions_val, = sess.run([predictions_tensor], feed_dict={input_tensor: video_batch_val, num_frames_tensor: num_frames_batch_val})
+
+when it is inferencing, nothing concerns about the 'old input producer' in training section, however , when the 'old files for training' changed in the environment, the error arise and I have to rebuild the whole graph again instead of using import_meta_graph().  It's really confused.

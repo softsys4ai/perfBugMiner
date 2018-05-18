@@ -1,0 +1,75 @@
+tf.contrib.image.transform crashes under Windows when CUDA is enabled
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes. A minimal example reproducing the bug is provided below.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 10 (x64)
+TensorFlow installed from (source or binary):
+Binary installed using pip install tensorflow-gpu
+TensorFlow version (use command below):
+b'unknown' 1.6.0 (also tested on b'unknown' 1.4.0)
+Python version: 3.6
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version:
+CUDA 9.0.176 / cuDNN 7.0.5
+CUDA 8.0.61 / cuDNN 6.14.11
+GPU model and memory:
+(device: 0, name: GeForce GTX 970M, pci bus id: 0000:01:00.0, compute capability: 5.2, memory: 3.00GiB)
+(device: 0, name: Quadro M1200, pci bus id: 0000:01:00.0, compute capability: 5.0, memory: 4.00GiB)
+Exact command to reproduce: python example.py (see below)
+
+Describe the problem
+The function tf.contrib.image.transform crashes when CUDA is enabled under Windows. It produces the following errors: CUDA_ERROR_ILLEGAL_INSTRUCTION on tensorflow 1.6 or CUDA_ERROR_LAUNCH_FAILED on tensorflow 1.4.
+However, it functions correctly when CUDA is disabled (by setting CUDA_VISIBLE_DEVICES to -1).
+I tested a variation of different parameters (such as varying the batch size, image sizes, and number of channels), but the behavior stays the same. In addition I reproduced the same error on a different machine with an older tensorflow version.
+Source code / logs
+
+Code:
+
+import numpy as np
+import tensorflow as tf
+
+batch_size, image_size, channels = 1, 32, 1
+
+data = np.zeros(
+    shape=(batch_size, image_size, image_size, channels), 
+    dtype=np.float32)
+
+data_node = tf.placeholder(
+    shape=(batch_size, image_size, image_size, channels),
+    dtype=tf.float32)
+
+identity = tf.constant([1, 0, 0, 0, 1, 0, 0, 0], dtype=tf.float32)
+transform = tf.tile(tf.expand_dims(identity, 0), [batch_size, 1])
+data_node_transformed = tf.contrib.image.transform(data_node, transform)
+
+data_t = tf.Session().run([data_node_transformed], feed_dict={data_node: data})
+
+
+
+Console Output:
+Output with tensorflow 1.6 (with GeForce GTX 970M,) :
+
+
+2018-03-06 15:42:21.578078: I C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1212] Found device 0 with properties:
+name: GeForce GTX 970M major: 5 minor: 2 memoryClockRate(GHz): 1.038
+pciBusID: 0000:01:00.0
+totalMemory: 3.00GiB freeMemory: 2.48GiB
+2018-03-06 15:42:21.578310: I C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-03-06 15:42:21.890290: I C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 2192 MB memory) -> physical GPU (device: 0, name: GeForce GTX 970M, pci bus id: 0000:01:00.0, compute capability: 5.2)
+2018-03-06 15:42:22.101031: E C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\stream_executor\cuda\cuda_event.cc:49] Error polling for event status: failed to query event: CUDA_ERROR_ILLEGAL_INSTRUCTION
+2018-03-06 15:42:22.101032: E C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\stream_executor\cuda\cuda_driver.cc:1110] could not synchronize on CUDA context: CUDA_ERROR_ILLEGAL_INSTRUCTION ::
+2018-03-06 15:42:22.101185: F C:\tf_jenkins\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_event_mgr.cc:203] Unexpected Event status: 1
+
+Output with tensorflow 1.4 (with Quadro M1200):
+2018-03-06 15:31:17.800588: I C:\tf_jenkins\home\workspace\rel‑win\M\windows‑gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1030] Found device 0 with properties: 
+name: Quadro M1200 major: 5 minor: 0 memoryClockRate(GHz): 1.148
+pciBusID: 0000:01:00.0
+totalMemory: 4.00GiB freeMemory: 3.35GiB
+2018-03-06 15:31:17.803815: I C:\tf_jenkins\home\workspace\rel‑win\M\windows‑gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) ‑> (device: 0, name: Quadro M1200, pci bus id: 0000:01:00.0, compute capability: 5.0)
+2018-03-06 15:31:18.731252: E C:\tf_jenkins\home\workspace\rel‑win\M\windows‑gpu\PY\36\tensorflow\stream_executor\cuda\cuda_driver.cc:1110] could not synchronize on CUDA context: CUDA_ERROR_LAUNCH_FAILED :: No stack trace available
+2018-03-06 15:31:18.731258: E C:\tf_jenkins\home\workspace\rel‑win\M\windows‑gpu\PY\36\tensorflow\stream_executor\cuda\cuda_event.cc:49] Error polling for event status: failed to query event: CUDA_ERROR_LAUNCH_FAILED
+2018-03-06 15:31:18.733458: F C:\tf_jenkins\home\workspace\rel‑win\M\windows‑gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_event_mgr.cc:203] Unexpected Event status: 1

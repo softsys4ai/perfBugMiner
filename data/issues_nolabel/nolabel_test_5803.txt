@@ -1,0 +1,181 @@
+The parameters are not updated using multi-gpu training.
+
+from future import print_function
+import tensorflow as tf
+import numpy as np
+##------ Import MNIST data
+from tensorflow.examples.tutorials.mnist import input_data
+mnist = input_data.read_data_sets("/tmp/data/", one_hot=True)
+##------- Parameters
+learning_rate = 0.001
+training_iters = 100000
+batch_size = 32
+display_step = 10
+num_gpus = 2
+##--------- Network Parameters
+n_input = 784 # MNIST data input (img shape: 28*28)
+n_classes = 10 # MNIST total classes (0-9 digits)
+dropout = 0.75 # Dropout, probability to keep units
+##------- Create some wrappers for simplicity
+def conv2d(x, W, b, strides=1):
+# Conv2D wrapper, with bias and relu activation
+x = tf.nn.conv2d(x, W, strides=[1, strides, strides, 1], padding='SAME')
+x = tf.nn.bias_add(x, b)
+return tf.nn.relu(x)
+def maxpool2d(x, k=2):
+# MaxPool2D wrapper
+return tf.nn.max_pool(x, ksize=[1, k, k, 1], strides=[1, k, k, 1],
+padding='SAME')
+def average_gradients(tower_grads):
+average_grads = []
+for grad_and_vars in zip(*tower_grads):
+# Note that each grad_and_vars looks like the following:
+#   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
+    grads = []
+    for g, _ in grad_and_vars:
+  # Add 0 dimension to the gradients to represent the tower.
+        expanded_g = tf.expand_dims(g, 0)
+
+  # Append on a 'tower' dimension which we will average over below.
+        grads.append(expanded_g)
+
+# Average over the 'tower' dimension.
+        grad = tf.concat(0, grads)
+        grad = tf.reduce_mean(grad, 0)
+
+# Keep in mind that the Variables are redundant because they are shared
+# across towers. So .. we will just return the first tower's pointer to
+# the Variable.
+v = grad_and_vars[0][1]
+grad_and_var = (grad, v)
+average_grads.append(grad_and_var)
+return average_grads
+
+##--------   Create model
+def conv_net(images, dropout):
+# Reshape input picture
+images = tf.reshape(images, shape=[-1, 28, 28, 1])
+# Convolution Layer
+with tf.variable_scope('conv1'):
+    W = tf.get_variable('weights', [5, 5, 1, 32], initializer=tf.random_normal_initializer())
+    b = tf.get_variable("biases", [32], initializer=tf.random_normal_initializer())
+    conv1 = conv2d(images, W, b)
+    # Max Pooling (down-sampling)
+    conv1 = maxpool2d(conv1, k=2)
+
+# Convolution Layer
+with tf.variable_scope('conv2'):
+    W = tf.get_variable('weights', [5, 5, 32, 64], initializer=tf.random_normal_initializer())
+    b = tf.get_variable("biases", [64], initializer=tf.random_normal_initializer())
+# Max Pooling (down-sampling)
+    conv2 = conv2d(conv1, W, b)
+    conv2 = maxpool2d(conv2, k=2)
+
+# Fully connected layer
+# Reshape conv2 output to fit fully connected layer input
+fc1 = tf.reshape(conv2, [-1, 7*7*64])
+
+with tf.variable_scope('fully'):
+    weights = tf.get_variable('weights', [7*7*64, 1024], initializer=tf.random_normal_initializer())
+    bias = tf.get_variable('bias', [1024], initializer=tf.random_normal_initializer())
+    fc1 = tf.add(tf.matmul(fc1, weights), bias)
+    fc1 = tf.nn.relu(fc1)
+# Apply Dropout
+    fc1 = tf.nn.dropout(fc1, dropout)
+
+# Output, class prediction
+
+with tf.variable_scope('softmax'):
+    weights = tf.get_variable('weights', [1024, 10], initializer=tf.random_normal_initializer())
+    bias = tf.get_variable('bias', [10], initializer=tf.random_normal_initializer())     
+    out = tf.add(tf.matmul(fc1, weights), bias)
+
+return out
+
+##----------    multi-GPU
+def train():
+with tf.Graph().as_default():
+
+    x = tf.placeholder(tf.float32, [batch_size*num_gpus, 784])
+    y = tf.placeholder(tf.float32, [batch_size*num_gpus, n_classes])
+    keep_prob = tf.placeholder(tf.float32) #dropout (keep probability)
+
+    global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0), trainable=False)
+
+
+    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
+    tower_grads = []
+    for i in xrange(num_gpus):
+        with tf.device('/gpu:%d' % i):
+            with tf.name_scope('%s_%d' % ('MNIST', i)) as scope:
+      # Calculate the loss for one tower of the CIFAR model. This function
+      # constructs the entire CIFAR model but shares the variables across
+      # all towers
+      # Reuse variables for the next tower.
+
+                next_batch = x[i*batch_size:(i+1)*batch_size, :]
+                next_label_batch = y[i*batch_size:(i+1)*batch_size, :]
+                pred = conv_net(next_batch, keep_prob)
+                cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(pred, next_label_batch))
+                correct_pred = tf.equal(tf.argmax(pred, 1), tf.argmax(next_label_batch, 1))
+                accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+
+                tf.get_variable_scope().reuse_variables()
+
+      # Calculate the gradients for the batch of data on this CIFAR tower.
+                grads = optimizer.compute_gradients(cost)
+      # Keep track of the gradients across all towers.
+                tower_grads.append(grads)
+
+
+
+    grads = average_gradients(tower_grads)
+    apply_gradient_op = optimizer.apply_gradients(grads, global_step=global_step)
+
+##--------------------start training----------------------
+##---------- Initializing the variables
+init = tf.initialize_all_variables()
+##----------- Launch the graph
+with tf.Session() as sess:
+        sess = tf.Session(config=tf.ConfigProto(
+        allow_soft_placement=True,
+        log_device_placement=True))
+        sess.run(init)
+        saver = tf.train.Saver()
+        var = [v for v in tf.trainable_variables()][0]
+        aa = sess.run(var)
+        np.save('initial.npy', aa)
+
+        step = 1
+# Keep training until reach max iterations
+        while step * (num_gpus*batch_size) < training_iters:
+
+            large_input = np.zeros((num_gpus*batch_size, n_input))
+            large_labels = np.zeros((num_gpus*batch_size, n_classes))
+    
+            for index in xrange(num_gpus):
+                batch_x, batch_y = mnist.train.next_batch(batch_size)
+                large_input[index*batch_size:(index+1)*batch_size, :] = batch_x
+                large_labels[index*batch_size:(index+1)*batch_size, :] = batch_y
+
+    # Run optimization op (backprop)
+            sess.run(apply_gradient_op, feed_dict={x: large_input, y: large_labels,
+                                   keep_prob: dropout})
+            if step % display_step == 0:
+        # Calculate batch loss and accuracy
+                loss, acc = sess.run([cost, accuracy], feed_dict={x: large_input,
+                                                          y: large_labels,
+                                                          keep_prob: 1.})
+                print("Iter " + str(step*num_gpus*batch_size) + ", Minibatch Loss= " + \
+              "{:.6f}".format(loss) + ", Training Accuracy= " + \
+              "{:.5f}".format(acc))
+            step += 1
+        print("Optimization Finished!")
+        var = [v for v in tf.trainable_variables()][0]
+        aa = sess.run(var)
+        np.save('final.npy', aa)
+
+##-----------main---
+if name == 'main':
+train()
+I'm a beginner of Tensorflow and wrote a piece of code to test on the MNIST dataset. I find that during training my parameters doesn't change at all and cannot find the problem, so SOS!!!

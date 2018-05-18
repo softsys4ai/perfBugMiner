@@ -1,0 +1,100 @@
+How to build contrib module that depends on tensorflow/core/kernels:linalg?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes. Making a contrib module.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS Sierra
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.4.1
+Python version: 3.6
+Bazel version (if compiling from source): 0.9
+GCC/Compiler version (if compiling from source): Apple LLVM version 8.1.0 (clang-802.0.42)
+CUDA/cuDNN version: Building without GPU support
+GPU model and memory: Building without GPU support
+Exact command to reproduce: bazel build --config=opt //tensorflow/tools/pip_package:build_pip_package
+
+Describe the problem
+I am writing a contrib module that depends on tensorflow/core/kernels:linalg (specifically the //tensorflow/core/kernels:linalg_ops_common target). However, adding this dependency
+tf_custom_op_library(
+    name = "python/ops/_medical_image_ops.so",
+    srcs = [
+        "kernels/index_ops.cc",
+        "ops/index_ops.cc",
+    ],
+    deps = [
+        "//tensorflow/core/kernels:linalg"
+    ],
+)
+
+yields
+ERROR: /Users/kasper/Development/tensorflow3/tensorflow/contrib/medical_image/BUILD:13:1: in check_deps rule //tensorflow/contrib/medical_image:python/ops/_medical_image_ops.so_check_deps:
+Traceback (most recent call last):
+	File "/Users/kasper/Development/tensorflow3/tensorflow/contrib/medical_image/BUILD", line 13
+		check_deps(name = 'python/ops/_medical_image_ops.so_check_deps')
+	File "/Users/kasper/Development/tensorflow3/tensorflow/tensorflow.bzl", line 1196, in _check_deps_impl
+		fail(((_dep_label(input_dep) + " cann...)))
+tensorflow/core/kernels:linalg cannot depend on tensorflow/core:framework
+
+The //tensorflow/core/kernels:linalg_ops_common target is private so I cannot depend on it directly. In an earlier release I believe there was a //tensorflow/core/kernels:linalg_ops_common_headers_lib target but this is not there anymore.
+How can I add one of the linalg targets as a dep without introducing this circular dependency?
+(I have scoured over many of the cannot depend on tensorflow/core:framework issues from the past but have not found a solution)
+Source code / logs
+This is my full BUILD file:
+# Description:
+#   Contains ops for working natively with medical images in TensorFlow.
+
+licenses(["notice"])  # Apache 2.0
+
+exports_files(["LICENSE"])
+
+package(default_visibility = ["//visibility:public"])
+
+load("//tensorflow:tensorflow.bzl", "tf_custom_op_library", "tf_custom_op_py_library",
+     "tf_kernel_library", "tf_gen_op_libs", "tf_gen_op_wrapper_py")
+
+tf_custom_op_library(
+    name = "python/ops/_medical_image_ops.so",
+    srcs = [
+        "kernels/index_ops.cc",
+        "ops/index_ops.cc",
+    ],
+    deps = [
+        "//tensorflow/core:lib"
+    ],
+)
+
+tf_gen_op_libs(
+    op_lib_names = ["index_ops"],
+)
+
+tf_gen_op_wrapper_py(
+    name = "medical_image_ops",
+    deps = [":index_ops_op_lib"],
+)
+
+tf_custom_op_py_library(
+    name = "medical_image_py",
+    srcs = [
+        "__init__.py",
+        "python/medical_image/medical_image.py",
+        "python/medical_image/transforms.py",
+        "python/ops/index_ops.py",
+    ],
+    dso = [":python/ops/_medical_image_ops.so"],
+    srcs_version = "PY2AND3",
+    deps = [
+        ":medical_image_ops",
+    ],
+)
+
+filegroup(
+    name = "all_files",
+    srcs = glob(
+        ["**/*"],
+        exclude = [
+            "**/METADATA",
+            "**/OWNERS",
+        ],
+    ),
+    visibility = ["//tensorflow:__subpackages__"],
+)

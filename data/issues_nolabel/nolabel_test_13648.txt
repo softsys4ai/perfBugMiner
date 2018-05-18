@@ -1,0 +1,90 @@
+tf.string_input_producer() doesn't work with tf.placeholder
+
+In a scenario it is intended to dynamically change the file names of tensorflow record files, as indicated by the following code:
+import tensorflow as tf
+
+def test(s):
+    filename_queue = tf.train.string_input_producer([s])
+
+    reader = tf.TextLineReader()
+    key, value = reader.read(filename_queue)
+
+    record_defaults = [[1.0], [1]]
+    col1, col2 = tf.decode_csv(value, record_defaults = record_defaults)
+
+    return col1, col2
+
+s = tf.placeholder(tf.string, None, name = 's')
+# s = tf.constant('file0.csv', tf.string)
+ss = ["file0.csv", "file1.csv"]
+inputs, labels = test(s)
+
+with tf.Session() as sess:
+    sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()])
+
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
+
+    for e in ss:
+        inputs_val, labels_val = sess.run([inputs, labels], feed_dict = {s: e})
+        print("input {} - label {}".format(inputs_val, labels_val))
+
+    coord.request_stop()
+    coord.join(threads)
+
+
+it is observed the code above is working with tf.constant which is commented above, however not tf.placeholder, which is believed to be equivalent.
+There is no direct error related to the malfunctioning as below:
+(tensorflow)[yuming@atlas4 working-files]$ python 36.py
+2017-10-12 11:13:21.753318: I tensorflow/core/common_runtime/gpu/gpu_device.cc:965] Found device 0 with properties:
+name: Quadro M4000 major: 5 minor: 2 memoryClockRate(GHz): 0.7725
+pciBusID: 0000:83:00.0
+totalMemory: 7.93GiB freeMemory: 7.87GiB
+2017-10-12 11:13:21.858019: I tensorflow/core/common_runtime/gpu/gpu_device.cc:965] Found device 1 with properties:
+name: Quadro K2200 major: 5 minor: 0 memoryClockRate(GHz): 1.124
+pciBusID: 0000:03:00.0
+totalMemory: 3.95GiB freeMemory: 3.54GiB
+2017-10-12 11:13:21.858060: I tensorflow/core/common_runtime/gpu/gpu_device.cc:980] Device peer to peer matrix
+2017-10-12 11:13:21.858068: I tensorflow/core/common_runtime/gpu/gpu_device.cc:986] DMA: 0 1
+2017-10-12 11:13:21.858072: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] 0:   Y N
+2017-10-12 11:13:21.858075: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] 1:   N Y
+2017-10-12 11:13:21.858082: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1055] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Quadro M4000, pci bus id: 0000:83:00.0, compute capability: 5.2)
+2017-10-12 11:13:21.858088: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1042] Ignoring gpu device (device: 1, name: Quadro K2200, pci bus id: 0000:03:00.0, compute capability: 5.0) with Cuda multiprocessor count: 5. The minimum required count is 8. You can adjust this requirement with the env var TF_MIN_GPU_MULTIPROCESSOR_COUNT.
+Traceback (most recent call last):
+  File "36.py", line 26, in <module>
+    inputs_val, labels_val = sess.run([inputs, labels], feed_dict = {s: e})
+  File "/home/yuming/tensorflow/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 889, in run
+    run_metadata_ptr)
+  File "/home/yuming/tensorflow/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1118, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/home/yuming/tensorflow/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1315, in _do_run
+    options, run_metadata)
+  File "/home/yuming/tensorflow/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1334, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.OutOfRangeError: FIFOQueue '_0_input_producer' is closed and has insufficient elements (requested 1, current size 0)
+         [[Node: ReaderReadV2 = ReaderReadV2[_device="/job:localhost/replica:0/task:0/cpu:0"](TextLineReaderV2, input_producer)]]
+
+Caused by op u'ReaderReadV2', defined at:
+  File "36.py", line 17, in <module>
+    inputs, labels = test(s)
+  File "36.py", line 7, in test
+    key, value = reader.read(filename_queue)
+  File "/home/yuming/tensorflow/lib/python2.7/site-packages/tensorflow/python/ops/io_ops.py", line 194, in read
+    return gen_io_ops._reader_read_v2(self._reader_ref, queue_ref, name=name)
+  File "/home/yuming/tensorflow/lib/python2.7/site-packages/tensorflow/python/ops/gen_io_ops.py", line 654, in _reader_read_v2
+    queue_handle=queue_handle, name=name)
+  File "/home/yuming/tensorflow/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 789, in _apply_op_helper
+    op_def=op_def)
+  File "/home/yuming/tensorflow/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 3052, in create_op
+    op_def=op_def)
+  File "/home/yuming/tensorflow/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1610, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+OutOfRangeError (see above for traceback): FIFOQueue '_0_input_producer' is closed and has insufficient elements (requested 1, current size 0)
+         [[Node: ReaderReadV2 = ReaderReadV2[_device="/job:localhost/replica:0/task:0/cpu:0"](TextLineReaderV2, input_producer)]]
+
+
+OS version Redhat 7.3, Python version 2.7.5, Tensorflow version 1.3
+file0.csv and file1.csv are quite simple csv files just with two lines:
+0.1,0
+0.9,1

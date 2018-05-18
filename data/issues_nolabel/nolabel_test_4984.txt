@@ -1,0 +1,87 @@
+gcc: error trying to exec 'as': execvp: No such file or directory
+
+I think the problem is that as wasn't installed with gcc and thus gcc -print-prog-name=as just prints as. as is in my path, but not in the same location as gcc.
+$ which gcc
+/appl/gcc/4.9.2/bin/gcc
+$ which as
+/appl/binutils/2.25.1/bin/as
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+there are a couple:
+
+gcc: error trying to exec 'as': execvp: No such file or directory: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=40339
+gcc: error trying to exec 'as': execvp: No such file or directory https://decibel.ni.com/content/thread/39592
+Building TensorFlow with custom GCC requires hardcoded ld,nm and as bazelbuild/bazel#1713 – I tried setting build --action_env=PATH, but that did change anything.
+
+Environment info
+Operating System:
+$ uname -a
+Linux n-62-18-47 2.6.32-573.22.1.el6.x86_64 #1 SMP Tue Mar 22 17:15:28 CDT 2016 x86_64 x86_64 x86_64 GNU/Linux 
+
+Installed version of CUDA and cuDNN: CUDA: 8.0, cuDNN 5.1.5
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+$  ls -l /appl/cuda/8.0/lib64/libcud*
+-rw-r--r-- 1 sebo root 560184 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 sebo root     16 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 sebo root     19 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.27
+-rwxr-xr-x 1 sebo root 394472 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart.so.8.0.27
+-rw-r--r-- 1 sebo root 737516 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart_static.a
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD): f794cd393b1e7821fcc3cdcee9b6a4400f2540bf
+The output of bazel version:
+
+$ bazel --batch version
+INFO: Reading 'startup' options from /zhome/ff/2/77654/.bazelrc: --batch --output_user_root=/work1/s123598/.bazel
+Build label: 0.3.2-2016-10-13 (@2891ec5)
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Oct 13 15:05:25 2016 (1476371125)
+Build timestamp: 1476371125
+Build timestamp as int: 1476371125
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+# install tensorflow
+git clone https://github.com/tensorflow/tensorflow
+cd tensorflow
+curl -L https://github.com/tensorflow/tensorflow/pull/4983.patch | git am -
+
+# set configuration parameters
+export PYTHON_BIN_PATH=`which python3` # ~/stdpy3/bin/python3
+export TF_NEED_GCP=0
+export TF_NEED_HDFS=0
+export TF_NEED_CUDA=1
+export GCC_HOST_COMPILER_PATH=`which gcc` # /appl/gcc/4.9.2/bin/gcc
+export TF_CUDA_VERSION=8.0
+export CUDA_TOOLKIT_PATH=/appl/cuda/8.0/
+export TF_CUDNN_VERSION=5
+export CUDNN_INSTALL_PATH=$HOME/cuda/ # the cuDNN version provide IT is too old (5.0.4), so I downloaded the latest and unpacked it in $HOME
+export TF_CUDA_COMPUTE_CAPABILITIES="3.5,5.2"
+
+cat > $HOME/.bazelrc <<EOF
+# --batch: always run in batch mode, since there are some firewall issues.
+# --output_user_root: HOME is NFS (filesystem), this will not work with bazel, use WORKDIR instead
+startup --batch --output_user_root=$WORKDIR/.bazel
+EOF
+
+# one python configuration can't be set directly use yes to accept automatically
+yes "" | CC=gcc CXX=g++ ./configure
+
+# build tensorflow
+CC=gcc CXX=g++ bazel build --copt="-w" \
+--ignore_unsupported_sandboxing --spawn_strategy=standalone --verbose_failures \
+-c opt --config=cuda //tensorflow/tools/pip_package:build_pip_package
+
+What other attempted solutions have you tried?
+
+I've tried symlinking gcc and as into the same path, but then cc1 and the gcc header files can't be found.
+I've tried searching for how bazel or tensorflow finds as but I can't find that code.
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+full log: https://gist.github.com/AndreasMadsen/7bf11dcf5c53981e532f67850e5b2b9b
+gcc: error trying to exec 'as': execvp: No such file or directory
+ERROR: /zhome/ff/2/77654/tensorflow/tensorflow/contrib/rnn/BUILD:101:1: output 'tensorflow/contrib/rnn/_objs/python/ops/_gru_ops_gpu/tensorflow/contrib/rnn/kernels/gru_ops_gpu.cu.pic.o' was not created.
+ERROR: /zhome/ff/2/77654/tensorflow/tensorflow/contrib/rnn/BUILD:101:1: not all outputs were created.
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+INFO: Elapsed time: 320.454s, Critical Path: 196.64s

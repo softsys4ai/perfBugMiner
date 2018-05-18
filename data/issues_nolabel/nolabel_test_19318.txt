@@ -1,0 +1,58 @@
+Simple Keras model does not compile in float64 mode
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS Sierra 10.12.6
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.8.0
+Python version: 3.6.3
+Bazel version (if compiling from source): -
+GCC/Compiler version (if compiling from source): -
+CUDA/cuDNN version: CPU only
+GPU model and memory: CPU only
+Exact command to reproduce: Run code below
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+When setting the backend to float64, a simple model does not compile anymore. I have debugged into the issue - the problem arises in the call to weighted(y_true, y_pred, weights, mask=None), defined in tensorflow.python.keras._impl.keras.engine.training_utils.py. There, weights is
+Tensor("dense_1_sample_weights:0", shape=(?,), dtype=float32)
+while y_true and y_pred have both the type float64. This causes the subsequent multiplication to error. The weights come from line 401, the compile function in tensorflow/python/keras/_impl/keras/engine/training.py:
+sample_weights.append(array_ops.placeholder_with_default(
+                [1.], shape=[None], name=name + '_sample_weights'))
+
+But I have not found a way to make this placeholder_with_default function return float64 weights.
+When using keras instead of tensorflow.python.keras it works (for Keras version 2.1.6).
+Source code / logs
+Minimum reproducible test case:
+from tensorflow.python.keras import Model
+from tensorflow.python.keras import backend as K
+from tensorflow.python.keras.layers import Input, Dense
+
+K.set_floatx('float64')
+
+input_ = Input((5,))
+output = Dense(1)(input_)
+model = Model(input_, output)
+model.compile('rmsprop', 'mse')
+
+Stack trace:
+Traceback (most recent call last):
+  File "/Users/kilian/dev/tmp/src/test/float64.py", line 13, in <module>
+    model.compile('rmsprop', 'mse')
+  File "/Users/kilian/dev/tmp/venv/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/engine/training.py", line 428, in compile
+    output_loss = weighted_loss(y_true, y_pred, sample_weight, mask)
+  File "/Users/kilian/dev/tmp/venv/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/engine/training_utils.py", line 454, in weighted
+    score_array *= weights
+  File "/Users/kilian/dev/tmp/venv/lib/python3.6/site-packages/tensorflow/python/ops/math_ops.py", line 970, in binary_op_wrapper
+    y = ops.convert_to_tensor(y, dtype=x.dtype.base_dtype, name="y")
+  File "/Users/kilian/dev/tmp/venv/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1014, in convert_to_tensor
+    as_ref=False)
+  File "/Users/kilian/dev/tmp/venv/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1104, in internal_convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "/Users/kilian/dev/tmp/venv/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 947, in _TensorTensorConversionFunction
+    (dtype.name, t.dtype.name, str(t)))
+ValueError: Tensor conversion requested dtype float64 for Tensor with dtype float32: 'Tensor("dense_1_sample_weights:0", shape=(?,), dtype=float32)'

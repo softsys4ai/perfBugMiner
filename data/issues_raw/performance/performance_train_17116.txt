@@ -1,0 +1,34 @@
+Apparent thread-safety issue in tensorflow/core/common_runtime/executor.cc
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS 10.13.3
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): ('v1.6.0-rc1-277-g993006fa76', '1.6.0-rc1')
+Python version: Python 2.7.14
+Bazel version (if compiling from source): 0.10.1-homebrew
+GCC/Compiler version (if compiling from source): 4.2.1
+CUDA/cuDNN version: 9.1 / 7.0.5
+GPU model and memory: NVIDIA GeForce GT 750M with 2 GB device memory (CUDA compute capability 3.0)
+Exact command to reproduce: N/A
+
+Describe the problem
+Clang warns about a thread-safety issue in tensorflow/core/common_runtime/executor.cc at line 2338 which warning appears to be valid.
+Here is the code around that line:
+  if (parent_frame != nullptr) {
+    mutex_lock paranet_frame_lock(parent_frame->mu);
+    // Propagate all the dead exits to the parent frame.
+    for (const Node* node : frame->dead_exits) {                         // Line 2338
+      auto parent_iter_state = parent_frame->GetIteration(parent_iter);
+A lock is held on parent_frame->mu, but not frame->mu.
+If there is no thread safety issue, I think that a comment should be added to explain why, as it's not clear.
+Source code / logs
+tensorflow/core/common_runtime/executor.cc:2338:27: warning: reading variable 'dead_exits' requires holding mutex 'frame->mu' [-Wthread-safety-precise]
+    for (const Node* node : frame->dead_exits) {
+                          ^
+tensorflow/core/common_runtime/executor.cc:2338:27: note: found near match 'parent_frame->mu'
+tensorflow/core/common_runtime/executor.cc:2338:27: warning: reading variable 'dead_exits' requires holding mutex 'frame->mu' [-Wthread-safety-precise]
+    for (const Node* node : frame->dead_exits) {
+                          ^
+tensorflow/core/common_runtime/executor.cc:2338:27: note: found near match 'parent_frame->mu'

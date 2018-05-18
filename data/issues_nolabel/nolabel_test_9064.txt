@@ -1,0 +1,107 @@
+Distributed tensorflow
+
+NOTE: Issues that are not bugs or feature requests will be closed. Please ask usage questions on StackOverflow.
+You must complete this information or else your issue will be closed
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow)?:Yes
+TensorFlow installed from (source or binary)?:binary
+TensorFlow version:1.0.0
+Bazel version (if compiling from source):No
+CUDA/cuDNN version:No
+GPU Model and Memory:No
+Exact command to reproduce:
+
+Describe the problem clearly
+I am trying to apply distributed tensorflow and want to distribute my task on two pc.
+pc1 ip: 192.168.43.6->>>>ps
+pc2 ip:192.168.43.107->>>worker
+Code snippet:
+tf.train.ClusterSpec({
+"worker": [
+"192.168.43.107:2223"
+],
+"ps": [
+"192.168.43.6:2222"
+]})
+
+cluster = tf.train.ClusterSpec({"local": ["192.168.43.6:2222","192.168.43.107:2223"]})
+server = tf.train.Server(cluster, job_name="local", task_index=0)
+with tf.device("/job:ps/task:0"):
+weights = {
+    
+    'wc1': tf.Variable(tf.random_normal([5,5, 5, 1, 32])),
+
+    'wc2': tf.Variable(tf.random_normal([5,5, 5, 32, 64])),
+    
+    'wd1': tf.Variable(tf.random_normal([1216, 1024])),
+    
+    'out': tf.Variable(tf.random_normal([1024,n_classes]))
+}
+
+biases = {
+    'bc1': tf.Variable(tf.random_normal([32])),
+    'bc2': tf.Variable(tf.random_normal([64])),
+    'bd1': tf.Variable(tf.random_normal([1024])),
+    'out': tf.Variable(tf.random_normal([n_classes]))
+}
+
+with tf.device("/job:worker/task:0"):
+def conv3d(x, W, b, strides=1):
+    x = tf.nn.conv3d(x, W, strides=[1, strides, strides,strides, 1], padding='SAME')
+    x = tf.nn.bias_add(x, b)
+    return tf.nn.relu(x)
+
+
+def maxpool3d(x, k=3):
+    return tf.nn.max_pool3d(x, ksize=[1,2,2,2,1], strides=[1,2,2,2,1], padding='SAME')
+
+
+# Create model
+def conv_net(x, weights, biases, dropout):
+    x = tf.reshape(x, shape=[1,20,149,239, 1])
+
+    conv1 = conv3d(x, weights['wc1'], biases['bc1'])
+    print ("conv1",conv1)
+    conv1 = maxpool3d(conv1, k=3)
+    print ("max1",conv1)
+    conv2 = conv3d(conv1, weights['wc2'], biases['bc2'])
+    print ("conv2",conv2)
+    conv2 = maxpool3d(conv2, k=3)
+    print ("max2",conv2)
+    fc1 = tf.reshape(conv2, [-1, weights['wd1'].get_shape().as_list()[0]])
+    print ("fc1",fc1)
+    fc1 = tf.add(tf.matmul(fc1, weights['wd1']), biases['bd1'])
+    fc1 = tf.nn.relu(fc1)
+    print ("relu",fc1)
+    fc1 = tf.nn.dropout(fc1, dropout)
+
+    out = tf.add(tf.matmul(fc1, weights['out']), biases['out'])
+    print ("out",out)
+    return out
+
+x = tf.placeholder(tf.float32)
+y = tf.placeholder(tf.float32)
+keep_prob = tf.placeholder(tf.float32) 
+
+# Construct model
+pred = conv_net(x, weights, biases, keep_prob)
+print ("pred",pred)
+cost = tf.reduce_mean(tf.nn.softmax(logits=pred))
+optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+correct_pred = tf.equal(tf.argmax(pred, -1), tf.argmax(y, -1))
+accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+init = tf.global_variables_initializer()
+
+print ("time1",time.clock())
+saver = tf.train.Saver()
+
+with tf.Session('grpc://192.168.43.107:2222') as sess:
+sess.run(init)
+Command line on ps machine->> python train3d5.py --job_name="ps" --task_index=0
+Command line on ps machine->> python train3d5.py --job_name="worker" --task_index=0
+Please provide a solution how to distribute training in tensorflow.
+We also using hadoop multi-cluster.
+Source Code / Logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full-traceback. Large logs and files should be attached. Try to reproducible test-case code the bare-minimum necessary to generate the problem
+Error on worker machine:
+CreateSession still working for response from worker: /job:local/replica:0/task:1

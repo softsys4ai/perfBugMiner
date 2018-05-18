@@ -1,0 +1,30 @@
+XLA AOT tfcompile failure due to undeclared inclusions in cc_binary rule
+
+This happens on a freshly cloned TensorFlow master with Bazel 0.7 on Ubuntu 17.04:
+ERROR: tensorflow/BUILD:13:1: undeclared inclusion(s) in rule '//:model':
+this rule is missing dependency declarations for the following files included by 'graph.cc':
+  'tensorflow/compiler/tf2xla/xla_compiled_cpu_function.h'
+  'tensorflow/compiler/tf2xla/xla_local_runtime_context.h'
+  'tensorflow/core/platform/macros.h'
+  '/tensorflow/core/platform/types.h'
+  '/tensorflow/core/platform/platform.h'
+  '/tensorflow/core/platform/default/integral_types.h'
+  '/tensorflow/compiler/xla/executable_run_options.h'
+graph.cc pretty much just does #include "graph.h" as per the tfcompile tutorial and it's weird because these headers seem to be included in the tf_library rule but Bazel still complains that the subsequent cc_binary rule doesn't list them as dependencies.
+This is my BUILD file, placed in the repo root (so I use TensorFlow's Bazel workspace after going through ./configure):
+load("@org_tensorflow//tensorflow/compiler/aot:tfcompile.bzl", "tf_library")
+
+tf_library(
+  name = "graph",
+  cpp_class = "Graph",
+  graph = "graph.pb",
+  config = "graph.config.pb",
+)
+
+cc_binary(
+  name = "model",
+  srcs = ["graph.cc"],
+  deps = [":graph", "//third_party/eigen3"],
+  linkopts = ["-lpthread"]
+)
+I'm not comfortable with Bazel yet but building worked fine with earlier TensorFlow versions. Stuff started to become wonky somewhere around when @org_tensorflow was introduced throughout tfcompile.bzl, I think.

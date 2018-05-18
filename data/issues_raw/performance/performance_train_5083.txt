@@ -1,0 +1,18 @@
+Strange memory usage with atrous_conv2d on 1D signal.
+
+I am trying to build my own wavenet to generate sound.  For this I need to perform a dilated convolution on a 1D signal.  To accomplish this I simply added dummy dimension to my input and filter.
+def dilated_causal_conv1d(x, filter, dialation):
+    padding = (tf.shape(filter)[0] - 1) * dialation
+    x = tf.pad(x, ((0, 0), (padding, 0), (0, 0)))
+    filter = tf.expand_dims(filter, 0)
+    x = tf.expand_dims(x, 0)
+    x = tf.nn.atrous_conv2d(x, filter, dialation, 'VALID')
+    x = tf.squeeze(x, (0,))
+    return x[:, padding:]
+
+This appears to be working although I have not tried training it yet.  I have just managed to send a bunch of zeros through the network to make sure all of the shapes are in alignment.  When I ran it with an input of size (2, 16000) I got an error saying...
+
+W tensorflow/core/common_runtime/bfc_allocator.cc:217] Ran out of memory trying to allocate 2.75GiB. The caller indicates that this is not a failure, but may mean that there could be performance gains if more memory is available.
+
+I did manage to successfully run even with this message so I increased the batch size and ran it again and it still worked.  I kept doing this and I was able to get my batch size up to 64 and it still has not failed to execute.  This is strange to me since I only ever get these warning when I am on the verge of running out of memory.  I remember reading somewhere that atrous_conv2d can be very inefficient in terms of memory on 1D signals, however I have not been able to find that again or an explanation of why.
+I am using the latest tensorflow on Ubuntu 16.04 with Cuda 8.  The size of the dilations range from 1 to 1024 in powers of 2 increments.

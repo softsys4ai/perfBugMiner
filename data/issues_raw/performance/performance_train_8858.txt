@@ -1,0 +1,107 @@
+Machine restarts when running TensorFlow with GPU
+
+A simple Python program which runs a few TensorFlow computations consequently crashes when running on GPU.
+Code:
+from __future__ import print_function
+import numpy as np
+import tensorflow as tf
+from tensorflow.python.client import timeline
+
+def train_model(run_number):
+    image_size = 28
+    num_labels = 10
+    batch_size = 16
+    layer1_neuron_count = 16384
+
+    graph = tf.Graph()
+    
+    with graph.as_default():
+        tf_valid_dataset = tf.constant(valid_dataset)
+
+        # Variables.
+        weights0 = tf.Variable(
+            tf.truncated_normal([image_size * image_size, layer1_neuron_count]))
+        biases0 = tf.Variable(tf.zeros([layer1_neuron_count]))
+
+        weights1 = tf.Variable(
+            tf.truncated_normal([layer1_neuron_count, num_labels]))
+        biases1 = tf.Variable(tf.zeros([num_labels]))
+
+        valid_layer0 = tf.nn.relu(tf.matmul(tf_valid_dataset, weights0) + biases0)
+        valid_prediction = tf.matmul(valid_layer0, weights1) + biases1
+    
+    with tf.Session(graph=graph) as session:
+        tf.global_variables_initializer().run()
+
+        print('Validation')
+        
+        session.run(valid_prediction)
+            
+        print('Validation done')
+
+valid_dataset = np.random.uniform(-1, 1, (10000, 784)).astype(dtype=np.float32)
+valid_labels = np.random.uniform(0, 1, (10000, 10)).astype(dtype=np.float32)
+
+for i in range(10):
+    print("Run #{}".format(i))
+    train_model(i)
+
+It should run the same computation 10 times, recreating a graph and a session every time.
+Works fine when I run it on CPU. When running on GPU, it fails on running computation for 2nd, 3rd or 4th session.
+Console output:
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+Run #0
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE3 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:910] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties:
+name: GeForce GTX 980 Ti
+major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:01:00.0
+Total memory: 5.93GiB
+Free memory: 5.83GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 980 Ti, pci bus id: 0000:01:00.0)
+Validation
+Validation done
+Run #1
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 980 Ti, pci bus id: 0000:01:00.0)
+Validation
+Validation done
+Run #2
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 980 Ti, pci bus id: 0000:01:00.0)
+Validation
+Validation done
+Run #3
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 980 Ti, pci bus id: 0000:01:00.0)
+Validation
+
+Then the machine just restarts.
+There are no relevant messages in syslog before the restart.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+http://stackoverflow.com/questions/39122984/system-auto-reboot-when-tensorflow-model-is-too-large
+http://stackoverflow.com/questions/41237115/computer-restarts-with-large-mini-batches-in-tensorflow
+When running other TensorFlow programs, I noticed that sometimes such crashes happen when I use large tensors. Issues above seem to be related, at least symptoms are similar.
+Environment info
+GPU: GeForce GTX 980 Ti
+Operating System: Ubuntu 16.04.2 LTS
+Installed version of CUDA and cuDNN: CUDA 8.0.61, cuDNN 7.5
+Output of ls -l /usr/local/cuda/lib64/libcud*:
+-rw-r--r-- 1 root root 556000 Mar 30 18:05 /usr/local/cuda/lib64/libcudadevrt.a lrwxrwxrwx 1 root root 16 Mar 30 18:05 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0 lrwxrwxrwx 1 root root 19 Mar 30 18:05 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.61 -rwxr-xr-x 1 root root 415432 Mar 30 18:05 /usr/local/cuda/lib64/libcudart.so.8.0.61 -rw-r--r-- 1 root root 775162 Mar 30 18:05 /usr/local/cuda/lib64/libcudart_static.a lrwxrwxrwx 1 root root 13 Mar 30 19:42 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5 lrwxrwxrwx 1 root root 18 Mar 30 19:42 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.10 -rwxr-xr-x 1 root root 84163560 Mar 30 19:42 /usr/local/cuda/lib64/libcudnn.so.5.1.10 -rw-r--r-- 1 root root 70364814 Mar 30 19:42 /usr/local/cuda/lib64/libcudnn_static.a
+TensorFlow:
+
+"pip install tensorflow-gpu". Version 1.0.1
+The output from python -c "import tensorflow; print(tensorflow.__version__)":
+
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally 1.0.1
+What other attempted solutions have you tried?
+Tried to reinstall Ubuntu/CUDA/cuDNN/TensorFlow, didn't help.

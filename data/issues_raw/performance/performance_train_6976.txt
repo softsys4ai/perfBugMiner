@@ -1,0 +1,52 @@
+Unexpected behavior in tensorflow's distributed training
+
+Hi Tensorflowers,
+I was doing some distributed training experiments on tensorflow v0.11.0.
+I modified the ResNet code from the official model zoos here to be the one can do distributed training.
+In the experiments, ResNet56 is used for training on CIFAR10 data set and the settings follow the original paper.
+When I set the number of parameter server = 1, worker = 1, I expected the behavior would be the same as the single gpu one (which is the original code in the repo).
+It turns out that there is a huge performance gap. Please see the following figure.
+
+x-axis: time in second, y-axis: testing error
+tf-0: single gpu version, tf-1: distributed version with # ps=1, # worker=1
+Both code were run by 160 epochs and with the same parameter/learning rate schedule.
+The single gpu version can achieve 7% error rate (which is consistent with the original paper), but the distributed one is stalled at 12% error.
+I think there might be something wrong as the performance should be similar for both cases.
+Could you check if that is the case? (or maybe I used the wrong way to do distributed training)
+Please feel free to ask if you have any problem with the setting. Thanks.
+The single gpu version code can be found here (I used the earlier 0.11 compatible version)
+The code for distributed version can be found here.
+Some detailed settings:
+batch size=128, num_residual_units=9, relu_leakiness=0
+
+The command I launched:
+ps0
+> export CUDA_VISIBLE_DEVICES=""; python resnet_dist.py --ps_hosts="localhost:50000" --worker_hosts="localhost:50001" --job_name="ps" --task_id="0" --batch_size=128 --dataset='cifar10' --train_data_path=cifar10/data_batch* --log_root=./tmp-log-root/ --num_gpus=1 --mode train
+worker0
+> export CUDA_VISIBLE_DEVICES="0"; python resnet_dist.py --ps_hosts="localhost:50000" --worker_hosts="localhost:50001" --job_name="worker" --task_id="0" --batch_size=128 --dataset='cifar10' --train_data_path=cifar10/data_batch* --log_root=./tmp-log-root/ --num_gpus=1 --mode train
+
+Environment info
+Operating System:
+Ubuntu 14.04
+Installed version of CUDA and cuDNN:
+CUDA 7.5, cuDNN 5.1
+> ls -l /usr/local/cuda/lib/libcud*
+-rw-r--r-- 1 root root 189170 Oct 25 22:51 /usr/local/cuda/lib/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Oct 25 22:51 /usr/local/cuda/lib/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 Oct 25 22:51 /usr/local/cuda/lib/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 311596 Oct 25 22:51 /usr/local/cuda/lib/libcudart.so.7.5.18
+-rw-r--r-- 1 root root 558020 Oct 25 22:51 /usr/local/cuda/lib/libcudart_static.a
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+282823b
+The output of bazel version
+
+Build label: 0.4.2
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Dec 7 18:47:11 2016 (1481136431)
+Build timestamp: 1481136431
+Build timestamp as int: 1481136431
+
+I built tensorflow v0.11.0 by myself.

@@ -1,0 +1,27 @@
+C++ style concern of potential memory leak
+
+All the factories methods consisting a static pointer to heap allocated variable potentially cause memory leak, as the static in-function variables are allocated/disposed for the program life-time, but if the object is dynamically allocated on heap, the object itself is never disposed (only its pointer gets disposed).
+For example, in session_factory.cc:37
+static mutex* get_session_factory_lock() {
+  static mutex session_factory_lock;
+  return &session_factory_lock;
+}
+
+typedef std::unordered_map<string, SessionFactory*> SessionFactories;
+SessionFactories* session_factories() {
+  static SessionFactories* factories = new SessionFactories;
+  return factories;
+}
+Note that the factories is a static pointer, not a pointer to a static object. Since the object itself is not static, it will not be disposed and cause memory leak.
+Suggested change:
+static mutex* get_session_factory_lock() {
+  static mutex session_factory_lock;
+  return &session_factory_lock;
+}
+
+typedef std::unordered_map<string, SessionFactory*> SessionFactories;
+SessionFactories* session_factories() {
+  static SessionFactories factories = SessionFactories();
+  return &factories;
+}
+One could easily write a small program and use valgrind to verify the memory leak. One example is here.

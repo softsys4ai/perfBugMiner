@@ -1,0 +1,32 @@
+Tensorflow unable to detect no. of CPU cores
+
+Environment info
+Operating System:
+Ubuntu 14.04 Linux ppc64le
+Installed version of CUDA and cuDNN: 7.5
+ls -l /usr/local/cuda-7.5/lib64/libcud*
+-rw-r--r-- 1 root root   326744 Nov  9  2015 /usr/local/cuda-7.5/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Nov  5  2015 /usr/local/cuda-7.5/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root       19 Nov  5  2015 /usr/local/cuda-7.5/lib64/libcudart.so.7.5 -> libcudart.so.7.5.23
+-rwxr-xr-x 1 root root   445192 Nov  5  2015 /usr/local/cuda-7.5/lib64/libcudart.so.7.5.23
+-rw-r--r-- 1 root root   902750 Nov  9  2015 /usr/local/cuda-7.5/lib64/libcudart_static.a
+lrwxrwxrwx 1 root root       13 Apr 24 20:17 /usr/local/cuda-7.5/lib64/libcudnn.so -> libcudnn.so.5
+-rwxr-xr-x 1 root root 60068392 Apr 22 19:18 /usr/local/cuda-7.5/lib64/libcudnn.so.5.0.5
+-rw-r--r-- 1 root root 59436124 Apr 22 19:30 /usr/local/cuda-7.5/lib64/libcudnn_static.a
+**
+Tensorflow 0.8 built and installed from source. (v0.8.0 tag)
+
+The commit hash (git rev-parse HEAD) : 4b7bc31
+The output of bazel version: 0.2.0
+Note: Same issue also exists with tensorflow 0.9
+
+Steps to reproduce:
+On python prompt,
+
+import tensorflow as tf
+tf.Session()
+
+In a large output of above statement, there is a line that says "can't determine no. of CPU cores, assuming 4".
+After looking into the tensorflow code, I found that __linux macro in tensorflow/core/platform/posix/port.cc is found to be not defined and hence sched_getaffinity is not called, and returns 4 as default value. I checked that usually on linux, __linux is defined but if we compile using -std=c++11, then this macro gets undefined.
+Anyway, even if sched_getaffinity is called, it returns logical no. of CPU cores i.e. maximum threads possible. On POWER, usually this count is pretty higher and having so many threads degrades the performance. Ideally, we should have physical core size as the max possible thread count in thread pool for optimum performance. I tried looking for a built-in function that gives me physical core size, but unfortunately, all of the functions I found gives me logical core size. Then I found another library "libhwloc" that gives C API to get this information. This library in general is very useful with nice documentation. It is also available on canonical and one can install it using "apt-get install libhwloc-dev" on Ubuntu system or on RHEL using "yum install hwloc-devel".
+So, I wanted to know if Tensorflow can accept this additional dependency on hwloc library.

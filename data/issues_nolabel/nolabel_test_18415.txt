@@ -1,0 +1,79 @@
+A bug related to conv2d_transpose and tf.cond
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.7.0
+Python version: 2.7
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 7.0
+GPU model and memory: GTX 980M / 4G
+Exact command to reproduce: python the_following_code.py
+
+Describe the problem
+I am trying to implement a model named progressive GAN. I met some very weird problems. My problems could be reproduced by the following code. I believe it is a bug of tensorflow because removing any trivial tf.cond or removing conv2d_transpose will make the code work.
+  File "/home/yfeng23/test/tf/cond_test1.py", line 38, in <module>
+    net = upscale2d(net_out[0])                                                   # net.shape = [16, 16, 16, 512]
+  File "/home/yfeng23/test/tf/cond_test1.py", line 12, in upscale2d
+
+InvalidArgumentError (see above for traceback): Input to reshape is a tensor with 2097152 values, but the requested shape has 524288
+	 [[Node: Upscale2D_1/Reshape = Reshape[T=DT_FLOAT, Tshape=DT_INT32, _device="/job:localhost/replica:0/task:0/device:GPU:0"](Upscale2D_1/Tile, Upscale2D_1/Reshape/shape)]]
+
+Source code / logs
+import tensorflow as tf
+import tensorflow.contrib.slim as slim
+
+
+def upscale2d(x, factor=2):
+  """increase the resolution"""
+  with tf.variable_scope('Upscale2D'):
+    channels = x.shape[-1]
+    s = tf.shape(x)
+    x = tf.expand_dims(tf.expand_dims(x, axis=3), axis=2)
+    x = tf.tile(x, [1, 1, factor, 1, factor, 1])
+    x = tf.reshape(x, [s[0], s[1] * factor, s[2] * factor, channels])
+    return x
+
+
+def to_rgb(x, lod, num_outputs):
+  """generate image output"""
+  with tf.variable_scope('ToRGB_lod%d' % lod):
+    return slim.conv2d(x, num_outputs, 1, activation_fn=None)
+
+
+batch_size = 16
+num_outputs = 3
+noise = tf.random_normal([batch_size, 128])
+with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
+                    activation_fn=tf.nn.leaky_relu):
+  net = tf.expand_dims(tf.expand_dims(noise, 1), 1)
+  net = slim.conv2d_transpose(net, 512, kernel_size=4, padding='VALID')         # net.shape = [16, 4, 4, 512]
+  net0 = net
+  net_out = (net, tf.zeros([batch_size, 2, 2, 3]))                              # ([16, 4, 4, 512], [16, 2, 2, 3])
+
+  out = to_rgb(net_out[0], 1, num_outputs)                                      # out.shape = [16, 4, 4, 3]
+  net = upscale2d(net_out[0])                                                   # net.shape = [16, 8, 8, 512]
+  net_out = tf.cond(tf.less(0, 1), lambda: (net, out), lambda: net_out)         # ([16, 8, 8, 512], [16, 4, 4, 3])
+
+  with tf.control_dependencies([tf.assert_equal(tf.shape(net_out[0])[1], 8)]):
+    out = to_rgb(net_out[0], 2, num_outputs)                                    # out.shape = [16, 8, 8, 3]
+  net = upscale2d(net_out[0])                                                   # net.shape = [16, 16, 16, 512]
+  net = slim.conv2d(net, 512, 3, scope='conv1')
+  #net_out = tf.cond(tf.less(3, 4), lambda: net_out, lambda: (net, out))
+  net_out = tf.cond(tf.less(3, 1), lambda: (net, out), lambda: net_out)         # ([16, 8, 8, 512], [16, 4, 4, 3])
+
+  out = to_rgb(net_out[0], 3, num_outputs)                                      # out.shape = [16, 8, 8, 3]
+  up_out = upscale2d(net_out[1])                                                # out_up.shape = [16, 8, 8, 3]
+  net = tf.cond(tf.equal(0.0, 0.0), lambda: out, lambda: up_out + out)
+
+loss = tf.reduce_mean(net)
+grad0 = tf.gradients(loss, net0)[0]
+grad1 = tf.gradients(loss, noise)[0]
+with tf.Session() as sess:
+  sess.run(tf.global_variables_initializer())
+  print(sess.run(net).shape)
+  print(sess.run(grad0).shape)
+  print(sess.run(grad1).shape)

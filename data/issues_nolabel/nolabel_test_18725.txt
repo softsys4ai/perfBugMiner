@@ -1,0 +1,144 @@
+InvalidArgumentError : restore the weight of Inception_v4
+
+System information
+
+OS Platform and Distribution : windows10
+TensorFlow installed from : Source
+TensorFlow version : 1.7.0
+Python version: Python 3.6.3
+Bazel version: 0.11.1
+GCC/Compiler version : 5.4.0
+CUDA/cuDNN version: no
+GPU model and memory: no
+Exact command to reproduce:
+
+Describe the problem
+I'm training a deep neural network.I want to restore the weight of Inception_v4 ,but there are some errors.I think the define of network is right but I can't restore the weight of model.Is it a bug of different version.
+The errors:
+InvalidArgumentError (see above for traceback): Assign requires shapes of both tensors to match. lhs shape= [3,3,128,768] rhs shape= 5,5,128,768, use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/device:CPU:0"](InceptionV4/AuxLogits/Conv2d_2a/weights, save/RestoreV2:9)]]
+Source code
+import scipy.misc as misc
+import pickle
+import tensorflow as tf
+from tqdm import tqdm
+import numpy as np
+import argparse
+import fnmatch
+import sys
+import os
+
+from nets.inception_v4 import *
+sys.path.insert(0, 'nets/')
+slim = tf.contrib.slim
+
+def getPaths(data_dir):
+    image_paths = []
+    # add more extensions if need be
+    ps = ['jpg', 'jpeg', 'JPG', 'JPEG', 'bmp', 'BMP', 'png', 'PNG']
+    for p in ps:
+        pattern = '*.' + p
+        for d, s, fList in os.walk(data_dir):
+            for filename in fList:
+                if fnmatch.fnmatch(filename, pattern):
+                    fname_ = os.path.join(d, filename)
+                    image_paths.append(fname_)
+    return image_paths
+
+if name == 'main':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_dir', required=True, type=str, help='Directory images are in. Searches recursively.')
+    parser.add_argument('--model', required=True, type=str, help='Model to use')
+    parser.add_argument('--checkpoint_file', required=True, type=str, help='Model file')
+    a = parser.parse_args()
+    data_dir = a.data_dir
+    model = a.model
+    checkpoint_file = a.checkpoint_file
+    # I only have these because I thought some take in size of (299,299), but maybe not
+    height, width, channels = 224, 224, 3 
+    x = tf.placeholder(tf.float32, shape=(1, height, width, channels))
+    
+    arg_scope = inception_v4_arg_scope()
+    with slim.arg_scope(arg_scope):
+        logits, end_points = inception_v4(x, is_training=False, num_classes=1001)
+        features = end_points['PreLogitsFlatten']
+     
+    sess = tf.Session()
+    saver = tf.train.Saver()
+    saver.restore(sess, checkpoint_file)
+    
+    feat_dict = {}
+    paths = getPaths(data_dir)
+    print('Computing features...')
+    for path in tqdm(paths):
+        image = misc.imread(path)
+        image = misc.imresize(image, (height, width))
+        image = np.expand_dims(image, 0)
+        feat = np.squeeze(sess.run(features, feed_dict={x: image}))
+        feat_dict[path] = feat
+    
+    try:
+        os.makedirs('features/')
+    except:
+        pass
+    exp_pkl = open('features/' + model + '_features.pkl', 'wb')
+    data = pickle.dumps(feat_dict)
+    exp_pkl.write(data)
+    exp_pkl.close()
+
+Log：
+D:\PythonProject\Compute-Features-WithModel>python compute_features.py --data_dir=jaffe/ --checkpoint_file=inception_v4.ckpt --model=inception_v4
+Use the retry module or similar alternatives.
+Traceback (most recent call last):
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1327, in _do_call
+    return fn(*args)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1312, in _run_fn
+    options, feed_dict, fetch_list, target_list, run_metadata)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1420, in _call_tf_sessionrun
+    status, run_metadata)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\framework\errors_impl.py", line 516, in exit
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Assign requires shapes of both tensors to match. lhs shape= [3,3,128,768] rhs shape= [5,5,128,768]
+		[[Node: save/Assign_9 = Assign[T=DT_FLOAT, _class=["loc:@InceptionV4/AuxLogits/Conv2d_2a/weights"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/device:CPU:0"](InceptionV4/AuxLogits/Conv2d_2a/weights, save/RestoreV2:9)]]
+
+During handling of the above exception, another exception occurred:
+Traceback (most recent call last):
+  File "compute_features.py", line 120, in <module>
+    saver.restore(sess, checkpoint_file)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\training\saver.py", line 1775, in restore
+    {self.saver_def.filename_tensor_name: save_path})
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 905, in run
+    run_metadata_ptr)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1140, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1321, in _do_run
+    run_metadata)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\client\session.py", line 1340, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Assign requires shapes of both tensors to match. lhs shape= [3,3,128,768] rhs shape= [5,5,128,768]
+         [[Node: save/Assign_9 = Assign[T=DT_FLOAT, _class=["loc:@InceptionV4/AuxLogits/Conv2d_2a/weights"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/device:CPU:0"](InceptionV4/AuxLogits/Conv2d_2a/weights, save/RestoreV2:9)]]
+Caused by op 'save/Assign_9', defined at:
+  File "compute_features.py", line 119, in <module>
+    saver = tf.train.Saver()
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\training\saver.py", line 1311, in init
+    self.build()
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\training\saver.py", line 1320, in build
+    self.build(self.filename, build_save=True, build_restore=True)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\training\saver.py", line 1357, in _build
+    build_save=build_save, build_restore=build_restore)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\training\saver.py", line 809, in _build_internal
+    restore_sequentially, reshape)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\training\saver.py", line 470, in _AddRestoreOps
+    assign_ops.append(saveable.restore(saveable_tensors, shapes))
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\training\saver.py", line 162, in restore
+    self.op.get_shape().is_fully_defined())
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\ops\state_ops.py", line 281, in assign
+    validate_shape=validate_shape)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\ops\gen_state_ops.py", line 64, in assign
+    use_locking=use_locking, name=name)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\framework\ops.py", line 3290, in create_opop_def=op_def)
+  File "C:\ProgramData\Anaconda3\lib\site-packages\tensorflow\python\framework\ops.py", line 1654, in init
+    self.traceback = self.graph._extract_stack()  # pylint: disable=protected-access
+InvalidArgumentError (see above for traceback): Assign requires shapes of both tensors to match. lhs shape= [3,3,128,768] rhs shape= [5,5,128,768]
+         [[Node: save/Assign_9 = Assign[T=DT_FLOAT, _class=["loc:@InceptionV4/AuxLogits/Conv2d_2a/weights"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/device:CPU:0"](InceptionV4/AuxLogits/Conv2d_2a/weights, save/RestoreV2:9)]]

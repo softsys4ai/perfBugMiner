@@ -1,0 +1,33 @@
+grpc async server wrapper bug
+
+code in distributed_runtime/rpc/grpc_master_service.cc
+  void HandleRPCsLoop() override {
+    ENQUEUE_REQUEST(CreateSession, true);
+    ENQUEUE_REQUEST(ExtendSession, false);
+    for (int i = 0; i < 100; ++i) {
+      ENQUEUE_REQUEST(RunStep, true);
+    }
+    ENQUEUE_REQUEST(CloseSession, false);
+    ENQUEUE_REQUEST(ListDevices, false);
+    ENQUEUE_REQUEST(Reset, false);
+
+    void* tag;
+    bool ok;
+    while (cq_->Next(&tag, &ok)) {
+   
+      UntypedCall<GrpcMasterService>::Tag* callback_tag =
+          static_cast<UntypedCall<GrpcMasterService>::Tag*>(tag);
+      if (callback_tag) {
+        callback_tag->OnCompleted(this, ok);
+        delete callback_tag;
+      } else {
+        // NOTE(mrry): A null `callback_tag` indicates that this is
+        // the shutdown alarm.
+        cq_->Shutdown();
+      }
+    }
+  }
+
+While increasing the test pressure, I found that variable 'ok' will be set false, and
+in callback_tag->OnCompleted, it will not call callback if ok is false, thus   ENQUEUE_REQUEST will not be called, new incoming request will have no chance to be handled,
+memory increase more and more, if any bug here?

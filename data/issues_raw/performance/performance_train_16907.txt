@@ -1,0 +1,93 @@
+Multi-GPU could not provide performance improve with dataset API
+
+I just wrote a small piece of code in tensorflow to test its multi-gpu performance, with dataset API.
+import tensorflow as tf
+import numpy as np
+import time
+import os
+
+#dataset with 1000 vectors
+dataset = tf.data.Dataset.from_tensor_slices(tf.random_uniform([1000,4], maxval=4, dtype=tf.int32))
+          
+print(dataset.output_types)
+print(dataset.output_shapes)
+
+iterator = dataset.make_initializable_iterator()
+#next_element = iterator.get_next()
+
+tensor_results = []
+
+
+for i in range(500):
+    for j in range(2):
+        with tf.device("/gpu:%d" % j):
+            with tf.name_scope("Tower_%d" % j) as scope:
+                operand = iterator.get_next()
+                tensor_result = tf.matmul(tf.reshape(operand,shape=[1,4]), tf.reshape(operand,shape=[4,1]))
+                tensor_results.append(tensor_result)
+
+
+tfconfig = tf.ConfigProto(allow_soft_placement=True, log_device_placement=True)
+tfconfig.gpu_options.allow_growth=True
+
+sess = tf.Session(config=tfconfig)
+
+sess.run(iterator.initializer)
+t0 = time.time()
+
+results = sess.run(tensor_results)
+
+t1 = time.time()
+
+elapsed_time = t1 - t0
+print(elapsed_time)
+results
+
+I have 2 GPUs and this program takes 0.68 seconds to finish.
+When I change to a single GPU execution mode:
+import tensorflow as tf
+import numpy as np
+import time
+import os
+
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
+
+dataset = tf.data.Dataset.from_tensor_slices(tf.random_uniform([1000,4], maxval=4, dtype=tf.int32))
+          
+print(dataset.output_types)
+print(dataset.output_shapes)
+
+iterator = dataset.make_initializable_iterator()
+#next_element = iterator.get_next()
+
+tensor_results = []
+
+with tf.device("/gpu:0"):
+    for i in range(1000):
+        operand = iterator.get_next()
+        tensor_result = tf.matmul(tf.reshape(operand,shape=[1,4]), tf.reshape(operand,shape=[4,1]))
+        tensor_results.append(tensor_result)
+
+
+tfconfig = tf.ConfigProto(allow_soft_placement=True, log_device_placement=True)
+tfconfig.gpu_options.allow_growth=True
+
+sess = tf.Session(config=tfconfig)
+
+sess.run(iterator.initializer)
+t0 = time.time()
+
+results = sess.run(tensor_results)
+
+t1 = time.time()
+
+elapsed_time = t1 - t0
+print(elapsed_time)
+results
+
+It takes the same time to finish (actually single GPU is even faster perhaps due to overhead reasons). Do anyone know where does the problem come from?
+python version: Python 2.7.12
+tensorflow version: 1.4.0
+CUDA version: 8.0
+Ubuntu version: Ubuntu 16.04 LTS
+Thanks!

@@ -1,0 +1,86 @@
+Importing graph with control flow using TF_GraphImportGraphDef crashes
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+#8284
+#5406
+Environment info
+Operating System:
+macOS 10.12.3
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+CPU only
+
+The commit hash (git rev-parse HEAD) e895d5c
+The output of bazel version
+
+Build label: 0.4.4-homebrew
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Feb 2 01:05:15 2017 (1485997515)
+Build timestamp: 1485997515
+Build timestamp as int: 1485997515
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+from tensorflow.python.framework.graph_util import convert_variables_to_constants
+
+x = tf.placeholder(tf.float32, shape=(None), name="x")
+
+def add_one(x):
+  return tf.add(x, 1)
+
+y = tf.map_fn(add_one, x)
+
+y = tf.identity(y, name="y")
+
+with tf.Session() as sess:
+  print(tf.get_default_graph().as_graph_def().node)
+  minimal_graph = convert_variables_to_constants(sess, sess.graph.as_graph_def(add_shapes=True), ["y"])
+  tf.train.write_graph(minimal_graph, '.', 'minimal_graph.proto', as_text=False)
+package main
+
+import (
+  tf "github.com/tensorflow/tensorflow/tensorflow/go"
+  "io/ioutil"
+)
+
+func main() {
+  modelPath := "cond_test/minimal_graph.proto"
+  graphDef, _ := ioutil.ReadFile(modelPath)
+  graph := tf.NewGraph()
+  graph.Import(graphDef, "")
+}
+What other attempted solutions have you tried?
+
+Loading the graph without the map_fn works as expected. (y = add_one(x))
+Originally encountered problem using prebuild tensorflow for python: pip install tensorflow
+Same issue when saving / restoring using SavedModel routines.
+
+Logs or other output that would be helpful
+fatal error: unexpected signal during runtime execution
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x5de318c]
+
+runtime stack:
+runtime.throw(0x40cdc29, 0x2a)
+	/usr/local/go/src/runtime/panic.go:596 +0x95
+runtime.sigpanic()
+	/usr/local/go/src/runtime/signal_unix.go:274 +0x2db
+
+goroutine 1 [syscall, locked to thread]:
+runtime.cgocall(0x40973d0, 0xc42004de60, 0x40b34e0)
+	/usr/local/go/src/runtime/cgocall.go:131 +0xe2 fp=0xc42004de30 sp=0xc42004ddf0
+github.com/tensorflow/tensorflow/tensorflow/go._Cfunc_TF_GraphImportGraphDef(0xbf00020, 0xd0be3f0, 0xd0bee20, 0xd0bd5a0)
+	github.com/tensorflow/tensorflow/tensorflow/go/_obj/_cgo_gotypes.go:386 +0x45 fp=0xc42004de60 sp=0xc42004de30
+github.com/tensorflow/tensorflow/tensorflow/go.(*Graph).Import.func7(0xbf00020, 0xd0be3f0, 0xd0bee20, 0xd0bd5a0)
+	/Users/olav/go/src/github.com/tensorflow/tensorflow/tensorflow/go/graph.go:96 +0x121 fp=0xc42004de98 sp=0xc42004de60
+github.com/tensorflow/tensorflow/tensorflow/go.(*Graph).Import(0xc42000e038, 0xc42008a000, 0x1ae9, 0x1ce9, 0x0, 0x0, 0x0, 0x0)
+	/Users/olav/go/src/github.com/tensorflow/tensorflow/tensorflow/go/graph.go:96 +0x1ef fp=0xc42004df00 sp=0xc42004de98
+main.main()
+	/Users/olav/go/src/github.com/olavhn/infer/test.go:14 +0x112 fp=0xc42004df88 sp=0xc42004df00
+runtime.main()
+	/usr/local/go/src/runtime/proc.go:185 +0x20a fp=0xc42004dfe0 sp=0xc42004df88
+runtime.goexit()
+	/usr/local/go/src/runtime/asm_amd64.s:2197 +0x1 fp=0xc42004dfe8 sp=0xc42004dfe0
+
+goroutine 17 [syscall, locked to thread]:
+runtime.goexit()
+	/usr/local/go/src/runtime/asm_amd64.s:2197 +0x1

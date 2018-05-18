@@ -1,0 +1,63 @@
+TF freezes while running.
+
+Operating System: CentOS7
+Installed version of CUDA and cuDNN: 7.5.18; 4.0.7
+Package: Python2 GPU nightly built on Apr 23.
+While I'm training an inception-like model on multi GPUs, the training totally freezed after hours.
+Then I could see one of the GPUs stay at a 99~100% GPU utilization and a 0% GPU memory utilization. Others stayed at 0%:
+$ nvidia-smi --query-gpu=temperature.gpu,clocks.current.sm,power.draw,utilization.gpu,utilization.memory,memory.free --format=csv | column -t -s ,
+temperature.gpu   clocks.current.sm [MHz]   power.draw [W]   utilization.gpu [%]   utilization.memory [%]   memory.free [MiB]
+53                987 MHz                   71.80 W          0 %                   0 %                      38 MiB
+30                324 MHz                   14.33 W          0 %                   0 %                      38 MiB
+30                324 MHz                   14.81 W          0 %                   0 %                      38 MiB
+29                324 MHz                   14.34 W          0 %                   0 %                      38 MiB
+60                1151 MHz                  87.82 W          100 %                 0 %                      39 MiB
+54                987 MHz                   74.47 W          0 %                   0 %                      39 MiB
+28                324 MHz                   14.16 W          0 %                   0 %                      12264 MiB
+29                324 MHz                   14.06 W          0 %                   0 %                      12264 MiB
+
+This problem happened to me several times, but still hard to reproduce (happen after hours of training).
+I attached the process with gdb -p [proc] and did stack trace on thread 1 (there are a lot other threads):
+#0  0x00007fda5a3156d5 in pthread_cond_wait@@GLIBC_2.3.2 () from /lib64/libpthread.so.0
+#1  0x00007fda506ee9ec in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /lib64/libstdc++.so.6
+#2  0x00007fda33a1ed13 in tensorflow::DirectSession::WaitForNotification(tensorflow::DirectSession::RunState*, long long) ()
+   from /home/wyx/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#3  0x00007fda33a28634 in tensorflow::DirectSession::Run(tensorflow::RunOptions const&, std::vector<std::pair<std::string, tensorflow::Tensor>, std::allocator<std::pair<std::string, tensorflow::Tensor> > > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<tensorflow::Tensor, std::allocator<tensorflow::Tensor> >*, tensorflow::RunMetadata*) () from /home/wyx/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#4  0x00007fda33a2a8e2 in tensorflow::DirectSession::Run(std::vector<std::pair<std::string, tensorflow::Tensor>, std::allocator<std::pair<std::string, tensorflow::Tensor> > > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<tensorflow::Tensor, std::allocator<tensorflow::Tensor> >*) ()
+   from /home/wyx/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#5  0x00007fda33c2ff87 in TF_Run_Helper(TF_Session*, char const*, TF_Buffer const*, char const**, TF_Tensor**, int, char const**, TF_Tensor**, int, char const**, int, TF_Buffer*, TF_Status*) ()
+   from /home/wyx/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#6  0x00007fda33c303d1 in TF_Run () from /home/wyx/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#7  0x00007fda32da7855 in tensorflow::TF_Run_wrapper_helper(TF_Session*, char const*, TF_Buffer const*, tensorflow::gtl::InlinedVector<std::pair<char const*, tagPyArrayObject*>, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) ()
+   from /home/wyx/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#8  0x00007fda32da7ec1 in tensorflow::TF_Run_wrapper(TF_Session*, TF_Buffer const*, tensorflow::gtl::InlinedVector<std::pair<char const*, tagPyArrayObject*>, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) ()
+   from /home/wyx/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#9  0x00007fda32d93d17 in _wrap_TF_Run () from /home/wyx/.local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so
+#10 0x00007fda5a606aa4 in PyEval_EvalFrameEx () from /lib64/libpython2.7.so.1.0
+#11 0x00007fda5a6080bd in PyEval_EvalCodeEx () from /lib64/libpython2.7.so.1.0
+#12 0x00007fda5a594f68 in function_call () from /lib64/libpython2.7.so.1.0
+#13 0x00007fda5a5700b3 in PyObject_Call () from /lib64/libpython2.7.so.1.0
+#14 0x00007fda5a6032f7 in PyEval_EvalFrameEx () from /lib64/libpython2.7.so.1.0
+#15 0x00007fda5a6080bd in PyEval_EvalCodeEx () from /lib64/libpython2.7.so.1.0
+#16 0x00007fda5a60676f in PyEval_EvalFrameEx () from /lib64/libpython2.7.so.1.0
+#17 0x00007fda5a6080bd in PyEval_EvalCodeEx () from /lib64/libpython2.7.so.1.0
+#18 0x00007fda5a60676f in PyEval_EvalFrameEx () from /lib64/libpython2.7.so.1.0
+#19 0x00007fda5a6080bd in PyEval_EvalCodeEx () from /lib64/libpython2.7.so.1.0
+#20 0x00007fda5a60676f in PyEval_EvalFrameEx () from /lib64/libpython2.7.so.1.0
+#21 0x00007fda5a6080bd in PyEval_EvalCodeEx () from /lib64/libpython2.7.so.1.0
+#22 0x00007fda5a60676f in PyEval_EvalFrameEx () from /lib64/libpython2.7.so.1.0
+#23 0x00007fda5a606860 in PyEval_EvalFrameEx () from /lib64/libpython2.7.so.1.0
+#24 0x00007fda5a606860 in PyEval_EvalFrameEx () from /lib64/libpython2.7.so.1.0
+#25 0x00007fda5a6080bd in PyEval_EvalCodeEx () from /lib64/libpython2.7.so.1.0
+#26 0x00007fda5a60676f in PyEval_EvalFrameEx () from /lib64/libpython2.7.so.1.0
+#27 0x00007fda5a6080bd in PyEval_EvalCodeEx () from /lib64/libpython2.7.so.1.0
+#28 0x00007fda5a6081c2 in PyEval_EvalCode () from /lib64/libpython2.7.so.1.0
+#29 0x00007fda5a6215ff in run_mod () from /lib64/libpython2.7.so.1.0
+#30 0x00007fda5a6227be in PyRun_FileExFlags () from /lib64/libpython2.7.so.1.0
+#31 0x00007fda5a623a49 in PyRun_SimpleFileExFlags () from /lib64/libpython2.7.so.1.0
+#32 0x00007fda5a634b9f in Py_Main () from /lib64/libpython2.7.so.1.0
+#33 0x00007fda59861b15 in __libc_start_main () from /lib64/libc.so.6
+#34 0x0000000000400721 in _start ()
+
+The process doesn't respond to Ctrl-C (SIGINT), but can be killed by SIGTERM.
+I'm happy to try other methods to gather more information about the problem.

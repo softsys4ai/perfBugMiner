@@ -1,0 +1,76 @@
+No mechanism for handling user-defined Tensor wrappers in the arguments to `Session.run()`
+
+GitHub issues are for bugs / installation problems / feature requests.
+For general support from the community, see StackOverflow.
+To make bugs and feature requests more easy to find and organize, we close issues that are deemed
+out of scope for GitHub Issues and point people to StackOverflow.
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+Environment info
+Operating System: Ubuntu 14.04
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+-rw-r--r-- 1 root root   322936 Feb 25 17:24 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Feb 25 17:24 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root       19 Feb 25 17:24 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root   383336 Feb 25 17:24 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root   720192 Feb 25 17:24 /usr/local/cuda/lib64/libcudart_static.a
+-rwxr-xr-x 1 root root 61453024 Feb 25 17:38 /usr/local/cuda/lib64/libcudnn.so
+-rwxr-xr-x 1 root root 61453024 Feb 25 17:38 /usr/local/cuda/lib64/libcudnn.so.4
+-rwxr-xr-x 1 root root 61453024 Feb 25 17:38 /usr/local/cuda/lib64/libcudnn.so.4.0.7
+-rw-r--r-- 1 root root 62025862 Feb 25 17:38 /usr/local/cuda/lib64/libcudnn_static.a
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+
+Version: 0.8.0rc0
+
+The output from python -c "import tensorflow; print(tensorflow.version)".
+
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so locally
+0.8.0rc0
+If installed from sources, provide the commit hash:
+Steps to reproduce
+A simple script to illustrate what I'm trying to do is pasted below. The conversion function works as advertised when applying a downstream TensorFlow operator to a registered class. However, it appears that the run function does not try to apply registered conversion functions to the fetches. It seems intuitive that it would try. Adding in this functionality would make libraries built on top of TensorFlow feel a bit more seamless.
+import numpy as np
+import tensorflow as tf
+
+
+# create some dummy class that wraps a tensor
+class SquaredTensor(object):
+    def __init__(self, tensor):
+        self.sq = tf.square(tensor)
+
+
+# create conversion function back to a tensor
+def squared_to_tensor(value, dtype=None, name=None, as_ref=False):
+    return value.sq
+
+# register conversion function
+tf.register_tensor_conversion_function(SquaredTensor, squared_to_tensor)
+
+with tf.Session() as sess:
+    a = np.random.random(1000)
+    b = SquaredTensor(a)
+
+    # works as intended when a tf function is applied to class with conversion function
+    c = tf.sqrt(b)
+    c_eval = sess.run([c])
+    assert np.allclose(a, c_eval)
+
+    # directly evaluating the registered class fails
+    # seems like this should work by trying to apply conversions on run fetches:
+    # b_eval = sess.run([b])
+    # instead we need to explicitly convert:
+    b_eval = sess.run([b.sq])
+    assert np.allclose(a*a, b_eval)
+What have you tried?
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+Trying to fetch a SquaredTensor directly yields:
+TypeError: Fetch argument <__main__.SquaredTensor object at 0x7f63a5fa84d0> of <__main__.SquaredTensor object at 0x7f63a5fa84d0> has invalid type <class '__main__.SquaredTensor'>, must be a string or Tensor. (Can not convert a SquaredTensor into a Tensor or Operation.)

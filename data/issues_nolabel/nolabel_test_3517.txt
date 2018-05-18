@@ -1,0 +1,90 @@
+Error when running distributed MNIST example
+
+Hi I am new to tensorflow and distributed tensorflow. I was trying to run an example from #2726
+Right now I am using tensorflow 0.9 on a cluster of Raspberry Pi3, using slurm to manage the nodes in the cluster, the script is below:
+!/bin/bash
+SBATCH -N 4
+SBATCH --nodelist=piw[25-28]
+node1=piw25
+node2=piw26
+node3=piw27
+node4=piw28
+On node1:
+srun -N 1 -n 1 python mnist_yetanother.py 
+--ps_hosts=$node1:2223 
+--worker_hosts=$node2:2223,$node3:2223,$node4:2223 
+--job_name=ps --task_index=0 &
+On node2:
+srun -N 1 -n 1 python mnist_yetanother.py 
+--ps_hosts=$node1:2223 
+--worker_hosts=$node2:2223,$node3:2223,$node4:2223 
+--job_name=worker --task_index=0 &
+On node3:
+srun -N 1 -n 1 python mnist_yetanother.py 
+--ps_hosts=$node1:2223 
+--worker_hosts=$node2:2223,$node3:2223,$node4:2223 
+--job_name=worker --task_index=1 &
+On node4:
+srun -N 1 -n 1 python mnist_yetanother.py 
+--ps_hosts=$node1:2223 
+--worker_hosts=$node2:2223,$node3:2223,$node4:2223 
+--job_name=worker --task_index=2
+wait
+And this is the error message:
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job ps -> {piw25:2223}
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job worker -> {piw26:2223, piw27:2223, localhost:2223}
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job ps -> {localhost:2223}
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job worker -> {piw26:2223, piw27:2223, piw28:2223}
+I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:202] Started server with target: grpc://localhost:2223
+I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:202] Started server with target: grpc://localhost:2223
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job ps -> {piw25:2223}
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job ps -> {piw25:2223}
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job worker -> {localhost:2223, piw27:2223, piw28:2223}
+I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:202] Started server with target: grpc://localhost:2223
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job worker -> {piw26:2223, localhost:2223, piw28:2223}
+I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:202] Started server with target: grpc://localhost:2223
+Extracting data/train-images-idx3-ubyte.gz
+Extracting data/train-labels-idx1-ubyte.gz
+Extracting data/t10k-images-idx3-ubyte.gz
+Extracting data/t10k-labels-idx1-ubyte.gz
+Initialized!
+Traceback (most recent call last):
+File "mnist_yetanother.py", line 351, in 
+tf.app.run()
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+sys.exit(main(sys.argv))
+File "mnist_yetanother.py", line 310, in main
+with sv.prepare_or_wait_for_session(server.target, config=None) as sess:
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 684, in prepare_or_wait_for_session
+init_feed_dict=self._init_feed_dict, init_fn=self._init_fn)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/session_manager.py", line 176, in prepare_session
+sess.run(init_op, feed_dict=init_feed_dict)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 372, in run
+run_metadata_ptr)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 636, in _run
+feed_dict_string, options, run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 708, in _do_run
+target_list, options, run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 728, in _do_call
+raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: /job:worker/replica:0/task:0/cpu:0 unknown device.
+[[Node: truncated_normal_2_S5 = _Recvclient_terminated=false, recv_device="/job:ps/replica:0/task:0/cpu:0", send_device="/job:worker/replica:0/task:0/cpu:0", send_device_incarnation=-8305312558883263444, tensor_name="edge_62_truncated_normal_2", tensor_type=DT_FLOAT, _device="/job:ps/replica:0/task:0/cpu:0"]]
+srun: error: piw28: task 0: Exited with exit code 1
+E0726 15:08:58.966743325   10814 tcp_client_posix.c:173]     failed to connect to 'ipv4:192.168.50.38:2223': socket error: connection refused
+E tensorflow/core/distributed_runtime/master.cc:202] Master init: Unavailable:
+E0726 15:09:04.384147901   10819 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+E0726 15:09:09.463843371   10814 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+E0726 15:09:18.410973793   10820 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+E0726 15:09:29.903416857   10814 tcp_client_posix.c:173]     failed to connect to 'ipv4:192.168.50.38:2223': socket error: connection refused
+E tensorflow/core/distributed_runtime/master.cc:202] Master init: Unavailable:
+E0726 15:10:00.977546704   10814 tcp_client_posix.c:173]     failed to connect to 'ipv4:192.168.50.38:2223': socket error: connection refused
+E0726 15:10:47.956032631   10814 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+E0726 15:11:48.090654174   10814 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+E0726 15:13:21.260355773   10814 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+E0726 15:15:21.261626939   10814 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+E0726 15:17:21.263101653   10819 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+E0726 15:19:21.264292261   10814 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+E0726 15:21:21.265185108   10820 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+E0726 15:23:21.265939820   10801 tcp_client_posix.c:191]     failed to connect to 'ipv4:192.168.50.38:2223': timeout occurred
+I killed the program after a while. I'm not sure why I would get "[Node: truncated_normal_2_S5 = _Recvclient_terminated=false, recv_device="/job:ps/replica:0/task:0/cpu:0", send_device="/job:worker/replica:0/task:0/cpu:0", send_device_incarnation=-8305312558883263444, tensor_name="edge_62_truncated_normal_2", tensor_type=DT_FLOAT, _device="/job:ps/replica:0/task:0/cpu:0"]" such error message. Searching online does not help too much...
+Any help or advice will be greatly appreciated!

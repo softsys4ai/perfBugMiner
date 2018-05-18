@@ -1,0 +1,132 @@
+Gradient Penalty won't execute
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary (pip install inside conda)
+TensorFlow version (use command below): 1.8.0
+Python version: 2.7.9
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 9.0 / 7
+GPU model and memory: Nvidia Titan X
+Exact command to reproduce:
+
+I use the following code for Gradient Penalty. The code works fine without gradient penalty but with gradient penalty, the code hangs at the mentioned line (mentioned with -------> ). For some reason, incorporating the gradient in the loss term isn't letting me take the gradient. Is it a bug?
+def dropout(inp):
+        return tf.nn.dropout(inp,0.8)
+
+def mnist_svhn(X,noise,reuse=False):
+    with tf.variable_scope("Encoder/mnist-svhn",reuse=reuse,initializer=initializer):
+        h0 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(X,32,5,1)))
+        h1 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h0,64,4,2)))
+        h2 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h1,128,4,1)))
+        h3 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h2,256,4,2)))
+        h4 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h3,256,3,1)))
+        h5 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h4,256,1,1)))
+        h6 = tf.layers.conv2d(h5,256,1,1)
+
+        h7 = tf.concat([h6,noise],axis=-1)
+
+        h8 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h7,256,4,1)))
+        h9 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h8,128,4,2)))
+        h10 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h9,64,4,1)))
+        h11 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h10,32,4,2)))
+        h12 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h11,3,5,1)))
+        h13 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h12,32,1,1)))
+        h14 = tf.layers.conv2d_transpose(h13,3,1,1,activation=tf.nn.sigmoid)
+
+    print h14
+
+def svhn_mnist(X,noise,reuse=False):
+    with tf.variable_scope("Encoder/svhn-mnist",reuse=reuse,initializer=initializer):
+        h0 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(X,32,5,1)))
+        h1 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h0,64,4,2)))
+        h2 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h1,128,4,1)))
+        h3 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h2,256,4,2)))
+        h4 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h3,256,4,1)))
+        h5 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h4,256,1,1)))
+        h6 = tf.layers.conv2d(h5,256,1,1)
+
+        h7 = tf.concat([h6,noise],axis=-1)
+
+        h8 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h7,256,3,1)))
+        h9 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h8,128,4,2)))
+        h10 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h9,64,4,1)))
+        h11 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h10,32,4,2)))
+        h12 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h11,32,5,1)))
+        h13 = lrelu(tf.layers.batch_normalization(tf.layers.conv2d_transpose(h12,32,1,1)))
+        h14 = tf.layers.conv2d_transpose(h13,1,1,1,activation=tf.nn.sigmoid)
+
+    return h14
+
+def discriminator(X,y,reuse=False):
+    with tf.variable_scope("Discriminator",reuse=reuse,initializer=initializer):
+        d0 = dropout(lrelu(tf.layers.conv2d(X,32,5,1)))
+        d1 = dropout(lrelu(tf.layers.batch_normalization(tf.layers.conv2d(d0,64,4,2))))
+        d2 = dropout(lrelu(tf.layers.batch_normalization(tf.layers.conv2d(d1,128,4,1))))
+        d3 = dropout(lrelu(tf.layers.batch_normalization(tf.layers.conv2d(d2,256,4,2))))
+        d4 = dropout(lrelu(tf.layers.batch_normalization(tf.layers.conv2d(d3,512,4,1))))
+
+        h0 = dropout(lrelu(tf.layers.conv2d(y,32,5,1)))
+        h1 = dropout(lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h0,64,4,2))))
+        h2 = dropout(lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h1,128,4,1))))
+        h3 = dropout(lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h2,256,4,2))))
+        h4 = dropout(lrelu(tf.layers.batch_normalization(tf.layers.conv2d(h3,512,3,1))))
+
+        final = tf.concat([d4,h4],axis=-1)
+
+        f0 = dropout(lrelu(tf.layers.conv2d(final,1024,1,1)))
+        f1 = dropout(lrelu(tf.layers.conv2d(f0,1024,1,1)))
+        f2 = dropout(tf.layers.conv2d(f1,1,1,1))
+
+    return tf.reshape(f2,[-1,1])
+
+def sig_loss(a,b):
+    return tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=a,labels=b),axis=1)
+
+def get_vars(name):
+    return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,scope=name)
+
+def l2_loss(a,b):
+    return tf.reduce_sum(tf.square(a-b),axis=1)
+
+X_mnist = tf.placeholder(tf.float32,[None,28,28,1])
+X_svhn = tf.placeholder(tf.float32,[None,32,32,3])
+
+epsilon = tf.placeholder(tf.float32,[None,1])
+
+z_mnist = tf.placeholder(tf.float32,[None,1,1,32])
+z_svhn = tf.placeholder(tf.float32,[None,1,1,32])
+
+Xtr_svhn = mnist_svhn(X_mnist,z_mnist)
+Xtr_mnist = svhn_mnist(X_svhn,z_svhn)
+
+sv = discriminator(X_svhn,Xtr_mnist)
+mn = discriminator(Xtr_svhn,X_mnist,True)
+
+G_opt = tf.train.AdamOptimizer(learning_rate=1e-4,beta1=0.5)
+D_opt = tf.train.AdamOptimizer(learning_rate=1e-4,beta1=0.5)
+
+x_hat = epsilon * X_svhn + (1-epsilon) * Xtr_svhn
+grad_1 = tf.gradients(discriminator(x_hat,svhn_mnist(x_hat,z_svhn,True),True),x_hat)[0]
+x_hat = epsilon * X_mnist + (1-epsilon) * Xtr_mnist
+grad_2 = tf.gradients(discriminator(mnist_svhn(x_hat,z_mnist,True),x_hat,True),x_hat)[0]
+
+slopes_1 = tf.sqrt(tf.reduce_sum(tf.square(grad_1),reduction_indices=-1))
+slopes_2 = tf.sqrt(tf.reduce_sum(tf.square(grad_2),reduction_indices=-1))
+grad_penalty = tf.reduce_mean((slopes_1 - 1.)**2) * 5
+grad_penalty += tf.reduce_mean((slopes_2 - 1.)**2) * 5
+
+disc_loss = tf.reduce_mean(sig_loss(sv,tf.ones_like(sv))) + \
+            tf.reduce_mean(sig_loss(mn,tf.zeros_like(mn))) + grad_penalty
+
+gen_loss = tf.reduce_mean(sig_loss(mn,tf.ones_like(mn))) + \
+            tf.reduce_mean(sig_loss(sv,tf.zeros_like(sv)))
+
+g_grad = G_opt.compute_gradients(gen_loss,var_list=get_vars("Encoder"),colocate_gradient_with_ops=True)
+-------> d_grad = D_opt.compute_gradients(disc_loss,var_list=get_vars("Discriminator"),colocate_gradient_with_ops=True)
+
+d_step = D_opt.apply_gradients(d_grad)
+g_step = G_opt.apply_gradients(g_grad)

@@ -1,0 +1,143 @@
+bucket_by_sequence_length does not dequeue all items given to it from another queue
+
+I've got some SequenceExamples gzipped in a file that I read with TFRecordReader.  I then enqueue those serialized SequenceExamples onto a RandomShuffleQueue.  Then, I dequeue the RandomShuffleQueue, get a number I need from the serialized SequenceExample, and pass both the number and the SequenceExample into bucket_by_sequence_length.
+Since there are 100 items stored in the file, I expected to get 20 batches of 5.  Instead, I'm getting 17 batches of 5, with many of the smallest input_length items missing.
+My guess is that the top queue on batch_by_sequence_length is looking at its bucket queues, finding that only very small and very large inputs remain, and so refuses to put them together for the final batch(es).  I was hoping that by setting allow_smaller_final_batch to True, I could avoid that problem, but I guess not.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+GitHub issue #5609 (the discussion at the very bottom of this thread seems to be the only place on the web [as of 7 Mar 2017] with a discussion on how to actually use bucket_by_sequence_length)
+Environment info
+Operating System:  Fedora 24
+Installed version of CUDA and cuDNN:  8.0.44, 5.1.5
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+-rw-r--r-- 1 root root   558720 Nov 24 09:02 libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Nov 24 09:02 libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root       19 Nov 24 09:02 libcudart.so.8.0 -> libcudart.so.8.0.44
+-rwxr-xr-x 1 root root   415432 Nov 24 09:02 libcudart.so.8.0.44
+-rw-r--r-- 1 root root   775162 Nov 24 09:02 libcudart_static.a
+-rwxr-xr-x 1 root root 79337624 Nov 24 09:05 libcudnn.so
+-rwxr-xr-x 1 root root 79337624 Nov 24 09:05 libcudnn.so.5
+-rwxr-xr-x 1 root root 79337624 Nov 24 09:05 libcudnn.so.5.1.5
+-rw-r--r-- 1 root root 69756172 Nov 24 09:05 libcudnn_static.a
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:  https://ci.tensorflow.org/view/Nightly/job/nightly-matrix-linux-gpu/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON3,label=gpu-linux/lastSuccessfulBuild/artifact/pip_test/whl/tensorflow_gpu-1.0.0-cp35-cp35m-linux_x86_64.whl <- installed on 3 Mar 2017
+The output from python3 -c "import tensorflow; print(tensorflow.__version__)".  1.0.0
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Save the following code as test_bucket.py, download other.gz into the same directory, then run
+python3 test_bucket.py --intput_file other.gz --run_type batches
+import argparse
+import tensorflow as tf
+
+
+LAST_RUNNER = 'batch_dequeue'
+CONTEXT_FEATURES = {
+    'aas_length': tf.FixedLenFeature([], dtype=tf.int64),
+    'funcs_length': tf.FixedLenFeature([], dtype=tf.int64)}
+SEQUENCE_FEATURES = {
+    'aas': tf.FixedLenSequenceFeature([], dtype=tf.int64),
+    'funcs': tf.FixedLenSequenceFeature([], dtype=tf.int64)}
+
+
+def read_aas_length(serialized):
+    """Read aas_length"""
+    context_parsed, _ = tf.parse_single_sequence_example(
+        serialized=serialized,
+        context_features=CONTEXT_FEATURES,
+        sequence_features=SEQUENCE_FEATURES)
+    return context_parsed['aas_length']
+
+
+def main(args):
+    with tf.Session() as sess:
+        # filename_queue is FIFOQueue
+        filename_queue = tf.train.string_input_producer(
+            [args.input_file],
+            num_epochs=1,
+            name='tfrecord_filename_queue')
+        reader = tf.TFRecordReader(
+            name='tfrecord_reader',
+            options=tf.python_io.TFRecordOptions(
+                tf.python_io.TFRecordCompressionType.GZIP))
+
+        _, next_raw = reader.read(
+            filename_queue,
+            name='read_records')
+        random_raws = tf.RandomShuffleQueue(
+            capacity=50,
+            min_after_dequeue=0,
+            dtypes=tf.string,
+            # http://stackoverflow.com/questions/42119238/tensorflow-fifoqueues-dequeuemany-and-dequeueupto-require-the-components-to-ha
+            shapes=[()],
+            name='randomize_records')
+        enqueue_random_raws = random_raws.enqueue(next_raw)
+
+        serialized_example_dq = random_raws.dequeue()
+        aas_length = read_aas_length(serialized_example_dq)
+        if args.run_type == 'batches':
+            batch_max_lens, batches = \
+                tf.contrib.training.bucket_by_sequence_length(
+                    tf.to_int32(aas_length),
+                    [serialized_example_dq],
+                    5,
+                    [100, 200, 300, 400, 500, 1000],
+                    allow_smaller_final_batch=True,
+                    name=LAST_RUNNER)
+
+        init = tf.global_variables_initializer()
+        sess.run(init)
+        # necessary when num_epochs in string_input_producer is not None
+        sess.run(tf.local_variables_initializer())
+
+        random_records_runner = tf.train.QueueRunner(
+            random_raws,
+            [enqueue_random_raws] * 4)
+        coord = tf.train.Coordinator()
+        tf.train.add_queue_runner(random_records_runner)
+        threads = tf.train.start_queue_runners(coord=coord)
+        working = True
+        i = 0
+
+        if args.run_type == 'batches':
+            fetch = {
+                'batch_max_lens': batch_max_lens,
+                'batches': batches}
+
+        while working:
+            try:
+                i += 1
+                if args.run_type == 'batches':
+                    fetched = sess.run(fetch)
+                    print(i, fetched['batch_max_lens'])
+                else:
+                    print(i, sess.run(aas_length))
+            except tf.errors.OutOfRangeError as err:
+                coord.request_stop()
+                working = False
+
+        coord.join(threads)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--input_file',
+        type=str,
+        required=True,
+        help='Serialized file path... ?')
+    parser.add_argument(
+        '--run_type',
+        type=str,
+        default='',
+        help='Choose "batches" to run in batches')
+    args = parser.parse_args()
+    main(args)
+What other attempted solutions have you tried?
+I've tried collecting relevant data in the while loop and then feeding them into a placeholder for batch_by_sequence_length.  That yielded an error message about expecting a string but getting a _Message, or something to that effect.
+I've also looked at the node_def.name of the OutOfRangeError.  It only ever came up with the top queue created by bucket_by_sequence_length.
+Somewhat related, calling bucket_by_sequence_length but not fetching its outputs (so taking the function call out of the if block and running the code without the --run_type flag) still caused the list of input lengths to stop at 99 (not 100, as I would expect).
+I've also observed that the missing smaller numbers will show up if num_epochs on the TFRecordReader is set to 2, although they only appear once.
+There were other failed attempts, but I don't recall their details.
+Logs or other output that would be helpful
+output_batches.txt:  Example output of not getting back enough batches.
+output_list.txt:  Example output of printing out all lengths (note that some lengths are less than 100, but there are no lengths in the batches less than 100).

@@ -1,0 +1,115 @@
+Android: No OpKernel was registered to support Op 'ExtractImagePatches'
+
+Hi, I have read (#9763 =>) #9476 #5764 #8486 #6260 #5921 (#1269 This one is too old to be helpful).
+I was trying to use YOLOv2 on Android TensorFlow. I followed the exact same procedure stated in the README that successfully got the tiny-yolo-voc model running on my phones, the only different in the code is the filename. But I got the following error message and the app die.
+FATAL EXCEPTION: inference
+Process: org.tensorflow.demo, PID: 31154
+java.lang.IllegalArgumentException: No OpKernel was registered to support Op 'ExtractImagePatches' with these attrs.  Registered devices: [CPU], Registered kernels: <no registered kernels>
+                                                                     
+[[Node: ExtractImagePatches = ExtractImagePatches[T=DT_FLOAT, ksizes=[1, 2, 2, 1], padding="VALID", rates=[1, 1, 1, 1], strides=[1, 2, 2, 1]](concat)]]
+at org.tensorflow.Session.run(Native Method)
+at org.tensorflow.Session.access$100(Session.java:48)
+at org.tensorflow.Session$Runner.runHelper(Session.java:295)
+at org.tensorflow.Session$Runner.run(Session.java:245)
+at org.tensorflow.contrib.android.TensorFlowInferenceInterface.run(TensorFlowInferenceInterface.java:142)
+at org.tensorflow.demo.TensorFlowYoloDetector.recognizeImage(TensorFlowYoloDetector.java:165)
+at org.tensorflow.demo.DetectorActivity$3.run(DetectorActivity.java:313)
+at android.os.Handler.handleCallback(Handler.java:755)
+at android.os.Handler.dispatchMessage(Handler.java:95)
+at android.os.Looper.loop(Looper.java:156)
+at android.os.HandlerThread.run(HandlerThread.java:61)
+
+I also tried Yolo9000, it works (actually died because I didnot provide the matching label/name set, but it didnot yield the same error).
+
+I tried optimize_for_inference (https://petewarden.com/2016/09/27/tensorflow-for-mobile-poets/amp/), but the new pb file still have "ExtractImagePatches" op, so it didn't work for me.
+
+$ grep "ExtractImagePatches" *
+Binary file graph-yolo-voc.pb matches
+Binary file opt.pb matches
+
+
+I generated ops_to_register.h (shown below) and put it in tensorflow/tensorflow/core/framework dir (#8486), and it didn't work for me.
+
+#ifndef OPS_TO_REGISTER
+#define OPS_TO_REGISTER
+constexpr inline bool ShouldRegisterOp(const char op[]) {
+  return false
+     || (strcmp(op, "BiasAdd") == 0)
+     || (strcmp(op, "ConcatV2") == 0)
+     || (strcmp(op, "Const") == 0)
+     || (strcmp(op, "Conv2D") == 0)
+     || (strcmp(op, "ExtractImagePatches") == 0)
+     || (strcmp(op, "Identity") == 0)
+     || (strcmp(op, "MaxPool") == 0)
+     || (strcmp(op, "Maximum") == 0)
+     || (strcmp(op, "Mul") == 0)
+     || (strcmp(op, "NoOp") == 0)
+     || (strcmp(op, "Pad") == 0)
+     || (strcmp(op, "Placeholder") == 0)
+     || (strcmp(op, "RealDiv") == 0)
+     || (strcmp(op, "Sub") == 0)
+     || (strcmp(op, "_Recv") == 0)
+     || (strcmp(op, "_Send") == 0)
+  ;
+}
+#define SHOULD_REGISTER_OP(op) ShouldRegisterOp(op)
+
+
+    namespace {
+      constexpr const char* skip(const char* x) {
+        return (*x) ? (*x == ' ' ? skip(x + 1) : x) : x;
+      }
+
+      constexpr bool isequal(const char* x, const char* y) {
+        return (*skip(x) && *skip(y))
+                   ? (*skip(x) == *skip(y) && isequal(skip(x) + 1, skip(y) + 1))
+                   : (!*skip(x) && !*skip(y));
+      }
+
+      template<int N>
+      struct find_in {
+        static constexpr bool f(const char* x, const char* const y[N]) {
+          return isequal(x, y[0]) || find_in<N - 1>::f(x, y + 1);
+        }
+      };
+
+      template<>
+      struct find_in<0> {
+        static constexpr bool f(const char* x, const char* const y[]) {
+          return false;
+        }
+      };
+    }  // end namespace
+    constexpr const char* kNecessaryOpKernelClasses[] = {
+"BiasOp<CPUDevice, float>",
+"ConcatV2Op<CPUDevice, float>",
+"ConstantOp",
+"Conv2DOp<CPUDevice, float>",
+"ExtractImagePatchesOp<CPUDevice, float>",
+"IdentityOp",
+"MaxPoolingOp<CPUDevice, float>",
+"BinaryOp<CPUDevice, functor::maximum<float>>",
+"BinaryOp<CPUDevice, functor::mul<float>>",
+"NoOp",
+"PadOp<CPUDevice, float>",
+"PlaceholderOp",
+"BinaryOp<CPUDevice, functor::div<float>>",
+"BinaryOp<CPUDevice, functor::sub<float>>",
+"RecvOp",
+"SendOp",
+};
+#define SHOULD_REGISTER_OP_KERNEL(clz) (find_in<sizeof(kNecessaryOpKernelClasses) / sizeof(*kNecessaryOpKernelClasses)>::f(clz, kNecessaryOpKernelClasses))
+
+#define SHOULD_REGISTER_OP_GRADIENT false
+#endif
+
+
+
+I added tensorflow/core/kernels/extract_image_patches_op.cc to tf_op_files.txt(#5764), and run bazel like this $ bazel build -c opt //tensorflow/examples/android:tensorflow_demo --copt="-DSELECTIVE_REGISTRATION" --define ANDROID_TYPES=__ANDROID_TYPES_FULL__ (#9476), still, didn't work for me.
+
+I am using ubuntu 16.04,
+TensorFlow installed from (I think I did not install because I just pip list and tensorflow was not on that list. I just follow https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/android , and every thing works for tiny-yolo-voc),
+[bazel release 0.4.5],
+my phone is running Android 7.0
+Thanks,
+CHL

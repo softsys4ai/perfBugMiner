@@ -1,0 +1,103 @@
+Bazel error: building tensorflow 1.1 from source (CPU only)
+
+Problem description
+The Docker build script below fails to build TensorFlow 1.1 from source with the following error messages:
+ERROR: /tensorflow/WORKSPACE:3:1: //external:io_bazel_rules_closure: no such attribute 'urls' in 'http_archive' rule.
+ERROR: /tensorflow/WORKSPACE:3:1: //external:io_bazel_rules_closure: missing value for mandatory attribute 'url' in 'http_archive' rule.
+ERROR: com.google.devtools.build.lib.packages.BuildFileContainsErrorsException: error loading package '': Encountered error while reading extension file 'closure/defs.bzl': no such package '@io_bazel_rules_closure//closure': error loading package 'external': Could not load //external package.
+
+Complete build log:
+$ docker start tensorflow-builder
+$ docker attach tensorflow-builder
+root@8eef137e3404:/tensorflow# git fetch -fapv
+From https://github.com/tensorflow/tensorflow
+ = [up to date]      0.6.0      -> origin/0.6.0
+ = [up to date]      docs-republishing -> origin/docs-republishing
+ = [up to date]      estimator_windows -> origin/estimator_windows
+ = [up to date]      fix-makefile-build -> origin/fix-makefile-build
+ = [up to date]      master     -> origin/master
+ = [up to date]      r0.10      -> origin/r0.10
+ = [up to date]      r0.11      -> origin/r0.11
+ = [up to date]      r0.12      -> origin/r0.12
+ = [up to date]      r0.7       -> origin/r0.7
+ = [up to date]      r0.8       -> origin/r0.8
+ = [up to date]      r0.9       -> origin/r0.9
+ = [up to date]      r1.0       -> origin/r1.0
+ = [up to date]      r1.1       -> origin/r1.1
+ = [up to date]      rn_delete  -> origin/rn_delete
+root@8eef137e3404:/tensorflow# git checkout -b r1.1 origin/r1.1
+Switched to a new branch 'r1.1'
+root@8eef137e3404:/tensorflow# git pull
+Already up-to-date.
+root@8eef137e3404:/tensorflow# ./configure
+Please specify the location of python. [Default is /usr/local/bin/python]: 
+Please specify optimization flags to use during compilation when bazel option "--config=opt" is specified [Default is -march=native]: 
+Do you wish to use jemalloc as the malloc implementation? [Y/n] 
+jemalloc enabled
+Do you wish to build TensorFlow with Google Cloud Platform support? [y/N] 
+No Google Cloud Platform support will be enabled for TensorFlow
+Do you wish to build TensorFlow with Hadoop File System support? [y/N] 
+No Hadoop File System support will be enabled for TensorFlow
+Do you wish to build TensorFlow with the XLA just-in-time compiler (experimental)? [y/N] 
+No XLA support will be enabled for TensorFlow
+Found possible Python library paths:
+  /usr/lib/python3/dist-packages
+  /usr/local/lib/python3.5/dist-packages
+Please input the desired Python library path to use.  Default is [/usr/lib/python3/dist-packages]
+
+Using python library path: /usr/lib/python3/dist-packages
+Do you wish to build TensorFlow with OpenCL support? [y/N] 
+No OpenCL support will be enabled for TensorFlow
+Do you wish to build TensorFlow with CUDA support? [y/N] 
+No CUDA support will be enabled for TensorFlow
+Configuration finished
+.
+INFO: Starting clean (this may take a while). Consider using --expunge_async if the clean takes more than several minutes.
+..........
+ERROR: /tensorflow/WORKSPACE:3:1: //external:io_bazel_rules_closure: no such attribute 'urls' in 'http_archive' rule.
+ERROR: /tensorflow/WORKSPACE:3:1: //external:io_bazel_rules_closure: missing value for mandatory attribute 'url' in 'http_archive' rule.
+ERROR: com.google.devtools.build.lib.packages.BuildFileContainsErrorsException: error loading package '': Encountered error while reading extension file 'closure/defs.bzl': no such package '@io_bazel_rules_closure//closure': error loading package 'external': Could not load //external package.
+
+Dockerfile
+FROM ubuntu:16.04
+
+# https://github.com/kubernetes/test-infra/blob/master/images/pull-kubernetes-bazel/Dockerfile
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    openjdk-8-jdk \
+    pkg-config \
+    zip \
+    unzip \
+    zlib1g-dev \
+    bash-completion \
+    git \
+    wget \
+    python && \
+    apt-get clean
+
+ENV BAZEL_VERSION 0.3.2
+RUN wget "https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/bazel_${BAZEL_VERSION}-linux-x86_64.deb" && \
+    dpkg -i "bazel_${BAZEL_VERSION}-linux-x86_64.deb" && \
+    rm "bazel_${BAZEL_VERSION}-linux-x86_64.deb"
+
+# Fetch TensorFlow source code and build dependencies
+
+RUN apt-get install -y --no-install-recommends git python3-numpy swig python3-dev python3-wheel && \
+    apt-get install -y --no-install-recommends python3-setuptools rsync && \
+    apt-get clean && \
+    ln -s /usr/bin/python3 /usr/local/bin/python && \
+    git clone --quiet --recurse-submodules https://github.com/tensorflow/tensorflow.git /tensorflow
+WORKDIR /tensorflow
+
+# Steps to build:
+#
+# host$ docker build -t bazel .
+# host$ docker run -it --name bazel-builder bazel
+#
+# bazel-builder$ ./configure (press enter repeatedly)
+# bazel-builder$ bazel build -c opt --copt=-mavx2 //tensorflow/tools/pip_package:build_pip_package
+# bazel-builder$ bazel-bin/tensorflow/tools/pip_package/build_pip_package /tmp/tensorflow_pkg
+# bazel-builder$ exit
+#
+# host$ docker cp bazel-build:/tmp/tensorflow_pkg/tensorflow-0.11.0-py3-none-any.whl /tmp

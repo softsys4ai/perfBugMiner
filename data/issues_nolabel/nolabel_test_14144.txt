@@ -1,0 +1,20 @@
+Eager: Device Placement of Constant Eager Tensors
+
+When eager execution is enabled on 64bit machine, the following code snippet causes an error:
+with tf.device("/gpu:0"):
+  tf.split(np.array([1.0, 2.0]), np.array([1, 1]))`
+Tensors on conflicting devices: cannot compute SplitV as input #1 was expected to be on 
+/job:localhost/replica:0/task:0/device:CPU:0 but is actually on 
+/job:localhost/replica:0/task:0/device:GPU:0 (operation running on 
+/job:localhost/replica:0/task:0/device:GPU:0) Tensors can be copied explicitly using .gpu() or .cpu(),
+or transparently copied by using tfe.enable_eager_execution(tfe.DEVICE_PLACEMENT_SILENT).
+Copying tensors between devices may slow down your model [Op:SplitV] name: split
+
+There are a couple of ways to fix this:
+with tf.device("/gpu:0"):
+  tf.split(np.array([1.0, 2.0]), np.array([1, 1], dtype=np.int32))`
+or
+with tf.device("/gpu:0"):
+  tf.split(np.array([1.0, 2.0]), [1, 1])`
+The error is thrown for the following reason. Kernel of operation split expects the num_or_size_splits argument to be in host memory (CPU RAM). For a tensor to be placed in host memory, it needs to be either created in the CPU context (e.g. with tf.device("/cpu:0")) or have dtype of int32.  numpy defaults to creating int64 tensors on 64bit machines. Hence the fixes - either explicitly request int32 dtype from numpy or use python list (tensorflow defaults to int32 for python sequences of small integers)
+Another, more global, workaround is to enable automatic copying of tensors between devices as described in #14133..

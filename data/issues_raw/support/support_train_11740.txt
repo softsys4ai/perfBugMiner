@@ -1,0 +1,94 @@
+several Session , Models in one file
+
+so I am using CNN for fave detection and also I have CNN for age classification . but it seems two network doesn't work together.
+my code is :
+def main():
+
+    minsize = 20
+    threshold = [0.6, 0.7, 0.7]
+    factor = 0.709
+
+
+    print('Creating networks and loading parameters')
+   
+
+
+    sess= tf.Session()
+    with tf.variable_scope("MTCNN"):
+
+            pnet, rnet, onet = FD2.create_mtcnn(sess, None,"MTCNN")
+    writer = tf.summary.FileWriter("./graphs", sess.graph)
+      
+    img = cv2.imread('./test1.jpg')
+    img_matlab = img.copy()
+
+    # BGR -> RGB
+    tmp = img_matlab[:, :, 2].copy()
+    img_matlab[:, :, 2] = img_matlab[:, :, 0]
+    img_matlab[:, :, 0] = tmp
+
+    boundingboxes, points = FD2.detect_face(img_matlab, minsize, pnet, rnet, onet, threshold, factor)
+    points=np.reshape(points.T, (-1,10))
+
+    boxes=boundingboxes    
+    x1 = boxes[:, 0]
+    y1 = boxes[:, 1]
+    x2 = boxes[:, 2]
+    y2 = boxes[:, 3]
+
+
+    with sess.as_default():
+    
+    
+        label_list_age = AGE_LIST
+        nlabels_age = len(label_list_age)
+
+        model_fn_age = select_model(FLAGS.model_type_age)
+        images = tf.placeholder(tf.float32, [None, RESIZE_FINAL, RESIZE_FINAL, 3])
+        soft = tf.placeholder(tf.float32, [None, RESIZE_FINAL, RESIZE_FINAL, 3])
+
+        logits_age = model_fn_age(nlabels_age, images, 1, False)
+        init = tf.global_variables_initializer()
+        requested_step = FLAGS.requested_step if FLAGS.requested_step else None
+        checkpoint_path_age = '%s' % (FLAGS.model_dir_age)
+        model_checkpoint_path_age, global_step_age = get_checkpoint(checkpoint_path_age, requested_step, FLAGS.checkpoint_age)
+       
+        saver = tf.train.Saver()
+        saver.restore(sess, model_checkpoint_path_age)
+        softmax_output_age = tf.nn.softmax(logits_age)
+        coder= ImageCoder()
+
+    #with tf.Session as sess:
+
+       
+        
+        for i in range(x1.shape[0]):
+
+       
+            upper_cut = [min(img.shape[0], int(y2[i]) ), min(img.shape[1], int(x2[i]))]
+            lower_cut = [max(int(y1[i]), 0), max(int(x1[i]) , 0)]
+            age_image = img[lower_cut[0]:upper_cut[0], lower_cut[1]:upper_cut[1]]
+            best_choice_age= classify_age(sess, label_list_age, softmax_output_age, coder, boxes,age_image )
+            age.append(best_choice_age)
+   
+        img = markLandmark(img,points)
+        img = drawBoxes(img, boundingboxes)
+
+        cv2.imshow('window',img)
+        cv2.waitKey(0)
+
+        sess.close()
+
+if __name__ == '__main__':
+    main()
+
+
+and the  error is :
+  File "/home/sepid/tf/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2336, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/sepid/tf/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1228, in __init__
+    self._traceback = _extract_stack()
+
+NotFoundError (see above for traceback): Key MTCNN/rnet/conv5-2/weights not found in checkpoint
+	 [[Node: save/RestoreV2_45 = RestoreV2[dtypes=[DT_FLOAT], _device="/job:localhost/replica:0/task:0/cpu:0"](_recv_save/Const_0, save/RestoreV2_45/tensor_names, save/RestoreV2_45/shape_and_slices)]]
+	 [[Node: save/RestoreV2_18/_169 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_28_save/RestoreV2_18", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]

@@ -1,0 +1,15 @@
+A replacement for tf.cond
+
+This is a prototype for #9188.
+Two new ops, Mux and Demux are introduced by this patch. Mux op takes [i, input_0, input_1, ...] as input, and produces input_i as output. It is meant to replace tf.case and tf.cond. Demux op is a generalized version of Switch. It takes [i, input] as input, and produces [output_0, ..., output_N] where output_i is set to input and other outputs are dead.
+This patch also contains an algorithm that rewrites the graph before execution so that Mux ops are efficient just like tf.cond.
+Example:
+i = tf.placeholder(tf.int32, [])
+a = tf.placeholder(tf.int32, [])
+b = tf.placeholder(tf.int32, [])
+c = tf.select(i, [a+1, b*2]) # Mux op is renamed to select in python api.
+
+sess.run(c, feed_dict={i: 0, a: 1, b: 2}) # returns 2, trace to see that "Mul" node is not executed.
+sess.run(c, feed_dict={i: 1, a: 1, b: 2}) # returns 4, trace to see that "Add" node is not executed.
+
+I wouldn't be surprised if this patch causes problem somewhere. In particular, the graph rewriting algorithm may produce valid but cyclic graph. It also lacks proper handling of special nodes like Enter NextIteration etc. However, I would like to know if this approach is promising. I can work on this if there is no fundamental difficulty.

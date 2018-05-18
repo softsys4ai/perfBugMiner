@@ -1,0 +1,143 @@
+Segfault Custom Op using KenLM
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug, a feature request, or a significant problem with documentation (for small docs fixes please send a PR instead).
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.8.0
+Python version: 3.5.2
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 9.0 / 7
+GPU model and memory: TitanX
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+When I use KenLM in my C++ test suite it runs just fine but when I try to use it from inside a custom op I get a Segmentation Fault. Any help would be greatly appreciated. Thx!
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+#include "lm/model.hh"
+
+#include "ctc_beam.hh"
+
+#ifndef CTC_SCORER_HH
+#define CTC_SCORER_HH
+
+class CTCBeamScorer {
+    public:
+    CTCBeamScorer(std::string lm_path, float alpha, float beta) : alpha_(alpha), beta_(beta) {
+        model_ = lm::ngram::LoadVirtual(lm_path.c_str());
+        vocabulary_ = &model_->BaseVocabulary();
+    }
+    ~CTCBeamScorer(void) {
+        delete model_;
+    }
+
+    void expand_beam(const CTCBeam* beam, int from_label, int to_label) { }
+
+    void expand_beam_end(CTCBeam* beam) const { }
+
+    float get_beam_score(const CTCBeam* beam) const { return 0.0f; }
+
+    void initialize_beam(CTCBeam* beam) const { }
+
+    private:
+    const float alpha_ = 0.0;
+    const float beta_ = 0.0;
+    lm::base::Model* model_ = nullptr;
+    const lm::base::Vocabulary* vocabulary_ = nullptr;
+};
+
+#endif // CTC_SCORER_HH
+THIS WORKS
+#include <gtest/gtest.h>
+
+#include "../src/ctc_scorer.hh"
+
+TEST(ctc_scorer_tests, score) {
+    CTCBeamScorer* scorer = nullptr;
+    try {
+        scorer = new CTCBeamScorer("/tmp/test.mmap", 0.0f, 0.0f);
+        ASSERT_FALSE(scorer == nullptr);
+    } catch(const std::exception &e) {
+        std::cerr << e.what() << std::endl;
+    }
+
+    delete scorer;
+}
+g++ -Wall -O3 -std=c++11 -g -I/home/thomas/projects/thomas/ops/thirdparty/kenlm -DKENLM_MAX_ORDER=6 -DHAVE_ZLIB=1 -DHAVE_BZLIB=1 -DHAVE_XZLIB=1 -o tests/test_runner tests/test_runner.cc tests/ctc_scorer_tests.cc src/ctc_scorer.cc thirdparty/kenlm/util/string_piece.o thirdparty/kenlm/util/exception.o thirdparty/kenlm/util/spaces.o thirdparty/kenlm/util/pool.o thirdparty/kenlm/util/file_piece.o thirdparty/kenlm/util/usage.o thirdparty/kenlm/util/parallel_read.o thirdparty/kenlm/util/bit_packing.o thirdparty/kenlm/util/float_to_string.o thirdparty/kenlm/util/ersatz_progress.o thirdparty/kenlm/util/integer_to_string.o thirdparty/kenlm/util/mmap.o thirdparty/kenlm/util/murmur_hash.o thirdparty/kenlm/util/read_compressed.o thirdparty/kenlm/util/scoped.o thirdparty/kenlm/util/file.o thirdparty/kenlm/lm/value_build.o thirdparty/kenlm/lm/config.o thirdparty/kenlm/lm/model.o thirdparty/kenlm/lm/trie.o thirdparty/kenlm/lm/sizes.o thirdparty/kenlm/lm/search_hashed.o thirdparty/kenlm/lm/lm_exception.o thirdparty/kenlm/lm/virtual_interface.o thirdparty/kenlm/lm/binary_format.o thirdparty/kenlm/lm/trie_sort.o thirdparty/kenlm/lm/vocab.o thirdparty/kenlm/lm/search_trie.o thirdparty/kenlm/lm/read_arpa.o thirdparty/kenlm/lm/quantize.o thirdparty/kenlm/lm/bhiksha.o thirdparty/kenlm/util/double-conversion/strtod.o thirdparty/kenlm/util/double-conversion/fast-dtoa.o thirdparty/kenlm/util/double-conversion/double-conversion.o thirdparty/kenlm/util/double-conversion/cached-powers.o thirdparty/kenlm/util/double-conversion/bignum.o thirdparty/kenlm/util/double-conversion/fixed-dtoa.o thirdparty/kenlm/util/double-conversion/bignum-dtoa.o thirdparty/kenlm/util/double-conversion/diy-fp.o -lgtest -lpthread -lboost_program_options -lboost_system -lboost_thread -lz -lbz2 -llzma
+
+THIS DOES NOT WORK
+#include "tensorflow/core/framework/op.h"
+#include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/shape_inference.h"
+
+#include "ctc_scorer.hh"
+
+using namespace tensorflow;
+
+REGISTER_OP("CTCKenLMBeamSearchDecoder")
+    .Input("scores: float32")
+    .Output("output: float32")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* context) {
+      context->set_output(0, context->input(0));
+      return Status::OK();
+    });
+
+class CTCKenLMBeamSearchDecoderOp : public OpKernel {
+    public:
+    explicit CTCKenLMBeamSearchDecoderOp(OpKernelConstruction* context) : OpKernel(context) {
+        CTCBeamScorer* scorer = nullptr;
+        try {
+            scorer = new CTCBeamScorer("/tmp/test.mmap", 0.0f, 0.0f);
+        } catch(const std::exception &e) {
+            std::cerr << e.what() << std::endl;
+        }
+
+        delete scorer;
+    }
+
+    ~CTCKenLMBeamSearchDecoderOp(void) {
+        
+    }
+
+    void Compute(OpKernelContext* context) override {
+        // Grab the input tensor
+        const Tensor& scores_tensor = context->input(0);
+        auto scores = scores_tensor.tensor<float, 3>();
+
+        // Create an output tensor
+        Tensor* output_tensor = NULL;
+        OP_REQUIRES_OK(context, context->allocate_output(0, scores_tensor.shape(), &output_tensor));
+        auto output = output_tensor->tensor<float, 3>();
+
+        // Copy the scores to the output.
+        const auto scores_shape = scores_tensor.shape();
+        for (unsigned int x_idx = 0; x_idx < scores_shape.dim_size(0); x_idx++) {
+            for (unsigned int y_idx = 0; y_idx < scores_shape.dim_size(1); y_idx++) {
+                for (unsigned int z_idx = 0; z_idx < scores_shape.dim_size(2); z_idx++) {
+                    output(x_idx, y_idx, z_idx) = scores(x_idx, y_idx, z_idx);
+                }
+            }
+        }
+    }
+};
+
+REGISTER_KERNEL_BUILDER(Name("CTCKenLMBeamSearchDecoder").Device(DEVICE_CPU), CTCKenLMBeamSearchDecoderOp);
+g++ -Wall -O3 -std=c++11 -g -I/home/thomas/projects/thomas/ops/thirdparty/kenlm -DKENLM_MAX_ORDER=6 -DHAVE_ZLIB=1 -DHAVE_BZLIB=1 -DHAVE_XZLIB=1 -I/usr/local/lib/python3.5/dist-packages/tensorflow/include -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC -shared -o libs/ctc_decoder.so src/ctc_decoder_op.cc src/ctc_scorer.cc thirdparty/kenlm/util/string_piece.o thirdparty/kenlm/util/exception.o thirdparty/kenlm/util/spaces.o thirdparty/kenlm/util/pool.o thirdparty/kenlm/util/file_piece.o thirdparty/kenlm/util/usage.o thirdparty/kenlm/util/parallel_read.o thirdparty/kenlm/util/bit_packing.o thirdparty/kenlm/util/float_to_string.o thirdparty/kenlm/util/ersatz_progress.o thirdparty/kenlm/util/integer_to_string.o thirdparty/kenlm/util/mmap.o thirdparty/kenlm/util/murmur_hash.o thirdparty/kenlm/util/read_compressed.o thirdparty/kenlm/util/scoped.o thirdparty/kenlm/util/file.o thirdparty/kenlm/lm/value_build.o thirdparty/kenlm/lm/config.o thirdparty/kenlm/lm/model.o thirdparty/kenlm/lm/trie.o thirdparty/kenlm/lm/sizes.o thirdparty/kenlm/lm/search_hashed.o thirdparty/kenlm/lm/lm_exception.o thirdparty/kenlm/lm/virtual_interface.o thirdparty/kenlm/lm/binary_format.o thirdparty/kenlm/lm/trie_sort.o thirdparty/kenlm/lm/vocab.o thirdparty/kenlm/lm/search_trie.o thirdparty/kenlm/lm/read_arpa.o thirdparty/kenlm/lm/quantize.o thirdparty/kenlm/lm/bhiksha.o thirdparty/kenlm/util/double-conversion/strtod.o thirdparty/kenlm/util/double-conversion/fast-dtoa.o thirdparty/kenlm/util/double-conversion/double-conversion.o thirdparty/kenlm/util/double-conversion/cached-powers.o thirdparty/kenlm/util/double-conversion/bignum.o thirdparty/kenlm/util/double-conversion/fixed-dtoa.o thirdparty/kenlm/util/double-conversion/bignum-dtoa.o thirdparty/kenlm/util/double-conversion/diy-fp.o -lboost_program_options -lboost_system -lboost_thread -lz -lbz2 -llzma -L/usr/local/lib/python3.5/dist-packages/tensorflow -ltensorflow_framework

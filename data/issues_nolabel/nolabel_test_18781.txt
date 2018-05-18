@@ -1,0 +1,58 @@
+tf.variable_scope(auxiliary_name_scope=False) alters name_scope
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): binary (pip)
+TensorFlow version (use command below): 1.8.0.dev20180329
+Python version: 3.6.5
+
+Describe the problem
+Expected behavior for the following code is to print two lines containing:
+(<tf.Variable 'vs_outer/var:0' shape=(1,) dtype=float32_ref>, <tf.Tensor 'ns_outer/ns_inner_1/const:0' shape=() dtype=float32>)
+(<tf.Variable 'vs_outer/var:0' shape=(1,) dtype=float32_ref>, <tf.Tensor 'ns_outer/ns_inner_2/const:0' shape=() dtype=float32>)
+
+What is actually printed:
+(<tf.Variable 'vs_outer/var:0' shape=(1,) dtype=float32_ref>, <tf.Tensor 'ns_outer/ns_inner_1/const:0' shape=() dtype=float32>)
+(<tf.Variable 'vs_outer/var:0' shape=(1,) dtype=float32_ref>, <tf.Tensor 'ns_outer/ns_inner_1/const_1:0' shape=() dtype=float32>)
+
+Somehow the first use of with VSO: memorizes the name_scope it is in and restores it the second time it is used even though auxiliary_name_scope=False is set and the documentation states:
+auxiliary_name_scope: If True, we create an auxiliary name scope with the scope. If False, we don't touch name scope.
+
+Source code
+import tensorflow as tf
+
+with tf.Graph().as_default():
+  NSO = tf.name_scope('ns_outer').__enter__()
+
+  VSO = tf.variable_scope(
+        'vs_outer', auxiliary_name_scope=False, reuse=tf.AUTO_REUSE)
+
+  with tf.name_scope(NSO):
+    with tf.name_scope('ns_inner_1'):
+      with VSO:
+        print((tf.get_variable('var', [1]), tf.constant(1.0, name='const')))
+
+  with tf.name_scope(NSO):
+    with tf.name_scope('ns_inner_2'):
+      with VSO:
+        print((tf.get_variable('var', [1]), tf.constant(1.0, name='const')))
+It works when swapping the name_scope with-block with the variable_scope with-block.
+import tensorflow as tf
+
+with tf.Graph().as_default():
+  NSO = tf.name_scope('ns_outer').__enter__()
+
+  VSO = tf.variable_scope(
+        'vs_outer', auxiliary_name_scope=False, reuse=tf.AUTO_REUSE)
+
+  with tf.name_scope(NSO):
+    with VSO:
+      with tf.name_scope('ns_inner_1'):
+        print((tf.get_variable('var', [1]), tf.constant(1.0, name='const')))
+
+  with tf.name_scope(NSO):
+    with VSO:
+      with tf.name_scope('ns_inner_2'):
+        print((tf.get_variable('var', [1]), tf.constant(1.0, name='const')))

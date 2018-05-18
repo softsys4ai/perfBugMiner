@@ -1,0 +1,25 @@
+tf.gfile doesn't understand NTFS Unicode filenames on Windows
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows Server 2016 Datacenter, 64-bit, installed on a GCE VM
+TensorFlow installed from (source or binary): binary pip package
+TensorFlow version (use command below): 1.6.0
+Python version: 3.6
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: python -c "dir = '/tmp/tftest/\u8c37\u6b4c'; import tensorflow as tf; import os; os.makedirs(dir); print(os.path.exists(dir), tf.gfile.Exists(dir))"
+
+Describe the problem
+The tf.gfile functions that involve file paths appear not to understand Windows with NTFS filenames that contain Unicode characters, such as 谷歌 ("Google" in Chinese).  It seems like something about the name isn't translated in a way that actually results in successful lookups, so everything behaves as if those files didn't exist.
+Command to repro:
+python -c "dir = '/tmp/tftest/\u8c37\u6b4c'; import tensorflow as tf; import os; os.makedirs(dir); print(os.path.exists(dir), tf.gfile.Exists(dir))"
+
+This command run in Windows PowerShell prints "True False" i.e. os.path.exists() returns a different result than tf.gfile.Exists().  This is true even for different ways of formulating that path -
+in addition to /tmp/tftest/\u8c37\u6b4c I tested C:/tmp/tftest/\u8c37\u6b4c and C:\\tmp\\tftest\\\u8c37\u6b4c (double backslashes for the path separators to escape within a python string) and they both produce the same result.  If you remove the unicode characters from the path, it prints "True True" as expected.
+In contrast, on my gLinux workstation this prints "True True" all the time, i.e. the results are the same.
+I tested this with Exists(), IsDirectory(), and ListDirectory() but I'm assuming it applies generally to all the tf.gfile functions that take a path argument.  Note however that ListDirectory() will return the Unicode name just fine if run in the parent directory, the same as os.listdir().
+We've gotten a report about this for TensorBoard: tensorflow/tensorboard#861

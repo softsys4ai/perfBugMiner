@@ -1,0 +1,77 @@
+rnn_cell not Checkpointable
+
+tf-nightly: 1.8.0.dev20180329 (latest Windows 10 build)
+Sample Code:
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+from tensorflow.python.training import checkpointable
+
+
+class MyModel(checkpointable.Checkpointable):
+
+  def __init__(self):
+    self.cell = tf.nn.rnn_cell.DropoutWrapper(
+        tf.nn.rnn_cell.BasicLSTMCell(10), 0.5)
+    self.cell2 = tf.nn.rnn_cell.BasicLSTMCell(10)
+
+
+model = MyModel()
+state = tf.nn.rnn_cell.LSTMStateTuple(
+    c=tf.constant([[10] * 10] * 10, dtype=tf.float32),
+    h=tf.constant([[10] * 10] * 10, dtype=tf.float32))
+model.cell(tf.constant([[10]] * 10, dtype=tf.float32), state)
+model.cell2(tf.constant([[10]] * 10, dtype=tf.float32), state)
+
+checkpoint_path = 'modeldir/test/'
+checkpoint = tfe.Checkpoint(model=model)
+saver = tfe.CheckpointableSaver(checkpoint)
+
+from tensorflow.contrib.eager.python import checkpointable_utils
+print(checkpointable_utils._serialize_object_graph(saver._root_checkpointable))
+
+Prints:
+({'model/cell2/kernel/.ATTRIBUTES/VARIABLE_VALUE': <tf.Variable 'basic_lstm_cell_1/kernel:0' shape=(11, 40) dtype=float32_ref>, 'model/cell2/bias/.ATTRIBUTES/VARIABLE_VALUE': <tf.Variable 'basic_lstm_cell_1/bias:0' shape=(40,) dtype=float32_ref>}, nodes {
+  children {
+    node_id: 1
+    local_name: "model"
+  }
+}
+nodes {
+  children {
+    node_id: 2
+    local_name: "cell"
+  }
+  children {
+    node_id: 3
+    local_name: "cell2"
+  }
+}
+nodes {
+}
+nodes {
+  children {
+    node_id: 4
+    local_name: "kernel"
+  }
+  children {
+    node_id: 5
+    local_name: "bias"
+  }
+}
+nodes {
+  attributes {
+    name: "VARIABLE_VALUE"
+    full_name: "basic_lstm_cell_1/kernel"
+    checkpoint_key: "model/cell2/kernel/.ATTRIBUTES/VARIABLE_VALUE"
+  }
+}
+nodes {
+  attributes {
+    name: "VARIABLE_VALUE"
+    full_name: "basic_lstm_cell_1/bias"
+    checkpoint_key: "model/cell2/bias/.ATTRIBUTES/VARIABLE_VALUE"
+  }
+}
+)
+
+Expected to contain bias and kernel for both cell and cell2 but only contains them for the cell without DropoutWrapper.

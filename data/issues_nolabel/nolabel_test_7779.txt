@@ -1,0 +1,68 @@
+tensorflow custom op : user_ops
+
+I want to add my custom op.
+so I read https://www.tensorflow.org/extend/adding_an_op.
+And then I tried to wirte down follow code with your tutorial.
+file name is zero_out.cc and path is ~/tensorflow/tensorflow/core/user_ops.
+#include "tensorflow/core/framework/op.h"
+#include "tensorflow/core/framework/shape_inference.h"
+#include "tensorflow/core/framework/op_kernel.h"
+
+using namespace tensorflow;
+
+REGISTER_OP("ZeroOut")
+    .Input("to_zero: int32")
+    .Output("zeroed: int32")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    });
+
+class ZeroOutOp : public OpKernel {
+ public:
+  explicit ZeroOutOp(OpKernelConstruction* context) : OpKernel(context) {}
+  void Compute(OpKernelContext* context) override {
+    // Grab the input tensor
+    const Tensor& input_tensor = context->input(0);
+    auto input = input_tensor.flat<int32>();
+
+    // Create an output tensor
+    Tensor* output_tensor = NULL;
+    OP_REQUIRES_OK(context, context->allocate_output(0, input_tensor.shape(),
+                                                     &output_tensor));
+    auto output = output_tensor->flat<int32>();
+
+    // Set all but the first element of the output tensor to 0.
+    const int N = input.size();
+    for (int i = 1; i < N; i++) {
+      output(i) = 0;
+    }
+
+    // Preserve the first input value if possible.
+    if (N > 0) output(0) = input(0);
+  }
+};
+
+REGISTER_KERNEL_BUILDER(Name("ZeroOut").Device(DEVICE_CPU), ZeroOutOp);
+
+And I made BUILD file in same path.
+load("//tensorflow:tensorflow.bzl", "tf_custom_op_library")
+
+tf_custom_op_library(
+    name = "zero_out.so",
+    srcs = ["zero_out.cc"],
+)
+
+And then, follow your tutorial, I build with bazel.
+I wrote this command on ~/tensorflow.
+bazel build --config opt //tensorflow/core/user_ops:zero_out.so
+complete massage is here.
+Target //tensorflow/core/user_ops:zero_out.so up-to-date: bazel-bin/tensorflow/core/user_ops/zero_out.so
+and I put the exactly same tutorial code but it doesn't work.
+import tensorflow as tf
+zero_out_module = tf.load_op_library('zero_out.so')
+with tf.Session(''):
+  zero_out_module.zero_out([[1, 2], [3, 4]]).eval()
+
+error massage is this.
+Traceback (most recent call last): File "/Users/buginus/tf_installwithpip3/Study_TensorFlow/01 - LinearRegression/hi.py", line 2, in <module> zero_out_module = tf.load_op_library('zero_out.so') File "/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/load_library.py", line 64, in load_op_library None, None, error_msg, error_code) tensorflow.python.framework.errors_impl.NotFoundError: dlopen(zero_out.so, 6): image not found

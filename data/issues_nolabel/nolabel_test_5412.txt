@@ -1,0 +1,30 @@
+Request: Functionality for obtaining gradients that are internal to a while_loop
+
+I'd like to manipulate the gradients that are internal to a while loop. The actual purpose is to view / manipulate recurrent-neural-network behavior, but here is a simplified example to get the idea across:
+t_0 = tf.constant(0)
+x_0 = tf.constant(1.0)
+size = 3
+x_ta = tf.TensorArray(tf.float32, size=size)
+
+def cond(t, x_prev, x_ta):
+    return tf.less(t, size)
+
+def body(t, x_prev, x_ta):
+    x = 2*x_prev
+    x_ta = x_ta.write(t, x)
+    return t + 1, x, x_ta
+
+_, _, x_ta = tf.while_loop(cond, body, [t_0, x_0, x_ta])
+x = x_ta.pack()
+
+loss = x[size-1]
+
+dloss_dx, = tf.gradients(loss, x)
+
+with tf.Session() as sess:
+    sess.run(tf.initialize_all_variables())
+    print(sess.run(dloss_dx))
+
+In this example, x[t] = 2*x[t-1] for all t, so we'd like dloss_dx to be [4., 2., 1.]. We instead get [ 0. 0. 1.]. I don't think this is a bug: we're actually taking the derivative with respect to the pack operation, which x[2] doesn't actually depend on.
+Please correct me if I'm wrong, but I think it's currently impossible to obtain [4., 2., 1.] in the general case. (One hack here would be to compute gradients within the while_loop and then form a cumulative product corresponding to the chain rule, but this won't work with vector-valued x[t]'s because there's no way to get the Jacobians).
+But the gradients with respect to each of these time steps must live somewhere. Can we add a property to the TensorArray class to be able to obtain these?

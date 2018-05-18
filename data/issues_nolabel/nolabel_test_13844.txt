@@ -1,0 +1,113 @@
+Saving large graphs to S3 fails with InternalError: : Unable to connect to endpoint
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes; modified Tensorflow save/load example code to save a few large tensors to S3
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Binary
+TensorFlow version:
+Git version: v1.3.0-rc1-3504-g27767d8
+Tensorflow version: 1.4.0-rc1
+Python version: 2.7.12
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: 8.0
+GPU model and memory: Nvidia Tesla K80 (12 GiB RAM)
+Exact command to reproduce: Run the code in this gist in a Python shell. You'll need access to an S3 bucket for which you have write permissions.
+
+Describe the problem
+I'm trying to save a large (~380 MB) graph to S3, but my call to tf.Saver.save() crashes after ~1 min with what appears to be an AWS SDK error (InternalError: : Unable to connect to endpoint).
+If the error is indeed AWS related, it'd be helpful to wrap it in something to indicate that the error isn't coming from tensorflow. Here's the stacktrace:
+---------------------------------------------------------------------------
+InternalError                             Traceback (most recent call last)
+<command-5036518> in <module>()
+----> 1 test_save(num_tensors=10, tensor_size=10000000, save_path="s3://<redacted_s3_bucket_name>/model.ckpt")
+
+<command-5036204> in test_save(num_tensors, tensor_size, save_path)
+     18     sess.run(init_op)
+     19     # Save the variables to disk.
+---> 20     save_path = saver.save(sess, save_path)
+     21     print("Model saved in file: %s" % save_path)
+
+/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/training/saver.pyc in save(self, sess, save_path, global_step, latest_filename, meta_graph_suffix, write_meta_graph, write_state)
+   1571           model_checkpoint_path = sess.run(
+   1572               self.saver_def.save_tensor_name,
+-> 1573               {self.saver_def.filename_tensor_name: checkpoint_file})
+   1574         else:
+   1575           self._build_eager(
+
+/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    887     try:
+    888       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 889                          run_metadata_ptr)
+    890       if run_metadata:
+    891         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _run(self, handle, fetches, feed_dict, options, run_metadata)
+   1118     if final_fetches or final_targets or (handle and feed_dict_tensor):
+   1119       results = self._do_run(handle, final_targets, final_fetches,
+-> 1120                              feed_dict_tensor, options, run_metadata)
+   1121     else:
+   1122       results = []
+
+/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+   1315     if handle is None:
+   1316       return self._do_call(_run_fn, self._session, feeds, fetches, targets,
+-> 1317                            options, run_metadata)
+   1318     else:
+   1319       return self._do_call(_prun_fn, self._session, handle, feeds, fetches)
+
+/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _do_call(self, fn, *args)
+   1334         except KeyError:
+   1335           pass
+-> 1336       raise type(e)(node_def, op, message)
+   1337 
+   1338   def _extend_graph(self):
+
+InternalError: : Unable to connect to endpoint
+	 [[Node: save/SaveV2 = SaveV2[dtypes=[DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT], _device="/job:localhost/replica:0/task:0/device:CPU:0"](_arg_save/Const_0_0, save/SaveV2/tensor_names, save/SaveV2/shape_and_slices, v0/_1, v1/_3, v2/_5, v3/_7, v4/_9, v5/_11, v6/_13, v7/_15, v8/_17, v9/_19)]]
+
+Caused by op u'save/SaveV2', defined at:
+  File "/tmp/1509404428358-0/PythonShell.py", line 990, in <module>
+    launch_process()
+  File "/tmp/1509404428358-0/PythonShell.py", line 986, in launch_process
+    shell.executor.run()
+  File "/tmp/1509404428358-0/PythonShell.py", line 263, in run
+    self.shell.shell.run_cell(command_id, cmd, store_history=True)
+  File "/tmp/1509404428358-0/PythonShell.py", line 572, in run_cell
+    super(IPythonShell, self).run_cell(raw_cell, store_history, silent, shell_futures)
+  File "/databricks/python/local/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2741, in run_cell
+    interactivity=interactivity, compiler=compiler)
+  File "/databricks/python/local/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2833, in run_ast_nodes
+    if self.run_code(code):
+  File "/databricks/python/local/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2883, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<command-5036518>", line 1, in <module>
+    test_save(num_tensors=10, tensor_size=10000000, save_path="s3://databricks-mllib/tmp/s3-save-failure/model.ckpt")
+  File "<command-5036204>", line 13, in test_save
+    saver = tf.train.Saver()
+  File "/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1218, in __init__
+    self.build()
+  File "/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1227, in build
+    self._build(self._filename, build_save=True, build_restore=True)
+  File "/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1263, in _build
+    build_save=build_save, build_restore=build_restore)
+  File "/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 748, in _build_internal
+    save_tensor = self._AddSaveOps(filename_tensor, saveables)
+  File "/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 296, in _AddSaveOps
+    save = self.save_op(filename_tensor, saveables)
+  File "/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 239, in save_op
+    tensors)
+  File "/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/ops/gen_io_ops.py", line 1163, in save_v2
+    shape_and_slices=shape_and_slices, tensors=tensors, name=name)
+  File "/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "/databricks/python/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InternalError (see above for traceback): : Unable to connect to endpoint
+	 [[Node: save/SaveV2 = SaveV2[dtypes=[DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT], _device="/job:localhost/replica:0/task:0/device:CPU:0"](_arg_save/Const_0_0, save/SaveV2/tensor_names, save/SaveV2/shape_and_slices, v0/_1, v1/_3, v2/_5, v3/_7, v4/_9, v5/_11, v6/_13, v7/_15, v8/_17, v9/_19)]]
+
+If I run the same code but checkpoint to my local filesystem the save op runs without error.
+The error also only seems to occur for large graphs (running the linked gist with smaller/fewer tensors works)

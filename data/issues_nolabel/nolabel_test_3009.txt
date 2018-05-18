@@ -1,0 +1,18 @@
+FIFOQueue: dequeue many operation very slow?
+
+When training a relatively simple model (1-layer LSTM, 256 units) my Titan X GPU keeps spiking from 0% to 30% GPU utilization. Conclusion: somewhere in the pipeline there is a bottleneck which limits the GPU to be processing the training batches continuously. I use a FIFOQueue to which examples are being fed in one or more separate threads:
+queue = tf.FIFOQueue(
+     capacity=self.config.queue_capacity,
+     dtypes=[tf.float32, tf.float32],
+     shapes=[[30, 49, 512], [30]],
+     name="FIFOQueue"
+)
+For the training operation I use queue.dequeue_many to get examples from the queue. As you can see the batch size is 64 examples. So in the end the input tensor is 64x30x49x512 of type tf.float32:
+# Model inputs, either use the queue (training) or feed_dict (evaluation)
+inputs, targets = queue.dequeue_many(64)
+To find out why my code is running "slow" (i.e. spiking GPU allocation and no temperature increase) I use the Timeline object (see here) to measure execution times of individual operations. The results displayed below show the measurements for one training iteration at which point the queue was filled with more than 1000 examples. I have included screenshots for both GPU and CPU-only runs (forced with export CUDA_VISIBLE_DEVICES=-1.
+What strikes me from these results is that it takes a really long time to dequeue examples from the FIFOQueue. What is happening here...something wrong or is the dequeuing operation just very slow? Overall the dequeuing operation and sending the data to the GPU takes up half of the time of a training iteration. No wonder that the GPU utilization is spiking. Any help is welcome optimizing my training pipeline! As I understand correctly the examples are all queued in RAM, is there also a way to queue them ahead on GPU memory so when they are needed they do not have to be moved CPU => GPU?
+This is tested on TensorFlow v9.0 build from sources about 1.5 week ago.
+GPU running on Titan X
+
+CPU running on Xeon CPU E5-2640

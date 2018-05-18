@@ -1,0 +1,222 @@
+Error following the wide and deep tutorial
+
+I've been trying to follow through the wide and deep tutorial on a different data set and I am getting the below error.
+I am using this version of tensorflow: tensorflow-0.11.0rc0-cp27-none-linux_x86_64.whl
+on python: Python 2.7.5
+All my fields are strings (features and labels)
+I am adding the relevant code snippets
+f1Col = tf.contrib.layers.sparse_column_with_keys("f1", keys = ["l1", "l2", "l3"])
+..
+..
+I've defined all columns similar to this one (no hash bucket ones)
+..
+..
+
+
+wide_columns = [
+  tf.contrib.layers.crossed_column(columns = [f1Col, f2Col, f3Col] , hash_bucket_size = 1e7),
+  ...
+  defined all crossed columns like the above one with smaller hash buckets for ones with less features
+  ...
+]
+
+deep_columns = [
+    tf.contrib.layers.embedding_column(f1Col, dimension=8),
+    ...
+   defined all my features here as embedding columns exactly as the one above
+   ....
+]
+
+tried this with both settings for enable_centered_bias the error changes a bit but is still the same
+import tempfile
+model_dir = tempfile.mkdtemp()
+m = tf.contrib.learn.DNNLinearCombinedClassifier(
+    model_dir=model_dir,
+    linear_feature_columns=wide_columns,
+    dnn_feature_columns=deep_columns,
+    dnn_hidden_units=[1000, 500, 250], enable_centered_bias = False)
+
+def input_fn(df):
+  categorical_cols = {k: tf.SparseTensor(
+      indices=[[i, 0] for i in range(df[k].size)],
+      values=df[k].values,
+      shape=[df[k].size, 1])
+                      for k in my_features_col_list}
+  label = tf.constant(df['my_label_col'].values)
+  return categorical_cols, label
+
+def train_input_fn():
+  return input_fn(features)
+
+def eval_input_fn():
+  return input_fn(features)
+
+then when I try to fit like this:
+m.fit(input_fn=train_input_fn, steps=200)
+I get the following error. I am not sure if I hit a bug or did something wrong. I am getting some warnings in the earlier code about combiner function defaults changing
+Then again when executing the fit I get the 2 warnings and then the error below them:
+WARNING:tensorflow:Given features: {'f1': <tensorflow.python.framework.ops.SparseTensor object at 0xc5bf690>, ... required signatures: {'f1': TensorSignature(dtype=tf.string, shape=None, is_sparse=True), ...
+
+WARNING:tensorflow:Given targets: Tensor("Const:0", shape=(2019,), dtype=string), required signatures: TensorSignature(dtype=tf.string, shape=TensorShape([Dimension(2019)]), is_sparse=False).
+
+
+---------------------------------------------------------------------------
+UnimplementedError                        Traceback (most recent call last)
+<ipython-input-29-8f5351c1fdf8> in <module>()
+----> 1 m.fit(input_fn=train_input_fn, steps=200)
+
+/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.pyc in fit(self, x, y, input_fn, steps, batch_size, monitors, max_steps)
+    331                              steps=steps,
+    332                              monitors=monitors,
+--> 333                              max_steps=max_steps)
+    334     logging.info('Loss for final step: %s.', loss)
+    335     return self
+
+/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.pyc in _train_model(self, input_fn, steps, feed_fn, init_op, init_feed_fn, init_fn, device_fn, monitors, log_every_steps, fail_on_nan_loss, max_steps)
+    706           fail_on_nan_loss=fail_on_nan_loss,
+    707           hooks=hooks,
+--> 708           max_steps=max_steps)
+    709 
+    710   def _extract_metric_update_ops(self, eval_dict):
+
+/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/graph_actions.pyc in _monitored_train(graph, output_dir, train_op, loss_op, global_step_tensor, init_op, init_feed_dict, init_fn, log_every_steps, supervisor_is_chief, supervisor_master, supervisor_save_model_secs, keep_checkpoint_max, supervisor_save_summaries_steps, feed_fn, steps, fail_on_nan_loss, hooks, max_steps)
+    283       while not super_sess.should_stop():
+    284         _, loss = super_sess.run([train_op, loss_op], feed_fn() if feed_fn else
+--> 285                                  None)
+    286       return loss
+    287 
+
+/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/monitored_session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    366                           feed_dict=feed_dict,
+    367                           options=options,
+--> 368                           run_metadata=run_metadata)
+    369 
+    370   def should_stop(self):
+
+/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/monitored_session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    519                               feed_dict=feed_dict,
+    520                               options=options,
+--> 521                               run_metadata=run_metadata)
+    522       except errors.AbortedError:
+    523         self.close()
+
+/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/monitored_session.pyc in run(self, *args, **kwargs)
+    486 
+    487   def run(self, *args, **kwargs):
+--> 488     return self._sess.run(*args, **kwargs)
+    489 
+    490 
+
+/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/monitored_session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    617                                   feed_dict=feed_dict,
+    618                                   options=options,
+--> 619                                   run_metadata=run_metadata)
+    620 
+    621     for hook in self._hooks:
+
+/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/monitored_session.pyc in run(self, *args, **kwargs)
+    486 
+    487   def run(self, *args, **kwargs):
+--> 488     return self._sess.run(*args, **kwargs)
+    489 
+    490 
+
+/usr/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    715     try:
+    716       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 717                          run_metadata_ptr)
+    718       if run_metadata:
+    719         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/usr/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    913     if final_fetches or final_targets:
+    914       results = self._do_run(handle, final_targets, final_fetches,
+--> 915                              feed_dict_string, options, run_metadata)
+    916     else:
+    917       results = []
+
+/usr/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+    963     if handle is None:
+    964       return self._do_call(_run_fn, self._session, feed_dict, fetch_list,
+--> 965                            target_list, options, run_metadata)
+    966     else:
+    967       return self._do_call(_prun_fn, self._session, handle, feed_dict,
+
+/usr/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _do_call(self, fn, *args)
+    983         except KeyError:
+    984           pass
+--> 985       raise type(e)(node_def, op, message)
+    986 
+    987   def _extend_graph(self):
+
+UnimplementedError: Cast string to float is not supported
+     [[Node: ToFloat = Cast[DstT=DT_FLOAT, SrcT=DT_STRING, _device="/job:localhost/replica:0/task:0/cpu:0"](ExpandDims)]]
+
+Caused by op u'ToFloat', defined at:
+  File "/usr/lib64/python2.7/runpy.py", line 162, in _run_module_as_main
+    "__main__", fname, loader, pkg_name)
+  File "/usr/lib64/python2.7/runpy.py", line 72, in _run_code
+    exec code in run_globals
+  File "/usr/lib/python2.7/site-packages/ipykernel/__main__.py", line 3, in <module>
+    app.launch_new_instance()
+  File "/usr/lib/python2.7/site-packages/traitlets/config/application.py", line 658, in launch_instance
+    app.start()
+  File "/usr/lib/python2.7/site-packages/ipykernel/kernelapp.py", line 474, in start
+    ioloop.IOLoop.instance().start()
+  File "/usr/lib/python2.7/site-packages/zmq/eventloop/ioloop.py", line 162, in start
+    super(ZMQIOLoop, self).start()
+  File "/usr/lib/python2.7/site-packages/tornado/ioloop.py", line 887, in start
+    handler_func(fd_obj, events)
+  File "/usr/lib/python2.7/site-packages/tornado/stack_context.py", line 275, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/usr/lib/python2.7/site-packages/zmq/eventloop/zmqstream.py", line 440, in _handle_events
+    self._handle_recv()
+  File "/usr/lib/python2.7/site-packages/zmq/eventloop/zmqstream.py", line 472, in _handle_recv
+    self._run_callback(callback, msg)
+  File "/usr/lib/python2.7/site-packages/zmq/eventloop/zmqstream.py", line 414, in _run_callback
+    callback(*args, **kwargs)
+  File "/usr/lib/python2.7/site-packages/tornado/stack_context.py", line 275, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/usr/lib/python2.7/site-packages/ipykernel/kernelbase.py", line 276, in dispatcher
+    return self.dispatch_shell(stream, msg)
+  File "/usr/lib/python2.7/site-packages/ipykernel/kernelbase.py", line 228, in dispatch_shell
+    handler(stream, idents, msg)
+  File "/usr/lib/python2.7/site-packages/ipykernel/kernelbase.py", line 390, in execute_request
+    user_expressions, allow_stdin)
+  File "/usr/lib/python2.7/site-packages/ipykernel/ipkernel.py", line 196, in do_execute
+    res = shell.run_cell(code, store_history=store_history, silent=silent)
+  File "/usr/lib/python2.7/site-packages/ipykernel/zmqshell.py", line 501, in run_cell
+    return super(ZMQInteractiveShell, self).run_cell(*args, **kwargs)
+  File "/usr/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2717, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/usr/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2827, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/usr/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2881, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-29-8f5351c1fdf8>", line 1, in <module>
+    m.fit(input_fn=train_input_fn, steps=200)
+  File "/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 333, in fit
+    max_steps=max_steps)
+  File "/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 662, in _train_model
+    train_op, loss_op = self._get_train_ops(features, targets)
+  File "/usr/lib/python2.7/site-packages/tensorflow/contrib/learn/python/learn/estimators/dnn_linear_combined.py", line 195, in _get_train_ops
+    features)
+  File "/usr/lib/python2.7/site-packages/tensorflow/contrib/layers/python/layers/target_column.py", line 206, in training_loss
+    loss_unweighted = self._loss_fn(logits, target)
+  File "/usr/lib/python2.7/site-packages/tensorflow/contrib/layers/python/layers/target_column.py", line 389, in _log_loss_with_two_classes
+    math_ops.to_float(target))
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/ops/math_ops.py", line 661, in to_float
+    return cast(x, dtypes.float32, name=name)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/ops/math_ops.py", line 616, in cast
+    return gen_math_ops.cast(x, base_type, name=name)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/ops/gen_math_ops.py", line 419, in cast
+    result = _op_def_lib.apply_op("Cast", x=x, DstT=DstT, name=name)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 749, in apply_op
+    op_def=op_def)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2380, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1298, in __init__
+    self._traceback = _extract_stack()
+
+UnimplementedError (see above for traceback): Cast string to float is not supported
+     [[Node: ToFloat = Cast[DstT=DT_FLOAT, SrcT=DT_STRING, _device="/job:localhost/replica:0/task:0/cpu:0"](ExpandDims)]]

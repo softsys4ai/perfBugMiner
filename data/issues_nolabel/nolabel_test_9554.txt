@@ -1,0 +1,54 @@
+TFRecord Writer Bug Saving Float List
+
+OS: Linux Ubuntu 14.04
+TF: Version 1.1 (CPU) python 2.7
+When saving a list of floats to TFRecords format with
+tf.train.Feature(float_list=tf.train.FloatList(value=value)
+,where value it list of floats converted from a numpy array using tolist(), I get the following error:
+TypeError: [0.0, 41.95294952392578, 1.4004319906234741, 46.5711784362793, 33.32099914550781, 1.545793056488037, has type list, but expected one of: int, long, float
+which surprises me because it is explicitly a list of floats.
+def _int64_feature(value):
+    return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+
+
+def _float32_feature(value):
+    return tf.train.Feature(float_list=tf.train.FloatList(value=value))
+
+def _bytes_feature(value):
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+ 
+
+    with tf.Session() as sess:
+        # initialize variables
+        sess.run(init_op)
+        # Input threading
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(coord=coord)
+
+        print('Writing', filename)
+        recordWriter = tf.python_io.TFRecordWriter(filename)
+
+        try:
+            while not coord.should_stop():
+
+                img, latent = sess.run([img_op, latent_op])
+
+                example = tf.train.Example(features=tf.train.Features(feature={
+                    'image/width': _int64_feature(image_dims[0]),
+                    'image/height': _int64_feature(image_dims[1]),
+                    'image/channels': _int64_feature(image_dims[2]),
+                    'image/encoded': _bytes_feature(img[0]),
+                    'latent/size': _int64_feature(latent_dim),
+                    'latent/data': _float32_feature(latent.tolist())}))
+                recordWriter.write(example.SerializeToString())
+
+        except tf.errors.OutOfRangeError:
+            print('Done training -- epoch limit reached')
+
+        finally:
+            # When done, ask the threads to stop.
+            coord.request_stop()
+
+        recordWriter.close()
+        coord.join(threads)
+        sess.close()

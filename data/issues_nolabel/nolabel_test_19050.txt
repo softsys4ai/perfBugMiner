@@ -1,0 +1,13 @@
+Fix bug of declaring regularization loss multiple times when reusing PartitionedVariables in tf layers
+
+When reusing a variable in current variable scope, we should always reuse its regularization loss computation. But it will declare regularization loss multiple times when reusing PartitionedVariables in tf.layers.  For example:
+import tensorflow as tf
+partitioner = tf.fixed_size_partitioner(3)
+l2_regularizer = tf.contrib.layers.l2_regularizer(0.001)
+for i in xrange(2):
+  with tf.variable_scope(tf.get_variable_scope(), partitioner=partitioner, reuse=False if i == 0 else True):
+    inputs_tensor = tf.constant(1.0, shape=[100, 100])
+    logits = tf.layers.dense(inputs_tensor, 256, use_bias=False, name="fc", kernel_regularizer=l2_regularizer)
+print (tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+
+This short program should get result 3 because the PartitionedVariable has 3 shards. However, it got 6.  To debug the source code, we found that there is no judgement on PartitionedVariables when declaring the regularization loss in /tensorflow/python/layers/base.py

@@ -1,0 +1,64 @@
+Results inconsistent between each freeze graph
+
+Describe the problem
+I apologize if this is the wrong forum, but it may be a bug regarding certain operations. When freezing a graph and then running it elsewhere (mobile device), the output is of low quality compared to the inference on the server on my semantic segmentation model. It is basically a messy version of what would run on the server. It is executing successfully, but it appears as though something was not initialized prior to freezing, even though the method to load the model between the export script and inference scripts is nearly identical.
+The exported model can be run on the same images over and over and produce the same results for a given set of images, as expected.
+Here is the really strange part:
+However, each time the model is frozen, using exactly the same script and same checkpoint, it creates a different output for a given set of images.
+I went ahead and posted to stackoverflow in case this is the wrong place.
+https://stackoverflow.com/questions/49454430/tensorflow-results-inconsistent-between-each-freeze-graph
+Source code / logs
+def main():
+    args = get_arguments()
+    
+    if args.dataset == 'cityscapes':
+        num_classes = cityscapes_class
+    else:
+        num_classes = ADE20k_class
+
+    shape = [320, 320]
+
+    x = tf.placeholder(dtype=tf.float32, shape=(shape[0], shape[1], 3), name="input")
+    img_tf = preprocess(x)
+
+    model = model_config[args.model]
+    net = model({'data': img_tf}, num_classes=num_classes, filter_scale=args.filter_scale)
+
+    raw_output = net.layers['conv6_cls']
+    raw_output_up = tf.image.resize_bilinear(raw_output, size=shape, align_corners=True)
+    raw_output_maxed = tf.argmax(raw_output_up, axis=3, name="output")
+        
+    # Init tf Session
+    config = tf.ConfigProto()
+    sess = tf.Session(config=config)
+    init = tf.global_variables_initializer()
+
+    sess.run(init)
+    
+    model_path = model_paths[args.model]
+    ckpt = tf.train.get_checkpoint_state(model_path)
+    if ckpt and ckpt.model_checkpoint_path:
+        input_checkpoint = ckpt.model_checkpoint_path
+        loader = tf.train.import_meta_graph(input_checkpoint + '.meta', clear_devices=True)
+        load(loader, sess, ckpt.model_checkpoint_path)     
+    else:
+        print('No checkpoint file found at %s.' % model_path)
+        exit()
+
+    print("Loaded Model")
+
+    # We retrieve the protobuf graph definition
+    graph = tf.get_default_graph()
+    input_graph_def = graph.as_graph_def()
+
+    # We use a built-in TF helper to export variables to constants
+    output_graph_def = graph_util.convert_variables_to_constants(
+        sess, # The session is used to retrieve the weights
+        input_graph_def, # The graph_def is used to retrieve the nodes
+        output_node_names.split(",") # The output node names are used to select the usefull nodes
+    )
+
+    # Finally we serialize and dump the output graph to the filesystem
+    with tf.gfile.GFile("model/output_graph.pb", "wb") as f:
+        f.write(output_graph_def.SerializeToString())
+    print("%d ops in the final graph." % len(output_graph_def.node))

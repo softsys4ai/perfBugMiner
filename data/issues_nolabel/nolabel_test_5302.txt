@@ -1,0 +1,63 @@
+C++ memory leak after `Session::Close()` /  C++ equivalent to Python `reset_default_graph()` ?
+
+Using C++ API, memory (RAM) does not appear to be fully released after Session::Close() is called.
+See code snippet below. Running it within a loop eventually eats up all RAM and gets killed by system.
+From reading around, I understand that the closing of the session does not release the underlying graph. In Python it seems that reset_default_graph() releases the graph resources.
+Is there any equivalent to reset_default_graph() in C++ ?
+I initially reported this question on the mailing list, https://groups.google.com/a/tensorflow.org/forum/#!topic/discuss/NG7n6emda78 with no echo, so posted as an issue here. My apologies if this isn't the right procedure.
+Note:
+GPU memory appears to not be released when looking it up with nvidia-smi but I believe it is an nvidia-smi problem as in practice the GPU memory appears to be reusable, so no problem on this side.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+http://stackoverflow.com/questions/35695183/tensorflow-memory-leak-even-while-closing-session
+#1578
+fchollet/keras#2102
+#700
+#3106
+Environment info
+Operating System:
+Ubuntu 16.04 LTS
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+-rw-r--r-- 1 root root   560184 Sep  7 18:22 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Sep  7 18:22 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root       19 Sep  7 18:22 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.27
+-rwxr-xr-x 1 root root   394472 Sep  7 18:22 /usr/local/cuda/lib64/libcudart.so.8.0.27
+-rw-r--r-- 1 root root   737516 Sep  7 18:22 /usr/local/cuda/lib64/libcudart_static.a
+-rwxr-xr-x 1 root root 79337624 Sep 11 08:45 /usr/local/cuda/lib64/libcudnn.so
+-rwxr-xr-x 1 root root 79337624 Sep 11 08:45 /usr/local/cuda/lib64/libcudnn.so.5
+-rwxr-xr-x 1 root root 79337624 Sep 11 08:45 /usr/local/cuda/lib64/libcudnn.so.5.1.5
+-rw-r--r-- 1 root root 69756172 Sep 11 08:45 /usr/local/cuda/lib64/libcudnn_static.a
+
+From source installation
+
+The commit hash (git rev-parse HEAD)
+
+5c1ca717e8ddd16b0be8410a798dc174380a600d
+
+
+The output of bazel version
+
+Build label: 0.3.2
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Fri Oct 7 17:25:10 2016 (1475861110)
+Build timestamp: 1475861110
+Build timestamp as int: 1475861110
+
+Short code snippet
+Put the code below into a loop, and RAM keeps on growing, replace _inputLayer and _outputLayer with proper network layer names, and vtfinputs is a std::vector<tensorflow::Tensor>.
+tensorflow::GraphDef graph_def;
+tensorflow::Status graphLoadedStatus = ReadBinaryProto(tensorflow::Env::Default(),graphFile,&graph_def);
+tensorflow::SessionOptions options;
+tensorflow::ConfigProto &config = options.config;
+config.mutable_gpu_options()->set_allow_growth(true);
+std::unique_ptr<tensorflow::Session> session = std::unique_ptr<tensorflow::Session>(tensorflow::NewSession(options));
+tensorflow::Status session_create_status = session->Create(graph_def);                                                        
+...                                                                               
+tensorflow::Status run_status  = session->Run({{_inputLayer,*(vtfinputs.begin())}},{_outputLayer},{},&finalOutput)  /* runs file, results are what they should be, and are acquired via finalOutput. */
+...
+session->Close();                                                                                                          
+session.reset();
+
+/* RAM keeps building up if code above put into a loop */
+What other attempted solutions have you tried?
+using session->Reset(options,containers) does not appear to compile (Reset does not exist for Session). Looking at session.h and direct_session.h I don't yet understand why this is the case.

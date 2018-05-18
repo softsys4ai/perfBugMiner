@@ -1,0 +1,55 @@
+Random crashing in c2c fft
+
+I'm having issues with the c2c fft. I would think this was more an issue with my code except that it seems to be non-deterministic. As a result I'm having a hard time getting a minimal example. I'm working on a recurrent neural net, in which the recurrent cell involves an fft (and an ifft), and the crash seems to occur more often as I increase the depth (number of recurrent cells chained together), or as I increase the size of the tensor being fft'd. The problem doesn't seem to scale with the product of these two, though, so I don't immediately think it's a memory issue: rather, it happens only if both are above some sort of weak cutoffs. (40 and 80 causes problems for me consistently.) This is on a GPU with 1.7GB of memory, and not much else in the computation graph, so I don't think I'm hitting constraints there. It's also very odd that the error is so random: I can typically run through 100 batches (each of 1 element) before it crashes, although this number seems random. I find the error message pretty inscrutable -- it reads:
+E c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\cuda\cuda_fft.cc:169] failed to create cuFFT batched plan:2
+E c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\cuda\cuda_fft.cc:111] failed to run cuFFT routine cufftSetStream: 1
+Traceback (most recent call last):
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1022, in _do_call
+    return fn(*args)
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1004, in _run_fn
+    status, run_metadata)
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InternalError: c2c fft failed : in.shape=[2,110]
+         [[Node: stack_wrapper_14/FFT = FFT[_device="/job:localhost/replica:0/task:0/gpu:0"](stack_wrapper_14/Pad/_535)]]
+         [[Node: stack_wrapper_34/shift_exp/_1147 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_2694_stack_wrapper_34/shift_exp", tensor_type=DT_COMPLEX64, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "stacknn_test.py", line 300, in <module>
+    results = sess.run([merged, loss], feed_dict={xs: x, y_true: y})
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 767, in run
+    run_metadata_ptr)
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1035, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InternalError: c2c fft failed : in.shape=[2,110]
+         [[Node: stack_wrapper_14/FFT = FFT[_device="/job:localhost/replica:0/task:0/gpu:0"](stack_wrapper_14/Pad/_535)]]
+         [[Node: stack_wrapper_34/shift_exp/_1147 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_2694_stack_wrapper_34/shift_exp", tensor_type=DT_COMPLEX64, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+Caused by op 'stack_wrapper_14/FFT', defined at:
+  File "stacknn_test.py", line 254, in <module>
+    (cell_output, state) = cell(inp, state)
+  File "stacknn_test.py", line 162, in __call__
+    tf.pad(state_stack, [[0,0], [0, self._stack_size]])
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\gen_math_ops.py", line 812, in fft
+    result = _op_def_lib.apply_op("FFT", input=input, name=name)
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 763, in apply_op
+    op_def=op_def)
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\ops.py", line 2327, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "C:\Users\Timeroot\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\ops.py", line 1226, in __init__
+    self._traceback = _extract_stack()
+
+InternalError (see above for traceback): c2c fft failed : in.shape=[2,110]
+         [[Node: stack_wrapper_14/FFT = FFT[_device="/job:localhost/replica:0/task:0/gpu:0"](stack_wrapper_14/Pad/_535)]]
+         [[Node: stack_wrapper_34/shift_exp/_1147 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_2694_stack_wrapper_34/shift_exp", tensor_type=DT_COMPLEX64, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+and I could only find one stack overflow question about this: http://stackoverflow.com/questions/41720751/ignoring-warning-unable-to-load-cudnn-dso-effecting-fft-computation which ended up only getting some comment about the cudnn DSO. I don't have the cudnn DSO either, but if /that's/ what's causing this problem, I would be surprised.
+Using Tensorflow version 1.0.1, the Windows GPU build. Python version 3.5.3. The machine has a single GPU with compute capabilities 3.0. It has no problem loading cublas64_80.dll, cufft64_80.dll,  nvcuda.dll, and curand64_80.dll, but I don't have a cudnn dso.

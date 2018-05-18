@@ -1,0 +1,12 @@
+Optimize FusedBatchNorm (and fix a bug).
+
+I discovered experimentally that cudnn computations can be performed in place. Therefore there is no need to allocate two temporary tensors in FusedBatchNorm for GPU and data format NHWC. One is enough. This lowers memory consumption, and hence increases the maximum possible batch size.
+This might seem risky (because NVIDIA doesn't mention the property), but in fact the current implementation already uses it: by doing forward_input_or_allocate_output in FusedBatchNormOp.
+If data format is NCHW, and the input is forwarded, then cudnn would be forced
+to do the computation in place (see line 247). This is how I discovered that the whole approach works:
+I was trying to see if forwarding the input is a bug or not.
+I added several tests to ensure that the change is correct.
+While doing this, I discovered that ops_testutil does not properly synchronize at the end.
+The reason seems to be the call context_->eigen_gpu_device().synchronize(). Somehow
+it does nothing. I think the problem is that Eigen is not compiled with the flag EIGEN_CUDACC.
+So I changed it to GPUUtil::Sync(device_.get()).

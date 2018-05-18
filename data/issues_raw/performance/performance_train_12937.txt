@@ -1,0 +1,112 @@
+Possible Bug: while_loop, map_fn do not parallize
+
+The parallel_iterations parameter of while_loop and map_fn do not reduce the runtime as expected.
+In comparison to the same operations created in a python loop, while_loop and map_fn are at least 4 times slower. while_loop does not scale at all
+More details:
+For my project, I need to calculate a matrix blockwise.
+I execute the calculation in a loop, each loop iteration working on a small part of the matrix, not accessing the rest of the matrix.
+To achieve maximum performance, the loop has to be executed in parallel.
+In addition, I need to control the number of parallel threads because of memory limitations.
+I tried to use parallel_iterations, but changing this values doesn't change the runtime at all.
+Using a python-for loop to create the same number of operations and syncing them with control_dependencies is around 4 times faster.
+In contrast to while_loop, map_fn is getting faster with bigger parallel_iterations but remains noticeable slower then the python creation.
+If this issue is known (didn't find anything at stackoverflow or here) and not resolvable,
+the documentation of while_loop needs to be improved heavily - to avoid this operation if the loop should be parallized.
+Benchmark-Code:
+import tensorflow as tf
+import time
+
+if __name__ == '__main__':
+      runs = 100
+      N = 100
+      M = 30
+
+      KernelRow = tf.Variable(tf.zeros([M, N*M]), name='KernelRow')
+
+      def calEntry(KernelVariable, pos):
+            op = tf.assign(KernelVariable[:, pos*M:(pos+1)*M], 
+                  tf.eye(M) * 123. + tf.exp(tf.random_uniform([M, M]))) #perform some operations 
+            with tf.control_dependencies([op]):
+                  return tf.constant(0)
+
+      def calRow(KernelVariable, N, parallelNum):
+            ops = []
+            for ic in range(0, N, parallelNum):
+                  with tf.control_dependencies(ops):
+                        for j in range(parallelNum):
+                              if ic + j < N:
+                                    ops += [calEntry(KernelVariable, ic+j)]
+                        
+            with tf.control_dependencies(ops):
+                  return tf.identity(KernelVariable)
+
+      def calRow_while(KernelVariable, N, parallelNum):
+            i = tf.constant(0)
+            condition = lambda i: tf.less(i, N)
+            def body(ic):
+                  updateKernel = calEntry(KernelVariable, ic)
+                  with tf.control_dependencies([updateKernel]):
+                        return ic + 1
+            return tf.while_loop(condition, body, [i], back_prop=False, parallel_iterations=parallelNum)
+            
+      def calRow_map(KernelVariable, N, parallelNum):
+            f = lambda x: calEntry(KernelVariable, x)
+            return tf.map_fn(f, tf.range(N, dtype=tf.int32), parallel_iterations=parallelNum)
+
+      paraOps = []
+      paraOpsWhile = []
+      paraOpsMap = []
+      for paraEntry in [1, 10, 50, 100]:
+            paraOps += [(calRow(KernelRow, N, paraEntry), paraEntry )]
+            paraOpsWhile += [(calRow_while(KernelRow, N, paraEntry), paraEntry )]
+            paraOpsMap += [(calRow_map(KernelRow, N, paraEntry), paraEntry )]
+
+      init = tf.global_variables_initializer()
+      #perform calculation
+      with tf.Session() as sess:
+            sess.run(init)
+            for op in paraOps:
+                  runtime = []
+                  sess.run(op[0]) #warm up
+                  for i in range(runs):
+                        startTime = time.time()
+                        sess.run(op[0])
+                        runtime += [time.time() - startTime]
+                  print("Calculation using {} threads took {:.4f} +- {:.4f}".format(op[1], np.mean(runtime), np.std(runtime) ))
+            
+            for op in paraOpsWhile:
+                  runtime = []
+                  sess.run(op[0]) #warm up
+                  for i in range(runs):
+                        startTime = time.time()
+                        sess.run(op[0])
+                        runtime += [time.time() - startTime]
+                  print("WHILE: Calculation using {} threads took {:.4f} +- {:.4f}".format(op[1], np.mean(runtime), np.std(runtime) ))
+                
+            for op in paraOpsMap:
+                  runtime = []
+                  sess.run(op[0]) #warm up
+                  for i in range(runs):
+                        startTime = time.time()
+                        sess.run(op[0])
+                        runtime += [time.time() - startTime]
+                  print("MAP: Calculation using {} threads took {:.4f} +- {:.4f}".format(op[1], np.mean(runtime), np.std(runtime) ))
+
+Example Output:
+Calculation using 1 threads took 0.0044 +- 0.0004
+Calculation using 10 threads took 0.0026 +- 0.0006
+Calculation using 50 threads took 0.0018 +- 0.0000
+Calculation using 100 threads took 0.0014 +- 0.0001
+WHILE: Calculation using 1 threads took 0.0063 +- 0.0001
+WHILE: Calculation using 10 threads took 0.0063 +- 0.0007
+WHILE: Calculation using 50 threads took 0.0063 +- 0.0001
+WHILE: Calculation using 100 threads took 0.0062 +- 0.0004
+MAP: Calculation using 1 threads took 0.0072 +- 0.0004
+MAP: Calculation using 10 threads took 0.0035 +- 0.0003
+MAP: Calculation using 50 threads took 0.0035 +- 0.0002
+MAP: Calculation using 100 threads took 0.0035 +- 0.0002
+
+
+System information
+Ubuntu, Tensorflow installed using pip, version 1.3
+tested on two different systems

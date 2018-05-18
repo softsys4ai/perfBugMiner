@@ -1,0 +1,97 @@
+Computing gradients with tf.cond bug
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4.1
+Python version: 2.7.12
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: CUDA 8.0 , CUDNN 7.0.5
+GPU model and memory:  GTX 1060 (6 GiB Memory, 6.1 Compute Power)
+Exact command to reproduce: python test_cond_gradients.py (or whatever you call the file with source code)
+
+The file test_cond_gradients.py can be found  in the source code below
+Describe the problem
+I am using a tf.cond to stop gradients from being computed through one part of the graph - depending on which train cross entropy (TCE) is smaller. According to the time however, even with the tf.cond, gradients is still being computed through both parts of the graph which should not be the case.
+In the source code, there are three different losses tested. The first and second losses (baseline and loss1) are computed in similar time as shown if you run the script. The third loss tested (loss2) is slower than the first two, even though gradients should only be computed through one part of the graph (depending on the cond condition). The second loss is also using a tf.cond but the true_fn and false_fn passed to it are identical. The third should take about the same time to compute as the first two. This problem is amplified more when the network is more complex and thus back-prop takes more time but I have just created a simple example to run.
+Source code / logs
+import tensorflow as tf
+import numpy as np
+import time
+
+def run_test():
+    x1 = tf.placeholder(tf.float32, [64,32,32,3])
+    x2 = tf.placeholder(tf.float32, [64,32,32,3])
+
+    y = tf.placeholder(tf.int64, [64])
+
+    logits1 = simple_network(x1)
+    logits2 = simple_network(x2, reuse=True)
+
+    # TCEs
+    train_cross_entropy1 = tf.reduce_mean(
+            tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y, logits=logits1))
+    train_cross_entropy2 = tf.reduce_mean(
+            tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y, logits=logits2))
+
+    # Losses
+    loss_baseline = train_cross_entropy1 + tf.stop_gradient(train_cross_entropy2)
+
+    loss1 = tf.cond(train_cross_entropy1 < train_cross_entropy2, lambda: train_cross_entropy1 + tf.stop_gradient(train_cross_entropy2), 
+                                                                 lambda: train_cross_entropy1 + tf.stop_gradient(train_cross_entropy2))
+
+    loss2 = tf.cond(train_cross_entropy1 < train_cross_entropy2, lambda: train_cross_entropy1 + tf.stop_gradient(train_cross_entropy2), 
+                                                                 lambda: tf.stop_gradient(train_cross_entropy1) + train_cross_entropy2)
+    # Train Step
+    train_step = tf.train.AdamOptimizer()
+
+    apply_gradient_op_baseline = train_step.minimize(loss_baseline)
+
+    apply_gradient_op1 = train_step.minimize(loss1)
+
+    apply_gradient_op2 = train_step.minimize(loss2)
+    
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+
+        ## Baseline
+        baseline_s = time.time()
+        for i in range(1000):
+            sess.run(apply_gradient_op_baseline, feed_dict={x1: np.random.rand(64,32,32,3), x2: np.random.rand(64,32,32,3), y: np.random.randint(0,11,(64))})
+        print("Baseline time: ", time.time() - baseline_s)
+
+        ## Cond 1
+        cond1_s = time.time()
+        for i in range(1000):
+            sess.run(apply_gradient_op1, feed_dict={x1: np.random.rand(64,32,32,3), x2: np.random.rand(64,32,32,3), y: np.random.randint(0,11,(64))})
+        print("Cond1 time: ", time.time() - cond1_s)
+
+        ## Cond 2 (Should be about the same time as Cond 1)
+        cond2_s = time.time()
+        for i in range(1000):
+            sess.run(apply_gradient_op2, feed_dict={x1: np.random.rand(64,32,32,3), x2: np.random.rand(64,32,32,3), y: np.random.randint(0,11,(64))})
+        print("Cond2 time: ", time.time() - cond2_s)   
+
+def simple_network(Y, reuse=False):
+    with tf.variable_scope("simple_network", reuse=reuse):
+        K1 = tf.get_variable("K1", shape=[3,3,3,16], initializer=tf.initializers.random_normal)
+        Y = tf.nn.conv2d(Y, K1, strides=[1,1,1,1], padding='SAME')
+
+        K2 = tf.get_variable("K2", shape=[3,3,16,64], initializer=tf.initializers.random_normal)
+        Y = tf.nn.conv2d(Y, K2, strides=[1,1,1,1], padding='SAME')
+
+        Y = tf.reduce_mean(Y, [1,2])
+
+        FC_W = tf.get_variable("FC_W", shape=[64, 10], initializer=tf.initializers.random_normal)
+        FC_B = tf.get_variable("FC_B", shape=[10], initializer=tf.initializers.random_normal)
+
+        logits = tf.nn.xw_plus_b(Y, FC_W, FC_B)
+
+        return logits
+
+run_test()
+
+Thanks for any advice or work-arounds of this bug

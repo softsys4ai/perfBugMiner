@@ -1,0 +1,159 @@
+ValueError: An initializer for variable conv2d/kernel of <dtype: 'string'> is required
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug, a feature request, or a significant problem with documentation (for small docs fixes please send a PR instead).
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 17.10
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+1.7 cpu only
+Python version:
+3.6.5
+Bazel version (if compiling from source):
+no
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+I want to train a CNN model classify images use keras model. Train data import from CSV files via pandas.  the dataset i frist want to change to float32 and split by ','but system return error, i change back to string  split by ' ', got error as below.
+When I call the train method, an error is thrown.
+How can I fix this?
+image size 48*48
+Source code / logs
+model:
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from PIL import Image
+#import csv
+from numpy import imag, float32
+import tensorflow as tf
+from math import floor
+import sys
+TRAIN_CSV_COLUMN_NAMES=['label','feature']
+TEST_CSV_COLUMN_NAMES=['id','feature']
+trainEpochs = 40
+batchSize = 100
+LEARNING_RATE = 1e-4
+class Model(tf.keras.Model):
+def init(self):
+super(Model, self).init()
+self._input_shape = [-1,48,48,1]
+self.conv1 = tf.layers.Conv2D(32,5,padding = 'same',data_format = 'channels_last',activation=tf.nn.relu)
+self.conv2 = tf.layers.Conv2D(32,5,padding = 'same',data_format = 'channels_last',activation = tf.nn.relu)
+self.conv3 = tf.layers.Conv2D(64,5,padding = 'same',data_format = 'channels_last',activation = tf.nn.relu)
+self.max_pool2d = tf.layers.MaxPooling2D((2,2),(2,2),padding = 'same', data_format = 'channels_last')
+self.fc1 = tf.layers.Dense(1600,activation=tf.nn.relu)
+self.fc2 = tf.layers.Dense(7)
+self.dropout = tf.layers.Dropout(0.4)
+def call(self,input,training):
+y=tf.reshape(input,self._input_shape)
+y=self.conv1(y)#error appear here
+y=self.max_pool2d(y)
+y=self.conv2(y)
+y=self.max_pool2d(y)
+y=self.conv3(y)
+    y=tf.layers.flatten(y)
+    y=self.fc1(y,activation = tf.nn.relu)
+    y=self.dropout(y,training=training)
+    return self.fc2(y)
+
+#load data from csv
+def dataLoad():
+oragTrainData = pd.read_csv('train.csv',names = TRAIN_CSV_COLUMN_NAMES ,header = 0)
+oragTestData = pd.read_csv('test.csv', names = TEST_CSV_COLUMN_NAMES, header = 0)
+trainData,valiData =  splitValid(oragTrainData,0.2)
+trainData,labels = trainData,trainData.pop('label')
+valiData,vaLabels = valiData, valiData.pop('label')
+testData,tId = oragTestData,oragTestData.pop('id')
+return trainData,testData,valiData,labels,vaLabels,tId
+#input function
+def trainDataInputFn():
+features = tf.data.Dataset.from_tensor_slices(trainData)
+labels = tf.data.Dataset.from_tensor_slices(trainLabels)
+ds = tf.data.Dataset.zip((features,labels))
+ds=ds.cache().shuffle(5000).batch(batchSize)
+ds = ds.make_one_shot_iterator().get_next()
+return ds
+#model_fn function
+def model_fn(features,labels,mode,params):
+model = Model()
+images = features
+if isinstance(images,dict):
+images = images['feature']
+if mode == tf.estimator.ModeKeys.TRAIN:
+    optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE)
+    logists = model(images, training=True)
+    loss = tf.losses.sparse_softmax_cross_entropy(labels = labels, logits=logists)
+    accuracy = tf.metrics.accuracy(labels=labels, predictions = logists)
+    
+    tf.identity(LEARNING_RATE, 'learning_rate')
+    tf.identity(loss,'loss')
+    tf.identity(accuracy,'accuracy')
+    
+    tf.summary.scalar(accuracy[1],name='training accuracy')
+    print('9999999999999999999999999999999999999999999999999999')
+    return tf.estimator.EstimatorSpec(mode = tf.estimator.ModeKeys.TRAIN,
+                                      loss = loss,
+                                      train_op = optimizer.minimize(loss, tf.train.get_or_create_global_step()))
+
+pass to model data format:
+[[b'35 7 7 7 5 10 16 8 30 66 111.....48 54 56 53 67']
+...
+[b'249 249 249 249 247 254 ......143 148 97 98 59 57']]
+error information
+Traceback (most recent call last):
+File "emontionClassfy.py", line 218, in 
+main(argv=sys.argv)
+File "emontionClassfy.py", line 206, in main
+emontionClassify.train(input_fn=trainDataInputFn)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/estimator/estimator.py", line 355, in train
+loss = self._train_model(input_fn, hooks, saving_listeners)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/estimator/estimator.py", line 824, in _train_model
+features, labels, model_fn_lib.ModeKeys.TRAIN, self.config)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/estimator/estimator.py", line 805, in _call_model_fn
+model_fn_results = self._model_fn(features=features, **kwargs)
+File "emontionClassfy.py", line 134, in model_fn
+logists = model(images, training=True)
+File "emontionClassfy.py", line 45, in call
+y=self.conv1(y)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/layers/base.py", line 696, in call
+self.build(input_shapes)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/layers/convolutional.py", line 144, in build
+dtype=self.dtype)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/layers/base.py", line 546, in add_variable
+partitioner=partitioner)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/training/checkpointable.py", line 415, in _add_variable_with_custom_getter
+**kwargs_for_getter)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/ops/variable_scope.py", line 1297, in get_variable
+constraint=constraint)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/ops/variable_scope.py", line 1093, in get_variable
+constraint=constraint)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/ops/variable_scope.py", line 439, in get_variable
+constraint=constraint)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/ops/variable_scope.py", line 408, in _true_getter
+use_resource=use_resource, constraint=constraint)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/ops/variable_scope.py", line 773, in _get_single_variable
+name=name, shape=shape, dtype=dtype)
+File "/home/bruce/tensorflow/lib/python3.6/site-packages/tensorflow/python/ops/variable_scope.py", line 853, in _get_default_initializer
+% (name, dtype.base_dtype))
+ValueError: An initializer for variable conv2d/kernel of <dtype: 'string'> is required

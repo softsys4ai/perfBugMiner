@@ -1,0 +1,105 @@
+fused_batch_norm doesn't work with epsilon < 1e-5
+
+This line in nn_impl.py has the following comment: "Add 1e-12 to epsilon when epsilon <= 1e-5 to prevent CUDNN exception." However, I still get the cuDNN exception when using values of epsilon less than 1e-5.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Nothing related.
+Environment info
+
+Operating System: CentOS release 6.3 (Final)
+Installed version of CUDA: 8.0.44
+Installed version of cuDNN: 8.0v5.1
+Installed tensorflow-gpu from pip-3.5
+
+$ python3.5 -c "import tensorflow; print(tensorflow.__version__)"
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+1.0.0
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+from itertools import chain
+
+with tf.device('/gpu:0'):
+        x = tf.zeros([4, 4, 4, 4])
+        scale, offset = tf.ones(4), tf.zeros(4)
+
+        y, _, _ = tf.nn.fused_batch_norm(x, scale, offset, mean=None, variance=None, epsilon=1e-8,
+                data_format='NCHW', is_training=True)
+
+        init_op = tf.group(*(v.initializer for v in chain(tf.global_variables(),
+                tf.local_variables())))
+
+        sess = tf.Session()
+        sess.run(init_op)
+        sess.run(y)
+
+Logs or other output that would be helpful
+$ python3.5 tests/fused_batch_norm_crash.py
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE3 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties:
+name: GeForce GTX 1080
+major: 6 minor: 1 memoryClockRate (GHz) 1.7335
+pciBusID 0000:84:00.0
+Total memory: 7.92GiB
+Free memory: 7.81GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1080, pci bus id: 0000:84:00.0)
+E tensorflow/stream_executor/cuda/cuda_dnn.cc:2177] failed to enqueue forward batch normalization on stream: CUDNN_STATUS_BAD_PARAM
+Traceback (most recent call last):
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1022, in _do_call
+    return fn(*args)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1004, in _run_fn
+    status, run_metadata)
+  File "/share/apps/python3/3.5.3/intel/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py", line 469, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InternalError: cuDNN launch failure : input shape ([4,4,4,4])
+	 [[Node: FusedBatchNorm = FusedBatchNorm[T=DT_FLOAT, data_format="NCHW", epsilon=1.0001e-08, is_training=true, _device="/job:localhost/replica:0/task:0/gpu:0"](random_normal, ones, zeros, Const, Const_1)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "tests/fused_batch_norm_crash.py", line 16, in <module>
+    sess.run(y)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1035, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InternalError: cuDNN launch failure : input shape ([4,4,4,4])
+	 [[Node: FusedBatchNorm = FusedBatchNorm[T=DT_FLOAT, data_format="NCHW", epsilon=1.0001e-08, is_training=true, _device="/job:localhost/replica:0/task:0/gpu:0"](random_normal, ones, zeros, Const, Const_1)]]
+
+Caused by op 'FusedBatchNorm', defined at:
+  File "tests/fused_batch_norm_crash.py", line 9, in <module>
+    data_format='NCHW', is_training=True)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/ops/nn_impl.py", line 818, in fused_batch_norm
+    name=name)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/ops/gen_nn_ops.py", line 1257, in _fused_batch_norm
+    is_training=is_training, name=name)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 763, in apply_op
+    op_def=op_def)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2395, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/ar2922/.local/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1264, in __init__
+    self._traceback = _extract_stack()
+
+InternalError (see above for traceback): cuDNN launch failure : input shape ([4,4,4,4])
+	 [[Node: FusedBatchNorm = FusedBatchNorm[T=DT_FLOAT, data_format="NCHW", epsilon=1.0001e-08, is_training=true, _device="/job:localhost/replica:0/task:0/gpu:0"](random_normal, ones, zeros, Const, Const_1)]]

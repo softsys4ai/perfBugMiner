@@ -1,0 +1,34 @@
+graph_editor copy_with_input_replacements doesn't update colocation constraints
+
+It seems if you try to use graph_editor to make copy of a model to place on another device, the new graph will still refer to old version inside colocation constraints.
+This causes errors like below when trying to run resulting graph.
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Cannot colocate nodes 'gradients/Max_1_1_grad/mul' and 'gradients/AddN_13: Cannot merge devices with incompatible ids: '/GPU:0' and '/GPU:1'
+More natural might be to update colocation constraints to point to newly created copies of ops.
+Test case
+  import tensorflow.contrib.graph_editor as ge
+  tf.reset_default_graph()
+  with tf.device('/cpu:0'):
+    a = tf.ones((), name='a')
+    with tf.get_default_graph().colocate_with(a):
+      b = tf.add(a, 1, name='b')
+  g = tf.get_default_graph()
+  ops = g.get_operations()
+  copied_sgv, info = ge.copy_with_input_replacements(ge.sgv(ops),
+                                                       {})
+  print(tf.get_default_graph().as_graph_def())
+
+You will see that newly created b_1 op will refer to old op a
+node {
+  name: "b/y_1"
+  op: "Const"
+  device: "/device:CPU:0"
+  attr {
+    key: "_class"
+    value {
+      list {
+        s: "loc:@a"
+      }
+    }
+  }
+
+@purpledog

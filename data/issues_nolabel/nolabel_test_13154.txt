@@ -1,0 +1,51 @@
+BeamSearchDecoder should support an AttentionWrapper cell with alignment_history enabled
+
+System information
+
+Have I written custom code: yes
+OS Platform and Distribution: Ubuntu 16.04
+TensorFlow installed from: binary
+TensorFlow version: 1.3.0
+Python version: 2.7
+Exact command to reproduce: see the code snippet below.
+
+Describe the problem
+Currently, setting tf.contrib.seq2seq.AttentionWrapper's alignment_history argument to True and using this cell in a tf.contrib.seq2seq.BeamSearchDecoder does not work for 2 reasons:
+
+In this configuration, the tf.contrib.seq2seq.AttentionWrapper.state_size property is invalid as it does not have the same structure as zero_state (see the code below). The decoder state initialization is failing because of this.
+tf.contrib.seq2seq.BeamSearchDecoder raises an error when the state contains a TensorArray, which is the type currently used to gather alignments.
+
+I believe this configuration should be supported as it is a standard use case for sequence to sequence models.
+To address both of these limitations, it seems this alignment_history could be a Tensor on which alignments are repeatedly concatenated. Would it work?
+Source code / logs
+This code sample reproduces 1. which is the error directly visible when using this configuration.
+import tensorflow as tf
+
+batch_size = 2
+num_units = 10
+
+memory = tf.placeholder(tf.float32, shape=(None, None, num_units))
+
+attention_mechanism = tf.contrib.seq2seq.LuongAttention(
+  num_units,
+  memory)
+
+cell = tf.contrib.seq2seq.AttentionWrapper(
+  tf.contrib.rnn.LSTMCell(num_units),
+  attention_mechanism,
+  alignment_history=True) # Set this to False to make it work.
+
+tf.contrib.framework.nest.assert_same_structure(
+  cell.zero_state(batch_size, dtype=tf.float32),
+  cell.state_size)
+It exits with this error:
+Traceback (most recent call last):
+  File "<file>", line 19, in <module>
+    cell.state_size)
+  File "<dir>/local/lib/python2.7/site-packages/tensorflow/python/util/nest.py", line 199, in assert_same_structure
+    % (len_nest1, nest1, len_nest2, nest2))
+ValueError: The two structures don't have the same number of elements.
+
+First structure (6 elements): AttentionWrapperState(cell_state=LSTMStateTuple(c=<tf.Tensor 'AttentionWrapperZeroState/checked_cell_state:0' shape=(2, 10) dtype=float32>, h=<tf.Tensor 'AttentionWrapperZeroState/checked_cell_state_1:0' shape=(2, 10) dtype=float32>), attention=<tf.Tensor 'AttentionWrapperZeroState/zeros_1:0' shape=(2, 10) dtype=float32>, time=<tf.Tensor 'AttentionWrapperZeroState/zeros:0' shape=() dtype=int32>, alignments=<tf.Tensor 'AttentionWrapperZeroState/zeros_2:0' shape=(2, ?) dtype=float32>, alignment_history=<tensorflow.python.ops.tensor_array_ops.TensorArray object at 0x7fbd6326ec50>)
+
+Second structure (5 elements): AttentionWrapperState(cell_state=LSTMStateTuple(c=10, h=10), attention=10, time=TensorShape([]), alignments=<tf.Tensor 'LuongAttention/strided_slice_2:0' shape=() dtype=int32>, alignment_history=())

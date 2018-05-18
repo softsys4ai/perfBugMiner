@@ -1,0 +1,784 @@
+Tensorflow hangs during run() call on some machines
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Debian 9.1
+TensorFlow installed from (source or binary): Both
+TensorFlow version (use command below):  v1.3.0-rc2-20-g0787eee 1.3.0
+Python version: 3.5.3
+Bazel version (if compiling from source): 0.6.1
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:
+
+import tensorflow as tf
+from tensorflow.examples.tutorials.mnist import input_data
+
+x_ph = x = tf.placeholder(tf.float32, [None, 784], name='x')
+y = tf.placeholder(tf.float32, [None, 10], name='y')
+n_layers = 100
+batch_size = 256
+for _ in range(n_layers):
+    x = tf.layers.dense(x, 500, kernel_initializer=tf.contrib.layers.xavier_initializer())
+logits = tf.layers.dense(x, 10)
+loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=y), name="loss")
+train_op = tf.train.GradientDescentOptimizer(0.0001).minimize(loss)
+mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
+with tf.Session().as_default():
+    tf.global_variables_initializer().run()
+    for i in range(10000):
+        batch = mnist.train.next_batch(batch_size)
+        train_op.run({x_ph: batch[0], y: batch[1]})
+        print(i)
+Describe the problem
+When executing the above code (minimal example), the program hangs inside the run() call after several iterations have been successfully executed. The process and some of its threads are still busy while it hangs. Also it cannot be killed with ^C but kill works. The number of iterations before it hangs varies a lot (50-1000) and it seems to be dependent on the amount of computation being done. E.g. with smaller batch size, it would take longer before it freezes, and with a vgg-like neural net it would freeze after ~20 iterations. If I attach gdb to the frozen process, and run cont, the process starts running before it hangs again after several iterations.
+This must be system specific since the above example of course runs without any problems on most machines. I have tried it with tensorflow installed both from source and from binary, and with both python 3.5 and 3.6 but the issue is always there. Probably the same issue has been discussed in #2788 and #7573 but it wasn't resolved there.
+uname -r: 4.9.0-3-amd64
+CPU: 4 x Xeon(R) CPU E5-4627 v2
+Source code / logs
+This is output from gdb when the process hangs.
+(gdb) thread apply all bt
+
+Thread 65 (Thread 0x2aaacf2b3700 (LWP 15633)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab2855273 in Eigen::Barrier::Wait() ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab34597eb in void Eigen::TensorEvaluator<Eigen::TensorContractionOp<Eigen::array<Eigen::IndexPair<long>, 1ul> const, Eigen::TensorMap<Eigen::Tensor<float const, 2, 1, long>, 16, Eigen::MakePointer> const, Eigen::TensorMap<Eigen::Tensor<float const, 2, 1, long>, 16, Eigen::MakePointer> const> const, Eigen::ThreadPoolDevice>::evalProduct<true, false, false, 0>(float*) const () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab3464ddd in tensorflow::LaunchMatMulBase<Eigen::ThreadPoolDevice, float>::launch(tensorflow::OpKernelContext*, tensorflow::OpKernel*, tensorflow::Tensor const&, tensorflow::Tensor const&, Eigen::array<Eigen::IndexPair<long>, 1ul> const&, tensorflow::Tensor*) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab3465211 in tensorflow::MatMulOp<Eigen::ThreadPoolDevice, float, false>::Compute(tensorflow::OpKernelContext*) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#6  0x00002aaab3fbefdc in tensorflow::ThreadPoolDevice::Compute(tensorflow::OpKernel*, tensorflow::OpKernelContext*) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#7  0x00002aaab3f8f3e8 in tensorflow::(anonymous namespace)::ExecutorState::Process(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#8  0x00002aaab3f7ee10 in std::_Function_handler<void (), std::_Bind<std::_Mem_fn<void (tensorflow::(anonymous namespace)::ExecutorState::*)(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long)> (tensorflow::(anonymous namespace)::ExecutorState*, tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long)> >::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#9  0x00002aaab4308742 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#10 0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#11 0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#12 0x00002aaaaacd8494 in start_thread (arg=0x2aaacf2b3700) at pthread_create.c:333
+#13 0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 64 (Thread 0x2aaacf0b2700 (LWP 15632)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacf0b2700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 63 (Thread 0x2aaaceeb1700 (LWP 15631)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaaceeb1700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 62 (Thread 0x2aaacecb0700 (LWP 15630)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacecb0700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 61 (Thread 0x2aaaceaaf700 (LWP 15629)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaaceaaf700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 60 (Thread 0x2aaace8ae700 (LWP 15628)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaace8ae700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 59 (Thread 0x2aaace6ad700 (LWP 15627)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaace6ad700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 58 (Thread 0x2aaace4ac700 (LWP 15626)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaace4ac700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 57 (Thread 0x2aaace2ab700 (LWP 15625)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaace2ab700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 56 (Thread 0x2aaace0aa700 (LWP 15624)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaace0aa700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 55 (Thread 0x2aaacdea9700 (LWP 15623)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacdea9700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 54 (Thread 0x2aaacdca8700 (LWP 15622)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacdca8700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 53 (Thread 0x2aaacdaa7700 (LWP 15621)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacdaa7700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 52 (Thread 0x2aaacd8a6700 (LWP 15620)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacd8a6700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 51 (Thread 0x2aaacd6a5700 (LWP 15619)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacd6a5700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 50 (Thread 0x2aaacd4a4700 (LWP 15618)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacd4a4700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 49 (Thread 0x2aaacd2a3700 (LWP 15617)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacd2a3700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 48 (Thread 0x2aaacb0de700 (LWP 15616)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacb0de700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 47 (Thread 0x2aaacaedd700 (LWP 15615)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacaedd700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 46 (Thread 0x2aaacacdc700 (LWP 15614)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacacdc700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 45 (Thread 0x2aaacaadb700 (LWP 15613)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaacaadb700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 44 (Thread 0x2aaaca8da700 (LWP 15612)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaaca8da700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 43 (Thread 0x2aaaca6d9700 (LWP 15611)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaaca6d9700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 42 (Thread 0x2aaaca4d8700 (LWP 15610)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaaca4d8700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 41 (Thread 0x2aaaca2d7700 (LWP 15609)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaaca2d7700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 40 (Thread 0x2aaaca0d6700 (LWP 15608)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaaca0d6700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 39 (Thread 0x2aaac9ed5700 (LWP 15607)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac9ed5700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 38 (Thread 0x2aaac9cd4700 (LWP 15606)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac9cd4700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 37 (Thread 0x2aaac9ad3700 (LWP 15605)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac9ad3700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 36 (Thread 0x2aaac98d2700 (LWP 15604)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac98d2700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 35 (Thread 0x2aaac96d1700 (LWP 15603)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac96d1700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 34 (Thread 0x2aaac8576700 (LWP 15602)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac8576700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 33 (Thread 0x2aaac8375700 (LWP 15601)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac8375700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 32 (Thread 0x2aaac8174700 (LWP 15600)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac8174700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 31 (Thread 0x2aaac7f73700 (LWP 15599)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac7f73700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 30 (Thread 0x2aaac7d72700 (LWP 15598)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac7d72700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 29 (Thread 0x2aaac7b71700 (LWP 15597)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac7b71700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 28 (Thread 0x2aaac7970700 (LWP 15596)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac7970700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 27 (Thread 0x2aaac776f700 (LWP 15595)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac776f700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 26 (Thread 0x2aaac756e700 (LWP 15594)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac756e700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 25 (Thread 0x2aaac736d700 (LWP 15593)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac736d700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 24 (Thread 0x2aaac716c700 (LWP 15592)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac716c700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 23 (Thread 0x2aaac6a10700 (LWP 15591)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac6a10700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 22 (Thread 0x2aaac680f700 (LWP 15590)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac680f700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 21 (Thread 0x2aaac660e700 (LWP 15589)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac660e700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 20 (Thread 0x2aaac640d700 (LWP 15588)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac640d700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 19 (Thread 0x2aaac620c700 (LWP 15587)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac620c700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 18 (Thread 0x2aaac600b700 (LWP 15586)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac600b700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 17 (Thread 0x2aaac5e0a700 (LWP 15585)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac5e0a700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 16 (Thread 0x2aaac5c09700 (LWP 15584)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac5c09700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 15 (Thread 0x2aaac5a08700 (LWP 15583)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac5a08700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 14 (Thread 0x2aaac5807700 (LWP 15582)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac5807700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 13 (Thread 0x2aaac5606700 (LWP 15581)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac5606700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 12 (Thread 0x2aaac5405700 (LWP 15580)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac5405700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 11 (Thread 0x2aaac5204700 (LWP 15579)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac5204700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 10 (Thread 0x2aaac5003700 (LWP 15578)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac5003700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 9 (Thread 0x2aaac4e02700 (LWP 15577)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac4e02700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 8 (Thread 0x2aaac4c01700 (LWP 15576)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac4c01700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 7 (Thread 0x2aaac4a00700 (LWP 15575)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac4a00700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 6 (Thread 0x2aaac47ff700 (LWP 15574)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac47ff700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 5 (Thread 0x2aaac45fe700 (LWP 15573)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac45fe700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 4 (Thread 0x2aaac43fd700 (LWP 15572)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4308047 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#6  0x00002aaaaacd8494 in start_thread (arg=0x2aaac43fd700) at pthread_create.c:333
+#7  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 3 (Thread 0x2aaac41fc700 (LWP 15571)):
+#0  pthread_cond_signal@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S:87
+#1  0x00002aaab5427529 in std::condition_variable::notify_one() () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab4307dbb in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::Schedule(std::function<void ()>) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab4309681 in tensorflow::thread::ThreadPool::Schedule(std::function<void ()>) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab3f9f8d6 in tensorflow::EigenThreadPoolWrapper::Schedule(std::function<void ()>) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab3458371 in Eigen::TensorEvaluator<Eigen::TensorContractionOp<Eigen::array<Eigen::IndexPair<long>, 1ul> const, Eigen::TensorMap<Eigen::Tensor<float const, 2, 1, long>, 16, Eigen::MakePointer> const, Eigen::TensorMap<Eigen::Tensor<float const, 2, 1, long>, 16, Eigen::MakePointer> const> const, Eigen::ThreadPoolDevice>::Context<Eigen::internal::gemm_pack_lhs<float, long, Eigen::internal::TensorContractionSubMapper<float, long, 1, Eigen::TensorEvaluator<Eigen::TensorMap<Eigen::Tensor<float const, 2, 1, long>, 16, Eigen::MakePointer> const, Eigen::ThreadPoolDevice>, Eigen::array<long, 1ul>, Eigen::array<long, 1ul>, 4, true, false, 0, Eigen::MakePointer>, 8, 4, 0, false, false>, Eigen::internal::gemm_pack_rhs<float, long, Eigen::internal::TensorContractionSubMapper<float, long, 0, Eigen::TensorEvaluator<Eigen::TensorMap<Eigen::Tensor<float const, 2, 1, long>, 16, Eigen::MakePointer> const, Eigen::ThreadPoolDevice>, Eigen::array<long, 1ul>, Eigen::array<long, 1ul>, 4, false, false, 0, Eigen::MakePointer>, 4, 0, false, false>, Eigen::internal::gebp_kernel<float, float, long, Eigen::internal::blas_data_mapper<float, long, 0, 0>, 8, 4, false, false>, Eigen::internal::TensorContractionInputMapper<float, long, 1, Eigen::TensorEvaluator<Eigen::TensorMap<Eigen::Tensor<float const, 2, 1, long>, 16, Eigen::MakePointer> const, Eigen::ThreadPoolDevice>, Eigen::array<long, 1ul>, Eigen::array<long, 1ul>, 4, true, false, 0, Eigen::MakePointer>, Eigen::internal::TensorContractionInputMapper<float, long, 0, Eigen::TensorEvaluator<Eigen::TensorMap<Eigen::Tensor<float const, 2, 1, long>, 16, Eigen::MakePointer> const, Eigen::ThreadPoolDevice>, Eigen::array<long, 1ul>, Eigen::array<long, 1ul>, 4, false, false, 0, Eigen::MakePointer>, Eigen::internal::blas_data_mapper<float, long, 0, 0> >::enqueue_packing_helper(long, long, long, bool) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#6  0x00002aaab4308742 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#7  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#8  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#9  0x00002aaaaacd8494 in start_thread (arg=0x2aaac41fc700) at pthread_create.c:333
+#10 0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 2 (Thread 0x2aaac3ffb700 (LWP 15570)):
+#0  0x00002aaaabb10ca7 in sched_yield () at ../sysdeps/unix/syscall-template.S:84
+#1  0x00002aaab4308090 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WaitForWork(Eigen::EventCount::Waiter*, tensorflow::thread::EigenEnvironment::Task*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00002aaab4308abe in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab43079d2 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab542d200 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#5  0x00002aaaaacd8494 in start_thread (arg=0x2aaac3ffb700) at pthread_create.c:333
+#6  0x00002aaaabb27aff in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:97
+
+Thread 1 (Thread 0x2aaaaab10240 (LWP 15558)):
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+#1  0x00002aaab542750c in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#2  0x00002aaab3f46acb in tensorflow::DirectSession::WaitForNotification(tensorflow::Notification*, long long) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00002aaab3f46b5d in tensorflow::DirectSession::WaitForNotification(tensorflow::DirectSession::RunState*, tensorflow::CancellationManager*, long long) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00002aaab3f52e1d in tensorflow::DirectSession::Run(tensorflow::RunOptions const&, std::vector<std::pair<std::string, tensorflow::Tensor>, std::allocator<std::pair<std::string, tensorflow::Tensor> > > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<tensorflow::Tensor, std::allocator<tensorflow::Tensor> >*, tensorflow::RunMetadata*) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#5  0x00002aaab25b4c97 in TF_Run_Helper(tensorflow::Session*, char const*, TF_Buffer const*, std::vector<std::pair<std::string, tensorflow::Tensor>, std::allocator<std::pair<std::string, tensorflow::Tensor> > > const&, std::vector<std::string, std::allocator<std::string> > const&, TF_Tensor**, std::vector<std::string, std::allocator<std::string> > const&, TF_Buffer*, TF_Status*) () from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#6  0x00002aaab25b4fc4 in TF_Run ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#7  0x00002aaab241dcd2 in tensorflow::TF_Run_wrapper_helper(TF_DeprecatedSession*, char const*, TF_Buffer const*, _object*, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, TF_Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#8  0x00002aaab241e0d1 in tensorflow::TF_Run_wrapper(TF_DeprecatedSession*, TF_Buffer const*, _object*, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, TF_Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#9  0x00002aaab23e4e83 in _wrap_TF_Run ()
+   from /nfs/scistore12/clustersw/debian/stretch/tensorflow-1.3.0-python3.5/lib/python3.5/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#10 0x00005555557146df in PyCFunction_Call ()
+#11 0x00005555556d46e9 in PyEval_EvalFrameEx ()
+#12 0x00005555556da817 in PyEval_EvalCodeEx ()
+#13 0x00005555557165d3 in ?? ()
+#14 0x000055555575d647 in PyObject_Call ()
+#15 0x00005555556d2180 in PyEval_EvalFrameEx ()
+#16 0x00005555556d9286 in ?? ()
+#17 0x00005555556d54c9 in PyEval_EvalFrameEx ()
+#18 0x00005555556d97bf in ?? ()
+#19 0x00005555556d54c9 in PyEval_EvalFrameEx ()
+#20 0x00005555556d493f in PyEval_EvalFrameEx ()
+#21 0x00005555556d9286 in ?? ()
+#22 0x00005555556d50a9 in PyEval_EvalFrameEx ()
+#23 0x00005555556d9286 in ?? ()
+#24 0x00005555556d50a9 in PyEval_EvalFrameEx ()
+#25 0x00005555556d9286 in ?? ()
+#26 0x00005555556d50a9 in PyEval_EvalFrameEx ()
+#27 0x00005555556d9286 in ?? ()
+#28 0x00005555556d9f9f in PyEval_EvalCode ()
+#29 0x00005555557a78f2 in ?? ()
+#30 0x00005555557a9e1d in PyRun_FileExFlags ()
+#31 0x00005555557aa5be in PyRun_SimpleFileExFlags ()
+#32 0x00005555557d84d7 in Py_Main ()
+#33 0x0000555555668c01 in main ()

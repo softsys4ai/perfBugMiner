@@ -1,0 +1,58 @@
+No GPU OpKernel for tf.exp() operation for Complex64
+
+I am running tensorflow 1.4.0 from nightly build ('v1.3.0-rc1-5297-g4b7d79b6ea'  on ubuntu 16.04). I've had success working in eager mode (great job with this guys!) however I think I found a small bug:
+It seems that there is no OpKernel on device='GPU'  for the tf.exp() operation applied to complex numbers in eager mode.  This can be reproduced with the below code:
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+
+tfe.enable_eager_execution()
+
+with tf.device('/gpu:0'):
+  g = tf.spectral.rfft(tf.ones(64))
+  
+  tf.exp(g)
+
+which results in
+	 (OpKernel was found, but attributes didn't match)
+	.  Registered:  device='CPU'; T in [DT_COMPLEX128]
+  device='CPU'; T in [DT_COMPLEX64]
+  device='CPU'; T in [DT_DOUBLE]
+  device='CPU'; T in [DT_HALF]
+  device='CPU'; T in [DT_FLOAT]
+  device='GPU'; T in [DT_DOUBLE]
+  device='GPU'; T in [DT_HALF]
+  device='GPU'; T in [DT_FLOAT]
+ [Op:Exp]
+
+a more practical example that would lead to this same error:
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+
+tfe.enable_eager_execution(device_policy=tfe.DEVICE_PLACEMENT_SILENT)
+
+frame_length=256
+frame_step=64
+n_mels = 64
+sr=16000
+filename = 'path/to/a.wav'
+
+some_signal = tf.contrib.ffmpeg.decode_audio(tf.read_file(filename), 
+                                     file_format='wav', 
+                                     samples_per_second=16000, 
+                                     channel_count=1)
+
+with tf.device('/gpu:0'):
+  stft = tf.contrib.signal.stft(tf.transpose(some_signal), frame_length=frame_length, 
+                                  frame_step=frame_step, fft_length=frame_length)
+
+  linear_to_mel_weight_matrix = tf.contrib.signal.linear_to_mel_weight_matrix(
+      n_mels, 1+frame_length//2, sr)
+
+  magnitude_spectrograms = tf.abs(stft)
+  log_mel_spec = tf.log(1e-6+ tf.tensordot(magnitude_spectrograms,
+                                           linear_to_mel_weight_matrix, 
+                                           axes = [[2], [0]]))
+
+  mfccs = tf.contrib.signal.mfccs_from_log_mel_spectrograms(log_mel_spec)
+
+Keeping operations on CPU works just fine but I figured this would be easy to implement for GPU as well. Thanks

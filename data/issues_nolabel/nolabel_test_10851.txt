@@ -1,0 +1,138 @@
+ValueError: Attempt to reuse RNNCell - reuse flag does not work
+
+System information
+
+Linux Ubuntu 16.04
+tensorflow-gpu==1.1.0
+
+I am getting this error in quite a complex graph, but I can reproduce it with a minimal (but hopefully representative) example below:
+import tensorflow as tf
+import numpy as np
+
+
+class Controller(object):
+    def __init__(self, batch_size, input_size):
+
+        self.batch_size = batch_size
+        self.input_size = input_size
+
+        with tf.name_scope("controller"):
+            self.network_vars()
+
+            self.nn_output_size = None
+            with tf.variable_scope("shape_inference"):
+                self.nn_output_size = self.get_nn_output_size()
+
+    def network_vars(self):
+        self.lstm_cell = tf.contrib.rnn.BasicLSTMCell(256)
+        self.state = self.lstm_cell.zero_state(self.batch_size, tf.float32)
+
+    def network_op(self, x, state):
+        x = tf.convert_to_tensor(x)
+        return self.lstm_cell(x, state)
+
+    def get_state(self):
+        return self.state
+
+    def update_state(self, new_state):
+        return tf.no_op()
+
+    def process_input(self, x, state=None):
+        nn_output, nn_state = self.network_op(x, state)
+        return nn_output, nn_state
+
+    def get_nn_output_size(self):
+        input_tensor = np.zeros([self.batch_size, self.input_size], dtype=np.float32)
+        output_vector, _ = self.network_op(input_tensor, self.get_state())
+        shape = output_vector.get_shape().as_list()
+
+        if len(shape) > 2:
+            raise ValueError("Expected the neural network to output a 1D vector")
+        else:
+            return shape[1]
+
+
+class DNC(object):
+    def __init__(self, batch_size, input_size):
+        self.batch_size = batch_size
+        self.input_size = input_size
+        self.controller = Controller(batch_size, input_size)
+        self.build_graph()
+
+    def _step_op(self, x, controller_state=None):
+        _, nn_state = self.controller.process_input(x, controller_state)
+        return [nn_state[0], nn_state[1]]
+
+    def _loop_body(self, t, controller_state):
+        x = np.random.random_sample((self.batch_size, self.input_size)).astype(np.float32)
+        output_list = self._step_op(x, controller_state)
+        new_controller_state = tf.contrib.rnn.LSTMStateTuple(output_list[0], output_list[1])
+        return t+1, new_controller_state
+
+    def build_graph(self):
+        controller_state = self.controller.get_state()
+        if not isinstance(controller_state, tf.contrib.rnn.LSTMStateTuple):
+            controller_state = tf.contrib.rnn.LSTMStateTuple(controller_state[0], controller_state[1])
+
+        with tf.variable_scope("sequence_loop") as scope:
+            time = tf.constant(0, dtype=tf.int32)
+
+            final_results = tf.while_loop(
+                cond=lambda time, *_: time < 50,
+                body=self._loop_body,
+                loop_vars=(time, controller_state),
+                parallel_iterations=32,
+                swap_memory=True
+            )
+
+if __name__ == "__main__":
+    batch_size = 32
+    input_size = 10
+    dnc = DNC(batch_size, input_size)
+
+The traceback of the issue is:
+francescoferroni@francescoferroni:~$ python controller.py 
+Traceback (most recent call last):
+  File "controller.py", line 83, in <module>
+    dnc = DNC(batch_size, input_size)
+  File "controller.py", line 52, in __init__
+    self.build_graph()
+  File "controller.py", line 77, in build_graph
+    swap_memory=True
+  File "/home/francescoferroni/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2623, in while_loop
+    result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/home/francescoferroni/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2456, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/home/francescoferroni/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2406, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "controller.py", line 60, in _loop_body
+    output_list = self._step_op(x, controller_state)
+  File "controller.py", line 55, in _step_op
+    _, nn_state = self.controller.process_input(x, controller_state)
+  File "controller.py", line 33, in process_input
+    nn_output, nn_state = self.network_op(x, state)
+  File "controller.py", line 24, in network_op
+    return self.lstm_cell(x, state)
+  File "/home/francescoferroni/anaconda3/lib/python3.6/site-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 235, in __call__
+    with _checked_scope(self, scope or "basic_lstm_cell", reuse=self._reuse):
+  File "/home/francescoferroni/anaconda3/lib/python3.6/contextlib.py", line 82, in __enter__
+    return next(self.gen)
+  File "/home/francescoferroni/anaconda3/lib/python3.6/site-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 77, in _checked_scope
+    type(cell).__name__))
+ValueError: Attempt to reuse RNNCell <tensorflow.contrib.rnn.python.ops.core_rnn_cell_impl.BasicLSTMCell object at 0x7ff4075754e0> with a different variable scope than its first use.  First use of cell was with scope 'shape_inference/basic_lstm_cell', this attempt is with scope 'sequence_loop/basic_lstm_cell'.  Please create a new instance of the cell if you would like it to use a different set of weights.  If before you were using: MultiRNNCell([BasicLSTMCell(...)] * num_layers), change to: MultiRNNCell([BasicLSTMCell(...) for _ in range(num_layers)]).  If before you were using the same cell instance as both the forward and reverse cell of a bidirectional RNN, simply create two instances (one for forward, one for reverse).  In May 2017, we will start transitioning this cell's behavior to use existing stored weights, if any, when it is called with scope=None (which can lead to silent model degradation, so this error will remain until then.)
+
+If I use tensorflow 1.0 rather than 1.1 it causes no issues.
+francescoferroni@francescoferroni:~$ source Repositories/tfr10/bin/activate
+(tfr10) francescoferroni@francescoferroni:~$ python controller.py 
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+(tfr10) francescoferroni@francescoferroni:~$ 
+
+For the new tensorflow version, I have tried to add a reuse=True flag, as per #9401, when defining the LSTM cell, but then I  get another error:
+ValueError: Variable shape_inference/basic_lstm_cell/weights does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+Any help would be greatly appreciated.
+Best,
+Francesco

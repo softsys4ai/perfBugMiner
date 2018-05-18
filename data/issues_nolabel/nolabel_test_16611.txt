@@ -1,0 +1,98 @@
+Bug: tf.train.monitoredtrainingsession non-chief worker does not start
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 17.10
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): v1.4.0-19-ga52c8d9 1.4.1
+Python version: 3.6.3
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 8
+GPU model and memory: GTX-1080 11GB (chief) and M2000 4GB (slave)
+Exact command to reproduce:
+CUDA_VISIBLE_DEVICES='' python3 test.py --job-name ps --task-index 0
+CUDA_VISIBLE_DEVICES=0 python3 test.py --job-name worker --task-index 0
+CUDA_VISIBLE_DEVICES='' python3 test.py --job-name ps --task-index 1
+CUDA_VISIBLE_DEVICES=0 python3 test.py --job-name worker --task-index 1
+
+Describe the problem
+I am trying to run the distributed training and use tf.train.MonitoredTrainingSession with 2 PCs. PC1 has one GTX-1080 11GB and is set as chief, while PC2 has one M2000 4GB and is set as non-chief. They are connected back-to-back without switch/router. The chief worker was running okay but the non-chief worker was stuck at tf.train.MonitoredTrainingSession and did not proceed to execute the code within the session.
+Source code / logs
+import argparse
+import tensorflow as tf
+
+def parse_command():
+    parser = argparse.ArgumentParser(description='Monitor Training Session Test.')
+    parser.add_argument('--job-name', dest='job_name', default="worker", nargs='?', help='job name [worker|ps]')
+    parser.add_argument('--task-index', dest='task_index', type=int, default=0, help='task index')
+    return parser.parse_args()
+
+if __name__ == '__main__':
+    print("Test started...")
+
+    cluster = {
+        "ps" : [
+             "192.168.0.2:2221",
+             "192.168.0.1:2221"
+             ],
+        "worker" : [
+             "192.168.0.2:2222",
+             "192.168.0.1:2222"
+             ]}
+
+    options = parse_command()
+    cluster_spec = tf.train.ClusterSpec(cluster)
+    server = tf.train.Server(server_or_cluster_def=cluster_spec,
+                             job_name=options.job_name,
+                             task_index=options.task_index)
+
+    if options.job_name == "ps":
+        server.join()
+        sys.exit(0)
+
+    is_chief = (options.task_index == 0)
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    config.log_device_placement = True
+    step_size = 5
+
+    print("Running " + options.job_name + ":" + str(options.task_index))
+
+    with tf.device(tf.train.replica_device_setter(
+        worker_device = "/job:worker/task:%d" % options.task_index,
+        cluster = cluster_spec)) :
+
+        global_step = tf.train.get_or_create_global_step()
+        learning_rate = tf.train.exponential_decay(0.1, global_step, step_size, 0.94, staircase=True)
+
+        with tf.train.MonitoredTrainingSession(master=server.target,
+                                               is_chief=is_chief) as session:
+
+            print("MonitoredTrainingSession started")
+
+            for i in range(10):
+                for j in range(step_size):
+                    lr, gstep = session.run([learning_rate, global_step])
+                    print("learning rate=" + str(lr) + ", global step=" + str(gstep))
+
+PC1 (GTX-1080) Logs
+...
+Running worker:0
+2018-01-31 10:29:44.888497: I tensorflow/core/distributed_runtime/master_session.cc:1004] Start master session 9a6571b5ba45d49d with config:
+MonitoredTrainingSession started
+learning rate=0.1, global step=0
+learning rate=0.1, global step=0
+learning rate=0.1, global step=0
+...
+
+PC2 (M2000) Logs
+...
+2018-01-31 10:29:37.753239: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:324] Started server with target: grpc://localhost:2222
+Running worker:1
+(...wait for 1800 secs)
+MonitoredTrainingSession "Session was not ready after waiting 1800 secs"
+
+I was using the tf.train.SyncReplicasOptimizer example to implement between-graph and synchronous training but found that the non-chief worker has never printed MonitoredTrainingSession started. Then I slowly remove all the unnecessary code (which becomes the code provided above) and found that tr.train.MonitoredTrainingSession does not seem to work for the bare minimum configuration. Please can you kindly have a look?
+Many thanks!

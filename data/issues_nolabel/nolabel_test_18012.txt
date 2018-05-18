@@ -1,0 +1,97 @@
+Error: absl.flags._exception:IllegalFlagValueError: flag --input=: cannot convert string to float in tensorflow serving
+
+I have written a simple program for tensorflow serving to deploy and check how it is working. I followed many tutorials on how to deploy these models using tensorflow serving inside docker environment.
+sess = tf.InteractiveSession()
+# define the tensorflow network and do some trains
+x = tf.placeholder("float", name="x")
+w = tf.Variable(2.0, name="w")
+b = tf.Variable(0.0, name="bias")
+h = tf.multiply(x, w)
+
+sess.run(tf.global_variables_initializer())
+y = tf.add(h, b, name="y")
+
+
+export_path_base = FLAGS.work_dir
+export_path = os.path.join(tf.compat.as_bytes(export_path_base),
+  tf.compat.as_bytes(str(FLAGS.model_version)))
+print('Exporting trained model to', export_path)
+builder = tf.saved_model.builder.SavedModelBuilder(export_path)
+
+tensor_info_x = tf.saved_model.utils.build_tensor_info(x)
+tensor_info_y = tf.saved_model.utils.build_tensor_info(y)
+
+prediction_signature = (
+  tf.saved_model.signature_def_utils.build_signature_def(
+  inputs={'input': tensor_info_x},
+  outputs={'output': tensor_info_y},
+  method_name=tf.saved_model.signature_constants.PREDICT_METHOD_NAME))
+
+legacy_init_op = tf.group(tf.tables_initializer(), name='legacy_init_op')
+
+builder.add_meta_graph_and_variables(
+  sess, [tf.saved_model.tag_constants.SERVING],
+  signature_def_map={
+  'prediction':
+  prediction_signature,
+  },
+  legacy_init_op=legacy_init_op)
+
+builder.save()
+
+This saved_model of above programs is currently running inside the docker.I now want to create a client.py file to take input and produce output. I want to give a single number as input to my client file and not to declare inside . I mean
+i want to give input like this
+
+python client.py --server=localhost:9000 --input=3
+
+so i created a client file with input as tf.app.flags.float('input','','input for the model')
+
+from grpc.beta import implementations
+import numpy
+import tensorflow as tf
+import sys 
+from datetime import datetime
+from tensorflow_serving.apis import predict_pb2
+from tensorflow_serving.apis import prediction_service_pb2
+
+tf.app.flags.DEFINE_string('server', 'localhost:9000', 'PredictionService host:port')
+tf.app.flags.DEFINE_float('input','', 'input for the model')
+FLAGS = tf.app.flags.FLAGS
+
+def do_inference(hostport,args):
+  """Tests PredictionService with concurrent requests.
+  Args:
+  hostport: Host:port address of the Prediction Service.
+  Returns:
+  pred values, ground truth label
+  """
+  # create connection
+  host, port = hostport.split(':')
+  channel = implementations.insecure_channel(host, int(port))
+  stub = prediction_service_pb2.beta_create_PredictionService_stub(channel)
+
+  # initialize a request
+  data = args
+  request = predict_pb2.PredictRequest()
+  request.model_spec.name = 'example_model'
+  request.model_spec.signature_name = 'prediction'
+
+  request.inputs['input'].CopyFrom(tf.contrib.util.make_tensor_proto(data))
+  # predict
+  result = stub.Predict(request, 5.0) # 5 seconds
+  return result
+
+def main(_):
+    if not FLAGS.server:
+        print('please specify server host:port')
+    return
+
+    result = do_inference(FLAGS.server,FLAGS.input)
+    print('Result is: ', result)
+
+
+if __name__ == '__main__':
+  tf.app.run()
+
+This gives error ,
+Can someone tell me what i did wrong here please? How i send a float number as input to the client file?

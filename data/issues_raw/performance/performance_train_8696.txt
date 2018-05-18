@@ -1,0 +1,62 @@
+TensorFlow hangs during training while using with tf.device('/device:CPU:0'):
+
+Description
+I'm trying to fine-tune an Inception-V1 model and my latest implementation is based on train_image_classifier.py. I've noticed that sometimes TF hangs (might be similar to Issue #2788) and I'm trying to figure out why.
+The following snippet is my load_batch function. I've also used this session_config=tf.ConfigProto(operation_timeout_in_ms=60000) to throw a DeadlineExceededError when things timed out.
+I've noticed that if I remove the with tf.device('/device:CPU:0') line, I can run the model for a whole night without any issue. If I add this line back I'll get a DeadlineExceededError fairly quickly (at around 1K steps with a batch size of 32) and I have a consistent repro.
+def load_batch(dataset, batch_size, height, width):
+    dataset_basename = os.path.basename(dataset.data_sources)
+    with tf.device('/device:CPU:0'):
+        with tf.name_scope(name=dataset_basename):
+            data_provider = slim.dataset_data_provider.DatasetDataProvider(dataset=dataset)
+            raw_image, label = data_provider.get(items=['image', 'label'])
+            tf.summary.image('raw_image', tf.expand_dims(input=raw_image, axis=0))
+            image = tf.cast(raw_image, tf.float32) / 255.0
+            image = tf.image.resize_images(images=image, size=[height, width], align_corners=True)
+            tf.summary.image('resized_image', tf.expand_dims(input=image, axis=0))
+            # TensorFlow recommendation:
+            # min_after_dequeue + (num_threads + a small safety margin) * batch_size
+            # https://www.tensorflow.org/programmers_guide/reading_data
+            num_threads = 8
+            images, labels = tf.train.batch(tensors=[image, label],
+                                            batch_size=batch_size,
+                                            num_threads=num_threads,
+                                            capacity=(num_threads + 2) * batch_size,
+                                            allow_smaller_final_batch=True)
+    return images, labels
+
+The error message is:
+INFO:tensorflow:global step 1040: loss = 0.2107 (0.17 sec/step)
+2017-03-24 10:09:57.915250: W tensorflow/core/kernels/queue_base.cc:294] _0_magazines_train.tfrecord/parallel_read/filenames: Skipping cancelled enqueue attempt with queue not closed
+INFO:tensorflow:Error reported to Coordinator: <class 'tensorflow.python.framework.errors_impl.DeadlineExceededError'>, Timed out waiting for notification
+INFO:tensorflow:global step 1040: validation loss = 0.3864, validation accuracy = 97.66%
+INFO:tensorflow:Finished training! Saving model to disk.
+Traceback (most recent call last):
+  File "fine-tune.py", line 215, in <module>
+    run()
+  File "fine-tune.py", line 211, in run
+    session_config=tf.ConfigProto(operation_timeout_in_ms=60000))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/learning.py", line 752, in train
+    sv.saver.save(sess, sv.save_path, global_step=sv.global_step)
+  File "/usr/lib/python2.7/contextlib.py", line 24, in __exit__
+    self.gen.next()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 960, in managed_session
+    self.stop(close_summary_writer=close_summary_writer)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 788, in stop
+    stop_grace_period_secs=self._stop_grace_secs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/coordinator.py", line 389, in join
+    six.reraise(*self._exc_info_to_raise)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/queue_runner_impl.py", line 234, in _run
+    sess.run(enqueue_op)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 786, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 994, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1044, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1064, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.DeadlineExceededError: Timed out waiting for notification
+
+Since I have a consistent repro I'll be willing to provide more information to help debug this issue. Right now I'm not exactly sure what I should provide to help understand the root cause.
+This is the TensorBoard information from /batch/fraction_of_320_full:

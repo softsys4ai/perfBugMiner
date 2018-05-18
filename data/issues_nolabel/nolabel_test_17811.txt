@@ -1,0 +1,41 @@
+Make feature column input_layer compatible with sequential data
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Debian Buster/Sid
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.7.0-rc0
+Python version: 3.6.5rc1
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: See source code below
+
+Describe the problem
+Feature columns offer easy and reproducible feature encodings. It would be nice if they could be made compatible with sequential data as well. I currently would like to use them for processing inputs in a custom RNN estimator and sadly discovered that the current input_layer API doesn't support sequential inputs. It always returns a Tensor shaped (batch_size, first_layer_dimension), which makes it unusable in combination with the dynamic_rnn wrapper which expects inputs of shape (batch_size, max_time, first_layer_dimension)
+Source code / logs
+My first attempt at a workaround for this shortcoming, was mapping the input_layer function across the sequences of the inputs.
+def model_fn(features, labels, mode, params, config):
+    sequence_lengths = features.pop('session_length')
+    rnn_cell, state_size, initializer = params['rnn_cell'].values()
+
+    encoded_features = tf.map_fn(lambda input_features: tf.feature_column.input_layer(input_features, params['feature_columns']), features, dtype=tf.float32)
+    encoded_labels = tf.tile(tf.map_fn(lambda seqeunce_labels: tf.feature_column.input_layer(seqeunce_labels, params['label_columns']), labels, dtype=tf.float32), sequence_lengths)
+
+    cell = rnn_cell(num_units=state_size, initializer=initializer())
+    outputs, state = tf.nn.dynamic_rnn(cell=cell, inputs=encoded_features, dtype=tf.float32, sequence_length=sequence_lengths)
+    logits = tf.contrib.layers.fully_connected(outputs, num_outputs=2, activation_fn=None)
+    predictions = tf.nn.softmax(logits)
+    
+    loss = tf.losses.softmax_cross_entropy(encoded_labels, logits)
+    optimizer = tf.train.AdamOptimizer(learning_rate=params["learning_rate"])
+    train_op = optimizer.minimize(loss=loss, global_step=tf.train.get_global_step())
+    
+    return tf.estimator.EstimatorSpec(mode, predictions=predictions, train_op=train_op, loss=loss)
+Due to some kind of frame error this sadly is also not possible. Maybe I am missing something here and any tips on why this is failing would be highly appreciated.
+InvalidArgumentError: The node 'group_deps_1' has inputs from different frames. 
+The input 'map/while/input_layer/url_indicator/url_lookup/hash_table/table_init' is in frame 'map/while/while_context'. 
+The input 'map_1/while/input_layer/label_indicator/label_lookup/hash_table/table_init' is in frame 'map_1/while/while_context'.`
+In my opinion a native (higher-level) solution to this problem is needed nonetheless!

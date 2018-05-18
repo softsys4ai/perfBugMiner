@@ -1,0 +1,84 @@
+NaNs only on GPU with large convolution kernel
+
+Consider the following (silly) autoencoder-style network, which performs a strided convolution followed by a transposed convolution:
+import numpy as np
+import tensorflow as tf
+
+n = 100
+m = 24
+k = 14
+
+W1 = tf.Variable(tf.truncated_normal([1, k, 32, 64], stddev=1e-1,
+                                     dtype=tf.float32))
+b1 = tf.Variable(tf.truncated_normal([64], stddev=1e-1,
+                                     dtype=tf.float32))
+W2 = tf.Variable(tf.truncated_normal([1, k, 32, 64], stddev=1e-1,
+                                     dtype=tf.float32))
+b2 = tf.Variable(tf.truncated_normal([1], stddev=1e-1,
+                                     dtype=tf.float32))
+
+x = tf.placeholder(tf.float32, [n, 1, m, 32])
+x_1 = tf.nn.tanh(tf.nn.conv2d(x, W1,
+                              [1, 1, 8, 1], 'SAME')) + b1
+x_2 = tf.nn.conv2d_transpose(x_1, W2, [n, 1, m, 32],
+                             [1, 1, 8, 1], 'SAME') + b2
+
+loss = tf.nn.l2_loss(x - x_2)
+
+train_step = tf.train.AdamOptimizer(1e-4).minimize(loss)
+check_step = tf.add_check_numerics_ops()
+
+sess = tf.InteractiveSession()
+sess.run(tf.global_variables_initializer())
+
+for i in range(10000):
+    _, _, loss_val = \
+        sess.run([train_step, check_step, loss],
+                 feed_dict={x: np.random.randn(n, 1, m, 32)})
+
+    print("Iteration: {}; loss: {}".format(i, loss_val))
+
+On the CPU, this runs fine.  Using CUDA with k >= 14, though, I reproducibly get the following error:
+name: GeForce GTX 1080 Ti
+major: 6 minor: 1 memoryClockRate (GHz) 1.582
+pciBusID 0000:82:00.0
+Total memory: 10.91GiB
+Free memory: 10.76GiB
+2017-08-04 17:09:01.683907: I tensorflow/core/common_runtime/gpu/gpu_device.cc:961] DMA: 0
+2017-08-04 17:09:01.683916: I tensorflow/core/common_runtime/gpu/gpu_device.cc:971] 0:   Y
+2017-08-04 17:09:01.683927: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1080 Ti, pci bus id: 0000:82:00.0)
+2017-08-04 17:09:03.022214: E tensorflow/core/kernels/check_numerics_op.cc:157] abnormal_detected_host @0x1020d800b00 = {1, 0} gradients/Conv2D_grad/Conv2DBackpropFilter:0
+Traceback (most recent call last):
+  File "mintrans.py", line 35, in <module>
+    feed_dict={x: np.random.randn(n, 1, m, 32)})
+  File "/home/sschulze/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 789, in run
+    run_metadata_ptr)
+  File "/home/sschulze/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 997, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/sschulze/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1132, in _do_run
+    target_list, options, run_metadata)
+  File "/home/sschulze/.local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1152, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: gradients/Conv2D_grad/Conv2DBackpropFilter:0 : Tensor had NaN values
+         [[Node: CheckNumerics_60 = CheckNumerics[T=DT_FLOAT, message="gradients/Conv2D_grad/Conv2DBackpropFilter:0", _device="/job:localhost/replica:0/task:0/gpu:0"](gradients/Conv2D_grad/Conv2DBackpropFilter, ^CheckNumerics_59)]]
+  
+Caused by op u'CheckNumerics_60', defined at:
+  File "mintrans.py", line 27, in <module>
+    check_step = tf.add_check_numerics_ops()
+  File "/home/sschulze/.local/lib/python2.7/site-packages/tensorflow/python/ops/numerics.py", line 68, in add_check_numerics_ops
+    check_op = [array_ops.check_numerics(output, message=message)]
+  File "/home/sschulze/.local/lib/python2.7/site-packages/tensorflow/python/ops/gen_array_ops.py", line 415, in check_numerics
+    message=message, name=name)
+  File "/home/sschulze/.local/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "/home/sschulze/.local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2506, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/sschulze/.local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1269, in __init__
+    self._traceback = _extract_stack()
+  
+InvalidArgumentError (see above for traceback): gradients/Conv2D_grad/Conv2DBackpropFilter:0 : Tensor had NaN values
+         [[Node: CheckNumerics_60 = CheckNumerics[T=DT_FLOAT, message="gradients/Conv2D_grad/Conv2DBackpropFilter:0", _device="/job:localhost/replica:0/task:0/gpu:0"](gradients/Conv2D_grad/Conv2DBackpropFilter, ^CheckNumerics_59)]]
+
+This code is the minimal example that I could reproduce the error with.  I am running tensorflow-gpu 1.2.1, installed via pip on Ubuntu 16.04.2, with Python version 2.7.12.  CUDA is 8.0.61-1 from the nVidia repo, and cuDNN is 5.1.10.  My GPU is an nVidia GTX 1080 Ti with 11172 MiB of memory.
+To reproduce the error, run the above code with CUDA enabled.
+My suspicion is that when the kernel is too large with respect to the input or the output of the strided convolution, a bug is triggered.  I am not entirely sure how the size of the kernel must relate to the other convolution parameters, but I could produce errors both in the conv2d and the conv2d_transpose op.

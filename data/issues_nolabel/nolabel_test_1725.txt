@@ -1,0 +1,83 @@
+scan / TensorArray bug
+
+Environment info
+Operating System: CentOS 6.7
+If installed from sources, provide the commit hash: b4b276e
+Issue
+According to #208, scan will soon be part of the public API.
+The snippet of code
+from __future__ import division, print_function
+import tensorflow as tf
+from tensorflow.python.ops import functional_ops
+
+def fn(previous_state, current_input):
+    return previous_state + current_input
+
+x = tf.Variable([0.0, 1.0, 2.0, 3.0, 4.0])
+y = functional_ops.scan(fn, x, parallel_iterations=1)
+
+with tf.Session() as sess:
+    sess.run(tf.initialize_all_variables())
+    print(sess.run(y))
+
+results in the error below.
+I get the same error
+
+whether or not I use a REPL
+whether or not I define x and y inside of a with tf.device('/cpu:0') block
+whether or not swap_memory is True
+whether or not I use soft device placement
+
+---------------------------------------------------------------------------
+RuntimeError                              Traceback (most recent call last)
+<ipython-input-1-73ddd8c32a4f> in <module>()
+     10 
+     11 with tf.Session() as sess:
+---> 12     sess.run(tf.initialize_all_variables())
+     13     print(sess.run(y))
+
+/home-4/rdipiet2@jhu.edu/.local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    331     try:
+    332       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 333                          run_metadata_ptr)
+    334       if run_metadata:
+    335         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/home-4/rdipiet2@jhu.edu/.local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    536     # Run request and get response.
+    537     results = self._do_run(handle, target_list, unique_fetches,
+--> 538                            feed_dict_string, options, run_metadata)
+    539 
+    540     # User may have fetched the same tensor multiple times, but we
+
+/home-4/rdipiet2@jhu.edu/.local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+    599     if handle is None:
+    600       return self._do_call(_run_fn, self._session, feed_dict, fetch_list,
+--> 601                            target_list, options, run_metadata)
+    602     else:
+    603       return self._do_call(_prun_fn, self._session, handle, feed_dict,
+
+/home-4/rdipiet2@jhu.edu/.local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _do_call(self, fn, *args)
+    606   def _do_call(self, fn, *args):
+    607     try:
+--> 608       return fn(*args)
+    609     except tf_session.StatusNotOK as e:
+    610       error_message = compat.as_text(e.error_message)
+
+/home-4/rdipiet2@jhu.edu/.local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _run_fn(session, feed_dict, fetch_list, target_list, options, run_metadata)
+    583                 run_metadata):
+    584       # Ensure any changes to the graph are reflected in the runtime.
+--> 585       self._extend_graph()
+    586       if options:
+    587         return tf_session.TF_Run(session, options,
+
+/home-4/rdipiet2@jhu.edu/.local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _extend_graph(self)
+    636               self._session, graph_def.SerializeToString(), status)
+    637           if tf_session.TF_GetCode(status) != 0:
+--> 638             raise RuntimeError(compat.as_text(tf_session.TF_Message(status)))
+    639           self._opened = True
+    640         finally:
+
+RuntimeError: AttrValue must not have reference type value of float_ref
+     for attr 'dtype'
+    ; NodeDef: scan/TensorArray = TensorArray[dtype=DT_FLOAT_REF, dynamic_size=false, tensor_array_name=""](scan/Squeeze); Op<name=TensorArray; signature=size:int32 -> handle:Ref(string); attr=dtype:type; attr=dynamic_size:bool,default=false; attr=tensor_array_name:string,default=""; is_stateful=true>

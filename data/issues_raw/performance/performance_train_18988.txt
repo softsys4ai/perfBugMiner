@@ -1,0 +1,217 @@
+Tensorflow input pipeline & performance - images - memory
+
+Best,
+system properties:
+
+
+windows 10
+
+
+intel core i7-6820HQ CPU | 2.70GHZ 8CPUs
+
+
+16GB ram
+
+
+64bit
+
+
+NVIDIA Quadro M1000M
+
+approx. total memory: 10093 MB
+Display memory (VRAM): 2019 MB
+Shared Memory: 8073 MB
+
+
+
+Tensorflow 1.8
+
+
+Python 3.5.2
+
+
+images (i've 36k images):
+
+train: 3000 x (720x1280x3)
+valid: 500 x (720x1280x3)
+test : 500 x (720x1280x3)
+
+
+
+My story & strugles
+First of all, I would like to say that I really like machine learning, specially neural networks. But most of the time, when I'm working with Tensorflow, I've the feeling that it is backstabbing me the entirely time. (like for example, the speed of those releases... (1.8 :O )) & Sometimes I even don't know any more if I'm doing it right or wrong? (Or can I do it better?)
+Therefore, my main question is: How do you create a proper input pipeline!
+preferable with tensorflow gpu
+Because come one, it should be easy as $*%€k no? Especially, can't you cover 90% of all the input pipelines into 1, 2 or 3 template pipelines? (I think it is +/- possible, (a giant image with a cat is still an image | matrix))
+and if it is possible, why can't we have an optimized template/base for it?
+as you would have noticed, I've provided my system properties and info about the data which I'm using. My goals are:
+
+Create a GAN-network (GPU)(doesn't have to be a gan for this question)
+Use the TF-estimator api (with custom features)
+Use TF-records !
+Use TF-dataset !
+
+But Unfortunately, most of the time, I'll receive errors like for example that I'm out of memory :'(
+And the more I look things up, the more I start to hesitate...
+Step 1: create TF-records
+In my first step, I create a tf-record (train). And as you can see, I loop over the images (from a certain folder) and write all the data into 1 tf-record.
+# Helper-function for wrapping an integer so it can be saved to the TFRecords file
+def wrap_int64(value):
+    return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+
+# Helper-function for wrapping raw bytes so they can be saved to the TFRecords file.
+
+def wrap_bytes(value):
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
+
+#from skimage.transform import rescale, resize, downscale_local_mean
+
+def convert(image_paths, out_path):
+    # Args:
+    # image_paths   List of file-paths for the images.
+    # labels        Class-labels for the images.
+    # out_path      File-path for the TFRecords output file.
+
+    print("Converting: " + out_path)
+
+    # Number of images. Used when printing the progress.
+    num_images = len(image_paths)
+
+    # Open a TFRecordWriter for the output-file.
+    with tf.python_io.TFRecordWriter(out_path) as writer:
+
+        # Iterate over all the image-paths and class-labels.
+        for i, path in enumerate(image_paths):
+
+            # Print the percentage-progress.
+            print_progress(count=i+1, total=num_images)
+
+            # Load the image-file using matplotlib's imread function.
+            img_bytes_sharp = load_images(path)
+
+            # Convert the image to raw bytes.
+            img_bytes_sharp = tf.compat.as_bytes(img_bytes_sharp.tostring())
+
+            # Create a dict with the data we want to save in the
+            # TFRecords file. You can add more relevant data here.
+            data = \
+                {
+                    'x': wrap_bytes(img_bytes_sharp)
+                }
+
+            # Wrap the data as TensorFlow Features.
+            feature = tf.train.Features(feature=data)
+
+            # Wrap again as a TensorFlow Example.
+            example = tf.train.Example(features=feature)
+
+            # Serialize the data.
+            serialized = example.SerializeToString()
+
+            # Write the serialized data to the TFRecords file.
+            writer.write(serialized)
+about the tf-record:
+
+size: 6 GB
+3000 images
+preprocessed:
+
+RGB values between: 0 and 1
+type: float32
+
+
+
+Step 2: Load TF-records (parser)
+def parse(serialized):
+    # Define a dict with the data-names and types we expect to
+    # find in the TFRecords file.
+    # It is a bit awkward that this needs to be specified again,
+    # because it could have been written in the header of the
+    # TFRecords file instead.
+    features = \
+        {
+            'x': tf.FixedLenFeature([], tf.string)
+        }
+
+    # Parse the serialized data so we get a dict with our data.
+    parsed_example = tf.parse_single_example(serialized=serialized,
+                                             features=features)
+
+
+    # Decode the raw bytes so it becomes a tensor with type.
+    image_x = tf.decode_raw(parsed_example['x'], tf.float32)
+
+    # The type is now uint8 but we need it to be float.
+    #image_x = tf.cast(image_x, tf.float32)
+
+    return image_x
+Step 2+1: Load TF-records (for real)
+def input_fn(filenames, train, batch_size=32, buffer_size=2048):
+    # Args:
+    # filenames:   Filenames for the TFRecords files.
+    # train:       Boolean whether training (True) or testing (False).
+    # batch_size:  Return batches of this size.
+    # buffer_size: Read buffers of this size. The random shuffling
+    #              is done on the buffer, so it must be big enough.
+
+    # Create a TensorFlow Dataset-object which has functionality
+    # for reading and shuffling data from TFRecords files.
+    dataset = tf.data.TFRecordDataset(filenames=filenames)
+
+    # Parse the serialized data in the TFRecords files.
+    # This returns TensorFlow tensors for the image and labels.
+    dataset = dataset.map(parse)
+
+    if train:
+        # If training then read a buffer of the given size and
+        # randomly shuffle it.
+        dataset = dataset.shuffle(buffer_size=buffer_size)
+
+        # Allow infinite reading of the data.
+        num_repeat = None
+    else:
+        # If testing then don't shuffle the data.
+
+        # Only go through the data once.
+        num_repeat = 1
+
+    # Repeat the dataset the given number of times.
+    dataset = dataset.repeat(num_repeat)
+
+    # Get a batch of data with the given size.
+    dataset = dataset.batch(batch_size)
+
+    # Create an iterator for the dataset and the above modifications.
+    iterator = dataset.make_one_shot_iterator()
+
+    # Get the next batch of images and labels.
+    images_batch = iterator.get_next()
+
+    # The input-function must return a dict wrapping the images.
+    x = {'image': images_batch}
+
+    return x
+But but but but
+although, I think that the above set-up is quite clear, as soon as I get rid of the mnist dataset (32x32 images), I receive memory issues. (can't even perform a batch-size of 2)
+
+Also when I'm trying to solve this and watch/read the tensorflow summit videos (2018), I even wonder if I'm doing it correctly at the first place :s
+
+For example:
+
+
+
+First of all, how to deal with memory issues? I really can understand that I've a memory issue, when TF tries to store, the whole tf-record 6-7gig in its memory (video-card memory)? but I also would think that it is smarter then that ... (doesn't it work like a generator? add only x values in memory + their location)
+1.1 I really would like to keep the tf-records because they promises us that it is faster then e.g. the placeholders (actually it is also easier to use)
+
+
+In the image, you see at the beginning: Dataset.list_files the question which I've with this is. Is this just 1 file, or does this mean that each image which I've is a new tf.record? (do I've) to create 3000 tf records?)(and is this the reason why I might have memory issues?)
+
+
+The image returns a dataset and not a iterator (like in my piece of code), any clue where they might do it (this is necessary right?), when they are using the tf-estimator api?
+
+
+And that is basically it.
+underlying question is: How can I work & play with Tensorflow|tf-records|tf-estimator on BIG images. (even bigger than 720p)
+extra info:
+(https://www.youtube.com/watch?v=SxOsJPaxHME https://www.tensorflow.org/versions/master/performance/datasets_performance)

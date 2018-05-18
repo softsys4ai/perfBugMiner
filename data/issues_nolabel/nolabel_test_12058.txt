@@ -1,0 +1,173 @@
+Couldn't restore attention_ocr checkpoint via saver
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug or a feature request.
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+MacOS Sierra 10.12.5
+TensorFlow installed from (source or binary):
+created environment in conda, then installed tf via pip
+TensorFlow version (use command below):
+('v1.2.0-rc2-21-g12f033d', '1.2.0')
+Python version:
+2.7
+Bazel version (if compiling from source):
+Not installed
+CUDA/cuDNN version:
+No GPU supported
+GPU model and memory:
+No
+Exact command to reproduce:
+python test.py
+You can collect some of this information using our environment capture script:
+
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+Hi, I am trying to use attention_ocr in my own data, a simple test is firstly implemented.
+according to the instructions from How to use a pre-trained model but somehow failed in restoring the checkpoints without explicit error info.
+The following condition has been checked:
+
+checkpoint files are complete
+right path to the checkpoint
+graphs have been imported from .meta
+Nothing changes after run saver.train.restore() (predictions remained the same)
+No error or hints provided
+
+The checkpoint was downloaded as suggested:
+wget http://download.tensorflow.org/models/attention_ocr_2017_05_17.tar.gz
+tar xf attention_ocr_2017_05_17.tar.gz
+cd attention_ocr_2017_05_17
+ls -lh
+
+total 64216
+-rw-r-----  1 liuhuichuan  staff    14M  5 18 04:07 model.ckpt-399731.data-00000-of-00001
+-rw-r-----  1 liuhuichuan  staff   8.2K  5 18 04:07 model.ckpt-399731.index
+-rw-r-----  1 liuhuichuan  staff    17M  5 18 04:07 model.ckpt-399731.meta
+
+The graphs were successfully imported from .meta, but somehow saver couldn't recognize .index and .data files:
+print os.path.exists('../attention_ocr_2017_05_17/model.ckpt-399731.data-00000-of-00001')
+print os.path.exists('../attention_ocr_2017_05_17/model.ckpt-399731.index')
+print tf.train.get_checkpoint_state('../attention_ocr_2017_05_17/model.ckpt-399731')
+
+returns:
+Ture
+Ture
+None
+
+A very simple test is attempted:
+saver = tf.train.import_meta_graph('../attention_ocr_2017_05_17/model.ckpt-399731.meta')
+with tf.Session() as sess:
+    print os.path.exists('./attention_ocr_2017_05_17/model.ckpt-399731.meta')
+    print tf.train.get_checkpoint_state('../attention_ocr_2017_05_17/model.ckpt-399731')
+    saver.restore(sess,'../attention_ocr_2017_05_17/model.ckpt-399731')
+
+returns no error, but still not restored:
+2017-08-06 16:24:41.346086: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+True
+2017-08-06 16:24:41.346124: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-06 16:24:41.346129: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-06 16:24:41.346133: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+None
+INFO:tensorflow:Restoring parameters from ../attention_ocr_2017_05_17/model.ckpt-399731
+INFO 2017-08-06 16:24:41.000354: tf_logging.py: 82 Restoring parameters from ../attention_ocr_2017_05_17/model.ckpt-399731
+
+Process finished with exit code 0
+
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+import tensorflow as tf
+import os
+from tensorflow.python.platform import flags
+import matplotlib.image as mpimg
+import common_flags
+
+FLAGS = flags.FLAGS
+common_flags.define()
+
+# yapf: disable
+flags.DEFINE_integer('num_batches', 100,
+                     'Number of batches to run eval for.')
+
+flags.DEFINE_string('eval_log_dir', '/tmp/attention_ocr/eval',
+                    'Directory where the evaluation results are saved to.')
+
+flags.DEFINE_integer('eval_interval_secs', 60,
+                     'Frequency in seconds to run evaluations.')
+
+flags.DEFINE_integer('number_of_steps', None,
+                     'Number of times to run evaluation.')
+
+
+# fake a simple test image
+
+raw_image_data = mpimg.imread('A4A8A5910A355-cvt.jpg').reshape((1,150,600,3))
+images_placeholder = tf.placeholder(tf.float32,shape = (1,150, 600, 3),name='img_data')
+
+if not tf.gfile.Exists(FLAGS.eval_log_dir):
+    tf.gfile.MakeDirs(FLAGS.eval_log_dir)
+dataset = common_flags.create_dataset(split_name=FLAGS.split_name)
+model = common_flags.create_model(dataset.num_char_classes,
+                                    dataset.max_sequence_length,
+                                    dataset.num_of_views, dataset.null_code)
+endpoints = model.create_base(images_placeholder, labels_one_hot=None)
+
+# start loading attention_ocr model
+
+saver = tf.train.import_meta_graph('../attention_ocr_2017_05_17/model.ckpt-399731.meta')
+
+with tf.Session() as sess:
+    # init without checkpoint variables and predict
+    init = tf.global_variables_initializer()
+    sess.run(init)
+    predictions = sess.run(endpoints.predicted_chars, feed_dict={images_placeholder: raw_image_data})
+    print predictions
+
+    # restore from checkpoint then predict
+    print os.path.exists('./attention_ocr_2017_05_17/model.ckpt-399731.meta')
+    print tf.train.get_checkpoint_state('../attention_ocr_2017_05_17/model.ckpt-399731')
+    saver.restore(sess,'../attention_ocr_2017_05_17/model.ckpt-399731')
+    predictions = sess.run(endpoints.predicted_chars, feed_dict={images_placeholder: raw_image_data})
+    print predictions
+
+INFO 2017-08-06 16:48:44.000554: fsns.py: 130 Using FSNS dataset split_name=train dataset_dir=/Users/liuhuichuan/PycharmProjects/models/attention_ocr/python/datasets/data/fsns
+DEBUG 2017-08-06 16:48:44.000556: model.py: 343 images: Tensor("img_data:0", shape=(1, 150, 600, 3), dtype=float32)
+DEBUG 2017-08-06 16:48:44.000561: model.py: 348 Views=4 single view: Tensor("AttentionOcr_v1/split:0", shape=(1, 150, 150, 3), dtype=float32)
+DEBUG 2017-08-06 16:48:44.000561: model.py: 191 Using final_endpoint=Mixed_5d
+DEBUG 2017-08-06 16:48:46.000492: model.py: 191 Using final_endpoint=Mixed_5d
+DEBUG 2017-08-06 16:48:47.000546: model.py: 191 Using final_endpoint=Mixed_5d
+DEBUG 2017-08-06 16:48:48.000684: model.py: 191 Using final_endpoint=Mixed_5d
+DEBUG 2017-08-06 16:48:49.000862: model.py: 354 Conv tower: Tensor("AttentionOcr_v1/conv_tower_fn/INCE/InceptionV3/Mixed_5d/concat:0", shape=(1, 16, 16, 288), dtype=float32)
+DEBUG 2017-08-06 16:48:49.000862: model.py: 357 Conv tower w/ encoded coordinates: Tensor("AttentionOcr_v1/conv_tower_fn/INCE/InceptionV3/Mixed_5d/concat:0", shape=(1, 16, 16, 288), dtype=float32)
+DEBUG 2017-08-06 16:48:49.000869: model.py: 360 Pooled views: Tensor("AttentionOcr_v1/pool_views_fn/STCK/Reshape:0", shape=(1, 1024, 288), dtype=float32)
+DEBUG 2017-08-06 16:48:49.000869: sequence_layers.py: 421 Use AttentionWithAutoregression as a layer class
+DEBUG 2017-08-06 16:48:53.000099: model.py: 363 chars_logit: Tensor("AttentionOcr_v1/sequence_logit_fn/SQLR/concat:0", shape=(1, 37, 134), dtype=float32)
+2017-08-06 16:50:05.943512: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-06 16:50:05.943528: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-06 16:50:05.943532: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-06 16:50:05.943537: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+INFO:tensorflow:Restoring parameters from ../attention_ocr_2017_05_17/model.ckpt-399731
+INFO 2017-08-06 16:50:29.000024: tf_logging.py: 82 Restoring parameters from ../attention_ocr_2017_05_17/model.ckpt-399731
+[[  0   0   0 123 123 123 123 123 123 123 123 123 123 123 123 123 123 123
+  123 123 123 123 123 123 123 123 123 123 123 123 123 123 123 123 123 123
+  123]]
+True
+None
+[[  0   0   0 123 123 123 123 123 123 123 123 123 123 123 123 123 123 123
+  123 123 123 123 123 123 123 123 123 123 123 123 123 123 123 123 123 123
+  123]]
+
+Process finished with exit code 0

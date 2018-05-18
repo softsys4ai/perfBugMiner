@@ -1,0 +1,56 @@
+[android demo] UnsatisfiedLinkError exception on app start if build with nativeBuildSystem = 'none'
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+NO
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+app build at Android Studio 2.3.3 on Linux Ubuntu 16.04
+app tested on Meizu M2 Note (Android 5.1, API 22)
+TensorFlow installed from (source or binary):
+Source
+TensorFlow version (use command below):
+Master branch from GitHub
+Python version:
+2.7 (not used in that case)
+Bazel version (if compiling from source):
+0.5.3 (not used in that case)
+CUDA/cuDNN version:
+none
+GPU model and memory:
+none
+Exact command to reproduce:
+Android Studio/Run (build.gradle)
+
+Describe the problem
+With nativeBuildSystem = 'none' app exit with UnsatisfiedLinkError exception (see log below).
+Quick investigation shows call of env.ImageUtils.convertYUV420SPToARGB8888(Native Method) native method from CameraActivity.onPreviewFrame(CameraActivity.java:113).
+convertYUV420SPToARGB8888 suppose to be implemented in libtensorflow_demo.so wich is not created in case of nativeBuildSystem = 'none'. (With nativeBuildSystem = 'cmake' libtensorflow_demo.so created and convertYUV420SPToARGB8888 works fine)
+Quick fix may be obtained by including libtensorflow_demo.so into JCenter and download it like the TensorFlow Inference Interface package.
+Another solution would be Java implementation of convertYUV420SPToARGB8888, the same as it been done for convertYUV420ToARGB8888 in commit #003deb8 at PR #10771 "Refactor and implementation of the camera API 1, it fixes #8736 #10771".
+I start working with that Java implementation of convertYUV420SPToARGB8888 but I don't think I have enough skills to make it. At the moment I create Java wrapper for native convertYUV420SPToARGB8888 and make all native methods private to isolate the rest of the Java code from occasional use them:
+https://github.com/ArtsiomCh/tensorflow/blob/master/tensorflow/examples/android/src/org/tensorflow/demo/CameraActivity.java
+https://github.com/ArtsiomCh/tensorflow/blob/master/tensorflow/examples/android/src/org/tensorflow/demo/env/ImageUtils.java
+Would be great if @osdamv (creator of Java implementation of convertYUV420ToARGB8888) can help in porting Java implementation of convertYUV420ToARGB8888 for convertYUV420SPToARGB8888
+Source code / logs
+08-20 13:28:38.212 19058-19058/? I/TensorFlowInferenceInterface: Model load took 1303ms, TensorFlow version: 1.2.0
+08-20 13:28:38.217 19058-19058/? I/TensorFlowInferenceInterface: Successfully loaded model from 'file:///android_asset/tensorflow_inception_graph.pb'
+08-20 13:28:38.219 19058-19058/? I/TensorFlowImageClassifier: Read 1001 labels, output layer size is 1008
+08-20 13:28:38.219 19058-19058/? I/tensorflow: ClassifierActivity: Sensor orientation: 90, Screen orientation: 0
+08-20 13:28:38.219 19058-19058/? I/tensorflow: ClassifierActivity: Initializing at size 640x480
+08-20 13:28:38.223 19058-19058/? W/tensorflow: ImageUtils: Native library not found, native RGB -> YUV conversion may be unavailable.
+08-20 13:28:38.225 19058-19058/? E/art: No implementation found for void org.tensorflow.demo.env.ImageUtils.convertYUV420SPToARGB8888(byte[], int[], int, int, boolean) (tried Java_org_tensorflow_demo_env_ImageUtils_convertYUV420SPToARGB8888 and Java_org_tensorflow_demo_env_ImageUtils_convertYUV420SPToARGB8888___3B_3IIIZ)
+08-20 13:28:38.226 19058-19058/? E/AndroidRuntime: FATAL EXCEPTION: main
+Process: org.tensorflow.demo, PID: 19058
+java.lang.UnsatisfiedLinkError: No implementation found for void org.tensorflow.demo.env.ImageUtils.convertYUV420SPToARGB8888(byte[], int[], int, int, boolean) (tried Java_org_tensorflow_demo_env_ImageUtils_convertYUV420SPToARGB8888 and Java_org_tensorflow_demo_env_ImageUtils_convertYUV420SPToARGB8888___3B_3IIIZ)
+at org.tensorflow.demo.env.ImageUtils.convertYUV420SPToARGB8888(Native Method)
+at org.tensorflow.demo.CameraActivity.onPreviewFrame(CameraActivity.java:113)
+at android.hardware.Camera$EventHandler.handleMessage(Camera.java:1288)
+at android.os.Handler.dispatchMessage(Handler.java:111)
+at android.os.Looper.loop(Looper.java:194)
+at android.app.ActivityThread.main(ActivityThread.java:5877)
+at java.lang.reflect.Method.invoke(Native Method)
+at java.lang.reflect.Method.invoke(Method.java:372)
+at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:1020)
+at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:815)
+08-20 13:28:38.265 19058-19058/? I/Process: Sending signal. PID: 19058 SIG: 9

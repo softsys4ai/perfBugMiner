@@ -1,0 +1,94 @@
+Cannot run TensorFlow on GPU - RHEL 6
+
+Hello,
+I have been trying for days to take advantage of the in one of the machines I have access to.
+Given that I have no root  access I had to compile everything from source.
+I tried both the last stable release and the current master branch but I had no luck at running TensorFlow on the GPU.
+My setup is the following :
+Red Hat EL 6.8 (no root access)
+Python 2.7.8
+virtualenv 13.1.0
+devtoolset-4 (GCC 5.3.1)
+Bazel 0.4.3 (built from source)
+GeForce GTX680 (compute capability 3.0)
+Cuda Toolkit 8.0
+cuDNN 5.1
+I had to modify few configuration files such that the configure script could complete successfully :
+diff --git a/configure b/configure
+index a8e7bb773..002094aba 100755
+--- a/configure
++++ b/configure
+@@ -39,7 +39,7 @@ function bazel_clean_and_fetch() {
+   # bazel clean --expunge currently doesn't work on Windows
+   # TODO(pcloudy): Re-enable it after bazel clean --expunge is fixed.
+   if ! is_windows; then
+-    bazel clean --expunge
++    bazel clean --expunge_async
+   fi
+   bazel fetch "//tensorflow/... -//tensorflow/examples/android/..."
+ }
+
+
+diff --git a/tensorflow/core/platform/default/build_config.bzl b/tensorflow/core/platform/default/build_config.bzl
+index ebf835d11..824471640 100644
+--- a/tensorflow/core/platform/default/build_config.bzl
++++ b/tensorflow/core/platform/default/build_config.bzl
+@@ -8,7 +8,7 @@ load("//tensorflow:tensorflow.bzl", "if_not_mobile")
+ WITH_GCP_SUPPORT = False
+ WITH_HDFS_SUPPORT = False
+ WITH_XLA_SUPPORT = False
+-WITH_JEMALLOC = True
++WITH_JEMALLOC = False
+ 
+ # Appends a suffix to a list of deps.
+ def tf_deps(deps, suffix):
+
+
+diff --git a/tensorflow/tensorflow.bzl b/tensorflow/tensorflow.bzl
+index 7fa7e4a91..ef41f5cd9 100644
+--- a/tensorflow/tensorflow.bzl
++++ b/tensorflow/tensorflow.bzl
+@@ -714,7 +714,8 @@ def tf_custom_op_library(name, srcs=[], gpu_srcs=[], deps=[]):
+   )
+ 
+ def tf_extension_linkopts():
+-  return []  # No extension link opts
++  #return []  # No extension link opts
++  return ["-lrt"] 
+ 
+ def tf_extension_copts():
+   return []  # No extension c opts
+
+
+diff --git a/third_party/gpus/crosstool/CROSSTOOL.tpl b/third_party/gpus/crosstool/CROSSTOOL.tpl
+index b77a45c32..e1fb068a2 100644
+--- a/third_party/gpus/crosstool/CROSSTOOL.tpl
++++ b/third_party/gpus/crosstool/CROSSTOOL.tpl
+@@ -56,6 +56,8 @@ toolchain {
+   cxx_flag: "-std=c++11"
+   linker_flag: "-Wl,-no-as-needed"
+   linker_flag: "-lstdc++"
++  linker_flag: "-lm"
++  linker_flag: "-lrt"
+   linker_flag: "-B/usr/bin/"
+At the point in which I have to ask bazel to build TensorFlow I face a weird problem.
+If I use --config=cuda8.0 the building process completes but the gpu is never used nor detected.
+If I use --config=cuda the building process fails with the following error
+ERROR: /home/emt1627/.cache/bazel/_bazel_emt1627/aeec3eab67314b40e280b02ed0028dfc/external/nasm/BUILD:8:1: undeclared inclusion(s) in rule '@nasm//:nasm':
+this rule is missing dependency declarations for the following files included by 'external/nasm/regvals.c':
+  '/opt/rh/devtoolset-4/root/usr/lib/gcc/x86_64-redhat-linux/5.3.1/include/stddef.h'
+  '/opt/rh/devtoolset-4/root/usr/lib/gcc/x86_64-redhat-linux/5.3.1/include/stdarg.h'
+  '/opt/rh/devtoolset-4/root/usr/lib/gcc/x86_64-redhat-linux/5.3.1/include/stdint.h'.
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+
+If I run it again I get a similar error
+ERROR: /home/emt1627/.cache/bazel/_bazel_emt1627/aeec3eab67314b40e280b02ed0028dfc/external/nasm/BUILD:8:1: undeclared inclusion(s) in rule '@nasm//:nasm':
+this rule is missing dependency declarations for the following files included by 'external/nasm/iflag.c':
+  '/opt/rh/devtoolset-4/root/usr/lib/gcc/x86_64-redhat-linux/5.3.1/include/stdint.h'
+  '/opt/rh/devtoolset-4/root/usr/lib/gcc/x86_64-redhat-linux/5.3.1/include/stddef.h'
+  '/opt/rh/devtoolset-4/root/usr/lib/gcc/x86_64-redhat-linux/5.3.1/include/stdarg.h'.
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+
+I have also tried different configurations of Cuda toolkit and cuDNN library, but those all led nowhere near the solution.

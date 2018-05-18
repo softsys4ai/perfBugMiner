@@ -1,0 +1,101 @@
+Error loading saved_model.pb from C++
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes (minor changes), see below.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 17.04
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+1.1.0
+Bazel version (if compiling from source):
+0.4.5
+
+Describe the problem
+I use the high level API to train an estimator (specifically, tf.contrib.learn.DNNRegressor) in Python. I then use export_savedmodel to save it to protobuf. When I try to load it from C++ I get:
+Data loss: Can't parse saved_model.pb as binary proto.
+Source code / logs
+
+Python file
+
+import numpy as np
+import pandas as pd
+import sys
+import pickle
+import tensorflow as tf
+import random, os, shutil
+from tensorflow.contrib.layers import create_feature_spec_for_parsing
+from tensorflow.contrib.learn.python.learn.utils import input_fn_utils
+
+tf.logging.set_verbosity(tf.logging.INFO)
+train_filename = sys.argv[1]
+test_filename = sys.argv[2]
+saved_model_directory = sys.argv[3]
+
+COLUMNS = ["X1", "Y1", "X2", "Y2", "SP"]
+FEATURES = ["X1", "Y1", "X2", "Y2"]
+TARGET = "SP"
+training_set = pd.read_csv(train_filename, skipinitialspace=True, names=COLUMNS)
+test_set = pd.read_csv(test_filename, skipinitialspace=True, names=COLUMNS)
+
+def input_fn(data_set):
+    feature_cols = {k: tf.constant(data_set[k].values) for k in FEATURES}
+    targets = tf.constant(data_set[TARGET].values)
+    return feature_cols, targets
+
+feature_cols = [tf.contrib.layers.real_valued_column(k) for k in FEATURES]
+feature_spec = create_feature_spec_for_parsing(feature_cols)
+serving_input_fn = input_fn_utils.build_parsing_serving_input_fn(feature_spec)
+
+validation_monitor = tf.contrib.learn.monitors.ValidationMonitor(
+    input_fn=lambda: input_fn(test_set),
+    eval_steps=1,
+    every_n_steps=100)
+
+estimator = tf.contrib.learn.DNNRegressor(
+    feature_columns=feature_cols,
+    hidden_units=[50, 25, 5],
+    model_dir=saved_model_directory,
+    config=tf.contrib.learn.RunConfig(save_checkpoints_secs=1))
+
+estimator.fit(input_fn=lambda: input_fn(training_set), steps=100, monitors=[validation_monitor])
+
+estimator.export_savedmodel(export_dir_base=saved_model_directory,
+    serving_input_fn = serving_input_fn)
+
+
+
+CPP file
+
+#include "tensorflow/core/public/session.h"
+#include "tensorflow/core/platform/env.h"
+
+using namespace tensorflow;
+using std::cout;
+using std::vector;
+using std::pair;
+
+int main(int argc, char* argv[]) {
+  // Initialize a tensorflow session
+  Session* session;
+  Status status = NewSession(SessionOptions(), &session);
+  if (!status.ok()) {
+    cout << status.ToString() << "\n";
+    return 1;
+  }
+
+  // Read in the protobuf graph we exported
+  // (The path seems to be relative to the cwd. Keep this in mind
+  // when using `bazel run` since the cwd isn't where you call
+  // `bazel run` but from inside a temp folder.)
+  cout << "READING MODEL.\n";
+  GraphDef graph_def;
+  status = ReadBinaryProto(Env::Default(), "saved_model.pb", &graph_def);
+  if (!status.ok()) {
+    cout << status.ToString() << "\n";
+    return 1;
+  }
+  cout << "DONE reading model.\n";
+}

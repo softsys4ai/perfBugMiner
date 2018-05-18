@@ -1,0 +1,156 @@
+Bug: tf.keras.estimator.model_to_estimator() API giving error when Keras model contains Lambda layer.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Custom code
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): 1.7
+Python version:  3.6
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:
+estimator_vae = tf.keras.estimator.model_to_estimator(keras_model=vae)
+
+Describe the problem
+tf.keras.estimator.model_to_estimator() API is failing when Keras model contains Lambda layer.
+The error I am getting is SystemError: unknown opcode
+The problem seems to be only there when I am using custom functions inside the Keras mode.
+Source code / logs
+I implemented a VAE in Keras and was trying to convert it into an TF estimator model. The model works and trains using Keras. The Keras model has functions for gaussian sampling and VAE training loss. The code and  error trace back is given below.
+#Encoder network, mapping inputs to our latent distribution parameters:
+x = Input(batch_shape=(batch_size, original_dim),name='encoder_input')
+encoded = Dense(intermediate_dim, activation='relu',name='encoder_dense_1')(x)
+z_mean = Dense(latent_dim,name='z_mean')(encoded)
+z_log_var = Dense(latent_dim,name='z_log_var')(encoded)
+
+# Sampling from Gaussian
+def sampling(args):
+    
+    z_mean, z_log_var = args
+
+    epsilon = tf.random_normal(shape=(batch_size, latent_dim),
+                               mean=0., stddev=epsilon_std) 
+    
+    return z_mean + tf.exp(z_log_var/2) * epsilon
+z = Lambda(sampling,name='z')([z_mean, z_log_var]) 
+
+#Compute VAE loss
+def vae_loss(x, x_decoded):
+    x_mse_loss = original_dim*tf.keras.losses.mean_squared_error(tf.layers.flatten(x), tf.layers.flatten(x_decoded))
+    beta = 4.0
+    kl_loss = - 0.5*beta* tf.reduce_sum(1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var), axis=-1)
+    return tf.reduce_mean(x_mse_loss + kl_loss)
+
+# Map these sampled latent points back to reconstructed inputs:
+#Decoder network layers
+decoder_dense_1 = Dense(intermediate_dim, activation='relu',name='decoder_dense_1')
+decoder_output = Dense(48, activation='relu',name='decoder_output')
+decoded = decoder_dense_1(z)
+x_decoded = decoder_output(decoded)
+
+# end-to-end autoencoder
+vae = Model(x, x_decoded)
+vae.compile(optimizer='adam',loss=vae_loss) 
+vae.summary()
+#Converting to tf estimator
+estimator_vae = tf.keras.estimator.model_to_estimator(keras_model=vae)
+
+Output:
+__________________________________________________________________________________________________
+Layer (type)                    Output Shape         Param #     Connected to                     
+==================================================================================================
+encoder_input (InputLayer)      (50, 48)             0                                            
+__________________________________________________________________________________________________
+encoder_dense_1 (Dense)         (50, 24)             1176        encoder_input[0][0]              
+__________________________________________________________________________________________________
+z_mean (Dense)                  (50, 10)             250         encoder_dense_1[0][0]            
+__________________________________________________________________________________________________
+z_log_var (Dense)               (50, 10)             250         encoder_dense_1[0][0]            
+__________________________________________________________________________________________________
+z (Lambda)                      (50, 10)             0           z_mean[0][0]                     
+                                                                 z_log_var[0][0]                  
+__________________________________________________________________________________________________
+decoder_dense_1 (Dense)         (50, 24)             264         z[0][0]                          
+__________________________________________________________________________________________________
+decoder_output (Dense)          (50, 48)             1200        decoder_dense_1[0][0]            
+==================================================================================================
+Total params: 3,140
+Trainable params: 3,140
+Non-trainable params: 0
+__________________________________________________________________________________________________
+INFO:tensorflow:Using the Keras model provided.
+INFO:tensorflow:Using default config.
+WARNING:tensorflow:Using temporary folder as model directory: C:\Users\SPLATH~1\AppData\Local\Temp\tmps7nagdhz
+INFO:tensorflow:Using config: {'_model_dir': 'C:\\Users\\SPLATH~1\\AppData\\Local\\Temp\\tmps7nagdhz', '_tf_random_seed': None, '_save_summary_steps': 100, '_save_checkpoints_steps': None, '_save_checkpoints_secs': 600, '_session_config': None, '_keep_checkpoint_max': 5, '_keep_checkpoint_every_n_hours': 10000, '_log_step_count_steps': 100, '_service': None, '_cluster_spec': <tensorflow.python.training.server_lib.ClusterSpec object at 0x00000238136D9DA0>, '_task_type': 'worker', '_task_id': 0, '_global_id_in_cluster': 0, '_master': '', '_evaluation_master': '', '_is_chief': True, '_num_ps_replicas': 0, '_num_worker_replicas': 1}
+---------------------------------------------------------------------------
+SystemError                               Traceback (most recent call last)
+<ipython-input-10-77cc01c33881> in <module>()
+     13 vae.summary()
+     14 #Converting to tf estimator
+---> 15 estimator_vae = tf.keras.estimator.model_to_estimator(keras_model=vae)
+
+~\AppData\Local\Continuum\anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\estimator.py in model_to_estimator(keras_model, keras_model_path, custom_objects, model_dir, config)
+    481                            estimator,
+    482                            custom_objects,
+--> 483                            keras_weights)
+    484   elif keras_model.built:
+    485     logging.warning('You are creating an Estimator from a Keras model '
+
+~\AppData\Local\Continuum\anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\estimator.py in _save_first_checkpoint(keras_model, estimator, custom_objects, keras_weights)
+    396       training_util.create_global_step()
+    397       model = _clone_and_build_model(model_fn_lib.ModeKeys.TRAIN, keras_model,
+--> 398                                      custom_objects)
+    399       if isinstance(model, models.Sequential):
+    400         model = model.model
+
+~\AppData\Local\Continuum\anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\estimator.py in _clone_and_build_model(mode, keras_model, custom_objects, features, labels)
+    270         model = models.clone_model(keras_model, input_tensors=input_tensors)
+    271     else:
+--> 272       model = models.clone_model(keras_model, input_tensors=input_tensors)
+    273   else:
+    274     model = keras_model
+
+~\AppData\Local\Continuum\anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\models.py in clone_model(model, input_tensors)
+    261     return _clone_sequential_model(model, input_tensors=input_tensors)
+    262   else:
+--> 263     return _clone_functional_model(model, input_tensors=input_tensors)
+
+~\AppData\Local\Continuum\anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\models.py in _clone_functional_model(model, input_tensors)
+    166               kwargs['mask'] = computed_masks
+    167           output_tensors = generic_utils.to_list(layer(computed_tensors,
+--> 168                                                        **kwargs))
+    169           output_masks = generic_utils.to_list(
+    170               layer.compute_mask(computed_tensors, computed_masks))
+
+~\AppData\Local\Continuum\anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\engine\base_layer.py in __call__(self, inputs, **kwargs)
+    237     """
+    238     # Actually call the layer (optionally building it).
+--> 239     output = super(Layer, self).__call__(inputs, **kwargs)
+    240     if context.executing_eagerly():
+    241       return output
+
+~\AppData\Local\Continuum\anaconda3\lib\site-packages\tensorflow\python\layers\base.py in __call__(self, inputs, *args, **kwargs)
+    712 
+    713         if not in_deferred_mode:
+--> 714           outputs = self.call(inputs, *args, **kwargs)
+    715           if outputs is None:
+    716             raise ValueError('A layer\'s `call` method should return a Tensor '
+
+~\AppData\Local\Continuum\anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\layers\core.py in call(self, inputs, mask)
+    640     if has_arg(self.function, 'mask'):
+    641       arguments['mask'] = mask
+--> 642     return self.function(inputs, **arguments)
+    643 
+    644   def compute_mask(self, inputs, mask=None):
+
+~\AppData\Local\Continuum\anaconda3\lib\site-packages\tensorflow\python\keras\_impl\keras\layers\core.py in sampling(args)
+     16 def sampling(args):
+     17     #import tensorflow as tf
+---> 18     z_mean, z_log_var = args
+     19 
+     20     epsilon = tf.random_normal(shape=(batch_size, latent_dim),
+
+SystemError: unknown opcode

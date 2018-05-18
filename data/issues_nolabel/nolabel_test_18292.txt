@@ -1,0 +1,66 @@
+Memory leak with py_func
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes (see below)
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.7.0
+Python version: 3.6.4 64bit
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: 9.0
+GPU model and memory: GeForce 1080 Ti
+Exact command to reproduce: (see below)
+
+Issue
+py_func which has a python function referencing the graph (might be an unobvious reference, see below) results in the graph never being garbage collected. If you know about this issue usually it can be worked around, but in general it's a pitfall which should be fixed in the code (see below for suggestion).
+Source Code Example
+The following source code produces the leak. If you comment out py_func.graph = graph you will see that "Deleted MyPyFunc" will be printed.
+import gc
+import tensorflow as tf
+
+
+class MyPyFunc:
+    def __init__(self):
+        self.graph = None
+
+    def __call__(self, inputs):
+        return inputs
+
+    def __del__(self):
+        print("Deleted MyPyFunc")
+
+
+def run_graph():
+    graph = tf.Graph()
+    with graph.as_default():
+        inputs = tf.constant(0)
+        py_func = MyPyFunc()
+        op = tf.py_func(py_func, [inputs], [inputs.dtype])
+        # Comment this out to fix the leak
+        py_func.graph = graph
+
+    with tf.Session(graph=graph) as sess:
+        print("Result:", sess.run(op))
+
+
+run_graph()
+gc.collect()
+run_graph()
+gc.collect()
+Analysis
+The issue originates from script_ops.py:181. Here, all py_funcs get registered globally, i.e. these will only be deleted when CleanupFunc is garbage collected. It is instantiated at script_ops.py:222 and stored in the graph when py_func is called. The idea is, that the CleanupFunc.__del__ method is called when the graph is garbage collected, which in turn will delete the reference to the python function, so it can get garbage collected as well.
+In the example, MyPyFunc contains a reference to the graph. By calling py_func the reference to MyPyFunc is stored globally in _py_funcs = FuncRegistry(). That means the graph is referenced globally, so it will never get garbage collected, which in turn means that the CleanupFunc.__del__ will never be called, so MyPyFunc will never be deleted from _py_funcs.
+Importance
+Consider the following:
+class MyOp:
+    def __init__(self, inputs):
+        self.op = tf.py_func(self._py_func, [inputs], [inputs.dtype])
+
+    def _py_func(self, inputs):
+        return inputs
+This looks like valid code, but having MyOp.op in your graph will make the graph leak. The problem lies in the fact that _py_func has is bound to the MyOp instance which contains a reference to a TensorFlow op which in turn has a reference to the graph (for the remaining inference see above). This is a big issue, because tf.estimator.train_and_evaluate creates a lot of graphs during training (i.e. when it switches between training and evaluation a new graph is created).
+Suggestion
+Instead of globally storing references to the functions and keys to them, they might be better stored in the graph directly. This also prevents them from being deleted while the graph exists. Thus they are only cyclic references in the graph and can be garbage collected with the graph. Instead of storing
+graph._cleanup_py_funcs_used_in_graph.append(cleanup), the function should be stored directly like graph._py_funcs_used_in_graph.append(func).

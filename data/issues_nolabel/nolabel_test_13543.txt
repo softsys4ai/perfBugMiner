@@ -1,0 +1,206 @@
+how to condition encoder final hidden state on the inputs of RNN dynamic decoder with ScheduledOutputTrainingHelper?
+
+Hi, I'm trying to use tensorflow to code RDD encoder and decoder and with different length sequence inputs, so hope both encoder and decoder can be dynamic. Additionally, a decoder inputs is conditioned by the encoder final hidden states (context vector), which is similar to the Related Paper see picture a in page 3. The decoder is trying to fully inference during training with feeding previous outputs and context vector as inputs at each step.
+`class RNNEncoder_Decoder(object):
+def init(self,input_dim,
+context_dim,output_dim,hidden_dim,
+layers_stacked_count,learning_rate):
+    self.graph = tf.get_default_graph()
+    self.input_dim = input_dim
+    self.output_dim = output_dim
+    self.context_dim = context_dim
+    self.hidden_dim = hidden_dim
+    self.layers_stacked_count = layers_stacked_count
+    self.learning_rate = learning_rate
+    self.sampling_probability = tf.constant(dtype=tf.float32,value=1.0)
+    
+    # [batch_size,sequence_length,input_dimension]
+    self.enc_inp = tf.placeholder(tf.float32, [None,None,self.input_dim], name='encoder_inputs')
+    self.expected_out = tf.placeholder(tf.float32, [None,None,self.output_dim], name='expected_outs')
+    # fullly inference during trianing
+    self.dec_inp = tf.zeros_like(self.expected_out,dtype=tf.float32,name='decoder_inputs')
+            
+    seq_length = tf.reduce_sum(tf.sign(tf.reduce_max(tf.abs(self.enc_inp), 2)), 1)
+    self.seq_length = tf.cast(seq_length, tf.int32)
+    
+    with tf.variable_scope('RNNEncoderDecoder'):
+        with tf.variable_scope("Enocder") as encoder_varscope:
+            # create encoder LSTM cell
+            encoder_cells = []
+            for i in range(self.layers_stacked_count):
+                with tf.variable_scope('EncoderCell_{}'.format(i)):
+                    encoder_cells.append(tf.nn.rnn_cell.LSTMCell(self.hidden_dim,
+                                                         use_peepholes=True))
+            self.encoder_cell = tf.nn.rnn_cell.MultiRNNCell(encoder_cells)
+
+            # ruuning dynamic rnn encoder                
+            _, enc_state = tf.nn.dynamic_rnn(cell = self.encoder_cell,
+                                             initial_state=None,
+                                             dtype=tf.float32,
+                                             inputs = self.enc_inp,
+                                             sequence_length = self.seq_length
+                                            )
+
+            # extract top layer hidden state as feature representation
+            self.context_vector = enc_state[-1].h
+            
+            cell_state0 = tf.zeros_like(enc_state[0].c,dtype=tf.float32)
+            hidden_state0 = tf.zeros_like(enc_state[0].h,dtype=tf.float32)
+
+            dec_init_state = (enc_state[1], # pass the top layer state of enocder to the bottom layer of decoder
+                              tf.nn.rnn_cell.LSTMStateTuple(cell_state0, hidden_state0))
+            
+            # condition extracted features on decoder inputs
+            # with a shape that matches decoder inputs in all but (potentially) the final dimension. 
+            # tile context vector from [batch_size,context_dim] to [batch_size,decoder_sequence_length,context_dim]
+            context_vector_shape = tf.shape(self.context_vector)
+            context_vector_reshaped = tf.reshape(self.context_vector, 
+                                                 [context_vector_shape[0], 1, context_vector_shape[1]]
+                                                )
+            enc_inp_shape = tf.shape(self.enc_inp)
+            self.auxiliary_inputs = tf.tile(context_vector_reshaped,
+                                       multiples=[1,enc_inp_shape[1],1]
+                                      )
+            
+        with tf.variable_scope("Deocder") as decoder_varscope:
+            # create decoder LSTM cell
+            decoder_cells = []
+            for i in range(self.layers_stacked_count):
+                with tf.variable_scope('DecoderCell_{}'.format(i)):
+                    decoder_cells.append(tf.nn.rnn_cell.LSTMCell(self.hidden_dim,
+                                                         use_peepholes=True))
+            self.decoder_cell = tf.nn.rnn_cell.MultiRNNCell(decoder_cells)
+
+            dec_out_dense = Dense(units = self.output_dim,
+                                  activation = None,
+                                  use_bias = False,
+                                  kernel_initializer = tf.truncated_normal_initializer(
+                                      dtype=tf.float32,
+                                      stddev = 1.0 / math.sqrt(float(self.hidden_dim))
+                                  ),
+                                  name = 'dec_outp_linear_projection'
+                                 )
+            
+            training_helper = tf.contrib.seq2seq.ScheduledOutputTrainingHelper(
+                inputs = self.dec_inp,
+                sequence_length = self.seq_length,
+                auxiliary_inputs = self.auxiliary_inputs, # condtional on inputs
+                sampling_probability = 1.0, # for fullly inference
+                name = 'feeding_conditional_input'
+            )
+            
+            decoder = tf.contrib.seq2seq.BasicDecoder(
+                cell = self.decoder_cell,
+                helper = training_helper,
+                initial_state = dec_init_state,
+                output_layer = dec_out_dense
+            )
+            
+            outputs, _ , final_seq_lengths = tf.contrib.seq2seq.dynamic_decode(decoder=decoder,
+                                                                               impute_finished = True
+                                                                              )
+        self.outputs = outputs
+        
+### optimize loss part
+
+def get_decoder_prediction(self,X,session):
+    feed_dict = {
+        self.enc_inp:X
+    }
+    feed_dict.update({self.expected_out:X})
+    run = [self.outputs]
+    return session.run(run,feed_dict=feed_dict)
+
+RNN_test = RNNEncoder_Decoder(input_dim=1,context_dim=32,output_dim=1,hidden_dim=32,layers_stacked_count=2,learning_rate=0.01)`
+Without "auxiliary_inputs = self.auxiliary_inputs", it running successfully,
+But with auxiliary_inputs = self.auxiliary_inputs I got following error:
+`---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+ in ()
+9                           hidden_dim=hidden_dim,
+10                           layers_stacked_count=layers_stacked_count,
+---> 11                           learning_rate=learning_rate
+12                          )
+ in init(self, input_dim, context_dim, output_dim, hidden_dim, layers_stacked_count, learning_rate)
+98
+99                 outputs, _ , final_seq_lengths = tf.contrib.seq2seq.dynamic_decode(decoder=decoder,
+--> 100                                                                                    impute_finished = True
+101                                                                                   )
+102             self.outputs = outputs
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py in dynamic_decode(decoder, output_time_major, impute_finished, maximum_iterations, parallel_iterations, swap_memory, scope)
+284         ],
+285         parallel_iterations=parallel_iterations,
+--> 286         swap_memory=swap_memory)
+287
+288     final_outputs_ta = res[1]
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py in while_loop(cond, body, loop_vars, shape_invariants, parallel_iterations, back_prop, swap_memory, name)
+2773     context = WhileContext(parallel_iterations, back_prop, swap_memory, name)
+2774     ops.add_to_collection(ops.GraphKeys.WHILE_CONTEXT, context)
+-> 2775     result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+2776     return result
+2777
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py in BuildLoop(self, pred, body, loop_vars, shape_invariants)
+2602       self.Enter()
+2603       original_body_result, exit_vars = self._BuildLoop(
+-> 2604           pred, body, original_loop_vars, loop_vars, shape_invariants)
+2605     finally:
+2606       self.Exit()
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py in _BuildLoop(self, pred, body, original_loop_vars, loop_vars, shape_invariants)
+2552         structure=original_loop_vars,
+2553         flat_sequence=vars_for_body_with_tensor_arrays)
+-> 2554     body_result = body(*packed_vars_for_body)
+2555     if not nest.is_sequence(body_result):
+2556       body_result = [body_result]
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py in body(time, outputs_ta, state, inputs, finished, sequence_lengths)
+232       """
+233       (next_outputs, decoder_state, next_inputs,
+--> 234        decoder_finished) = decoder.step(time, inputs, state)
+235       next_finished = math_ops.logical_or(decoder_finished, finished)
+236       if maximum_iterations is not None:
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/contrib/seq2seq/python/ops/basic_decoder.py in step(self, time, inputs, state, name)
+137     """
+138     with ops.name_scope(name, "BasicDecoderStep", (time, inputs, state)):
+--> 139       cell_outputs, cell_state = self._cell(inputs, state)
+140       if self._output_layer is not None:
+141         cell_outputs = self._output_layer(cell_outputs)
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/ops/rnn_cell_impl.py in call(self, inputs, state, scope)
+178       with vs.variable_scope(vs.get_variable_scope(),
+179                              custom_getter=self._rnn_get_variable):
+--> 180         return super(RNNCell, self).call(inputs, state)
+181
+182   def _rnn_get_variable(self, getter, *args, **kwargs):
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/layers/base.py in call(self, inputs, *args, **kwargs)
+448         # Check input assumptions set after layer building, e.g. input shape.
+449         self._assert_input_compatibility(inputs)
+--> 450         outputs = self.call(inputs, *args, **kwargs)
+451
+452         # Apply activity regularization.
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/ops/rnn_cell_impl.py in call(self, inputs, state)
+936                                       [-1, cell.state_size])
+937           cur_state_pos += cell.state_size
+--> 938         cur_inp, new_state = cell(cur_inp, cur_state)
+939         new_states.append(new_state)
+940
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/ops/rnn_cell_impl.py in call(self, inputs, state, scope)
+178       with vs.variable_scope(vs.get_variable_scope(),
+179                              custom_getter=self._rnn_get_variable):
+--> 180         return super(RNNCell, self).call(inputs, state)
+181
+182   def _rnn_get_variable(self, getter, *args, **kwargs):
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/layers/base.py in call(self, inputs, *args, **kwargs)
+448         # Check input assumptions set after layer building, e.g. input shape.
+449         self._assert_input_compatibility(inputs)
+--> 450         outputs = self.call(inputs, *args, **kwargs)
+451
+452         # Apply activity regularization.
+/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/ops/rnn_cell_impl.py in call(self, inputs, state)
+554     input_size = inputs.get_shape().with_rank(2)[1]
+555     if input_size.value is None:
+--> 556       raise ValueError("Could not infer input size from inputs.get_shape()[-1]")
+557     scope = vs.get_variable_scope()
+558     with vs.variable_scope(scope, initializer=self._initializer) as unit_scope:
+ValueError: Could not infer input size from inputs.get_shape()[-1]`
+I'm just getting start to use tensforflow, so could anyone help me with:
+Is this a correct way to condition the last hidden state of encoder on the inputs of decoder?
+and why the inputs of decoder become None after I feed the auxiliary_inputs as the error?
+@ebrevdo

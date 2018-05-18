@@ -1,0 +1,81 @@
+Fix the gradient computation of dynamic stitch.
+
+Currently the gradient of tf.dynamic_stitch is not correct for duplicated indices. This is
+issue #7397. @drasmuss submitted a pull request for this issue, but it was ultimately not merged
+due to a performance drop.
+While working on this, I realised that the problem is more complicated than what follows
+from the discussion in #7487. In fact, the solution proposed in #7487 is not correct, because
+one can have duplicated indices in the same input tensor. The following example shows this:
+import tensorflow as tf
+
+x = tf.zeros((3,))
+y = tf.dynamic_stitch([[0, 1, 0]], [x])
+
+with tf.Session() as sess:
+    print("y")
+    print(sess.run(y))
+
+    analytic, numeric = tf.test.compute_gradient(x, (3,), y, (2,))
+    print("analytic")
+    print(analytic)
+    print("numeric")
+    print(numeric)
+
+The output (even with #7487) is
+y
+[ 0.  0.]
+analytic
+[[ 1.  0.]
+ [ 0.  1.]
+ [ 1.  0.]]
+numeric
+[[ 0.          0.        ]
+ [ 0.          0.99998707]
+ [ 0.99998707  0.        ]]
+
+My fix is to add a new kernel op GatherDisjoint, that can handle all the inputs together.
+This replaces the n calls to gather in data_flow_grad._DynamicStitchGrads with a
+single gather_disjoint.
+The implementation is very similar to gather, I just zero out duplicated slices at the end.
+I've put this op in core/, if you would like I can move it to contrib/, just let me know where.
+I've also added tests for the op and new tests for the gradient of dynamic stitch. Here
+I inspired myself from @drasmuss pull request.
+I've run the script by @drasmuss again:
+import time
+
+import numpy as np
+import tensorflow as tf
+
+stitch_size = 1000
+n_inputs = 10
+input_shape = (100, 50, 50)
+reps = 10
+
+with tf.device("cpu:0"):
+    idxs = [tf.constant(np.random.randint(stitch_size, size=input_shape[0]), dtype=tf.int32)
+            for _ in range(n_inputs)]
+    vals = [tf.constant(np.random.uniform(-1, 1, size=input_shape), dtype=tf.float32)
+            for _ in range(n_inputs)]
+    y = tf.dynamic_stitch(idxs, vals)
+    grad = tf.gradients(y, vals)
+
+total_time = 0.0
+for _ in range(reps):
+    with tf.Session() as sess:
+        start = time.time()
+        sess.run(grad)
+        total_time += time.time() - start
+
+print(total_time / reps)
+
+The results are as follows:
+with my fix:
+CPU - 0.09455678462982178
+GPU - 0.09739606380462647
+without my fix:
+CPU - 0.11728813648223876
+GPU - 0.11805038452148438
+So with the fix it runs faster. On GPU the slowdown is due to the memory copies from host to device
+and back, for input and output (I've checked with nvprof), and not because of my fix.
+I've run this script using local builds of the same master branch, with and without my patch.
+Let me know if the op should be moved somewhere else, or it should be made hidden.

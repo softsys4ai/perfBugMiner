@@ -1,0 +1,46 @@
+tf.keras.estimator.estimator_from_model does not respect options set in RunConfig
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): tf.VERSION = 1.4.0 tf.GIT_VERSION = v1.4.0-rc1-11-g130a514
+Python version: 2.7.12
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: 8.0.61/6.0.21
+GPU model and memory: NVIDIA Tesla M60 8 GB
+Exact command to reproduce: See Below
+
+Describe the problem
+When trying to use an estimator that is derived from tf.keras.estimator.estimator_from_model() and training with tf.estimator.train_and_evaluate(), setting gpu_options in the session_config of tf.estimator.RunConfig does not cause the settings to be respected when passed to the estimator_from_model function. For example setting per_process_gpu_memory_fraction=0.5 does not decrease the memory allocated to the process on the GPU, similarly setting allow_growth=True continues to allocate all of the memory and does not allow memory growth.
+I also tested this with the canned estimator tf.estimator.DNNRegressor, and the settings were applied as expected when the RunConfig was passed to the estimator.
+Below is code to demonstrate this issue.
+Source code / logs
+Minimal example, runs to completion and trains successfully. But, changing the GPUOptions settings does not cause the GPU memory to be utilized as expected:
+import os
+import numpy as np
+import tensorflow as tf
+
+tf.logging.set_verbosity(tf.logging.INFO)
+
+# Neither of these GPUOptions are respected
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.5)
+#gpu_options = tf.GPUOptions(allow_growth=True)
+sess_config = tf.ConfigProto(gpu_options=gpu_options)
+run_config = tf.estimator.RunConfig(session_config=sess_config)
+
+inputs = tf.keras.layers.Input(shape=(10,))
+outputs = tf.keras.layers.Dense(10)(inputs)
+model = tf.keras.models.Model(inputs, outputs)
+model.compile(optimizer='sgd', loss='mse')
+est_keras = tf.keras.estimator.model_to_estimator(keras_model=model, config=run_config)
+
+input_name = model.input_names[0]
+data = np.random.rand(1000,10).astype(np.float32)
+train_input_fn = tf.estimator.inputs.numpy_input_fn({input_name:data}, data, batch_size=10, num_epochs=None, shuffle=False)
+
+train_spec = tf.estimator.TrainSpec(input_fn=train_input_fn, max_steps=100000)
+eval_spec = tf.estimator.EvalSpec(input_fn=train_input_fn, steps=10)
+tf.estimator.train_and_evaluate(est_keras, train_spec, eval_spec)

@@ -1,0 +1,51 @@
+Distributed Tensorflow model is no faster than standalone
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+I have taken the Resnet code from the Tensorflow model zoo and distributed it as according to https://www.tensorflow.org/deploy/distributed
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04.1 LTS
+TensorFlow installed from (source or binary):
+Official Tensorflow-GPU docker image
+TensorFlow version (use command below):
+('v1.0.0-2378-g2259213', '1.1.0-rc0')
+Bazel version (if compiling from source):
+N/A
+CUDA/cuDNN version:
+Version 8
+GPU model and memory:
+Tested on multiple setups within a cluster
+4 machines with 2x Nvidia TitanX 12GB
+1 machine with 2x GeForce GTX 1080 8GB
+Exact command to reproduce:
+The commands differ slightly between machines depending on cluster configuration, but for 1 PS and 2 workers it looks like this:
+
+CUDA_VISIBLE_DEVICES="" python resnet_main.py --dataset="cifar10" --train_data_path="/notebooks/cifar_data/data_batch*" --train_dir="/notebooks/tmp/resnet_model/train" --log_root="/notebooks/tmp/resnet_model" --job_name="ps" --task_index=0 --eval_data_path="/notebooks/cifar_data/test_batch.bin" --eval_dir="/notebooks/tmp/resnet_model/test"
+CUDA_VISIBLE_DEVICES=0 python resnet_main.py --dataset="cifar10" --train_data_path="/notebooks/cifar_data/data_batch*" --train_dir="/notebooks/tmp/resnet_model/train" --log_root="/notebooks/tmp/resnet_model" --job_name="worker" --task_index=0 --eval_data_path="/notebooks/cifar_data/test_batch.bin" --eval_dir="/notebooks/tmp/resnet_model/test"
+CUDA_VISIBLE_DEVICES=0 python resnet_main.py --dataset="cifar10" --train_data_path="/notebooks/cifar_data/data_batch*" --train_dir="/notebooks/tmp/resnet_model/train" --log_root="/notebooks/tmp/resnet_model" --job_name="worker" --task_index=1 --eval_data_path="/notebooks/cifar_data/test_batch.bin" --eval_dir="/notebooks/tmp/resnet_model/test"
+Describe the problem
+When running the Resnet model on CIFAR10 from the tf zoo in a distributed environment (asynchronous, between-graph replication), there is no performance gain.
+Running Resnet 110 on a single (non-distributed) machine, single GPU resulted in approximately 3 iterations per second. This is considered the baseline for any tests on the following configurations - all of which resulted in approximately the same number of iterations per second irrespective of configuration.
+Note: in all cases, each worker has their own dedicated GPU
+
+1 PS, 2 workers on one machine
+1 PS with dedicated GPU & 1 worker on one machine, 1 worker on another machine
+1 PS & 2 workers on one machine, 2 workers on another machine
+1 PS & 2 workers on one machine, 3 more machines with 2 workers each
+4 machines with 2 workers each, two of these with 1 PS each
+4 machines, each with 1 PS & 2 workers
+
+When starting up the workers, each would begin training as soon as it's ready, printing information to the terminal during/after each iteration. The difference is speed is visually noticeable - when there is only 1 worker running, it's as fast as I would expect. As more workers spin up, all of the existing workers slow down. In this way, I can see (with 8 terminals on my screen) the entire cluster slowing as more workers begin.
+I monitored system stats during training to rule things out as the bottleneck and found the following for each machine:
+
+CPU usage: CPU usage is not at 100% for any machine
+GPU usage: GPU usage repeatedly flickers between 0% and ~80% - once per iteration
+Network usage: Network bandwidth in/out for any given machine is never more than ~80% of its capacity. the network speed is limited to 1Gbps, and it doesn't reach this cap. We raised the limit to 2Gbps and saw no increased usage or performance.
+HDD usage: Batches are loaded from disk multi-threaded. I printed to the screen during file-access and it's practically instantaneous.
+
+For the input pipeline, I have also tried switching between tf.RandomShuffleQueue and tf.train.shuffle_batch and playing with the number of threads/min after deque etc for each of these batching methods to no avail.
+Source code / logs
+Source code files attached below - cifar_input.py has small modifications from the original input pipeline. The original cifar input code is the file cifar_input_orig.py
+resnet_distrib.zip
+Thank you in advance for any light you may be able to shed on this!

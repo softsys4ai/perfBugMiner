@@ -1,0 +1,49 @@
+Error on importing metagraph that uses unbound input multiple times
+
+If I export a scoped metagraph which has multiple references to a tensor which will be unbound after exporting, I cannot re-import the metagraph. This problem can be reproduced with the following MWE.
+import tensorflow as tf
+
+graph = tf.Graph()
+
+with graph.as_default():
+    inputs = tf.placeholder(shape=[], dtype=tf.float32, name="inputs")
+
+    with tf.name_scope("scope"):
+        output = inputs + inputs
+
+    tf.train.export_meta_graph("./mwe.meta",
+                               export_scope="scope",
+                               as_text=True)
+
+graph = tf.Graph()
+
+with graph.as_default():
+    inputs = tf.constant(shape=[], value=1.0)
+
+    tf.train.import_meta_graph("./mwe.meta",
+                               import_scope="scope",
+                               input_map={
+                                   "$unbound_inputs_inputs": inputs
+                               })
+
+Running this code results in the following error.
+Traceback (most recent call last):
+  File "<snip>\metagraph_bug_mwe.py", line 23, in <module>
+    "$unbound_inputs_inputs": inputs
+  File "<snip>\Python35\lib\site-packages\tensorflow\python\training\saver.py", line 1595, in import_meta_graph
+    **kwargs)
+  File "<snip>\Python35\lib\site-packages\tensorflow\python\framework\meta_graph.py", line 479, in import_scoped_meta_graph
+    ",".join([compat.as_str(v) for v in field.value
+ValueError: Graph contains unbound inputs: $unbound_inputs_inputs,$unbound_inputs_inputs. Must provide these inputs through input_map.
+
+Upon inspection of the generated metagraph file (see mwe.meta, lines 67 - 75), I noticed that the inputs tensor actually has two entries in the unbound_inputs collection. Since the import_scoped_meta_graph function compares the full collection read from the proto to the input_map parameter, they do not match and the error is raised.
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes, see above
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.1.0
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: 8.0/5.1.10
+GPU model and memory: Nvidia GeForce GTX 860M with 2GB VRAM + 4GB shared
+Exact command to reproduce: See MWE above

@@ -1,0 +1,41 @@
+Computing 2nd-order tf.gradients of tensors throws Exception when used with batch_norm
+
+Describe the problem clearly
+If the updates_collections of a batch_norm layer is set other than tf.GraphKeys.UPDATE_OPS, it is no longer possible to compute 2nd-order tf.gradients with respect to the weights of a fully_connected layer.
+p.s. It is okay when updates_collections is set as tf.GraphKeys.UPDATE_OPS. I think updates_collections should not affect the ability to compute gradients?
+Environments
+
+Ubuntu 16.04 64bit
+Python 3.6.0 |Anaconda 4.3.1 (64-bit)| (default, Dec 23 2016, 12:22:00)
+[GCC 4.4.7 20120313 (Red Hat 4.4.7-1)] on linux
+tensorflow-gpu 1.0.1 installed from pip
+libcublas.so.8.0, libcudnn.so.5, libcufft.so.8.0,  libcuda.so.1, libcurand.so.8.0
+
+Source Code
+import tensorflow as tf
+
+with tf.Session() as sess:
+    X = tf.placeholder(tf.float32, [None, 2])
+    is_training = tf.placeholder(tf.bool, [], name='is_training')
+
+    outputs = tf.contrib.layers.fully_connected(inputs=X, num_outputs=1)
+    outputs = tf.contrib.layers.batch_norm(
+        inputs=outputs,
+        is_training=is_training,
+        updates_collections='bad_collections')
+    # get gradients of X with respect to outputs values
+    grads = tf.gradients(outputs, [
+        X,
+    ])[0]
+    bad_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+    # get gradients of weights with respect to gradients of X
+    bad_grads = tf.gradients(grads, bad_vars) # this line
+Logs
+Traceback (most recent call last):
+  File "test.py", line 18, in <module>
+    bad_grads = tf.gradients(grads, bad_vars)
+  File "$HOME/anaconda2/envs/tf/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 474, in gradients
+    out_grads[i] = control_flow_ops.ZerosLikeOutsideLoop(op, i)
+  File "$HOME/anaconda2/envs/tf/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1303, in ZerosLikeOutsideLoop
+    pred = op_ctxt.pred
+AttributeError: 'NoneType' object has no attribute 'pred'

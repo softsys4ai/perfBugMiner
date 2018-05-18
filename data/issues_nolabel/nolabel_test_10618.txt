@@ -1,0 +1,27 @@
+crop_and_resize issue with box_index on 1.2rc2
+
+I use crop_and_resize() in a standard way as such:
+pool = tf.image.crop_and_resize(features, boxes, box_indicies, pool_shape, method="bilinear")
+
+And it works great. Then I tried to train on multiple GPUs, and I got this error:
+OutOfRangeError: box_index has values outside [0, batch_size)
+	 [[Node: tower_2/mask_rcnn/roi_align/CropAndResize = CropAndResize[T=DT_FLOAT, extrapolation_value=0, method="bilinear", _device="/job:localhost/replica:0/task:0/gpu:2"](tower_2/mask_rcnn/activation_40/Relu, tower_2/mask_rcnn/roi_align/StopGradient, tower_2/mask_rcnn/roi_align/StopGradient_1/_5871, tower_2/mask_rcnn/roi_align/CropAndResize/crop_size)]]
+	 [[Node: tower_5/mask_rcnn/mrcnn_mask/Reshape_1/_6389 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:5", send_device_incarnation=1, tensor_name="edge_33119_tower_5/mask_rcnn/mrcnn_mask/Reshape_1", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+I verified that box_index is within the correct range (all zeros in my case because I use one image per batch), and verified that all the other inputs to crop_and_resize() look good. I ended up spending almost two days checking and rechecking every line of my code to make sure I didn't make a mistake somewhere. It drove me nuts. Finally, I tried downgrading TF to 1.1 and suddenly everything worked. And to make sure this is the problem, I upgraded to 1.2rc2 again and got the error again.
+A few points that might help:
+
+On 1.1 it works whether I use 1 GPU or 8 GPUs. On 1.2rc2 it works on 1 GPU but fails on 8GPUs.
+The way I do multi-GPU training is by running 8 copies of my model, one on each GPU (shared weights). My input batch size is 8 and I split the inputs by the batch dimension and feed one sample to each GPU, and then I concatenate the outputs to get a batch size of 8 again and then apply the loss function.
+If you're wondering why I'm using 1.2rc2, it's because 1.1 has an issue that causes Batch normalization to run on CPU and it was fixed in 1.2rc2.
+
+System information
+
+Ubuntu 16.04
+Python 3.5
+TensorFlow 1.2.0-rc2. Installed using
+
+sudo pip3 install --upgrade https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-1.2.0rc2-cp35-cp35m-linux_x86_64.whl
+
+
+On EC2 p2.8xlarge (8 GPUs)

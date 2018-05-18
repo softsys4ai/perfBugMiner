@@ -1,0 +1,45 @@
+Fixed inconsistency of outputs collection
+
+Because naming logic for utils.collect_named_outputs in max_pool2d and convolution2d is different, collection is getting filled with inconsistent names.
+code to reproduce:
+graph = tf.Graph()
+
+node_collection = 'nodes'
+with graph.as_default():
+    x = tf.placeholder(tf.float32, (1, 20, 20, 3))
+
+    with tf.name_scope('name_scope'):
+        conv = tf.contrib.layers.conv2d(
+            x, num_outputs=8, kernel_size=4,
+            scope='conv', outputs_collections=node_collection)
+        max_pool = tf.contrib.layers.max_pool2d(
+                conv, kernel_size=2, stride=2, scope='max_pool',
+                outputs_collections=node_collection)
+
+print([nt.name for nt in graph.get_collection(node_collection)])
+=============================================
+['conv', 'name_scope/max_pool']
+
+Expected output is ['name_scope/conv', 'name_scope/max_pool'].
+It is also important for those who use tf.name_scope to distinguish processing of different inputs with the same layer, like in siamese neural network. Currently, they will get identical names.
+Code to reproduce:
+graph = tf.Graph()
+
+node_collection = 'nodes'
+with graph.as_default():
+  input_a = tf.placeholder(tf.float32, (1, 20, 20, 3))
+  input_b = tf.placeholder(tf.float32, (1, 20, 20, 3))
+  with tf.variable_scope('feature_extractor') as vs:
+    for name_scope, inputs in [('a', input_a), ('b', input_b)]:
+      with tf.name_scope(name_scope):
+        conv = tf.contrib.layers.conv2d(
+          inputs, num_outputs=8, kernel_size=4,
+          scope='conv', outputs_collections=node_collection)
+        max_pool = tf.contrib.layers.max_pool2d(
+          conv, kernel_size=2, stride=2, scope='max_pool',
+          outputs_collections=node_collection)
+      vs.reuse_variables()
+
+print([nt.name for nt in graph.get_collection(node_collection)])
+=============================================
+['feature_extractor/conv', 'feature_extractor/a/max_pool', 'feature_extractor/conv', 'feature_extractor/b/max_pool']

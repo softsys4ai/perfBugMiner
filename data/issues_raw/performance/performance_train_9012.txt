@@ -1,0 +1,66 @@
+BiasGradOp mistakenly put on CPU
+
+NOTE: Issues that are not bugs or feature requests will be closed. Please ask usage questions on StackOverflow.
+You must complete this information or else your issue will be closed
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow)?:
+custom code
+TensorFlow installed from (source or binary)?: from binary
+TensorFlow version: 1.0.1
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: CUDA 8.0, cuDNN v5.1
+GPU Model and Memory: GTX 1080, 8GB
+Exact command to reproduce:
+Here is a sample script in Python that can reproduce the problem:
+
+import tensorflow as tf
+import numpy as np
+ly = tf.layers
+
+
+def lrelu(x, leak=0.2, name="lrelu"):
+    with tf.variable_scope(name):
+        f1 = 0.5 * (1 + leak)
+        f2 = 0.5 * (1 - leak)
+        return f1 * x + f2 * tf.abs(x)
+        # return tf.maximum(leak*x, x)
+
+x = np.ones([16, 3, 32, 32], dtype=np.float32)
+
+with tf.device('/gpu:0'):
+    input = tf.placeholder(tf.float32, shape=[16, 3, 32, 32])
+    output = ly.conv2d(input, 3, kernel_size=1, data_format='channels_first',
+                       strides=1, activation=lrelu)
+    loss = tf.gradients(input - output, input)[0]
+    optimizer = tf.train.AdamOptimizer()
+    gradients = optimizer.compute_gradients(loss)
+    grad_op = optimizer.apply_gradients(gradients)
+
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    out = sess.run(grad_op, feed_dict={input: x})
+
+Describe the problem clearly
+I am on Ubuntu 16.04. While running the above script, despite the device has been specified to be GPU, tensorflow still try to do the BiasGradOp on CPU and will cause an error because of the data format. If I change the implementation of lrelu() to return tf.maximum(leak*x, x) then the problem goes away.
+Source Code / Logs
+Here is the output from console:
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:910] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties: 
+name: GeForce GTX 1080
+major: 6 minor: 1 memoryClockRate (GHz) 1.797
+pciBusID 0000:01:00.0
+Total memory: 7.92GiB
+Free memory: 7.21GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1080, pci bus id: 0000:01:00.0)
+E tensorflow/core/common_runtime/executor.cc:594] Executor failed to create kernel. Invalid argument: CPU BiasGradOp only supports NHWC.
+	 [[Node: gradients_1/conv2d/BiasAdd_grad/BiasAddGrad = BiasAddGrad[T=DT_FLOAT, data_format="NCHW", _device="/job:localhost/replica:0/task:0/gpu:0"](gradients_1/gradients/conv2d/lrelu/Abs_grad/Sign_grad/zeros)]]
+E tensorflow/core/common_runtime/executor.cc:594] Executor failed to create kernel. Invalid argument: CPU BiasGradOp only supports NHWC.
+	 [[Node: gradients_1/conv2d/BiasAdd_grad/BiasAddGrad = BiasAddGrad[T=DT_FLOAT, data_format="NCHW", _device="/job:localhost/replica:0/task:0/gpu:0"](gradients_1/gradients/conv2d/lrelu/Abs_grad/Sign_grad/zeros)]]

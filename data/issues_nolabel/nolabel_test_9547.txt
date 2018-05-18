@@ -1,0 +1,35 @@
+Fix build issue when `/usr/bin/python` path is not available
+
+This fix tries to fix the build error where PYTHON_BIN_PATH is not used in tf_version_info_genrule() (which will cause build error if python is not available in the PATH).
+(See Ln 1188 in tensorflow/tensorflow.bzl)
+This could be an issue even if python is available yet a different python location is used in ./configure.
+This fix fixes the issue by passing $(PYTHON_BIN_PATH) explicitly so that same python version could be used:
+-      "$(location //tensorflow/tools/git:gen_git_source.py) --generate $(SRCS) \"$@\"",
++      "$(PYTHON_BIN_PATH) $(location //tensorflow/tools/git:gen_git_source.py) --generate $(SRCS) \"$@\"",
+Below is the detailed issue description:
+In one of the build machines (Ubuntu 16.04) only python3 is available
+(/usr/bin/python3) without python 2:
+ubuntu@ubuntu:~/tensorflow$ python --version
+python: command not found
+ubuntu@ubuntu:~/tensorflow$ python3 --version
+Python 3.5.2+
+ubuntu@ubuntu:~/tensorflow$ which python3
+/usr/bin/python3
+
+After configure with /usr/bin/python3 through ./configure:
+ubuntu@ubuntu:~/tensorflow$ ./configure
+Please specify the location of python. [Default is /usr/bin/python3]:
+...
+
+The following is the error:
+ubuntu@ubuntu:~/tensorflow$ bazel build --config=opt //tensorflow/tools/pip_package:build_pip_package
+WARNING: /home/ubuntu/tensorflow/tensorflow/contrib/learn/BUILD:15:1: in py_library rule //tensorflow/contrib/learn:learn: target '//tensorflow/contrib/learn:learn' depends on deprecated target '//tensorflow/contrib/session_bundle:exporter': Use SavedModel Builder instead.
+WARNING: /home/ubuntu/tensorflow/tensorflow/contrib/learn/BUILD:15:1: in py_library rule //tensorflow/contrib/learn:learn: target '//tensorflow/contrib/learn:learn' depends on deprecated target '//tensorflow/contrib/session_bundle:gc': Use SavedModel instead.
+INFO: Found 1 target...
+ERROR: /home/ubuntu/tensorflow/tensorflow/core/BUILD:1363:1: Executing genrule //tensorflow/core:version_info_gen failed: bash failed: error executing command /bin/bash -c ... (remaining 1 argument(s) skipped): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 127.
+/usr/bin/env: 'python': No such file or directory
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+INFO: Elapsed time: 3.548s, Critical Path: 0.20s
+
+Signed-off-by: Yong Tang yong.tang.github@outlook.com

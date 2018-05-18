@@ -1,0 +1,45 @@
+StagingArea.get() ignores timeout
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS 10.13.1
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4.1
+Python version: 2.7.14
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+The get() method of a tf.contrib.staging.StagingArea is a blocking operation. I would expect it to respect any operation timeout that has been set for the Tensorflow session. This is important to avoid deadlocks, e.g., if the StagingArea is empty.
+In comparison, the dequeue() method of a tf.FIFOQueue respects the timeout by raisingtf.errors.DeadlineExceededError.
+Source code / logs
+Example script:
+import tensorflow as tf
+from __future__ import print_function
+
+print("Testing tf.FIFOQueue")
+empty_queue = tf.FIFOQueue(capacity=1, shapes=[1,], dtypes=tf.int32)
+with tf.Session() as sess:
+  try:
+    print(sess.run(empty_queue.dequeue(), options=tf.RunOptions(timeout_in_ms = 500)))
+  except tf.errors.DeadlineExceededError as e:
+    print("Error:", e)
+
+
+print("Testing tf.contrib.staging.StagingArea")
+empty_stagingArea = tf.contrib.staging.StagingArea([tf.int64], shapes=[(1,)])
+with tf.Session() as sess:
+  try:
+    print(sess.run(empty_stagingArea.get(), options=tf.RunOptions(timeout_in_ms = 500)))
+  except tf.errors.DeadlineExceededError as e:
+    print("Error:", e)
+Example output:
+Testing tf.FIFOQueue
+Error: Timed out waiting for notification
+Testing tf.contrib.staging.StagingArea
+
+The final sess.run call hangs indefinitely.

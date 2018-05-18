@@ -1,0 +1,32 @@
+A bug in tensorflow r1.4 when applying  MultiRNNCell
+
+System information
+
+**TensorFlow installed from source :
+**TensorFlow version: r1.4
+**Python version: 3.5.4
+**Bazel version: 0.5.4
+**GCC/Compiler version 5.4.0
+**CUDA/cuDNN version: 9.0 &5.0
+*GPU model and memory: GeForce GTX 1080
+
+Describe the problem
+when applying the MultiRNNCell as below, an error occurs. The code went well in tensorflow r1.3
+Source code
+input_list is a list of tensor with shape[None, 8]
+n_hidden = 32
+lstm = tf.nn.rnn_cell.BasicLSTMCell(n_hidden)
+stacked_lstm = tf.nn.rnn_cell.MultiRNNCell([lstm]*2)
+outputs, states = tf.nn.static_rnn(stacked_lstm, input_list, dtype=tf.float32)
+error
+ValueError: Dimensions must be equal, but are 64 and 40 for 'rnn/rnn/multi_rnn_cell/cell_0/cell_0/basic_lstm_cell/MatMul_1' (op: 'MatMul') with input shapes: [?,64], [40,128].
+However when only applying one single lstm, i works well.
+opinions:
+when calculating, the basiclstmcell will be called, where a class named Linear will be initialized, as an example, in my case, the variable self.weight in this class will be initialized as 40,128.
+*** code from rnn_cell_impl.py***
+if self._linear is None:
+self._linear = _Linear([inputs, h], 4 * self._num_units, True)
+But, when MultiRNNCell is the case, for example,  a 2 layers lstm. in the second layer, the weight should be [64,128]('h' in last layer (32)+'o' in  last layer(32)). Disappointingly, the weight will only be initialized once and stay with the shape [40,128] due to the sentence "if self._linear is None:". So that the reason why such error occurs.
+i try to comment out this sentence, but since share variable mechanism is related. it dosen't work, and induces other problem.
+ValueError: Trying to share variable rnn/multi_rnn_cell/cell_0/basic_lstm_cell/kernel, but specified shape (64, 128) and found shape (40, 128).
+Any idea how to solve this problem efficiently?

@@ -1,0 +1,23 @@
+Attempting to use uninitialized value lstm/LSTMCell/W_0 on Distributed TensorFlow
+
+On a cluster of Tensorflow, which has one ps server, and one worker:
+def inference(self, inds, early_stops):
+
+            ...
+
+            with tf.variable_scope('lstm_encoder') as scope:
+                initializer = tf.random_uniform_initializer(-0.08, 0.08)
+                lstm_cell = tf.nn.rnn_cell.LSTMCell(self.hidden_units, initializer = initializer, state_is_tuple = True)
+                if self.is_training and self.keep_prob < 1:
+                    lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob = self.keep_prob)
+
+       ...
+ with tf.device(tf.train.replica_device_setter(worker_device =
+                                                          '/job:worker/task:%d' % int(os.environ['task_index']), cluster = cluster)):
+                train_op, loss = inference()
+it turns out that:
+tensorflow.python.framework.errors.FailedPreconditionError: Attempting to use uninitialized value sentiment/lstm_encoder/RNN/LSTMCell/W_0
+     [[Node: sentiment/lstm_encoder/RNN/LSTMCell/W_0_S8 = _Send[T=DT_FLOAT, client_terminated=false, recv_device="/job:worker/replica:0/task:0/gpu:0", send_device="/job:ps/replica:0/task:0/gpu:0", send_device_incarnation=-5768356229269645157, tensor_name="edge_226_sentiment/lstm_encoder/RNN/LSTMCell/W_0", _device="/job:ps/replica:0/task:0/gpu:0"](sentiment/lstm_encoder/RNN/LSTMCell/W_0)]]
+     [[Node: sentiment/lstm_encoder/RNN/LSTMCell/B/Assign_S4 = _Recv[client_terminated=false, recv_device="/job:worker/replica:0/task:0/gpu:0", send_device="/job:ps/replica:0/task:0/gpu:0", send_device_incarnation=-5768356229269645157, tensor_name="edge_214_sentiment/lstm_encoder/RNN/LSTMCell/B/Assign", tensor_type=DT_FLOAT, _device="/job:worker/replica:0/task:0/gpu:0"]()]]
+
+I try to place variables on cpu or gpu, both of them did not work.

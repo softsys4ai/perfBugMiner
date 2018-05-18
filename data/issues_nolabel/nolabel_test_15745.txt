@@ -1,0 +1,107 @@
+Eager: variable created in @tfe.defun is invalid and raise error when print
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Win10
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below):1.5.0dev20171230
+Python version: 3.6
+
+Describe the problem
+I want to use defun to speed up static rnn compute in eager:
+def _eager_dynamic_rnn(cell,
+                       inputs,
+                       sequence_length=None,
+                       initial_state=None,
+                       dtype=tf.float32,
+                       parallel_iterations=None,
+                       swap_memory=False,
+                       time_major=False,
+                       scope=None):
+    time_axis = 0 if time_major else 1
+    input_shape = inputs.shape.as_list()
+    seq_len = input_shape[time_axis]
+    if time_major:
+        batch_size = input_shape[1]
+    else:
+        batch_size = input_shape[0]
+    if initial_state is None:
+        initial_state = cell.zero_state(batch_size, dtype)
+    inputs = tf.unstack(inputs, num=seq_len, axis=time_axis)
+    outputs = []
+    for inp in inputs:
+        output, initial_state = cell(inp, initial_state)
+        outputs.append(output)
+    outputs = tf.stack(outputs, axis=time_axis)
+    return outputs, initial_state
+
+
+@tfe.defun
+def _eager_compiled_dynamic_rnn(cell,
+                                inputs,
+                                sequence_length=None,
+                                initial_state=None,
+                                dtype=tf.float32,
+                                parallel_iterations=None,
+                                swap_memory=False,
+                                time_major=False,
+                                scope=None):
+    return _eager_dynamic_rnn(cell, inputs, sequence_length, initial_state,
+                              dtype, None, False, time_major, scope)
+If I directly use _eager_compiled_dynamic_rnn in forward, because of tf.layers.Layer create variables in its first call, then variables created in _eager_compiled_dynamic_rnn is invalid, if print it, get a error:
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+<ipython-input-7-308544234cc4> in <module>()
+      1 for var in net.variables:
+----> 2     print(var)
+
+~\Anaconda3\lib\site-packages\tensorflow\python\ops\variables.py in __repr__(self)
+    233       return "<tf.Variable '%s' shape=%s dtype=%s, numpy=%s>" % (
+    234           self.name, self.get_shape(), self.dtype.name,
+--> 235           ops.numpy_text(self.read_value(), is_repr=True))
+    236     else:
+    237       return "<tf.Variable '%s' shape=%s dtype=%s>" % (
+
+~\Anaconda3\lib\site-packages\tensorflow\python\ops\resource_variable_ops.py in read_value(self)
+    679       # Ensure we read the variable in the same device as the handle.
+    680       with ops.device(self._handle_device):
+--> 681         value = self._read_variable_op()
+    682     # Return an identity so it can get placed on whatever device the context
+    683     # specifies instead of the device where the variable is.
+
+~\Anaconda3\lib\site-packages\tensorflow\python\ops\resource_variable_ops.py in _read_variable_op(self)
+    657       tape.watch_variable(self)
+    658     return gen_resource_variable_ops.read_variable_op(self._handle,
+--> 659                                                       self._dtype)
+    660 
+    661   def read_value(self):
+
+~\Anaconda3\lib\site-packages\tensorflow\python\ops\gen_resource_variable_ops.py in read_variable_op(resource, dtype, name)
+    209     _attrs = ("dtype", dtype)
+    210     _result = _execute.execute(b"ReadVariableOp", 1, inputs=_inputs_flat,
+--> 211                                attrs=_attrs, ctx=_ctx, name=name)
+    212   _execute.record_gradient(
+    213       "ReadVariableOp", _inputs_flat, _attrs, _result, name)
+
+~\Anaconda3\lib\site-packages\tensorflow\python\eager\execute.py in quick_execute(op_name, num_outputs, inputs, attrs, ctx, name)
+     58     tensors = pywrap_tensorflow.TFE_Py_Execute(ctx._handle, device_name,
+     59                                                op_name, inputs, attrs,
+---> 60                                                num_outputs)
+     61   except core._NotOkStatusException as e:
+     62     if name is not None:
+
+TypeError: provided list of inputs contains objects other than 'EagerTensor'
+To solve this problem, I must call function which isn't decorated by tfe.defun in first forward, then switch to _eager_compiled_dynamic_rnn:
+if self._cell.built is True:
+    func = _eager_compiled_dynamic_rnn
+else:
+    func = _eager_dynamic_rnn
+outputs, state = func(
+    self._cell,
+    inputs,
+    seq_len,
+    state,
+    dtype=self._rnn_dtype,
+    time_major=self._time_major, )
+locate this error cost me much time. please consider to fix it.

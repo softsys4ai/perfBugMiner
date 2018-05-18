@@ -1,0 +1,64 @@
+Using fixed_unigram_candidate_sampler + nce_loss with reserved_ids emits NaN outputs
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 14.04
+TensorFlow installed from (source or binary): From Source,
+TensorFlow version (use command below): v1.1.0-rc2-773-g7fa0cf3
+Bazel version (if compiling from source): 0.4.5
+CUDA/cuDNN version: CUDA 8.0, cuDNN 5
+
+Describe the problem
+Using tf.nn.nce_loss (to be precise, _compute_sampled_logits function with argument subtract_log_q=True) with tf.nn.fixed_unigram_candidate_sampler(num_reserved_ids>0) + inputs with reserved ids gives NaN/inf logit output.
+The cause for this NaN seems to be the true_expected_count return value of tf.nn.fixed_unigram_candidate_sampler for ids in range [0, num_reserved_ids), since sampler returns expected count 0.0 for these ids. When the subtract_log_q argument of _compute_sampled_logits is zero, log value of expected count for these ids become inf or NaN. I used reserved ids for UNK and PAD (since nce_loss does not support variable number of target classes yet), using these ids in input was inevitable.
+Possible solution would be adding/cliiping log input by small epsilon. Will there be any better solution?
+Source code / logs
+import tensorflow as tf
+import numpy as np
+
+batch_size = 3
+num_true = 4
+num_classes = 5
+num_sampled = 5
+embed_dim = 5
+
+true_classes = tf.constant(
+    np.array(
+        [[3, 1, 2, 0],
+         [2, 0, 0, 0],
+         [2, 4, 3, 0]]),
+    dtype=tf.int64)
+
+sampled_values = tf.nn.fixed_unigram_candidate_sampler(
+    true_classes=true_classes,
+    num_true=num_true,
+    num_sampled=num_sampled,
+    unique=False,
+    range_max=num_classes,
+    num_reserved_ids=1,
+    unigrams=[10, 10, 10, 10]
+)
+sampled_ids, true_expected_count, sampled_expected_count = sampled_values
+
+loss = tf.reduce_mean(
+    tf.nn.nce_loss(
+        weights=tf.ones([num_classes, embed_dim], dtype=tf.float32),
+        biases=tf.zeros([num_classes], dtype=tf.float32),
+        labels=true_classes,
+        inputs=tf.ones([batch_size, embed_dim], dtype=tf.float32),
+        num_sampled=num_sampled,
+        num_classes=num_classes,
+        num_true=num_true,
+        sampled_values=sampled_values
+    )
+)
+
+with tf.Session() as sess:
+    loss_value, true_count = sess.run([loss, true_expected_count])
+    print('Loss: {:.4f}'.format(loss_value))
+    print('Min True Count: {:.4f}'.format(np.amin(true_count)))
+
+>>>>>>>>
+Loss: nan
+Min True Count: 0.0000

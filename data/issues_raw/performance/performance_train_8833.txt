@@ -1,0 +1,54 @@
+DynamicAttentionWrapper expects own state on the 0-th step
+
+Using Tensorflow 1.1rc0
+AFAIK the DynamicAttentionWrapper wraps an attention mechanism around the RNNCell. To do so, it passes around its own DynamicAttentionWrapperState in the call()
+However, I think that on the 0-th step, the network cannot pass such state as an argument, because the function gets called by a general decoder. (which doesnt know what cell it will encounter)
+I got the following error
+Traceback (most recent call last):
+  File "/home/rob/Documents/frosha/analysis-service/src/analysis_parser/analysis_parser/trainer_class.py", line 54, in __init__
+    self.model = Model(self.tok_chr.dim)
+  File "/home/rob/Documents/frosha/analysis-service/src/analysis_parser/analysis_parser/models/rnn_seq2seq_tf.py", line 164, in __init__
+    outputs, _ = dynamic_decode(decoder, impute_finished = True, maximum_iterations = max_sl)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py", line 278, in dynamic_decode
+    swap_memory=swap_memory)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 2623, in while_loop
+    result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 2456, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 2406, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py", line 231, in body
+    decoder_finished) = decoder.step(time, inputs, state)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/contrib/seq2seq/python/ops/basic_decoder.py", line 140, in step
+    cell_outputs, cell_state = self._cell(inputs, state)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/contrib/seq2seq/python/ops/dynamic_attention_wrapper.py", line 530, in __call__
+    cell_inputs = self._cell_input_fn(inputs, state.attention)
+AttributeError: 'tuple' object has no attribute 'attention'
+The error indicates that the current state has no attribute attention. But that's the final state of the encoder, which doesn't use this syntax
+The following snippet shows the use of the wrapper. This was coded after this explanation
+encoder_outputs, encoder_state = core_rnn.static_rnn(
+                encoder_cell, encoder_inputs, dtype=dtype, sequence_length=self.SL_enc)
+
+#Some other code
+
+attention_size = 10
+attn_obj = BahdanauAttention(num_units=attention_size,
+                                             memory=attention_states,
+                                             memory_sequence_length=self.SL_enc,
+                                             normalize=True,
+                                             name='BahdanauAttentionObject')
+
+wrapped_cell = DynamicAttentionWrapper(cell_dec_fw,
+                                                       attn_obj,
+                                                       D,
+                                                       output_attention=False,
+                                                       name='DynAttnWrap')
+
+sampler = ScheduledEmbeddingTrainingHelper(decoder_inputs,
+                                                        sequence_length=self.SL_dec,
+                                                        embedding=embedding_in,
+                                                        sampling_probability=self.samp_prob)
+decoder = BasicDecoder(wrapped_cell,
+                                       sampler,
+                                       encoder_state)
+outputs, _ = dynamic_decode(decoder)

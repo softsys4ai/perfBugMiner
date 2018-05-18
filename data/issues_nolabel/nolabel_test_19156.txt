@@ -1,0 +1,38 @@
+Tensorflow silently renaming variables on implicitly defined scope
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):  Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.8.0-0-g93bc2e2072 1.8.0
+Python version: 3.5.2
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version:  N/A
+GPU model and memory:  N/A
+Exact command to reproduce:
+
+import tensorflow as tf
+
+tf.logging.set_verbosity(tf.logging.DEBUG)
+
+n_input = 5
+input = tf.placeholder(tf.float32, (None, n_input), 'input')
+output = tf.placeholder(tf.float32, (None, 1), 'output')
+check = tf.placeholder(tf.float32, (None, 1), 'check')
+
+with tf.variable_scope("scope1",
+                       initializer=tf.random_normal_initializer(mean=0, stddev=1)):
+    w = tf.get_variable(name="w", shape=(n_input, 1))
+    y_predicted = tf.matmul(input, w)
+
+cost = tf.losses.mean_squared_error(check, y_predicted)
+cost = tf.reduce_mean(cost, name="mean_squared_error")
+
+tf.get_default_graph().get_tensor_by_name("mean_squared_error:0")
+Describe the problem
+When using losses from tf.losses various scopes a defined implicitly. For example for tf.losses.mean_squared_error the scope mean_squared_error is defined. If I now try to define a variable named mean_squared_error, e.g., for later showing results in Tensorboard, then I get a KeyError:
+KeyError: "The name 'mean_squared_error:0' refers to a Tensor which does not exist. The operation, 'mean_squared_error', does not exist in the graph."
+
+This is due to Tensorflow silently renaming my explicitly defined variable because of the implicitly defined scope (by tf.losses.mean_squared_error). This is rather counter intuitive and potentially can easily result in unexpected behavior. I suggest throwing an error or at least printing a warning in such a case.

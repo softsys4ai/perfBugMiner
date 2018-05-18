@@ -1,0 +1,67 @@
+Keras has much better gradients calculated than native TF
+
+Hi,
+I am not sure if this is a bug in some TF function or Keras has just some clever ways to pull things off.
+I was prototyping a simple logistic regression model with Keras and trying to write the exact same model with TF to reproduce the result. However, there's something unexplainable to me that Keras always has much better gradients calculated than TF does when I use mini-batch SGD.
+tensorflow==1.2.1
+Keras==2.0.8
+GPU: Tesla P40
+Keras version:
+def custom_objective(y_true, y_pred):
+    loss = tf.reduce_mean(-(y_true*tf.log(y_pred)+((1.0-y_true)*tf.log(1.0-y_pred))))
+    return loss
+model = Sequential()
+model.add(Dense(1,input_dim=2440000, activation='sigmoid', bias_initializer='zeros', kernel_initializer='zeros'))
+sgd = tf.train.GradientDescentOptimizer(0.5)
+model.compile(loss=custom_objective, optimizer=sgd)
+model.fit_generator(generator, steps_per_epoch=1, epochs=1, callbacks=[ival], max_queue_size=10, workers=1, use_multiprocessing=False, initial_epoch=0)
+TF version:
+def linear(x, n_input, n_output, name=None):
+    with tf.variable_scope(name or 'fc'):
+        W = tf.get_variable(
+            name = "W",
+            # shape = [n_input, n_output],
+            dtype=tf.float32,
+            # initializer=tf.contrib.layers.xavier_initializer())
+            initializer=tf.zeros(shape=[n_input,n_output]))
+        b = tf.get_variable(
+            name='bias',
+            shape=[n_output],
+            dtype=tf.float32,
+            initializer=tf.constant_initializer(0.0))
+        if not isinstance(x, tf.SparseTensor):
+            h = tf.nn.bias_add(
+                tf.matmul(x, W),
+                b,
+                name='h')
+        else:
+            h = tf.nn.bias_add(
+                tf.sparse_tensor_dense_matmul(x, W),
+                b,
+                name='h')
+    return h, W, b
+
+tf.reset_default_graph()
+X_shape = tf.placeholder(tf.int64, shape=[2], name="X_shape")
+X_indices = tf.placeholder(tf.int64, name="X_indices")
+X_values = tf.placeholder(tf.float32, shape=[None], name="X_values")
+y = tf.placeholder(dtype=tf.float32, name="y")
+H = tf.SparseTensor(indices=X_indices, values=X_values, dense_shape=X_shape)
+logit, w, b = linear(H, 2440000, 1, name="output_layer")
+y_pred = tf.nn.sigmoid(logit)
+train_error = -(y*tf.log(y_pred) + ((1.0 - y) * tf.log(1.0-y_pred)))
+loss = tf.reduce_mean(train_error)
+optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.5)
+gvs = optimizer.compute_gradients(loss,[w,b])
+train_op = optimizer.apply_gradients(gvs)
+sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True), graph=tf.get_default_graph())
+sess.run(tf.global_variables_initializer())
+TL;DR
+Keras has better gradients calculated/updates than TF.
+Both version implements a vanilla logistic regression, with same native TF optimizer, same user defined cross entropy and same data generator(except for Keras accepts a dense matrix and TF accepts sparse matrix.tocoo()), same learning rate, same zero initializer for both w and b.
+Simple calculus can show that if the first batch contains all NEGATIVE examples, the gradient for b in the first update must be exactly 0.5.
+If a batch has very few examples (e.g 1-9), both version produce an exact gradient of 0.5 for b.
+When sample size goes above 9, Keras starts to have a way better gradients calculated for both b and w. For example, with sample size 10, Keras calculates 0.50000006 for b and TF gives 0.49999988. With sample size 12, Keras gives 0.49999994 but TF gives 0.50000012. Though both give wrong gradient, Keras is always better, not to mentions the weights gradients. Also trying casting the loss to float16, 32 or 64 won't make the gradient as good as Keras'.
+The accumulated differences after 100 batches of training makes TF's model worse than Keras' in terms of AUC.
+At this stage I am not sure where I should look for so I resort to the community to help me with this "unexplainable" phenomena. Any suggestion will be much appreciated.
+Oscar

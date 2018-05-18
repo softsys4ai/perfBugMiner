@@ -1,0 +1,22 @@
+fold/scan gradient high memory usage
+
+It seems that the gradients for higher order functions (foldl/foldr/scan) require a very large amount of memory.
+The following code block will easily compute res (even with swap_memory disabled) but will fail when computing grad:
+v = tf.Variable([1.0])
+def foo(aggregate, arr):
+    arr = v * tf.tile(arr, [10000])
+    return aggregate + arr[0, 0]
+
+arr = np.empty([10000, 1000], dtype=np.float32)
+res = tf.foldl(foo, arr, 0.0, 1, swap_memory=True)
+opt = tf.train.GradientDescentOptimizer(0.001)
+grad = opt.compute_gradients(res)
+
+sess = tf.Session()
+sess.run(tf.initialize_all_variables())
+sess.run(res) #This will run
+sess.run(grad) #This will cause an OOM error
+This was tested on a machine with a GTX1070 and 24GB RAM.
+I'm guessing that what's happening is that tensorflow is only keeping track of data necessary for one iteration of foldl at a time when computing res (~40MB) but has to keep track of all the memory in all iterations of foldl when computing grad (~400GB).
+In fact, reducing arr to be of size 1000x1000, still causes an OOM error, but reducing the size of arr to be 500x1000 ends up with the code block succeeding. This makes sense given that setting arr to these two sizes requires ~40GB and ~20GB respectively, the latter of which just fits on my machine's memory.
+From what I understand of automatic differentiation, tensorflow shouldn't need to simultaneously keep track of the data needed across all iterations of foldl when computing gradients. Or am I missing something?

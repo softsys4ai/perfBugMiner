@@ -1,0 +1,127 @@
+float16 support for separable_convolutions
+
+System information
+
+Have I written custom code:
+No
+**OS Platform and Distribution **:
+16.04
+TensorFlow installed from:
+from pip package
+TensorFlow version:
+1.4.0
+Python version:
+3.5.2
+CUDA/cuDNN version:
+CUDA 8.0, cuDNN 6.0
+GPU model and memory:
+1080Ti with 12GB Memory
+Exact command to reproduce:
+
+It appears that half precision support is still not available for separable_convolutions even with tf 1.4.0 release.
+inputs_32 = tf.placeholder(tf.float32, shape=(1,16,16,3))
+inputs_16 = tf.placeholder(tf.float16, shape=(1,16,16,3))
+slim.separable_conv2d(inputs_32,16,[3,3],depth_multiplier=1)
+slim.separable_conv2d(inputs_16,16,[3,3],depth_multiplier=1)
+
+The first call succeeds (as expected), while the second fails with the following error:
+TypeError: Value passed to parameter 'input' has DataType float16 not in list of allowed values: float32, float64
+I also tried that with tf.nn.separable_conv2d(.), but with same results.
+Full Error Traceback
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+<ipython-input-6-61a1fd560923> in <module>()
+----> 1 slim.separable_conv2d(inputs_16,16,[3,3],depth_multiplier=1)
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/contrib/framework/python/ops/arg_scope.py in func_with_args(*args, **kwargs)
+    179       current_args = current_scope[key_func].copy()
+    180       current_args.update(kwargs)
+--> 181     return func(*args, **current_args)
+    182   _add_op(func)
+    183   setattr(func_with_args, '_key_op', _key_op(func))
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/contrib/layers/python/layers/layers.py in separable_convolution2d(inputs, num_outputs, kernel_size, depth_multiplier, stride, padding, data_format, rate, activation_fn, normalizer_fn, normalizer_params, weights_initializer, weights_regularizer, biases_initializer, biases_regularizer, reuse, variables_collections, outputs_collections, trainable, scope)
+   2500           _scope=sc,
+   2501           _reuse=reuse)
+-> 2502       outputs = layer.apply(inputs)
+   2503 
+   2504       # Add variables to collections.
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/layers/base.py in apply(self, inputs, *args, **kwargs)
+    669       Output tensor(s).
+    670     """
+--> 671     return self.__call__(inputs, *args, **kwargs)
+    672 
+    673   def _add_inbound_node(self,
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/layers/base.py in __call__(self, inputs, *args, **kwargs)
+    573         if in_graph_mode:
+    574           self._assert_input_compatibility(inputs)
+--> 575         outputs = self.call(inputs, *args, **kwargs)
+    576 
+    577         if outputs is None:
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/layers/convolutional.py in call(self, inputs)
+    982         padding=self.padding.upper(),
+    983         rate=self.dilation_rate,
+--> 984         data_format=utils.convert_data_format(self.data_format, ndim=4))
+    985 
+    986     if self.use_bias:
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/ops/nn_impl.py in separable_conv2d(input, depthwise_filter, pointwise_filter, strides, padding, rate, name, data_format)
+    488         padding=padding,
+    489         data_format=data_format,
+--> 490         op=op)
+    491 
+    492     return nn_ops.conv2d(
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/ops/nn_ops.py in with_space_to_batch(input, dilation_rate, padding, op, filter_shape, spatial_dims, data_format)
+    343                              spatial_dims=spatial_dims,
+    344                              data_format=data_format)
+--> 345   return new_op(input, None)
+    346 
+    347 
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/ops/nn_ops.py in __call__(self, inp, filter)
+    497 
+    498   def __call__(self, inp, filter):  # pylint: disable=redefined-builtin
+--> 499     return self.call(inp, filter)
+    500 
+    501 
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/ops/nn_ops.py in <lambda>(inp, _)
+    334 
+    335   def build_op(num_spatial_dims, padding):
+--> 336     return lambda inp, _: op(inp, num_spatial_dims, padding)
+    337 
+    338   new_op = _WithSpaceToBatch(input_shape,
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/ops/nn_impl.py in op(input_converted, _, padding)
+    480           padding=padding,
+    481           data_format=data_format,
+--> 482           name="depthwise")
+    483 
+    484     depthwise = nn_ops.with_space_to_batch(
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/ops/gen_nn_ops.py in depthwise_conv2d_native(input, filter, strides, padding, data_format, name)
+   1159     _, _, _op = _op_def_lib._apply_op_helper(
+   1160         "DepthwiseConv2dNative", input=input, filter=filter, strides=strides,
+-> 1161         padding=padding, data_format=data_format, name=name)
+   1162     _result = _op.outputs[:]
+   1163     _inputs_flat = _op.inputs
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py in _apply_op_helper(self, op_type_name, name, **keywords)
+    607               _SatisfiesTypeConstraint(base_type,
+    608                                        _Attr(op_def, input_arg.type_attr),
+--> 609                                        param_name=input_name)
+    610             attrs[input_arg.type_attr] = attr_value
+    611             inferred_from[input_arg.type_attr] = input_name
+
+~/.virtualenvs/p3.5-tf1.4/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py in _SatisfiesTypeConstraint(dtype, attr_def, param_name)
+     58           "allowed values: %s" %
+     59           (param_name, dtypes.as_dtype(dtype).name,
+---> 60            ", ".join(dtypes.as_dtype(x).name for x in allowed_list)))
+     61 
+     62 
+
+TypeError: Value passed to parameter 'input' has DataType float16 not in list of allowed values: float32, float64

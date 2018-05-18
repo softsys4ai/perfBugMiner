@@ -1,0 +1,38 @@
+Doubt in the implementation of gan's training critera
+
+I read the code of gan implementation in tf.contrib.gan, but I'm not quite sure whether the generator_train_op and discriminator_train_op use the same batch of data.
+Here is the code in https://github.com/tensorflow/tensorflow/blob/master/tensorflow/contrib/gan/python/train.py
+class RunTrainOpsHook(session_run_hook.SessionRunHook):
+  """A hook to run train ops a fixed number of times."""
+
+  def __init__(self, train_ops, train_steps):
+    """Run train ops a certain number of times.
+    Args:
+      train_ops: A train op or iterable of train ops to run.
+      train_steps: The number of times to run the op(s).
+    """
+    if not isinstance(train_ops, (list, tuple)):
+      train_ops = [train_ops]
+    self._train_ops = train_ops
+    self._train_steps = train_steps
+
+  def before_run(self, run_context):
+    for _ in range(self._train_steps):
+      run_context.session.run(self._train_ops)
+
+def get_sequential_train_hooks(train_steps=namedtuples.GANTrainSteps(1, 1)):
+  """Returns a hooks function for sequential GAN training.
+  Args:
+    train_steps: A `GANTrainSteps` tuple that determines how many generator
+      and discriminator training steps to take.
+  Returns:
+    A function that takes a GANTrainOps tuple and returns a list of hooks.
+  """
+  def get_hooks(train_ops):
+    generator_hook = RunTrainOpsHook(train_ops.generator_train_op,
+                                     train_steps.generator_train_steps)
+    discriminator_hook = RunTrainOpsHook(train_ops.discriminator_train_op,
+                                         train_steps.discriminator_train_steps)
+    return [generator_hook, discriminator_hook]
+  return get_hooks
+Can we guarantee that both hooks run the optimizer on the same batch, along with that each hook run the respective optimizer several times on the same batch? I think that's needed for gan training, and consistent with relative papers.

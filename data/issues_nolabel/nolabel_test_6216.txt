@@ -1,0 +1,118 @@
+task assignment in tensorflow distributed process
+
+I'm confused about the distributed training process in tensorflow.
+I think the tensorflow feed a batch_size of data to a worker and then the worker update the ps server,is this right?
+But when training , I noticed that the step number in the log may strange.
+If I have only 2 workers , I thinks the right process should be some thing like
+[worker1] step 0 xxxxxxx
+[worker2] step 100 xxxxxxx
+[worker1] step 200 xxxxxxx
+[worker2] step 300 xxxxxxx
+.....
+every worker should print different step to log.
+Actually , the log are as below:
+[worker1] step 0 xxxxxxx
+[worker2] step 100 xxxxxxx
+[worker1] step 100 xxxxxxx
+[worker2] step 200 xxxxxxx
+[worker1] step 300 xxxxxxx
+...
+Why the worker1 dosn't print step 200?
+I am confused about the job assign .... a step to a worker? or every worker run every step?
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+there are nothing about the tensorflow distributed process in these websites
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+def main(_):
+  ps_hosts = FLAGS.ps_hosts.split(",")
+  worker_hosts = FLAGS.worker_hosts.split(",")
+
+  # Create a cluster from the parameter server and worker hosts.
+  cluster = tf.train.ClusterSpec({"ps": ps_hosts, "worker": worker_hosts})
+
+  # Create and start a server for the local task.
+  server = tf.train.Server(cluster,
+                           job_name=FLAGS.job_name,
+                           task_index=FLAGS.task_index)
+
+  if FLAGS.job_name == "ps":
+    server.join()
+  elif FLAGS.job_name == "worker":
+
+    # Assigns ops to the local worker by default.
+    with tf.device(tf.train.replica_device_setter(
+        worker_device="/job:worker/task:%d" % FLAGS.task_index,
+        cluster=cluster)):
+
+      # Variables of the hidden layer
+      hid_w = tf.Variable(
+          tf.truncated_normal([IMAGE_PIXELS * IMAGE_PIXELS, FLAGS.hidden_units],
+                              stddev=1.0 / IMAGE_PIXELS), name="hid_w")
+      hid_b = tf.Variable(tf.zeros([FLAGS.hidden_units]), name="hid_b")
+
+      # Variables of the softmax layer
+      sm_w = tf.Variable(
+          tf.truncated_normal([FLAGS.hidden_units, 10],
+                              stddev=1.0 / math.sqrt(FLAGS.hidden_units)),
+          name="sm_w")
+      sm_b = tf.Variable(tf.zeros([10]), name="sm_b")
+
+      x = tf.placeholder(tf.float32, [None, IMAGE_PIXELS * IMAGE_PIXELS])
+      y_ = tf.placeholder(tf.float32, [None, 10])
+
+      hid_lin = tf.nn.xw_plus_b(x, hid_w, hid_b)
+      hid = tf.nn.relu(hid_lin)
+
+      y = tf.nn.softmax(tf.nn.xw_plus_b(hid, sm_w, sm_b))
+      loss = -tf.reduce_sum(y_ * tf.log(tf.clip_by_value(y, 1e-10, 1.0)))
+
+      global_step = tf.Variable(0)
+
+      train_op = tf.train.AdagradOptimizer(0.01).minimize(
+          loss, global_step=global_step)
+
+      saver = tf.train.Saver()
+      summary_op = tf.merge_all_summaries()
+      init_op = tf.initialize_all_variables()
+
+    # Create a "supervisor", which oversees the training process.
+    sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
+                             logdir="/tmp/train_logs",
+                             init_op=init_op,
+                             summary_op=summary_op,
+                             saver=saver,
+                             global_step=global_step,
+                             save_model_secs=600)
+
+    mnist = input_data.read_data_sets(FLAGS.data_dir, one_hot=True)
+
+    # The supervisor takes care of session initialization, restoring from
+    # a checkpoint, and closing when done or an error occurs.
+    with sv.managed_session(server.target) as sess:
+      # Loop until the supervisor shuts down or 1000000 steps have completed.
+      step = 0
+      while not sv.should_stop() and step < 1000000:
+        # Run a training step asynchronously.
+        # See `tf.train.SyncReplicasOptimizer` for additional details on how to
+        # perform *synchronous* training.
+
+        batch_xs, batch_ys = mnist.train.next_batch(FLAGS.batch_size)
+        train_feed = {x: batch_xs, y_: batch_ys}
+
+        _, step = sess.run([train_op, global_step], feed_dict=train_feed)
+        if step % 100 == 0: 
+            print "Done step %d" % step
+
+    # Ask for all the services to stop.
+    sv.stop()
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+[0:00:17.115814] Task: 0, Step: 74600, loss: 0.303285002708, accuracy: 0.910000026226, auc: 0.946377456188
+[0:00:03.804889] Task: 1, Step: 74700, loss: 0.287385582924, accuracy: 0.879999995232, auc: 0.946395516396
+[0:00:03.778589] Task: 0, Step: 74800, loss: 0.247096762061, accuracy: 0.860000014305, auc: 0.946370542049
+[0:00:03.772320] Task: 1, Step: 74900, loss: 0.264987647533, accuracy: 0.899999976158, auc: 0.946406364441
+[0:00:03.795459] Task: 0, Step: 75000, loss: 0.228719010949, accuracy: 0.899999976158, auc: 0.946437120438
+[0:00:01.902293] Task: 1, Step: 75000, loss: 0.217391207814, accuracy: 0.910000026226, auc: 0.946473121643
+[0:00:01.942055] Task: 1, Step: 75100, loss: 0.284583866596, accuracy: 0.889999985695, auc: 0.946496844292
+[0:00:03.860608] Task: 0, Step: 75200, loss: 0.273199081421, accuracy: 0.850000023842, auc: 0.946503221989
+[0:00:03.800881] Task: 1, Step: 75300, loss: 0.189931258559, accuracy: 0.930000007153, auc: 0.946559965611

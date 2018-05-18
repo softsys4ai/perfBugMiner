@@ -1,0 +1,132 @@
+What's the difference between function eval() and sess.run()?
+
+Codes are as follows:
+# encoding: utf-8
+import load
+import tensorflow as tf
+import numpy as np
+from sklearn.metrics import confusion_matrix
+
+def get_chunk(samples, labels, chunkSize):
+    if len(samples) != len(labels):
+        raise Exception('Length of samples and labels must equal')
+    stepStart = 0
+    i = 0
+    while stepStart < len(samples):
+        stepEnd = stepStart + chunkSize
+        if stepEnd < len(samples):
+            yield i, samples[stepStart: stepEnd], labels[stepStart: stepEnd]
+            i += 1
+        stepStart = stepEnd
+
+class NetWork():
+    def __init__(self, num_hidden, batch_size, num_labels, image_size, channel):
+        self.num_hidden = num_hidden
+        self.batch_size = batch_size
+        self.num_labels = num_labels
+
+        self.image_size = image_size
+        self.num_channel= channel
+
+        self.tf_train_samples = None
+        self.tf_train_labels  = None
+        self.tf_test_samples  = None
+
+        self.graph = tf.Graph()      
+        self.define_graph()
+        self.sess  = tf.Session(graph = self.graph)
+        self.writer= tf.summary.FileWriter('./board', self.graph)
+    
+    def define_graph(self):
+        with self.graph.as_default():
+            with tf.name_scope('inputs'):
+                self.tf_train_samples = tf.placeholder(tf.float32, shape = (self.batch_size, self.image_size, self.image_size, self.num_channel), name = 'train_samples')
+                self.tf_train_labels   = tf.placeholder(tf.float32, shape = (self.batch_size, self.num_labels), name = 'train_labels')
+                self.tf_test_samples  = tf.placeholder(tf.float32, shape = (self.batch_size, self.image_size, self.image_size, self.num_channel), name = 'test_labels')
+            with tf.name_scope('fc1'):
+                weight1 = tf.Variable(tf.truncated_normal([self.image_size * self.image_size, self.num_hidden], stddev = 0.1), name = 'weight1')
+                bias1   = tf.Variable(tf.truncated_normal([self.num_hidden], stddev = 0.1), name = 'bias1')
+                tf.summary.histogram('weight1', weight1)
+                tf.summary.histogram('bias1', bias1)
+            with tf.name_scope('fc2'):
+                weight2 = tf.Variable(tf.truncated_normal([self.num_hidden, self.num_labels], stddev = 0.1), name = 'weight2')
+                bias2   = tf.Variable(tf.truncated_normal([self.num_labels], stddev = 0.1), name = 'bias2')
+                tf.summary.histogram('weight2', weight2)
+                tf.summary.histogram('bias2', bias2)
+
+            def model(data):
+                shape = data.get_shape().as_list()
+                reshape = tf.reshape(data, [shape[0], shape[1] * shape[2] * shape[3]])
+                with tf.name_scope('fc1_model'):
+                    hidden  = tf.nn.relu(tf.matmul(reshape, weight1) + bias1)   
+                with tf.name_scope('fc2_model'):
+                    return tf.matmul(hidden, weight2) + bias2
+
+            logits = model(self.tf_train_samples)
+            with tf.name_scope('loss'):
+                self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits = logits, labels = self.tf_train_labels))
+                tf.summary.scalar('loss', self.loss)
+            with tf.name_scope('optimizer'):
+                self.optimizer = tf.train.AdamOptimizer(0.01).minimize(self.loss)
+            with tf.name_scope('predictions'):
+                self.train_prediction = tf.nn.softmax(logits)
+                self.test_prediction  = tf.nn.softmax(model(self.tf_test_samples))
+            self.merged = tf.summary.merge_all()
+
+    def run(self):
+        ### train
+        def print_confusion_matrix(confusionMatrix):
+            print('Consusion Matrix: ')
+            for i, line in enumerate(confusionMatrix):
+                print line, line[i]/np.sum(line)
+            
+            a = 0
+            for i, column in enumerate(np.transpose(confusionMatrix, (1, 0))):
+                a += (column[i] / np.sum(column)) * (np.sum(column) / 26000)
+                print column[i] / np.sum(column), 
+            print '\n', np.sum(confusionMatrix, a)
+
+        with self.sess as sess:
+            tf.global_variables_initializer().run()
+            print 'Start Training'
+
+            train_samples, train_labels = load.loadmat_data('train_32x32.mat')
+            train_samples, train_labels = load.reformat(train_samples, train_labels)
+            train_samples = load.normalize(train_samples)
+
+            test_samples, test_labels = load.loadmat_data('test_32x32.mat')
+            test_samples, test_labels = load.reformat(test_samples, test_labels)
+            test_samples = load.normalize(test_samples)
+
+            for i, samples, labels in get_chunk(train_samples, train_labels, chunkSize = self.batch_size):
+                _, l, predictions, summary = sess.run([self.optimizer, self.loss, self.train_prediction, self.merged], feed_dict = {self.tf_train_samples: samples, self.tf_train_labels: labels})
+                self.writer.add_summary(summary, i)
+                accuracy, _ = self.accuracy(predictions, labels)
+                if i % 50 == 0:
+                    print 'Minibatch loss at step %d: loss is %f' % (i, l)
+                    print 'Minibatch accuracy: %.1f' % accuracy
+
+            accuracies = []
+            confusionMatrices = []
+            for i, samples, labels in get_chunk(test_samples, test_labels, chunkSize=self.batch_size):
+                result = sess.run(self.test_prediction, feed_dict={self.tf_test_samples: samples})
+				# result = self.test_prediction.eval(feed_dict={self.tf_test_samples: samples})
+                accuracy, cm = self.accuracy(result, labels, need_confusion_matrix=True)
+                accuracies.append(accuracy)
+                confusionMatrices.append(cm)
+                print('Test Accuracy: %.1f%%' % accuracy)
+            print(' Average  Accuracy:', np.average(accuracies))
+            print('Standard Deviation:', np.std(accuracies))
+            print_confusion_matrix(np.add.reduce(confusionMatrices))
+
+    def accuracy(self, predictions, labels, need_confusion_matrix = False):
+        _predictions = np.argmax(predictions, 1)
+        _labels      = np.argmax(labels, 1)
+        cm = confusion_matrix(_labels, _predictions) if need_confusion_matrix else None
+        accuracy = (100 * np.sum(_predictions == _labels) / predictions.shape[0])
+        return accuracy, cm
+
+if __name__ == '__main__':
+    net = NetWork(num_hidden = 128, batch_size = 100, num_labels = 10, image_size = 32, channel = 1)
+    net.run()
+When I use 'result = self.test_prediction.eval(feed_dict={self.tf_test_samples: samples})', it works fine, while in 'result = sess.run(self.test_prediction, feed_dict={self.tf_test_samples: samples})', it shows error 'ValueError: operands could not be broadcast together with shapes (10,10) (9,9) '. SO, what's difference between function eval() and sess.run()

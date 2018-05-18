@@ -1,0 +1,56 @@
+Tensorflow GRU error when trying to concatenate activations to outputs
+
+I have been trying to grab the activations of the GRU cell layer in the following manner
+def __call__(self, inputs, state, scope=None):
+    """Gated recurrent unit (GRU) with nunits cells."""
+    with vs.variable_scope(scope or type(self).__name__):  # "GRUCell"
+      with vs.variable_scope("Gates"):  # Reset gate and update gate.
+        # We start with bias of 1.0 to not reset and not update.
+        r, u = array_ops.split(1, 2, linear([inputs, state], 2 * self._num_units, True, 1.0))
+        r, u = sigmoid(r), sigmoid(u)
+      with vs.variable_scope("Candidate"):
+        c = tanh(linear([inputs, r * state], self._num_units, True))
+      new_h = u * state + (1 - u) * c
+
+      # store the activations, everything else is the same
+      h_activations = array_ops.concat(1, [new_h,r,u,c])
+    return h_activations, h_activations
+
+Later I try to grab the activations in the following way
+cell = ClusterableGRUCell(num_units=hidden_neurons) initial_state = tf.zeros([batch_size, cell.state_size]) outputs_activations, outputs_activations = rnn.rnn(cell=cell, inputs=x, initial_state=initial_state, sequence_length=s) outputs_activations = tf.concat(0, outputs_activations) outputs, rs, us, cs = tf.split(1, 4, outputs_activations) activations = tf.concat(1, [rs, us, cs])
+However this fails in the rnn() step with the following error
+Traceback (most recent call last):
+File "myautoencoder.py", line 29, in 
+outputs_activations, outputs_activations = rnn.rnn(cell=cell, inputs=x, initial_state=initial_state, sequence_length=s)
+File "xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 141, in rnn
+zero_output, state, call_cell)
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 265, in _rnn_step
+_maybe_copy_some_through)
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1157, in cond
+res_f = context_f.BuildCondBranch(fn2)
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1073, in BuildCondBranch
+r = fn()
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 247, in _maybe_copy_some_through
+lambda: _copy_some_through(new_output, new_state))
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1157, in cond
+res_f = context_f.BuildCondBranch(fn2)
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1073, in BuildCondBranch
+r = fn()
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 247, in 
+lambda: _copy_some_through(new_output, new_state))
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 236, in _copy_some_through
+return (math_ops.select(copy_cond, zero_output, new_output),
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/gen_math_ops.py", line 1396, in select
+name=name)
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/op_def_library.py", line 655, in apply_op
+op_def=op_def)
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2156, in create_op
+set_shapes_for_outputs(ret)
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1612, in set_shapes_for_outputs
+shapes = shape_func(op)
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/math_ops.py", line 1411, in _SelectShape
+t_e_shape = t_shape.merge_with(e_shape)
+File "/xxx/anaconda/lib/python2.7/site-packages/tensorflow/python/framework/tensor_shape.py", line 554, in merge_with
+(self, other))
+ValueError: Shapes (32, 33) and (32, 132) are not compatible
+My batch size is 32 and number of neurons is 33, 132 = 33*4 which makes sense. What I dont understand is why is there a lingering (32,33) tensor? Thank you.

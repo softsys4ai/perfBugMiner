@@ -1,0 +1,67 @@
+Gradient of gamma log pdf is broken
+
+In [1]: import tensorflow as tf
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+d
+In [2]: dist = tf.contrib.distributions
+
+In [3]: mu = tf.get_variable('mean_arg', [], 'float32')
+
+In [4]: m = tf.nn.softplus(mu)
+
+In [5]: q = dist.Gamma(0.01, 0.01/mu)
+
+In [6]: sess = tf.InteractiveSession()
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:937] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties:
+name: GeForce GTX 780 Ti
+major: 3 minor: 5 memoryClockRate (GHz) 0.928
+pciBusID 0000:02:00.0
+Total memory: 2.98GiB
+Free memory: 2.90GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 780 Ti, pci bus id: 0000:02:00.0)
+
+In [7]: sess.run(tf.global_variables_initializer())
+
+In [8]: sess.run(tf.gradients(q.log_pdf(q.sample()), mu))
+Out[8]: [0.74267536]
+
+In [9]: sess.run(tf.gradients(q.log_pdf(q.sample()), mu))
+Out[9]: [nan]
+
+In [10]: sess.run(tf.gradients(q.log_pdf(q.sample()), mu))
+Out[10]: [nan]
+
+In [20]: tf.__version__
+Out[20]: '0.12.0-rc1'
+
+It looks like this happens because Gamma samples can be negative:
+In [80]: z = q.sample()
+
+In [81]: sess.run([z] + tf.gradients(q.log_pdf(z), mu))
+Out[81]: [-0.0050091296, 0.74267536]
+
+In [82]: sess.run([z] + tf.gradients(q.log_pdf(z), mu))
+Out[82]: [-0.0, nan]
+
+In [83]: sess.run([z] + tf.gradients(q.log_pdf(z), mu))
+Out[83]: [-0.0, nan]
+
+In [84]: sess.run([z] + tf.gradients(q.log_pdf(z), mu))
+Out[84]: [-0.0, nan]
+
+In [85]: sess.run([z] + tf.gradients(q.log_pdf(z), mu))
+Out[85]: [-0.01258331, 0.74267519]
+
+In [86]: sess.run([z] + tf.gradients(q.log_pdf(z), mu))
+Out[86]: [-1.0715475e-21, 0.74267536]
+
+Happy to run more tests to figure out this issue.
+Update: quick fix thanks to @ebrevdo -
+z = z + np.finfo(z.dtype.as_numpy_dtype).tiny

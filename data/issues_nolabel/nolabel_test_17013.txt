@@ -1,0 +1,249 @@
+[Android Studio + TensorFlow] Error with some Kernel's Operations
+
+System information
+
+Have I written custom code: Yes
+OS Platform and Distribution: Linux Ubuntu 16.04
+TensorFlow installed from: Source
+TensorFlow version (use command below): 1.5.0
+Python version: 2.7.12
+Bazel version: 0.10.0
+GCC/Compiler version (if compiling from source): 5.4.0
+GPU model and memory: GTX 1050 TI 256MB
+Exact command to reproduce: Build on Android Studio
+
+Describe the problem
+Hello guys,
+My team and I are attempting to import and use a specific model on Android Studio. This functionality is pretty easy, we feed this model with an image in bitmap format and we receive a matrix points with results.
+But on Run step this model shows different errors according to libtensorflow_inference.so.
+I create an image to better explain my problem to you. See below:
+
+Source code / logs
+Initially, I want to load my model:
+public static Detector testCreate(AssetManager assetManager, String modelFileName, String labelFileName, int inputWidth, int inputHeight, int inputDepth, String inputName, String outputName) throws IOException {
+
+	TensorFlowImageDetector d = new TensorFlowImageDetector();
+        d.inputName = inputName;
+        d.outputName = outputName;
+        d.inferenceInterface = new TensorFlowInferenceInterface(assetManager, modelFileName);
+
+        d.inputWidth = inputWidth;
+        d.inputHeight = inputHeight;
+        d.inputDepth = inputDepth;
+
+        d.outputNames = new String[]{outputName};
+        // start outputs
+        // fix labelfilename != null
+
+        return d;
+}
+
+Before I need to detect element on image (feed, run and fetch):
+public Detection testDetectImage(final float[] pixels) {
+
+        // Log this method so that it can be analyzed with systrace.
+        TraceCompat.beginSection("detectImage");
+
+        // Copy the input data into TensorFlow.
+        TraceCompat.beginSection("feed");
+        inferenceInterface.feed(inputName, pixels, 1, inputWidth, inputHeight, inputDepth);
+        TraceCompat.endSection();
+
+        // Run the inference call.
+        TraceCompat.beginSection("run");
+        inferenceInterface.run(outputNames, Boolean.parseBoolean(null));
+        TraceCompat.endSection();
+
+        // Copy the output Tensor back into the output array.
+        TraceCompat.beginSection("fetch");
+        //inferenceInterface.fetch(outputName, outputs);
+        TraceCompat.endSection();
+
+        return null;
+}
+
+Comments
+
+Errors occurring on Run function
+We already tried to solve the problem with 3 different ways mentioned in the image
+My model has an input size of 1x256x256x3 and for test, I'm using a matrix of zeros
+To generate a custom library we used this tutorial: https://medium.com/@daj/how-to-shrink-the-tensorflow-android-inference-library-cb698facf758
+To generate a full library of Android, on Bazel, we used --copt=-D__ANDROID_TYPES_FULL__ flag
+We used JAR created by Bazel when generated custom libraries
+
+Logs for errors
+
+Op Sin
+
+02-14 13:23:08.584 8090-8090/? E/art: No implementation found for long org.tensorflow.contrib.android.RunStats.allocate() (tried Java_org_tensorflow_contrib_android_RunStats_allocate and Java_org_tensorflow_contrib_android_RunStats_allocate__)
+02-14 13:23:08.584 8090-8090/? I/TensorFlowInferenceInterface: TensorFlow native methods not found, attempting to load via tensorflow_inference
+02-14 13:23:08.685 8090-8090/? I/TensorFlowInferenceInterface: Successfully loaded TensorFlow native methods (RunStats error may be ignored)
+02-14 13:23:11.083 8090-8090/com.example.lis.zitronenkuchen I/TensorFlowInferenceInterface: Model load took 518ms, TensorFlow version: 1.6.0-rc0
+02-14 13:23:11.092 8090-8090/com.example.lis.zitronenkuchen I/TensorFlowInferenceInterface: Successfully loaded model from 'file:///android_asset/frozen_pose3d.pb'
+02-14 13:23:11.092 8090-8090/com.example.lis.zitronenkuchen D/MainActivity: Load Success!
+02-14 13:23:11.215 8090-8090/com.example.lis.zitronenkuchen E/TensorFlowInferenceInterface: Failed to run TensorFlow inference with inputs:[input_image], outputs:[MatMul]
+02-14 13:23:11.216 8090-8090/com.example.lis.zitronenkuchen D/AndroidRuntime: Shutting down VM
+02-14 13:23:11.217 8090-8090/com.example.lis.zitronenkuchen E/AndroidRuntime: FATAL EXCEPTION: main
+                                                                              Process: com.example.lis.zitronenkuchen, PID: 8090
+                                                                              java.lang.RuntimeException: Unable to start activity ComponentInfo{com.example.lis.zitronenkuchen/com.example.lis.zitronenkuchen.MainActivity}: java.lang.RuntimeException: Error initializing TensorFlow!
+                                                                                  at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:2659)
+                                                                                  at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:2724)
+                                                                                  at android.app.ActivityThread.-wrap12(ActivityThread.java)
+                                                                                  at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1473)
+                                                                                  at android.os.Handler.dispatchMessage(Handler.java:102)
+                                                                                  at android.os.Looper.loop(Looper.java:154)
+                                                                                  at android.app.ActivityThread.main(ActivityThread.java:6123)
+                                                                                  at java.lang.reflect.Method.invoke(Native Method)
+                                                                                  at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:867)
+                                                                                  at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:757)
+                                                                               Caused by: java.lang.RuntimeException: Error initializing TensorFlow!
+                                                                                  at com.example.lis.zitronenkuchen.MainActivity.onCreate(MainActivity.java:44)
+                                                                                  at android.app.Activity.performCreate(Activity.java:6672)
+                                                                                  at android.app.Instrumentation.callActivityOnCreate(Instrumentation.java:1140)
+                                                                                  at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:2612)
+                                                                                  at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:2724) 
+                                                                                  at android.app.ActivityThread.-wrap12(ActivityThread.java) 
+                                                                                  at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1473) 
+                                                                                  at android.os.Handler.dispatchMessage(Handler.java:102) 
+                                                                                  at android.os.Looper.loop(Looper.java:154) 
+                                                                                  at android.app.ActivityThread.main(ActivityThread.java:6123) 
+                                                                                  at java.lang.reflect.Method.invoke(Native Method) 
+                                                                                  at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:867) 
+                                                                                  at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:757) 
+                                                                               Caused by: java.lang.IllegalArgumentException: No OpKernel was registered to support Op 'Sin' with these attrs.  Registered devices: [CPU], Registered kernels:
+                                                                                <no registered kernels>
+                                                                              
+                                                                              	 [[Node: ViewpointNet/get_rot_mat/Sin = Sin[T=DT_FLOAT](ViewpointNet/get_rot_mat/Sqrt)]]
+                                                                                  at org.tensorflow.Session.run(Native Method)
+                                                                                  at org.tensorflow.Session.access$100(Session.java:48)
+                                                                                  at org.tensorflow.Session$Runner.runHelper(Session.java:298)
+                                                                                  at org.tensorflow.Session$Runner.run(Session.java:248)
+                                                                                  at org.tensorflow.contrib.android.TensorFlowInferenceInterface.run(TensorFlowInferenceInterface.java:230)
+                                                                                  at org.tensorflow.contrib.android.TensorFlowInferenceInterface.run(TensorFlowInferenceInterface.java:197)
+                                                                                  at org.tensorflow.contrib.android.TensorFlowInferenceInterface.run(TensorFlowInferenceInterface.java:187)
+                                                                                  at com.example.lis.zitronenkuchen.TensorFlowImageDetector.detectImage(TensorFlowImageDetector.java:73)
+                                                                                  at com.example.lis.zitronenkuchen.MainActivity.onCreate(MainActivity.java:41)
+                                                                                  	... 12 more
+
+
+Op Identity
+
+E/art: No implementation found for long org.tensorflow.contrib.android.RunStats.allocate() (tried Java_org_tensorflow_contrib_android_RunStats_allocate and Java_org_tensorflow_contrib_android_RunStats_allocate__)
+I/TensorFlowInferenceInterface: TensorFlow native methods not found, attempting to load via tensorflow_inference
+I/TensorFlowInferenceInterface: Successfully loaded TensorFlow native methods (RunStats error may be ignored)
+D/AndroidRuntime: Shutting down VM
+
+
+                  --------- beginning of crash
+E/AndroidRuntime: FATAL EXCEPTION: main
+                  Process: com.example.lis.zitronenkuchen, PID: 6521
+                  java.lang.RuntimeException: Unable to start activity ComponentInfo{com.example.lis.zitronenkuchen/com.example.lis.zitronenkuchen.MainActivity}: java.lang.RuntimeException: Error initializing TensorFlow!
+                      at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:2659)
+                      at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:2724)
+                      at android.app.ActivityThread.-wrap12(ActivityThread.java)
+                      at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1473)
+                      at android.os.Handler.dispatchMessage(Handler.java:102)
+                      at android.os.Looper.loop(Looper.java:154)
+                      at android.app.ActivityThread.main(ActivityThread.java:6123)
+                      at java.lang.reflect.Method.invoke(Native Method)
+                      at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:867)
+                      at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:757)
+                   Caused by: java.lang.RuntimeException: Error initializing TensorFlow!
+                      at com.example.lis.zitronenkuchen.MainActivity.onCreate(MainActivity.java:44)
+                      at android.app.Activity.performCreate(Activity.java:6672)
+                      at android.app.Instrumentation.callActivityOnCreate(Instrumentation.java:1140)
+                      at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:2612)
+                      at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:2724) 
+                      at android.app.ActivityThread.-wrap12(ActivityThread.java) 
+                      at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1473) 
+                      at android.os.Handler.dispatchMessage(Handler.java:102) 
+                      at android.os.Looper.loop(Looper.java:154) 
+                      at android.app.ActivityThread.main(ActivityThread.java:6123) 
+                      at java.lang.reflect.Method.invoke(Native Method) 
+                      at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:867) 
+                      at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:757) 
+                   Caused by: org.tensorflow.TensorFlowException: Op type not registered 'Identity' in binary running on localhost. Make sure the Op and Kernel are registered in the binary running in this process.
+                      at org.tensorflow.Graph.importGraphDef(Native Method)
+                      at org.tensorflow.Graph.importGraphDef(Graph.java:130)
+                      at org.tensorflow.Graph.importGraphDef(Graph.java:114)
+                      at org.tensorflow.contrib.android.TensorFlowInferenceInterface.loadGraph(TensorFlowInferenceInterface.java:561)
+                      at org.tensorflow.contrib.android.TensorFlowInferenceInterface.<init>(TensorFlowInferenceInterface.java:105)
+                      at com.example.lis.zitronenkuchen.TensorFlowImageDetector.create(TensorFlowImageDetector.java:47)
+                      at com.example.lis.zitronenkuchen.MainActivity.onCreate(MainActivity.java:29)
+                      at android.app.Activity.performCreate(Activity.java:6672) 
+                      at android.app.Instrumentation.callActivityOnCreate(Instrumentation.java:1140) 
+                      at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:2612) 
+                      at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:2724) 
+                      at android.app.ActivityThread.-wrap12(ActivityThread.java) 
+                      at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1473) 
+                      at android.os.Handler.dispatchMessage(Handler.java:102) 
+                      at android.os.Looper.loop(Looper.java:154) 
+                      at android.app.ActivityThread.main(ActivityThread.java:6123) 
+                      at java.lang.reflect.Method.invoke(Native Method) 
+                      at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:867) 
+                      at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:757) 
+
+
+Op Switch
+
+02-14 13:09:36.334 26040-26040/com.example.lis.zitronenkuchen E/art: No implementation found for long org.tensorflow.contrib.android.RunStats.allocate() (tried Java_org_tensorflow_contrib_android_RunStats_allocate and Java_org_tensorflow_contrib_android_RunStats_allocate__)
+02-14 13:09:36.334 26040-26040/com.example.lis.zitronenkuchen I/TensorFlowInferenceInterface: TensorFlow native methods not found, attempting to load via tensorflow_inference
+02-14 13:09:36.406 26040-26040/com.example.lis.zitronenkuchen I/TensorFlowInferenceInterface: Successfully loaded TensorFlow native methods (RunStats error may be ignored)
+02-14 13:09:37.835 26040-26040/com.example.lis.zitronenkuchen I/TensorFlowInferenceInterface: Model load took 1382ms, TensorFlow version: 1.3.1
+02-14 13:09:37.843 26040-26040/com.example.lis.zitronenkuchen I/TensorFlowInferenceInterface: Successfully loaded model from 'file:///android_asset/frozen_pose3d.pb'
+02-14 13:09:37.843 26040-26040/com.example.lis.zitronenkuchen D/MainActivity: Load Success!
+02-14 13:09:37.892 26040-26040/com.example.lis.zitronenkuchen E/TensorFlowInferenceInterface: Failed to run TensorFlow inference with inputs:[input_image], outputs:[MatMul]
+02-14 13:09:37.892 26040-26040/com.example.lis.zitronenkuchen D/AndroidRuntime: Shutting down VM
+02-14 13:09:37.893 26040-26040/com.example.lis.zitronenkuchen E/AndroidRuntime: FATAL EXCEPTION: main
+                                                                                Process: com.example.lis.zitronenkuchen, PID: 26040
+                                                                                java.lang.RuntimeException: Unable to start activity ComponentInfo{com.example.lis.zitronenkuchen/com.example.lis.zitronenkuchen.MainActivity}: java.lang.RuntimeException: Error initializing TensorFlow!
+                                                                                    at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:2426)
+                                                                                    at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:2490)
+                                                                                    at android.app.ActivityThread.-wrap11(ActivityThread.java)
+                                                                                    at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1354)
+                                                                                    at android.os.Handler.dispatchMessage(Handler.java:102)
+                                                                                    at android.os.Looper.loop(Looper.java:148)
+                                                                                    at android.app.ActivityThread.main(ActivityThread.java:5443)
+                                                                                    at java.lang.reflect.Method.invoke(Native Method)
+                                                                                    at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:728)
+                                                                                    at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:618)
+                                                                                 Caused by: java.lang.RuntimeException: Error initializing TensorFlow!
+                                                                                    at com.example.lis.zitronenkuchen.MainActivity.onCreate(MainActivity.java:44)
+                                                                                    at android.app.Activity.performCreate(Activity.java:6245)
+                                                                                    at android.app.Instrumentation.callActivityOnCreate(Instrumentation.java:1130)
+                                                                                    at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:2379)
+                                                                                    at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:2490) 
+                                                                                    at android.app.ActivityThread.-wrap11(ActivityThread.java) 
+                                                                                    at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1354) 
+                                                                                    at android.os.Handler.dispatchMessage(Handler.java:102) 
+                                                                                    at android.os.Looper.loop(Looper.java:148) 
+                                                                                    at android.app.ActivityThread.main(ActivityThread.java:5443) 
+                                                                                    at java.lang.reflect.Method.invoke(Native Method) 
+                                                                                    at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:728) 
+                                                                                    at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:618) 
+                                                                                 Caused by: java.lang.IllegalArgumentException: No OpKernel was registered to support Op 'Switch' with these attrs.  Registered devices: [CPU], Registered kernels:
+                                                                                  device='GPU'; T in [DT_STRING]
+                                                                                  device='GPU'; T in [DT_BOOL]
+                                                                                  device='GPU'; T in [DT_INT32]
+                                                                                  device='GPU'; T in [DT_INT64]
+                                                                                  device='GPU'; T in [DT_FLOAT]
+                                                                                  device='GPU'; T in [DT_HALF]
+                                                                                  device='CPU'; T in [DT_QINT32]
+                                                                                  device='CPU'; T in [DT_QUINT8]
+                                                                                  device='CPU'; T in [DT_QINT8]
+                                                                                  device='CPU'; T in [DT_FLOAT]
+                                                                                  device='CPU'; T in [DT_HALF]
+                                                                                  device='CPU'; T in [DT_INT32]
+                                                                                  device='CPU'; T in [DT_INT64]
+                                                                                
+                                                                                	 [[Node: PosePrior/dropout/cond/Switch = Switch[T=DT_BOOL](PlaceholderWithDefault, PlaceholderWithDefault)]]
+                                                                                    at org.tensorflow.Session.run(Native Method)
+                                                                                    at org.tensorflow.Session.access$100(Session.java:48)
+                                                                                    at org.tensorflow.Session$Runner.runHelper(Session.java:295)
+                                                                                    at org.tensorflow.Session$Runner.run(Session.java:245)
+                                                                                    at org.tensorflow.contrib.android.TensorFlowInferenceInterface.run(TensorFlowInferenceInterface.java:143)
+                                                                                    at com.example.lis.zitronenkuchen.TensorFlowImageDetector.detectImage(TensorFlowImageDetector.java:73)
+                                                                                    at com.example.lis.zitronenkuchen.MainActivity.onCreate(MainActivity.java:41)
+                                                                                    	... 12 more
+
+Thank you! 😁

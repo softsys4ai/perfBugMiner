@@ -1,0 +1,76 @@
+[BUG?] Memory overflow (?) on Nvidia Quadro M6000 using feed dictionary with conv2d
+
+Hi everybody,
+we just got several machines with Quadro M6000 (12G RAM) for our lab, and they all seem to suffer the same problem when feeding too much data to a convolution via a feed dictionary. The problem does not appear when using CPU on the same machine, and neither when using an equivalent machine with a different GPU (GeForce GTX Titan X).
+It looks like when using a feed dictionary to provide data for the evaluation of a graph, part of the weights in the graph may be overwritten depending on the size of the data fed through the dictionary.
+Two ways to reproduce
+A minimal example
+import tensorflow as tf
+import numpy as np
+x = tf.placeholder(tf.float32, shape=(None, 1024))
+x_r = tf.reshape(x, (-1, 32, 32, 1))
+W = tf.Variable(tf.ones((5, 5, 1, 32)))
+W_sum = tf.reduce_sum(W)
+conv = tf.nn.conv2d(x_r, W, strides=(1, 1, 1, 1), padding='SAME')
+sess = tf.Session()
+sess.run(tf.initialize_all_variables())
+data = np.ones((5001, 1024), dtype='float32')
+print(sess.run(W_sum))
+c = sess.run(conv, feed_dict={x: data})
+print(sess.run(W_sum))
+sess.close()
+
+It outputs
+800.0
+0.0
+
+which indicates that W has changed through the feed-dictionary evaluation of the convolution.
+Note that
+
+By reducing data.shape[0] to 5000 or less, the problem disappears
+Going up to 5070, the second value stays at 0.0.
+at exactly 5080 the problem seems to disappear (we get 800.0 800.0)
+from 5100 the second number can take arbitrary values (not zero)
+The problem does not arise when replacing the tf.nn.conv2d operation by an equivalently sized  matmul operation (same dimensions of weight vector, not same dimensionality of output)
+EDIT: (that said, see below, in the MNIST tutorial all weight vectors are affected, not only ones pertaining to convolution. But that doesn't necessarily contradict the convolution being the culprit)
+
+The expert MNIST tutorial
+The problem also arises in one of the very first tutorials https://www.tensorflow.org/versions/r0.9/tutorials/mnist/pros/index.html
+Everything works perfect until the last line of the tutorial, where a large array is fed by feed-dictionary for test accuracy. This modifies all the weight vectors of the convnet!
+Again, the error disappears when feeding only 5000 test examples instead of 10000 to the architecture.
+Environment
+
+OS: Ubuntu 1504
+CUDA version 7.5
+cuDNN version 4
+library files
+
+(tensorflow) meickenb@g-1504:~/code/tensorflow$ ls -l /usr/local/cuda/lib64/libcud*
+-rw-r--r-- 1 root root 322936 Aug 15  2015 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Aug  15  2015 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 Aug  15  2015 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 383336 Aug  15  2015 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root 720192 Aug  15  2015 /usr/local/cuda/lib64/libcudart_static.a
+
+(tensorflow) meickenb@g-1504:/usr/lib/x86_64-linux-gnu$ ls -l libcudnn*
+lrwxrwxrwx 1 root root       13 Jul 21 18:22 libcudnn.so -> libcudnn.so.4
+lrwxrwxrwx 1 root root       17 Jul 21 18:22 libcudnn.so.4 -> libcudnn.so.4.0.7
+-rwxr-xr-x 1 root root 61453024 Jul 21 18:22 libcudnn.so.4.0.7
+-rw-r--r-- 1 root root 62025862 Jul 21 18:22 libcudnn_static.a
+
+
+Anaconda 3
+pip install from wheel https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.9.0-cp35-cp35m-linux_x86_64.whl
+tf version 0.9.0
+
+(tensorflow) meickenb@g-1504:~$ python -c "import tensorflow; print(tensorflow.__version__)"
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+0.9.0
+
+
+Please let me know if you need any other info, or what else I could try to narrow down the reason for this overflow.
+CC @tmanglesl @CarmineCella @AndreuxMath @beedotkiran

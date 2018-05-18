@@ -1,0 +1,46 @@
+`Datasets` sometimes resamples stochastic Tensors during multiple transformations
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes, to demonstrate the bug
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Mac OS X 10.13.3
+TensorFlow installed from (source or binary):
+Binary
+TensorFlow version (use command below):
+1.5.0
+Python version:
+2.7
+
+Describe the problem
+Datasets can involve stochastic transformations. Sometimes random Tensors are resampled, and sometimes they're not. It's not clear when one happens and when another happens. This is likely a subtle Datasets bug, but at a minimum is a documentation bug. This is the root cause of Issue #16606, which is fixed in the resampling code by PR #17858.
+Source code / logs
+The following short snippet demonstrates that Dataset.zip causes the random Tensors to be resampled, while a seemingly-equivalent map statement does not:
+def _test_ds_consistency(tup_ds):
+  get_next = tup_ds.make_one_shot_iterator().get_next()
+
+  with tf.Session() as sess:
+    while True:
+      try:
+        tup = sess.run(get_next)
+        assert tup[0] == tup[1]
+      except tf.errors.OutOfRangeError:
+        break
+
+def _get_random_0s_and_1s(num_elements):
+  const_ds = tf.data.Dataset.from_tensor_slices([0] * num_elements)
+  return const_ds.map(lambda _: tf.cast(tf.random_uniform([]) * 2, dtype=tf.int32))
+
+def doesnt_work(num_elements=10):
+  rand_ds = _get_random_0s_and_1s(num_elements)
+  index_ds = rand_ds.map(lambda i: tf.gather([0, 1], i))
+  return tf.data.Dataset.zip((index_ds, rand_ds))
+
+def works(num_elements=10):
+  rand_ds = _get_random_0s_and_1s(num_elements)
+  tup_ds = rand_ds.map(lambda i: (tf.gather([0, 1], i), i))
+  return tup_ds
+
+_test_ds_consistency(works())  # works
+_test_ds_consistency(doesnt_work())  # raises assert

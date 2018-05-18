@@ -1,0 +1,7 @@
+Fail with error (rather than hanging) when init_op requires starting queues (ManagedSesssion etc)
+
+In 0.12 and in master
+MonitoredSession wraps the original SessionCreator in a _CoordinatedSessionCreator in an attempt to ensure queue runners are started before the session is run, however the original session has to be created first (as it is an argument to start_queue_runner). In the case of ChiefSessionCreator, ChiefSessionCreator.create_session calls ChiefSessionCreator._get_session_manager
+which instantiates a new SessionManager and returns it. Then ChiefSessionCreator.create_session calls SessionManager.prepare_session which calls sess.run(init_op). Thus resulting in sess.run(init_op) being run before start_queue_runner is called.
+This makes it impossible to initialize variables from queues. Even if this is intended behavior, it causes the initialization of MonitoredSession to stall without any logging output, and not respond to SIGTERM.
+It seems that prepare_session may need to be split into two calls for this use case.

@@ -1,0 +1,76 @@
+[iOS] No OpKernel was registered to support Op 'Prod' with these attrs
+
+I'm trying to load the faster_rcnn_resnet101_coco model from the Tensorflow Object Detection model zoo onto the iOS camera example.  Currently, I'm running in to the issue with
+No OpKernel was registered to support Op 'Prod' with these attrs.  Registered devices: [CPU], Registered kernels:
+  <no registered kernels>
+
+The environment is as follows:
+
+python 3.6
+xcode 9.0.1
+mac os 10.12
+tensorflow built from source using r1.4
+bazel 0.5.4
+
+I have done things as follow:
+
+
+Following the iOS static library build instructions,
+
+
+Successfully ran
+
+
+tensorflow/contrib/makefile/download_dependencies.sh
+3. Successfully ran
+tensorflow/contrib/makefile/compile_ios_protobuf.sh
+
+Successfully ran
+
+export HOST_NSYNC_LIB=`tensorflow/contrib/makefile/compile_nsync.sh`
+export TARGET_NSYNC_LIB=`tensorflow/contrib/makefile/compile_nsync.sh -t ios`
+
+
+Created faster-rcnn specific ops:
+
+  bazel build tensorflow/python/tools:print_selective_registration_header 
+  bazel-bin/tensorflow/python/tools/print_selective_registration_header \
+    --graphs=frozen_inference_graph.pb > ops_to_register.h
+
+
+
+Moved ops_to_register.h under tensorflow/core/framework/
+
+
+Successfully built libtensorflow-core.a to account for additional types and custom ops
+
+
+tensorflow/contrib/makefile/compile_ios_tensorflow.sh "-O3  -DANDROID_TYPES=ANDROID_TYPES_FULL -DSELECTIVE_REGISTRATION -DSUPPORT_SELECTIVE_REGISTRATION"
+
+
+Verified the creation of
+
+tensorflow/contrib/makefile/gen/lib/libtensorflow-core.a
+tensorflow/contrib/makefile/gen/protobuf_ios/lib/libprotobuf.a
+tensorflow/contrib/makefile/gen/protobuf_ios/lib/libprotobuf-lite.a
+
+
+
+Check for tf_op_files.txt, and made sure tensorflow/core/ops/math_ops.cc exists (I think this is where "Prod" is covered since there's no such file as cwise_op_prod.cc?)
+
+
+Updated iOS camera example with faster-rcnn model, imported "mscoco_label_map", and corresponding input/output layers.
+
+
+When running, I can't get pass error
+2017-10-30 18:00:28.307769: E [path]/tensorflow_utils.mm:209] Could not create TensorFlow Graph: Invalid argument: No OpKernel was registered to support Op 'Prod' with these attrs.  Registered devices: [CPU], Registered kernels:
+  <no registered kernels>
+
+	 [[Node: SecondStageBoxPredictor/Flatten/Prod = Prod[T=DT_INT32, Tidx=DT_INT32, keep_dims=false](SecondStageBoxPredictor/Flatten/Slice_1, SecondStageBoxPredictor/Flatten/Const)]]
+2017-10-30 18:00:28.320101: F [path]CameraExampleViewController.mm:495] Couldn't load model: Invalid argument: No OpKernel was registered to support Op 'Prod' with these attrs.  Registered devices: [CPU], Registered kernels:
+  <no registered kernels>
+
+	 [[Node: SecondStageBoxPredictor/Flatten/Prod = Prod[T=DT_INT32, Tidx=DT_INT32, keep_dims=false](SecondStageBoxPredictor/Flatten/Slice_1, SecondStageBoxPredictor/Flatten/Const)]]
+
+If I try the same steps with the model ssd_mobilenet_v1_coco from the same model zoo, it works fine.  I've also tried the instructions from JieHe96/iOS_Tensorflow_ObjectDetection_Example but runs into the exact same problem.
+Can anyone help?

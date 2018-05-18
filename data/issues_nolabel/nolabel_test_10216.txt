@@ -1,0 +1,41 @@
+tf.nn.max_pool_with_argmax bug with padding
+
+There is a bug in the indices returned from tf.nn.max_pool_with_argmax when a padding is applied. The indices with be based on the shape supplied to max_pool_with_argmax, instead of the shape+padding.
+Simple code example to reproduce:
+import tensorflow as tf
+
+def main():
+    with tf.Session() as session:
+        input = tf.get_variable('weights',
+                                  shape=[1, 301, 201, 1],
+                                  initializer=tf.truncated_normal_initializer(stddev=0.5, dtype=tf.float32),
+                                  dtype=tf.float32)
+
+        val, idx = tf.nn.max_pool_with_argmax(input, [1, 2, 2, 1], [1, 2, 2, 1], padding="SAME") #padding will turn dimensions to 302x202
+
+        y1 = idx // 201
+        x1 = idx % 201
+
+        y2 = idx // 202
+        x2 = idx % 202
+
+        max_x1 = tf.reduce_max(x1)
+        max_y1 = tf.reduce_max(y1)
+        max_x2 = tf.reduce_max(x2)
+        max_y2 = tf.reduce_max(y2)
+
+
+        session.run(tf.global_variables_initializer())
+        m_x1, m_y1, m_x2, m_y2 = session.run([max_x1, max_y1, max_x2, max_y2])
+
+        print("%d, %d, %d, %d"%(m_x1, m_y1, m_x2, m_y2))
+
+if __name__ == "__main__":
+    main()
+
+This prints "200, 300, 201, 299". As you can see, the padding would increase the dimensions of the tensor to 302x202, so the maximum y coordinate should be 301 and x should be 201. But if we unravel the argmax indices with a width of 202, we get a maximum x of 201, but maximum y of only 299. If we instead use 201 as width for unraveling (the unpadded width of the input tensor), we get 200 and 300, respectively, which are the correct values for the unpadded input tensor.
+So the ((b * height + y) * width + x) * channels + c formula for tf.nn.max_pool_with_argmax uses the input tensor dimensions for width, not the input+padding dimensions.
+This is relevant if you then use the indices to unpool/reverse the max_pool, since often you'll multiple the dimensions of the max_pool output by 2 to get the input dimensions, which would be off with a naive implementation like this.
+When using this to implement an unpooling operation (for instance for SegNet), this will cause every line of the image to shift (by 1 pixel) if padding is applied to the width of an image,  basically slightly tilting an image. It's especially obvious with multiple argmax&unpool in succession.
+It also means that, with zero-padding, if the whole tensor is negative values (in which case the zero-padding would be the highest value in the tensor), it won't return the coordinates of the padding. Basically, it doesn't actually add any padding to the input tensor, it just pretends it does to make dimensions line up, but doesn't consider the actual values/zeros in the padding. This might be intended behaviour, though it would strike me as odd given the usual understanding of padding. If so, the documentation should be changed to make it clear that this is the way the operation works. But I think this would be against the principle of least astonishment, since I assume most people would think that an op talking about padding would actually add padding values.
+See also #2169 for a use-case for this with additional discussion

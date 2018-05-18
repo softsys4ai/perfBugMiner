@@ -1,0 +1,76 @@
+InvalidArgumentError: slice index 0 of dimension 0 out of bounds.
+
+Hi,
+Describe the problem
+I am trying to encode and decode an image using tf.image.decode_jpeg and b64 encoding. The code is so simple but it seems I have an error regarding StrideSlice. I am not sure if the problem coming from the undefined shape of input placeholder or related to jpeg_decode.  Thanks.
+Source code / logs
+import tensorflow as tf
+import base64
+import functools
+
+
+def build_graph(input_len=None):
+    graph = tf.Graph()
+    with graph.as_default():
+        image_bytes = tf.placeholder(tf.string, name='input_node')
+        images = tf.map_fn(
+            functools.partial(tf.image.decode_jpeg, channels=3),
+            image_bytes,
+            dtype=tf.uint8
+        )
+        image_floats = tf.cast(images, tf.float32, name="output_node") / 255.0
+
+    return graph
+
+
+if __name__ == '__main__':
+    file_name = "test_1.jpg"
+    with open(file_name, "rb") as imageFile:
+        image_string = imageFile.read()
+        image_encode = base64.b64encode(image_string).decode("utf-8")
+
+    graph = build_graph(input_len=len(image_encode))
+
+    with tf.Session(graph=graph) as session:
+        init_op = tf.group(tf.global_variables_initializer(),
+                           tf.local_variables_initializer())
+        session.run(init_op)
+        input_node = graph.get_tensor_by_name("input_node:0")
+        output_node = graph.get_tensor_by_name("output_node:0")
+        image_out = session.run(output_node, feed_dict={input_node: image_encode})
+
+These is the traceback:
+Caused by op u'map/TensorArrayUnstack/strided_slice', defined at:
+  File "/.../Simple_Graph_Design/ImageTest.py", line 26, in <module>
+    graph = build_graph(input_len=len(image_encode))
+  File "/.../Simple_Graph_Design/ImageTest.py", line 13, in build_graph
+    dtype=tf.uint8
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/functional_ops.py", line 354, in map_fn
+    elem_ta.unstack(elem) for elem_ta, elem in zip(elems_ta, elems_flat)]
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/util/tf_should_use.py", line 107, in wrapped
+    return _add_should_use_warning(fn(*args, **kwargs))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/tensor_array_ops.py", line 412, in unstack
+    num_elements = array_ops.shape(value)[0]
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_ops.py", line 538, in _SliceHelper
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_ops.py", line 706, in strided_slice
+    shrink_axis_mask=shrink_axis_mask)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_array_ops.py", line 5430, in strided_slice
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): slice index 0 of dimension 0 out of bounds.
+	 [[Node: map/TensorArrayUnstack/strided_slice = StridedSlice[Index=DT_INT32, T=DT_INT32, begin_mask=0, ellipsis_mask=0, end_mask=0, new_axis_mask=0, shrink_axis_mask=1, _device="/job:localhost/replica:0/task:0/device:CPU:0"](map/TensorArrayUnstack/Shape, map/TensorArrayUnstack/strided_slice/stack, map/TensorArrayUnstack/strided_slice/stack_1, map/TensorArrayUnstack/strided_slice/stack_1)]]
+
+
+System information
+
+TF version: 1.4.0
+Linux Ubuntu 16.04
+Python version: 2.7
+No CUDA or GPU

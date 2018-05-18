@@ -1,0 +1,39 @@
+Keeping gradient of sqrt(x) stable for x = 0
+
+I'm minimizing a function that contains a few tf.sqrt(c * x) terms. The x is a tf.Variable and c is a tf.constant that is sometimes zero. A NaN inevitably presents itself. In my case, the gradient is to c, which is x * 0.5/sqrt(c * x) and which equals 0 * inf = NaN when c is 0.
+When such a sqrt is deeply buried in your function, it can be quite an effort to dig out where the NaN is coming from. I can understand and appreciate the fact that there is no check for zero in the sqrt_grad operator. However, I feel that debugging could be easier for ops that are known to be unstable in some numerical range.
+Two possible fixes would be:
+
+Add exceptions to the documentation of these ops. Right now this is not even indicated for tf.div, for instance. Since the use-cases of TensorFlow almost always mean that gradients will be involved, the allowed range should also be mentioned for the gradient, if different from that of the op itself.
+Add debug-mode versions of the ops. These could include NaN and inf checks.
+
+By the way, I was using the tf.contrib.opt.ScipyOptimizerInterface for the minimization, which does not support manually changing the gradients by using compute_gradients and apply_gradients. That's beside the point, though.
+Below some example code for completeness' sake. The differences in outcome only add to the confusion.
+from __future__ import absolute_import, division, print_function
+import tensorflow as tf
+
+c = tf.Variable(0.0)
+
+sqrt_grad = tf.gradients(tf.sqrt(c), c)
+
+# another possibility is when another factor in the argument is zero
+x = tf.Variable(1.)
+sqrt_x_grad = tf.gradients(tf.sqrt(x * c), x)
+
+# try to use select to filter out the NaN
+selsqrt_grad = tf.gradients(tf.select(c > 0, tf.sqrt(c), 0), c)
+
+# try clipping of the sqrt
+clipsqrt_grad = tf.gradients(tf.clip_by_value(tf.sqrt(c), 1e-10, 1), c)
+
+# clip the argument of the sqrt --> only numerically stable option
+clipargsqrt_grad = tf.gradients(tf.sqrt(tf.clip_by_value(c, 1e-10, 1)), c)
+
+init_op = tf.initialize_all_variables()
+
+with tf.Session() as sess:
+    sess.run(init_op)
+
+    print(sess.run([sqrt_grad, sqrt_x_grad, selsqrt_grad,
+                    clipsqrt_grad, clipargsqrt_grad]))
+    # [[inf], [nan], [nan], [nan], [0.0]]

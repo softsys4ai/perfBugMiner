@@ -1,0 +1,48 @@
+tf-slim resnet-50 pretrained model get wrong results when inference
+
+I have asked this question on stackoverflow, but no one answer. Does any can help me.
+The question link to stackoverflow is here.
+The following is the code I used to do inference.The image preprocess method following this issue ResNet pre-processing: VGG or Inception?
+import tensorflow as tf
+import tensorflow.contrib.slim.nets as nets
+import imagenet
+import urllib.request
+from preprocessing import inception_preprocessing
+import matplotlib.pyplot as plt
+import numpy as np
+slim = tf.contrib.slim
+resnet = nets.resnet_v1
+
+if __name__ == '__main__':
+    ckpt_file_path = '../model_weights/resnet_v1_50.ckpt'
+    url = 'https://upload.wikimedia.org/wikipedia/commons/7/70/EnglishCockerSpaniel_simon.jpg'
+    image_string = urllib.request.urlopen(url).read()
+    image = tf.image.decode_jpeg(image_string, channels=3)
+    processed_image = inception_preprocessing.preprocess_image(image, 224, 224, is_training=False)
+    processed_images = tf.expand_dims(processed_image, 0)
+    with slim.arg_scope(nets.resnet_utils.resnet_arg_scope()):
+        resnet_50, end_points = resnet.resnet_v1_50(inputs=processed_images, num_classes=1000, scope='resnet_v1_50')
+        prob = tf.squeeze(resnet_50, axis=[1, 2])
+    probabilities = tf.nn.softmax(prob, dim=-1)
+    sess = tf.Session()
+    saver = tf.train.Saver()
+    saver.restore(sess, ckpt_file_path)
+    np_image, results = sess.run([image, probabilities])
+    results = results[0, 0:]
+
+    plt.figure()
+    plt.imshow(np_image.astype(np.uint8))
+    plt.axis('off')
+    plt.show()
+
+    sorted_inds = [i[0] for i in sorted(enumerate(-results), key=lambda x: x[1])]
+    names = imagenet.create_readable_names_for_imagenet_labels()
+    for i in range(5):
+        index = sorted_inds[i]
+        print('Probability %0.2f%% => [%s]' % (results[index] * 100, names[index]))
+The following is result:
+Probability 1.00% => [moving van]
+Probability 0.69% => [television, television system]
+Probability 0.63% => [English foxhound]
+Probability 0.63% => [beagle]
+Probability 0.61% => [German short-haired pointer]

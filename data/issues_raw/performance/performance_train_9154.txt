@@ -1,0 +1,69 @@
+consecutive calls of saver.restore(sess,path) slows down
+
+You must complete this information or else your issue will be closed
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow)?: no
+TensorFlow installed from (source or binary)?: binary
+TensorFlow version: 0.12.1
+Bazel version (if compiling from source):
+CUDA/cuDNN version: cpu
+
+Describe the problem clearly
+Hi I was building and evaluating ensemble models about 45 very simple neural networks.
+when evaluating, I noticed that consecutive calls to saver.restore(sess, path) slows down
+at first it spent about 0.08 seconds but after 45 calls to  saver.restore(), time spent on restore increased to 0.5 seconds. It kept increasing to 1 second and beyond.
+Is anyone having the same problem? In the source code, I called test_model() consecutively. Other part didn't slow down but only the part with saver.restore() did
+Source Code / Logs
+def test_model(model, batch_gen, batch_num, batch_size, num_class, model_id):
+
+    saver = tf.train.Saver()
+    start_time = time.time()
+
+    print('## Testing model : {}'.format(model_id))
+    with tf.Session() as sess:
+        ot = time.time()
+        sess.run(tf.global_variables_initializer())
+        # Load latest model to evaluate
+        checkpoint_dir = CHECKPOINTS_DIR+str(model_id)+'/'
+
+        ckpt = tf.train.get_checkpoint_state(os.path.dirname(checkpoint_dir))
+
+        
+        if ckpt and ckpt.model_checkpoint_path:
+            saver.restore(sess, ckpt.model_checkpoint_path)
+        else:
+            print('# No trained weight found')
+            return
+        nt = time.time()
+        print('1 : {}'.format(nt-ot))
+
+        vote_list = []
+        for i in xrange(batch_num):
+            X_batch, Y_batch = batch_gen.next()
+            _, loss_batch, softmax_batch = sess.run([model.optimizer, model.loss, model.softmax], feed_dict={model.input: X_batch, model.output:Y_batch}) 
+            
+            vote_batch = dense_to_one_hot(np.argmax(softmax_batch,1), num_class)
+            vote_list.append(vote_batch)
+
+        total_vote_list = np.concatenate(vote_list, 0)
+   
+        print('# time elapsed :{:.1f} seconds'.format(time.time() - start_time ))
+    return total_vote_list
+------------------EDIT------------------
+Problem was not saver.restore() but consecutive calling of
+sess.run(tf.global_variables_initializer())
+session is suppose to free all the memories right?
+so I think there has to be no performance slow down but there is when making multiple sessions
+import time
+import tensorflow as tf
+
+a = tf.Variable([1,2,3,4,5])
+
+def test():
+    for i in range(1000):
+        with tf.Session() as sess:
+            ot = time.time()
+            sess.run(tf.global_variables_initializer())
+            nt = time.time()
+            print('test : {:.3f}'.format(nt-ot))
+running time of tf.global_varaiables_initializer() op slowly increases

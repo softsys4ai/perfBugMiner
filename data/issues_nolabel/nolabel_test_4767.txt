@@ -1,0 +1,29 @@
+Problem initializing DT_DOUBLE variables in distributed TF
+
+If you save code below as init_bug.py and run as python init_bug.py, it crashes with error below when running init_op. It works fine using local session or when changing dtype to np.float32. Also fails for np.int32 type. Tried on 0.11rc0 on MacOS
+tensorflow.python.framework.errors.InternalError: Output 0 of type float_ref does not match declared output type double_ref for node Variable = Variable[container="", dtype=DT_DOUBLE, shape=[], shared_name="", _device="/job:worker/replica:0/task:0/cpu:0"]()
+import subprocess, sys
+import tensorflow as tf
+import numpy as np
+
+worker_ip="127.0.0.1:12222"
+cluster = {"worker": [worker_ip]}
+clusterspec = tf.train.ClusterSpec(cluster).as_cluster_def()
+
+def launch_worker():
+  def runcmd(cmd): subprocess.Popen(cmd, shell=True, stderr=subprocess.STDOUT)
+  runcmd("python init_bug.py worker")
+
+if __name__=='__main__':
+  if len(sys.argv)<2:
+    dtype=np.float64
+    global_param_var = tf.Variable(np.array(1).astype(dtype), dtype=dtype)
+    init_op = tf.initialize_all_variables()
+    launch_worker()
+    sess = tf.Session("grpc://"+worker_ip)
+    sess.run(init_op)
+
+  else:
+    print("Launching worker")
+    server = tf.train.Server(clusterspec, job_name="worker")
+    server.join()

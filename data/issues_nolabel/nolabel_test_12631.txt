@@ -1,0 +1,30 @@
+Make Dataset.map not unpack namedtuple
+
+The map method of tf.contrib.data.Dataset unpacks iterables before passing them to the mapped function. This is quite convenient. However, currently this also happens for namedtuples, which IMHO is not what one would expect. Consider, for example, the following code:
+import tensorflow as tf
+from tensorflow.contrib.data import Dataset
+from collections import namedtuple
+
+Example = namedtuple("Example", ["label", "attributes", "bounding_box", "image"])
+
+
+def read_example(serialized_example):
+    # parse example
+    label = ...
+    attribute = ...
+    bounding_box = ...
+    image = ...
+    
+    return Example(label, attribute, bounding_box, image)
+
+
+def preprocess_example(example):
+    image = some_function(example.image, example.bounding_box)
+    return example._replace(image=image)
+
+
+dataset = tf.contrib.data.TFRecordDataset(filename)
+dataset = dataset.map(read_example)
+dataset = dataset.map(preprocess_example)
+This does not work because the namedtuple instance is unpacked and its fields are passed as separate arguments to preprocess_example. So currently one has to reassemble the namedtuple manually. This is not a big deal, but it would be more convenient if namedtuples were not unpacked, as is also the case for dictionaries.
+This can be easily achieved by making _should_unpack_args return False for namedtuples, as is done in this pull request.

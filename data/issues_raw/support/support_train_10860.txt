@@ -1,0 +1,46 @@
+control_dependencies possibly broken
+
+Hi all, I've been playing with control_dependencies in the latest stable version, and I get different results to version 1.0.1. The code below is adapted from the TF Adam optimiser, which might be affected as well.
+The code I ran is
+import tensorflow as tf
+import numpy as np
+
+graph = tf.Graph()
+
+with graph.as_default():
+    x = tf.Variable(1.0, dtype=tf.float32, name='x')    
+    y = tf.Variable(10., dtype=tf.float32, name='y')
+    update_x = tf.assign(x, y)
+    with tf.control_dependencies([update_x]):
+        update_y = tf.assign(y, x * y)
+    update_op = tf.group(update_x, update_y)
+    init_op = tf.global_variables_initializer()
+print tf.__version__
+
+res = []
+for _ in range(10):
+    if 'sess' in locals():
+        locals()['sess'].close()
+    if 'sess' in globals():
+        globals()['sess'].close()
+
+    sess = tf.Session(graph=graph)
+    sess.run(init_op)
+    res += [sess.run([update_op, x, y])]
+print np.mean([r[-1] for r in res])
+print np.mean([r[-2] for r in res])
+
+And get results
+1.0.1
+100.0
+10.0
+
+vs
+1.2.0
+28.0
+5.5
+
+suggesting that the control dependencies are not used as expected in version 1.2.0.
+Can anyone spot any mistakes in the way I use the control dependencies?
+Cheers,
+Yarin

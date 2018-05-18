@@ -1,0 +1,126 @@
+Tensorflow stops training on random epoch
+
+When I run the following code on GPU, it trains well for some epoches and then just hangs.
+While hanged processes are still alive but the GPU usages become 0%.
+In the below code I am using Dataset API from tf.contrib.data.Dataset. But I also tried using placeholder and feed dictionary approach which hangs as well on random epoch during training.
+I am struggling with the problem for last 2-3 weeks and cannot find a way out.
+I am running the code on a remote GPU cluster. Here are some information about cluster node,
+Using tensorflow gpu version 1.4
+   NodeName=node050 Arch=x86_64 CoresPerSocket=1
+   CPUAlloc=0 CPUErr=0 CPUTot=24 CPULoad=12.03 Features=Proc24,GPU4
+   Gres=gpu:4
+   NodeAddr=node050 NodeHostName=node050 Version=15.08
+   OS=Linux RealMemory=129088 AllocMem=0 FreeMem=125664 Sockets=24 Boards=1
+   State=IDLE ThreadsPerCore=1 TmpDisk=0 Weight=1 Owner=N/A
+   BootTime=2017-11-07T08:20:00 SlurmdStartTime=2017-11-07T08:24:06
+   CapWatts=n/a
+   CurrentWatts=0 LowestJoules=0 ConsumedJoules=0
+   ExtSensorsJoules=n/s ExtSensorsWatts=0 ExtSensorsTemp=n/s
+
+CODE
+dat_split = np.load('data/dat_split2.npy')
+X_train = dat_split[0].astype(np.float32)
+X_test = dat_split[1].astype(np.float32)
+y_train = dat_split[2].astype(np.int32)
+y_test = dat_split[3].astype(np.int32)
+
+num_epochs = 100
+
+
+train_data_len = X_train.shape[0]
+test_data_len = X_test.shape[0]
+num_joints = len(considered_joints)
+num_classes = len(classes)
+
+
+############ taking batch_size even data##########
+even_train_len = (train_data_len//batch_size)*batch_size
+even_test_len = (test_data_len//batch_size)*batch_size
+
+X_train = X_train[:even_train_len]
+X_test = X_test[:even_test_len]
+y_train = y_train[:even_train_len]
+y_test = y_test[:even_test_len]
+
+
+train_dat = Dataset.from_tensor_slices((X_train, y_train))
+train_dat = train_dat.batch(batch_size)
+
+test_dat  = Dataset.from_tensor_slices((X_test, y_test))
+test_dat = test_dat.batch(batch_size)
+    
+iterator = Iterator.from_structure(train_dat.output_types, train_dat.output_shapes)
+
+trainig_iterator_init = iterator.make_initializer(train_dat)
+test_iterator_init = iterator.make_initializer(test_dat)
+   
+if __name__ == '__main__':
+   
+    global_cell = GlobalLSTM(num_units=num_units_each_cell, num_joints=num_joints)   #GlobalLSTM is a subtype of RNNCell
+    next_element = iterator.get_next()
+    X_loaded2, Y_loaded = next_element
+    X_loaded = tf.where(tf.is_nan(X_loaded2), tf.zeros_like(X_loaded2), X_loaded2)
+    
+    init_state = global_cell.zero_state((batch_size), tf.float32)
+    rnn_ops, rnn_state = tf.nn.dynamic_rnn(global_cell, X_loaded, dtype=tf.float32)
+    
+    with tf.variable_scope('softmax__'):
+        W = tf.get_variable('W', [(num_joints)*num_units_each_cell, num_classes], initializer=tf.truncated_normal_initializer(0.0, 1.0))
+        b = tf.get_variable('b', [num_classes], initializer=tf.truncated_normal_initializer(0.0, 1.0))
+
+  
+      
+    final_logits = tf.matmul(rnn_state[1], W) + b       # taking h state of rnn 
+    with tf.name_scope("loss_comp"):
+        total_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=final_logits, labels=tf.one_hot(Y_loaded, num_classes)))
+    with tf.name_scope("train_step"):
+        train_step = tf.train.AdamOptimizer(learning_rate).minimize(total_loss)
+
+    with tf.name_scope("pred_accu"):
+        predictions = tf.nn.softmax(final_logits)
+        pred2 = tf.reshape(tf.argmax(predictions, 1), [-1, 1])
+        correct_pred = tf.equal(pred2, tf.cast(Y_loaded, tf.int64))
+        accuracy_ = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+
+    
+    
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+  
+        tic = time.clock()    
+        for step in range(num_epochs):
+            sess.run(trainig_iterator_init)
+            batch_cnt = train_data_len//batch_size
+            epch_loss = 0.0
+            epch_acc = 0.0
+            for bt in range(batch_cnt):
+                _, loss_, acc = sess.run([train_step, total_loss, accuracy_])
+                epch_loss += loss_
+                epch_acc += acc
+            print ('loss after epoch, ', step,': ', epch_loss/batch_cnt, ' ## accuracy : ', epch_acc/batch_cnt)
+            
+        print ("optimization finished, time required: ", time.clock()-tic)
+		
+		
+		#############test accuracy##############
+        batch_cnt = test_data_len//batch_size
+        sess.run(test_iterator_init)
+        print ('testing accuracy on test data : batch number', batch_cnt)
+        epch_acc = 0.0
+        for bt in range(batch_cnt):
+            acc = sess.run(accuracy_)
+            epch_acc += acc
+        print ('testing accuracy : ', epch_acc/batch_cnt)  
+
+Here are some screen shot of different hangs,
+Hanged on an epoch
+
+GPU usage that time
+
+GPU usage while running (not hanged)
+
+Hanged on another eopch
+
+This type of random hanging behavior keeps repeating on each run.
+Each time it hangs on a random epoch. That's why I cannot figure out what is going wrong.
+By looking at code or other set up can anybody please give me any idea about what is going wrong or how can I debug this out? Thanks

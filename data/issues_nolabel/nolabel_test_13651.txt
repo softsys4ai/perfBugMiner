@@ -1,0 +1,76 @@
+Android -- No OpKernel was registered to support Op 'SparseToDense' with these attrs
+
+I am trying to load a graph inside Android that I generated and frozen. I keep getting this error whenever I try to run it:
+Caused by: java.lang.IllegalArgumentException: No OpKernel was registered to support
+Op 'SparseToDense' with these attrs.  Registered devices: [CPU], Registered kernels:
+device='CPU'; T in [DT_STRING]; Tindices in [DT_INT64]
+device='CPU'; T in [DT_STRING]; Tindices in [DT_INT32]
+device='CPU'; T in [DT_BOOL]; Tindices in [DT_INT64]
+device='CPU'; T in [DT_BOOL]; Tindices in [DT_INT32]
+device='CPU'; T in [DT_FLOAT]; Tindices in [DT_INT64]
+device='CPU'; T in [DT_FLOAT]; Tindices in [DT_INT32]
+device='CPU'; T in [DT_INT32]; Tindices in [DT_INT64]
+device='CPU'; T in [DT_INT32]; Tindices in [DT_INT32]
+                                                                                            
+[[Node: output = SparseToDense[T=DT_INT64, Tindices=DT_INT64, validate_indices=true](CTCBeamSearchDecoder, CTCBeamSearchDecoder:2, CTCBeamSearchDecoder:1, output/default_value)]]
+
+I also optimized the graph for inference. When I try to load it onto Android, I get this error:
+java.io.IOException: Not a valid TensorFlow Graph serialization: NodeDef expected inputs '' do not match 1 inputs 
+specified; Op<name=Const; signature= -> output:dtype; attr=value:tensor; attr=dtype:type>; 
+NodeDef: stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/bw/while/add/y = Const[dtype=DT_INT32, 
+value=Tensor<type: int32 shape: [] values: 1>](stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/bw/while/Switch:1)
+
+Steps to get the frozen graph and optimized graph:
+
+Clone this repository:
+Run dummy_train.py producing the .pbtxt and checkpoint files
+Run dummy_freeze_and_save.py producing the frozen and optimized graphs frozen_bi_lstm_ctc_ocr.pb and optimized_frozen_bi_lstm_ctc_ocr.pb, respectively.
+
+Files in the mentioned repository relevant to the problem:
+
+The Bidirectional LSTM Network (contains the network specs and training code)
+The utilities file (containing the graph freezing and optimization codes)
+The dummy configs in the test files (just to train the model for 1 epoch)
+
+Here is the Java part related to the problem:
+public String recognizeHandwritingFrom(Bitmap bitmap) {
+     bitmap = Bitmap.createScaledBitmap(bitmap, 1024, 128,, true);
+     int[] intValues = new int[bitmap.getWidth() * bitmap.getHeight()];
+     bitmap.getPixels(intValues, 0, bitmap.getWidth(), 0, 0, bitmap.getWidth(), bitmap.getHeight());
+     float[] floatValues = new float[bitmap.getWidth() * bitmap.getHeight()];
+     for (int i = 0; i < intValues.length; ++i) {
+         final int val = intValues[i];
+         floatValues[i] = (((val >> 16) & 0xFF));
+     }
+     float[] result = new float[80];
+
+     long[] INPUT_SIZE = new long[]{1, bitmap.getHeight(), bitmap.getWidth()};
+     String[] inputs = new String[]{"input", "seq_len_input"};
+     inferenceInterface.feed(inputs[0], floatValues, INPUT_SIZE);
+     inferenceInterface.feed(inputs[1], new int[]{bitmap.getWidth()}, 1);
+
+     String[] outputs = new String[]{"output"};
+     inferenceInterface.run(outputs);
+     inferenceInterface.fetch(outputs[0], result);
+
+     return result.toString();
+ }
+
+I'm using
+
+Python 3.5.3 :: Anaconda custom (64-bit)
+The python tensorflow build is downloaded using Anaconda. Tensorflow version is 1.2.1
+The compiled tensorflow for IOS is from this nightly build.
+
+I would be really grateful if anyone has an idea on why Android seems to not be able to find SparseToDense as this is the only thing I have to fix to make it work.
+If you would like to run the android application as well, you can clone this repository. Just get the files from the nightly build and place them inside app/libs folder following this structure:
+libs
+|____arm64-v8a
+| |____libtensorflow_inference.so
+|____armeabi-v7a
+| |____libtensorflow_inference.so
+|____libandroid_tensorflow_inference_java.jar
+|____x86
+| |____libtensorflow_inference.so
+|____x86_64
+| |____libtensorflow_inference.so

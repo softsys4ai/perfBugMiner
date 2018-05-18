@@ -1,0 +1,78 @@
+Tensorflow cifar 10 example memory leak
+
+Describe the problem
+I am new to Tensorflow. I tried to run the cifar10 examples from here: https://github.com/tensorflow/models/tree/master/tutorials/image/cifar10
+I didn't make any changes to the code, I just tried to run it on multiple GPUs. I am trying to use 6 GPUs and I am allocating 10 GB of RAM for my job but after a few minutes my jobs getting failed due to memory limit. Allocating more memory does not help, it just delays the error. I tried for up to 40GB of memory.
+Here is my system info:
+
+== cat /etc/issue =============================================== Linux mmmdgx01 4.4.0-45-generic #66~14.04.1-Ubuntu SMP Wed Oct 19 15:05:38 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux DGX_OTA_VERSION=2.0.5 VERSION="14.04.5 LTS, Trusty Tahr" VERSION_ID="14.04"
+== are we in docker ============================================= No
+== compiler ===================================================== c++ (Ubuntu 4.8.4-2ubuntu1~14.04.3) 4.8.4 Copyright (C) 2013 Free Software Foundation, Inc. This is free software; see the source for copying conditions. There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+== uname -a ===================================================== Linux mmmdgx01 4.4.0-45-generic #66~14.04.1-Ubuntu SMP Wed Oct 19 15:05:38 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+== check pips =================================================== numpy (1.11.1) protobuf (3.2.0) tensorflow (1.1.0rc1)
+== check for virtualenv ========================================= False
+== tensorflow import ============================================ tf.VERSION = 1.1.0-rc1 tf.GIT_VERSION = v1.1.0-rc1-272-gf77f19b tf.COMPILER_VERSION = v1.1.0-rc1-272-gf77f19b Sanity check: array(1, dtype=int32)
+== env ========================================================== LD_LIBRARY_PATH /opt/sw/cuda/8.0/lib64/:/project/DGX/cuda/lib64/:/opt/sw/cuda/8.0/extras/CUPTI/lib64/:/project/DGX/lib DYLD_LIBRARY_PATH /project/DGX/torch/install/lib:/project/torch7new/install/lib:
+== nvidia-smi =================================================== Fri May 12 15:46:50 2017 +-----------------------------------------------------------------------------+ | NVIDIA-SMI 375.20 Driver Version: 375.20
+| |-------------------------------+----------------------+----------------------+ | GPU Name Persistence-M| Bus-Id Disp.A | Volatile Uncorr. ECC | | Fan Temp Perf Pwr:Usage/Cap| Memory-Usage | GPU-Util Compute M. | |===============================+======================+======================| | 0 Tesla P100-SXM2... On | 0000:06:00.0 Off |
+0 | | N/A 34C P0 42W / 300W | 0MiB / 16308MiB | 0%
+Default | +-------------------------------+----------------------+----------------------+ | 1 Tesla P100-SXM2... On | 0000:07:00.0 Off |
+0 | | N/A 32C P0 32W / 300W | 0MiB / 16308MiB | 0%
+Default | +-------------------------------+----------------------+----------------------+ | 2 Tesla P100-SXM2... On | 0000:0A:00.0 Off |
+0 | | N/A 34C P0 33W / 300W | 0MiB / 16308MiB | 0%
+Default | +-------------------------------+----------------------+----------------------+ | 3 Tesla P100-SXM2... On | 0000:0B:00.0 Off |
+0 | | N/A 33C P0 32W / 300W | 0MiB / 16308MiB | 0%
+Default | +-------------------------------+----------------------+----------------------+ | 4 Tesla P100-SXM2... On | 0000:85:00.0 Off |
+0 | | N/A 33C P0 30W / 300W | 0MiB / 16308MiB | 0%
+Default | +-------------------------------+----------------------+----------------------+ | 5 Tesla P100-SXM2... On | 0000:86:00.0 Off |
+0 | | N/A 33C P0 33W / 300W | 0MiB / 16308MiB | 0%
+Default | +-------------------------------+----------------------+----------------------+ | 6 Tesla P100-SXM2... On | 0000:89:00.0 Off |
+0 | | N/A 31C P0 32W / 300W | 0MiB / 16308MiB | 0%
+Default | +-------------------------------+----------------------+----------------------+ | 7 Tesla P100-SXM2... On | 0000:8A:00.0 Off |
+0 | | N/A 35C P0 32W / 300W | 0MiB / 16308MiB | 0%
+Default | +-------------------------------+----------------------+----------------------+
++-----------------------------------------------------------------------------+ | Processes: GPU Memory | | GPU PID Type Process name
+Usage | |=============================================================================| | No running processes found
+| +-----------------------------------------------------------------------------+
+== cuda libs ===================================================
+
+TensorFlow version
+('v1.1.0-rc1-272-gf77f19b', '1.1.0-rc1')
+Source code / logs
+Here is my job submission script:
+
+#! /bin/bash
+#SBATCH --account=AI
+#SBATCH --time=167:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=20
+#SBATCH -J TFImgNet
+#SBATCH -e tf.err
+#SBATCH -o tf.log
+#SBATCH --mem=10960
+#SBATCH --gres=gpu:6
+cpath=$(pwd)
+cd ~
+source .bashrc
+cd $cpath
+which python
+python cifar10_multi_gpu_train.py --num_gpus 6
+
+Here is the error:
+
+2017-05-12 15:14:07.162709: I tensorflow/core/common_runtime/gpu/gpu_device.cc:908] DMA: 0 1 2 3 4 5
+2017-05-12 15:14:07.162718: I tensorflow/core/common_runtime/gpu/gpu_device.cc:918] 0:   Y Y Y Y Y N
+2017-05-12 15:14:07.162721: I tensorflow/core/common_runtime/gpu/gpu_device.cc:918] 1:   Y Y Y Y N Y
+2017-05-12 15:14:07.162724: I tensorflow/core/common_runtime/gpu/gpu_device.cc:918] 2:   Y Y Y Y N N
+2017-05-12 15:14:07.162727: I tensorflow/core/common_runtime/gpu/gpu_device.cc:918] 3:   Y Y Y Y N N
+2017-05-12 15:14:07.162729: I tensorflow/core/common_runtime/gpu/gpu_device.cc:918] 4:   Y N N N Y Y
+2017-05-12 15:14:07.162732: I tensorflow/core/common_runtime/gpu/gpu_device.cc:918] 5:   N Y N N Y Y
+2017-05-12 15:14:07.162743: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla P100-SXM2-16GB, pci bus id: 0000:06:00.0)
+2017-05-12 15:14:07.162747: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:1) -> (device: 1, name: Tesla P100-SXM2-16GB, pci bus id: 0000:07:00.0)
+2017-05-12 15:14:07.162751: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:2) -> (device: 2, name: Tesla P100-SXM2-16GB, pci bus id: 0000:0a:00.0)
+2017-05-12 15:14:07.162754: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:3) -> (device: 3, name: Tesla P100-SXM2-16GB, pci bus id: 0000:0b:00.0)
+2017-05-12 15:14:07.162756: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:4) -> (device: 4, name: Tesla P100-SXM2-16GB, pci bus id: 0000:85:00.0)
+2017-05-12 15:14:07.162759: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:5) -> (device: 5, name: Tesla P100-SXM2-16GB, pci bus id: 0000:86:00.0)
+slurmstepd: error: Job 1313520 exceeded memory limit (11240536 > 11223040), being killed
+slurmstepd: error: Exceeded job memory limit
+slurmstepd: error: *** JOB 1313520 ON mmmdgx01 CANCELLED AT 2017-05-12T15:28:58 ***

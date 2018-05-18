@@ -1,0 +1,62 @@
+tf.summary.text fails keeping summaries
+
+I got following issues when I use tf.summary.text and view the summaries on tensorboard.
+
+It shows me text summaries in random order.
+It randomly removes existing summaries and show me only a few (Is there a configuration for maximum number of summaries to keep?)
+I can usually see only around 5 summaries on tensorboard even if I added summaries 100+ times.
+Other summaries work properly when I use summaries like below.
+
+summary_op = tf.summary.merge(summaries) # Other scalar, distribution, histogram summaries
+valid_summary_op = tf.summary.merge([valid_sentence_summary]) # text summary with tf.summary.text
+
+I can reproduce this problem in two different environments.
+
+Ubuntu 14.04 / CUDA 8.0 / Cudnn 5.1 / TF 1.1.0rc2 / Bazel 0.4.5 / GPU TITAN X Pascal (use 0 gpus~4gpus)
+Mac OSx Sierra / TF 1.1.0rc2 / Bazel 0.4.5 / No GPU
+
+Below is sample code to reproduce this issue.
+import tensorflow as tf
+
+text_list = ['this is the first text', 'this is 2nd text', 'this is random text']
+id2sent = {id:sent for id, sent in enumerate(text_list)}
+sent2id = {sent:id for id, sent in id2sent.items()}
+
+tf.reset_default_graph()    
+
+outer_string = tf.convert_to_tensor('This is string outside inner scope.')
+outer_summary = tf.summary.text('outside_summary', outer_string)
+
+with tf.name_scope('validation_sentences') as scope:
+    id_list = tf.placeholder(tf.int32, shape=[3], name='sent_ids')
+
+    valid_placeholder = tf.placeholder(tf.string, name='valid_summaries')
+
+    inner_summary = tf.summary.text('sent_summary', valid_placeholder)
+    summaries = [outer_summary, inner_summary]
+    summary_op = tf.summary.merge(summaries)
+        
+sess = tf.Session()
+summary_writer = tf.summary.FileWriter(logdir='./text_summary', graph=sess.graph)
+
+for step in range(10):
+
+    predicted_sents_ids = sess.run(
+        id_list,
+        feed_dict={
+            id_list: [0, 1, 2]
+        })
+
+    # list of string
+    predicted_sents = [id2sent[id] for id in predicted_sents_ids]
+
+    valid_summary = sess.run(summary_op, feed_dict={
+        valid_placeholder: predicted_sents
+    })
+
+    summary_writer.add_summary(valid_summary, global_step=step)
+    # summary_writer.flush()
+# summary_writer.flush()
+# flush() didn't help..
+
+And below is the result on tensorboard.

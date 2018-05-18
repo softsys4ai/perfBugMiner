@@ -1,0 +1,60 @@
+Unittesting Models with Tensorflow - How to clear the existing graph ?
+
+Hello dear tensorflowers,
+I have already asked the question of StackOverflow, however it seams like nobody can answer my question.
+So I hope you will forgive me about reposting it here:
+I am developing unittests for a product I implemented with TF.
+Each part of the model is tested separately then all together in different conditions.
+Let's take the example of a simple GAN, I have the following tests:
+
+GeneratorTest Class: With all tests concerning G inside
+DiscriminatorTest Class: With all tests concerning D inside
+GAN_Train_Test Class: G and D connected all together: 1 training step is tested.
+GAN_Inference_Test Class: G and D connecteed all together: 1 inference run is tested.
+
+
+When the files are executed independently, everything is working nicely and fine. Tests are all fine.
+Problems start occuring when I try to create one file to launch them all from one master file.
+master_test_launcher.py:
+import unittest
+import time
+    
+import tensorflow as tf
+    
+from tests.test_generator import GeneratorTest
+from tests.test_discriminator import DiscriminatorTest
+from tests.test_anovae_model import GAN_Train_Test
+from tests.test_inference import GAN_Inference_Test
+    
+runner = unittest.TextTestRunner(verbosity=2)
+    
+if __name__ == '__main__':
+   tf.logging.set_verbosity(tf.logging.DEBUG)
+    
+    for test in [GeneratorTest, DiscriminatorTest, GAN_Train_Test, GAN_Inference_Test]:
+        tf.logging.debug("Running tests for: %s ..." % test.__str__())
+    
+        tf.reset_default_graph()
+    
+        time.sleep(2)
+    
+        test_suite = unittest.TestSuite()
+        test_suite.addTest(unittest.makeSuite(test))
+    
+        runner.run(test_suite)
+I repeatedly obtain the same error when I run the tests related to G and D connected together:
+Exception: Layer 'encoder/input' already exists, please choice other 'name' or reuse this layer
+Hint : Use different name for different 'Layer' (The name is used to control parameter sharing)
+The error is quite simple to understand, each test file is independant and thus create its own session and graph. While testing only G or D, there is no problem because they have different name_scope/variable_scope. However, when testing the whole model Layers already have been defined by previous tests and thus leading to issue.
+I would like to find a way to completely drop the graph and reset the whole TF state as brand new and clean. However, everything I try seem to  fail.
+I would like to avoid creating a new graph for each test, leaving the old one in memory (could lead to very high amount of memory waste after a few tests).
+So my question is easy: ** How can I reset the whole TF state and internal vars as "clean" as if you relaunch a new python shell ? By some black-magic I can't find any way doing it (after looking for it for hours).
+For information here are the things I tried and which failed:
+
+tf.reset_default_graph()
+cleaning everything in graph collections
+creating a new graph + new session before executing each Test File: A graph is still built somewhere containing my Layers and I can't manage to find it.
+reading the TF code and trying to find any exit or close function which I didn't find
+
+Thanks a lot,
+Jonathan D.

@@ -1,0 +1,48 @@
+tf.variables_initializer seems broken.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 14.04
+TensorFlow installed from (source or binary): The nightly wheel.
+TensorFlow version (use command below): The nightly build that went out at 2AM on 7/28/2017: https://ci.tensorflow.org/view/Nightly/job/nightly-matrix-linux-gpu/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON2,label=gpu-linux/
+Python version: 2.7.13
+Bazel version (if compiling from source): 0.5.3
+CUDA/cuDNN version: 8.0
+GPU model and memory: GTX 1080
+Exact command to reproduce:
+
+To reproduce, run this snippet in the python interpreter:
+import tensorflow as tf
+with tf.Session() as sess:
+  v = tf.Variable(42, dtype=tf.int32)
+  with tf.control_dependencies([tf.variables_initializer([v])]):
+    result = tf.assign(v, v + 1)
+  print(sess.run(result))
+
+Describe the problem
+Running the snippet above yields an exception:
+Caused by op u'Variable/read', defined at:
+  File "<stdin>", line 2, in <module>
+  File "/usr/home/agent007/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/variables.py", line 199, in __init__
+    expected_shape=expected_shape)
+  File "/usr/home/agent007/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/variables.py", line 330, in _init_from_args
+    self._snapshot = array_ops.identity(self._variable, name="read")
+  File "/usr/home/agent007/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/gen_array_ops.py", line 1408, in identity
+    _result = _op_def_lib.apply_op("Identity", input=input, name=name)
+  File "/usr/home/agent007/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 328, in apply_op
+    op_type_name, name, **keywords)
+  File "/usr/home/agent007/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/usr/home/agent007/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2619, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/home/agent007/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1205, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+FailedPreconditionError (see above for traceback): Attempting to use uninitialized value Variable
+	 [[Node: Variable/read = Identity[T=DT_INT32, _class=["loc:@Variable"], _device="/job:localhost/replica:0/task:0/cpu:0"](Variable)]]
+
+It seems like tf.variables_initializer is broken - it does not initialize the variables passed to it.
+This has caused a TensorBoard test (:summary_test) to fail today (TensorBoard runs tests on nightly TensorFlow).
+https://travis-ci.org/tensorflow/tensorboard/jobs/258655621
+The test had been passing yesterday (on nightly built on 7/27).

@@ -1,0 +1,57 @@
+function.Defun can't be applied to tf.Variable
+
+I need to specify a custom gradient for my custom_op() function. I've written the following example.
+import numpy as np
+import tensorflow as tf
+from tensorflow.python.framework import function
+
+def custom_op_grad(op, grad):
+    return grad
+
+@function.Defun(x=tf.float32, python_grad_func=custom_op_grad)
+def custom_op(x):
+    exp = tf.exp(x)
+    constant = tf.constant(1., dtype=tf.float32)
+    add1 = tf.add(constant, exp)
+    log = tf.log(add1)
+    return log
+
+x = tf.Variable(np.array(np.arange(6)).reshape(3, 2), dtype=tf.float32)
+
+sess = tf.Session()
+sess.run(tf.initialize_all_variables())
+
+x = tf.identity(x)
+
+grad = tf.gradients(custom_op(x), [x])[0]
+
+res = sess.run(grad)
+
+print(res)
+
+sess.close()
+
+If I run the above example as it is I get the following result:
+[[ 1.  1.]
+ [ 1.  1.]
+ [ 1.  1.]]
+
+If I comment out the @function.Defun(...) decorator (with I use to specify a custom gradient function) I get a different result:
+[[ 0.5         0.7310586 ]
+ [ 0.88079709  0.95257413]
+ [ 0.98201376  0.99330717]]
+
+That is strange because custom_op_grad(op, grad) just returns grad, which I guess should be the same as the gradient calculated in the second case.
+Moreover, if I keep the decorator I also need to do this: x = tf.identity(x). If I comment out this line, I get the following error and I don't understand why:
+Traceback (most recent call last):
+  File "custom_op3.py", line 42, in <module>
+    grad = tf.gradients(custom_op(x), [x])[0]
+  File "/Users/zeis/tfm/lib/python3.5/site-packages/tensorflow/python/framework/function.py", line 528, in __call__
+    return call_function(self._definition, *args, **kwargs)
+  File "/Users/zeis/tfm/lib/python3.5/site-packages/tensorflow/python/framework/function.py", line 267, in call_function
+    compute_shapes=False)
+  File "/Users/zeis/tfm/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2285, in create_op
+    raise TypeError("Input #%d is not a tensor: %s" % (idx, a))
+TypeError: Input #0 is not a tensor: <tensorflow.python.ops.variables.Variable object at 0x10eb7d710>
+
+I'm using the GitHub version of TensofFlow.

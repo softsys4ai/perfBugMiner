@@ -1,0 +1,20 @@
+Numerical issues with automatic matrix derivatives
+
+While it is my impression that automatic differentiation generally enjoys numerical stability, this does not seem to extend directly to complicated expressions involving matrix calculus.
+In particular, for objectives involving matrix inverses the error can grow disproportionately large, leading to e.g. scipy optimization routines failing to converge.
+In my case I see TF with absolute element-wise gradient errors (comparing to the numerical Jacobian from tf.test.compute_gradient) around 10e-4 when my analytical gradient (also written using TF, only explicitly) gets errors near 10e-15.
+The problem likely boils down to the TF graph computing the inverses naively and not exploiting e.g. Cholesky and/or triangle structure or reframing multiplications as more stable linear system solves.
+I'm not sure I can readily provide a MWE as the code is somewhat complicated, but it is basically Gaussian process regression with a heavily parameterized kernel function.
+The objective itself has a form similar to what is found in the snippet below, with the callable instance kernel holding several tuneable parameters.
+   #kernel computations
+    self.K = self.kernel(self.Xtrain) + self.kernel.diag(self.Xtrain) + self.kernel.noise(self.Xtrain)  +    self.kernel.jitter(Xtrain)
+    self.Ktest = self.kernel(self.Xtest) + self.kernel.noise(self.Xtest)  + self.kernel.jitter(self.Xtest)
+    self.Kx = self.kernel(self.Xtrain, self.Xtest)
+    self.L = tf.cholesky(self.K)
+
+    self.Ly = tf.matrix_triangular_solve(self.L, self.ytrain, lower = True)
+    self.LKx = tf.matrix_triangular_solve(self.L, self.Kx, lower = True)
+    self.llk = -0.5*tf.reduce_sum(self.Ly**2.) - 0.5*logdet_chol(self.L) 
+    self.objective = - self.llk
+
+Continued matrix calculus support was one of the primary reasons I picked TF over the alternatives, so I am really hoping this is something that can be fixed in the future.

@@ -1,0 +1,65 @@
+[feature request] Any way to control the order of send/recv (host to device data transfer) explicitly?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):
+source
+TensorFlow version (use command below):
+1.2
+Python version:
+3.5
+Bazel version (if compiling from source):
+0.5.2
+CUDA/cuDNN version:
+8.0
+GPU model and memory:
+GTX 1070
+
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+Overlapping the host to device data transfer with GPU calculation is an important method to improve the performance of inference workload. But I found it very difficult to control the order of data transfers explicitly at this moment. I understand the send/recv operations are added implicitly when the original graph is split/optimized into sub-graphs. I tried to use control dependency + identity/assign operation (as suggested here) to hand control send/recv order. But it seems impossible to achieve this goal.
+For example,
+In the following code, we'd like to overlap the H2D memcpy of B->B_GPU with the matmul calculation.
+import os
+import tensorflow as tf
+import numpy as np
+
+from tensorflow.python.client import session
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import variables
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+
+with ops.Graph().as_default():
+  with tf.device('/cpu:0'):
+    A = tf.placeholder(tf.float32, shape=(1000, 100), name="A")
+    B = tf.placeholder(tf.float32, shape=(1000, 1000), name="B")
+  with tf.device('/gpu:0'):
+    C = variables.Variable(tf.random_normal([100,1000],stddev=0.1), name="C")
+    A_GPU = tf.identity(A)
+    with tf.control_dependencies([A_GPU]):
+      B_GPU = tf.identity(B)
+      D = tf.add(tf.matmul(A_GPU, C), B_GPU, name="D")
+
+  random_A=np.random.rand(1000,100).astype(np.float32)
+  random_B=np.random.rand(1000,1000).astype(np.float32)
+
+  sess = session.Session()
+  init = tf.global_variables_initializer()
+  sess.run(init)
+
+  for x in range(1,50):
+    output = sess.run(D,feed_dict={A:random_A,B:random_B})
+
+But it turned out that H2D memcpy A->A_GPU is not ensured to launch first. Actually among the 50 iterations, I noticed the order of transferring A->A_GPU and transferring B->B_GPU is randomly performed if we use multiple threads (because the two transfers are handled in different threads, and no-dependency could be built between them).
+If A->A_GPU launches first, the matmul op could be overlapped with B->B-GPU
+
+otherwise, the matmul op has to wait until all H2D memcpys finished.
+
+Only if we can control the order of send node explicitly, the overlap can be ensured.
+Please let me know if I didn't use the identity operation correctly.
+Thanks.

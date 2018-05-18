@@ -1,0 +1,27 @@
+Some of tensorflow GPU OpKernel compute by eigen device without stream sync, is that correct?
+
+from gpu_device.cc
+   // NOTE(tucker): We need to discriminate between Eigen GPU
+   // operations and all others.  If an operation is Eigen
+   // implemented (or otherwise tries to launch a cuda kernel
+   // directly), we need to establish a stacked-scoped environment
+   // that directs it to execute on the proper device.  Otherwise we
+   // expect the Op to use StreamExecutor directly and correctly.  The
+   // way we make this discrimination is quite hacky: At the moment
+   // the only non-Eigen GPU Op is the recv-op, which is known to be
+   // asynchronous.
+
+and gpu_device only waits when there are different contexts. (sync_every_op is false)
+But take argmax_op.h  for example,
+template <typename Device, typename T>
+struct ArgMin {
+#define DECLARE_COMPUTE_SPEC(Dims)                                     \
+EIGEN_ALWAYS_INLINE static void Reduce##Dims(                        \
+const Device& d, typename TTypes<T, Dims>::ConstTensor input,    \
+const int32 dimension,                                           \
+typename TTypes<int64, Dims - 1>::Tensor output) {               \
+output.device(d) = input.argmin(dimension).template cast<int64>(); \
+}
+
+use device compute directly. Is that correct? Or I miss something ...
+Thank you very much!

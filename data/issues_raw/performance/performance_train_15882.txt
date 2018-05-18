@@ -1,0 +1,43 @@
+tfdbg error "Dump root directory does not exist" with empty fetches
+
+System information
+
+Have I written custom code: yes
+OS Platform and Distribution: Linux Ubuntu 16.04
+TensorFlow installed from: binary (pip install)
+TensorFlow version:
+== tensorflow import ============================================
+tf.VERSION = 1.4.1
+tf.GIT_VERSION = v1.4.0-19-ga52c8d9
+tf.COMPILER_VERSION = v1.4.0-19-ga52c8d9
+Sanity check: array([1], dtype=int32)
+Python version: 2.7.12
+CUDA/cuDNN version:
+== cuda libs  ===================================================
+/usr/local/cuda-9.0/targets/x86_64-linux/lib/libcudart_static.a
+/usr/local/cuda-9.0/targets/x86_64-linux/lib/libcudart.so.9.0.176
+/usr/local/cuda-9.0/doc/man/man7/libcudart.so.7
+/usr/local/cuda-9.0/doc/man/man7/libcudart.7
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart.so.8.0.61
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart_static.a
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+GPU model and memory: GeForce GTX 1080, 8114MiB
+Exact command to reproduce: see code below
+
+Describe the problem
+LocalCLIDebugWrapperSession.run() does not behave like tf.Session.run() if there are no fetches. The dump directory will never be created and it crashes with an IOError. For me this issue occured in a situation like this:
+      session.run([var.initializer for var in not_initialized_from_checkpoint])
+
+where actually everything was restored from the checkpoint and not_initialized_from_checkpoint was empty. This code runs fine with an ordinary tf.Session but crashed with tfdbg. It took me some time to track down the issue. If it's not too hard to fix, it would be nice to keep other users from the same pain (maybe - just speculating - #13604 crashes for the same reason)
+Source code / logs
+import tensorflow as tf
+from tensorflow.python import debug as tf_debug
+
+sess = tf.Session()
+dbg_sess = tf_debug.LocalCLIDebugWrapperSession(tf.Session())
+
+print sess.run([tf.constant(1.0)])     # [1.0]
+print sess.run([])                     # []
+print dbg_sess.run([tf.constant(1.0)]) # [1.0]
+print dbg_sess.run([])                 # IOError: Dump root directory /tmp/tfdbg_ai_aWv does not exist

@@ -1,0 +1,184 @@
+Inability to get tensorflow output from custom_estimator
+
+For this costum_estimator, the related documentation on https://www.tensorflow.org/get_started/custom_estimators tells me that I can just input tensorboard --logdir=PATH in the directory and obtain TensorGraph visualisation.  However I do this and I get on the Tensorboard page "Graph visualisation failed: the graph is empty. Make sure that the graph is passed to the tf.summary.filewriter after the graph is defined"
+As far as I understood, when using custom estimators it automatically passes the data to TensorBoard. What shall I do? I would like to get the basic graphs as shown at the bottom of the tutorial I linked above.
+`import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+import argparse
+def train_input_fn(features, labels, batch_size):
+"""An input function for training"""
+# Convert the inputs to a Dataset.
+dataset = tf.data.Dataset.from_tensor_slices((dict(features), labels))
+# Shuffle, repeat, and batch the examples.
+dataset = dataset.shuffle(buffer_size=1000).repeat(count=None).batch(batch_size)
+
+# Return the dataset.
+return dataset
+
+def eval_input_fn(features, labels, batch_size):
+"""An input function for evaluation or prediction"""
+features=dict(features)
+if labels is None:
+# No labels, use only features.
+inputs = features
+else:
+inputs = (features, labels)
+# Convert the inputs to a Dataset.
+dataset = tf.data.Dataset.from_tensor_slices(inputs)
+
+# Batch the examples
+assert batch_size is not None, "batch_size must not be None"
+dataset = dataset.batch(batch_size)
+
+# Return the dataset.
+return dataset
+
+def datasetfun(dataframe,split1,split2):
+#split1: variable deciding the proportion of test data to training data
+#split2: variable deciding the proportion of test data to training data
+
+dataframe = pd.read_csv("Supporttry.csv") # Let's have Pandas load our dataset as a dataframe
+#dataframe = dataframe.drop(["dzclass","num.co","edu","income","scoma","charges","totcst","totmcst","avtisst","race","meanbp","wblc","hrt","resp","temp","pafi","alb","bili","crea","sod","ph","glucose","bun","urine","adlp","adls","sfdm2","adlsc"], axis=1) # Remove columns we don't care about
+dataframe = dataframe.drop(["crea","avtisst","wblc","race","edu","income","charges","totcst","totmcst","pafi","alb","bili","ph","glucose","bun","urine","adlp","adls","sfdm2"], axis=1)
+train = dataframe[0:split1] # use first 15 rows as training set
+test = dataframe[split1:split2] # keep some as testing
+predictdata = dataframe[split2:] # find the ones to predict
+
+train_features, train_labels = train, train.pop("death") #separate features with classification in train set
+test_features, test_labels = test, test.pop("death") #separate features with classification in train set
+predict_features, predict_labels = predictdata, predictdata.pop("death")
+
+categorical_column1 = tf.feature_column.categorical_column_with_vocabulary_list(key="sex", vocabulary_list=["male", "female"], default_value=0)
+categorical_column2 = tf.feature_column.categorical_column_with_vocabulary_list(key='dzgroup',vocabulary_list=["Lung Cancer","Colon Cancer","ARF/MOSF w/Sepsis","MOSF w/Malig","Cirrhosi","CHF"])
+categorical_column3 = tf.feature_column.categorical_column_with_vocabulary_list(key="dzclass", vocabulary_list=["Cancer", "ARF/MOSF","COPD/CHF/Cirrhosis"], default_value=0)
+#categorical_column4 = tf.feature_column.categorical_column_with_vocabulary_list(key="race", vocabulary_list=["black", "hispanic","White","asian","other"], default_value=0)
+
+my_feature_columns = [
+tf.feature_column.numeric_column(key='age'),
+tf.feature_column.indicator_column(categorical_column1),
+tf.feature_column.numeric_column(key='hospdead'),
+tf.feature_column.numeric_column(key='slos'),
+tf.feature_column.numeric_column(key='d.time'),
+tf.feature_column.indicator_column(categorical_column2),
+tf.feature_column.indicator_column(categorical_column3),
+tf.feature_column.numeric_column(key='scoma'),
+#tf.feature_column.numeric_column(key='avtisst'),
+#tf.feature_column.indicator_column(categorical_column4),
+tf.feature_column.numeric_column(key='meanbp'),
+tf.feature_column.numeric_column(key='hrt'),
+tf.feature_column.numeric_column(key='resp'),
+tf.feature_column.numeric_column(key='temp'),
+#tf.feature_column.numeric_column(key='crea'),
+tf.feature_column.numeric_column(key='sod'),
+tf.feature_column.numeric_column(key='adlsc')]
+
+return (train_features, train_labels, test_features, test_labels, predict_features, predict_labels, my_feature_columns)
+
+def my_model(features, labels, mode, params):
+"""DNN with three hidden layers, and dropout of 0.1 probability."""
+# Create three fully connected layers each layer having a dropout
+# probability of 0.1.
+net = tf.feature_column.input_layer(features, params['feature_columns']) #imput layer
+for units in params['hidden_units']: #can change type of layers!!!!
+net = tf.layers.dense(net, units=units, activation=tf.nn.relu) #can change activation function to sigmoid!!!
+# Compute logits (1 per class).
+
+#output layer
+logits = tf.layers.dense(net, params['n_classes'], activation=None)
+
+# Compute predictions.
+predicted_classes = tf.argmax(logits, 1)
+if mode == tf.estimator.ModeKeys.PREDICT:
+    predictions = {
+        'class_ids': predicted_classes[:, tf.newaxis],
+        'probabilities': tf.nn.softmax(logits),
+        'logits': logits,
+    }
+    return tf.estimator.EstimatorSpec(mode, predictions=predictions)
+
+# Compute loss.
+loss = tf.losses.sparse_softmax_cross_entropy(labels=labels, logits=logits)
+
+# Compute evaluation metrics!!!!!!!
+accuracy = tf.metrics.accuracy(labels=labels,
+                               predictions=predicted_classes,
+                               name='acc_op')
+metrics = {'accuracy': accuracy}
+tf.summary.scalar('accuracy', accuracy[1])
+
+if mode == tf.estimator.ModeKeys.EVAL:
+    return tf.estimator.EstimatorSpec(
+        mode, loss=loss, eval_metric_ops=metrics)
+
+# Create training op.
+assert mode == tf.estimator.ModeKeys.TRAIN
+
+optimizer = tf.train.AdagradOptimizer(learning_rate=0.1) #can change optimizer
+train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step())
+return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=train_op)
+
+def main(m):
+#classification of death or no death
+
+dataframe = pd.read_csv("Supporttry.csv") # Let's have Pandas load our dataset as a dataframe
+
+split1=500
+split2=980
+
+[train_features, train_labels, test_features, test_labels, predict_features, predict_labels, my_feature_columns] = datasetfun(dataframe,split1,split2)
+
+classifier = tf.estimator.Estimator(
+    model_fn=my_model,
+    params={
+        'feature_columns': my_feature_columns,
+        # Two hidden layers of 10 nodes each.
+        'hidden_units': [10, 10],
+        # The model must choose between 3 classes.
+        'n_classes': 2,
+    })
+
+# classifier = tf.estimator.DNNClassifier(
+# 	feature_columns=my_feature_columns,
+# 	hidden_units=[10,10,5,6,7],
+# 	n_classes=2)
+
+batch_size=100
+train_steps=1000
+
+#writer = tf.summary.FileWriter("/Users/angelicagrusovin/documents/oxford/MLSP",graph=tf.get_default_graph())
+#writer.add_graph(sess.graph)
+
+classifier.train(input_fn=lambda:train_input_fn(train_features, train_labels, batch_size),steps=train_steps)
+
+eval_result = classifier.evaluate(
+input_fn=lambda:eval_input_fn(test_features, test_labels, batch_size))
+
+print('\nTest set accuracy: {accuracy:0.3f}\n'.format(**eval_result))
+
+#predictions = classifier.predict(
+#input_fn=lambda:eval_input_fn(predict_features,None,batch_size))
+
+# expected=['dead','alive']
+# STATE=['dead','alive']
+# print(zip(predictions))
+
+# template = ('\nPrediction is ({:.1f}%), expected {}')
+
+# for pred_dict in zip(predictions):
+# 	class_id = pred_dict[0]['class_ids'][0]
+# 	probability = pred_dict[0]['probabilities'][class_id]
+# 	print(template.format(100 * probability, STATE[class_id]))
+
+
+
+
+
+
+#print(my_feature_columns) 
+
+return m
+
+if name == 'main':
+main(10)`

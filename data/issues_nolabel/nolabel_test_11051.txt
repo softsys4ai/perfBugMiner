@@ -1,0 +1,263 @@
+tensorflow inference in iOS produces EXC_BAD_ACCESS error when memory mapped graph is used
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): OSX Sierra (10.12.5)
+TensorFlow installed from (source or binary): source & binary (tested both)
+TensorFlow version (use command below): 1.1.0
+Bazel version (if compiling from source): 0.5.1-homebrew
+CUDA/cuDNN version: CPU version used
+GPU model and memory: CPU version used
+Exact command to reproduce:
+
+Apologies if I posted an issue not appropriate here.
+I asked this issue on stackoverflow a week ago but seems that no one interested in this issue.
+===========
+I tested both iOS simple and camera example in tensorflow GitHub repo and they worked well.
+I checked those projects and recognized that camera example can use memory mapped graph if I modify constant variable "model_uses_memory_mapping" to true, while simple example cannot.
+So I modified simple example source to implement same function as camera example, and it seems that the mmapped graph loaded without problem, but when I run inference with session->Run method, the app gave me EXE_BAD_ACCESS error.
+I think I've done everything what I can do but still same error.
+No idea what else I can do for I'm not good at iOS nor tensorflow core functions.
+Could someone guide me how can I resolve this?
+FYI, run inference with optimized or quantized graph (with model_uses_memory_mapping set to false) works well.
+a) here's message I get when i execute session->Run method:
+tf_ios_makefile_example`tensorflow::Env::NewReadOnlyMemoryRegionFromFile:
+    0x103157ad0 <+0>:  pushq  %rbp
+    0x103157ad1 <+1>:  movq   %rsp, %rbp
+    0x103157ad4 <+4>:  pushq  %r15
+    0x103157ad6 <+6>:  pushq  %r14
+    0x103157ad8 <+8>:  pushq  %rbx
+    0x103157ad9 <+9>:  pushq  %rax
+    0x103157ada <+10>: movq   %rcx, %r14
+    0x103157add <+13>: movq   %rdx, %r15
+    0x103157ae0 <+16>: movq   %rdi, %rbx
+    0x103157ae3 <+19>: movq   (%rsi), %rax
+    0x103157ae6 <+22>: leaq   -0x20(%rbp), %rcx
+->  0x103157aea <+26>: callq  *0x10(%rax)  
+    0x103157aed <+29>: cmpq   $0x0, (%rbx)
+    0x103157af1 <+33>: jne    0x103157b06               ; <+54>
+    0x103157af3 <+35>: movq   -0x20(%rbp), %rsi
+    0x103157af7 <+39>: movq   (%rsi), %rax
+    0x103157afa <+42>: movq   %rbx, %rdi
+    0x103157afd <+45>: movq   %r15, %rdx
+    0x103157b00 <+48>: movq   %r14, %rcx
+    0x103157b03 <+51>: callq  *0x18(%rax)
+    0x103157b06 <+54>: movq   %rbx, %rax
+    0x103157b09 <+57>: addq   $0x8, %rsp
+    0x103157b0d <+61>: popq   %rbx
+    0x103157b0e <+62>: popq   %r14
+    0x103157b10 <+64>: popq   %r15
+    0x103157b12 <+66>: popq   %rbp
+    0x103157b13 <+67>: retq   
+    0x103157b14 <+68>: nopw   %cs:(%rax,%rax)
+
+and the error message shown on the line was: Thread19: EXC_BAD_ACCESS(code=EXC_I386_GPFLT)
+b) and here's some of code I added/modified/used in simple example:
+global variable declaration:
+static NSString* model_file_name = @"mmapped_graph";
+static NSString* model_file_type = @"pb";
+const bool model_uses_memory_mapping = true;  //use memory mapped graph
+
+static NSString* labels_file_name = @"retrained_labels";
+static NSString* labels_file_type = @"txt";
+
+const int wanted_width = 299;
+const int wanted_height = 299;
+const int wanted_channels = 3;
+const float input_mean = 128.0f;
+const float input_std = 128.0f;
+const std::string input_layer = "Mul";
+const std::string output_layer = "final_result";
+
+method definition to read mmapped graph
+( referenced from camera example)
+tensorflow::Status LoadMemoryMappedModel(
+    NSString* file_name, NSString* file_type,
+    std::unique_ptr<tensorflow::Session>* session,
+    std::unique_ptr<tensorflow::MemmappedEnv>* memmapped_env) {
+    NSString* network_path = FilePathForResourceName(file_name, file_type);
+    memmapped_env->reset(
+        new tensorflow::MemmappedEnv(tensorflow::Env::Default())
+    );
+    tensorflow::Status mmap_status =
+    (memmapped_env->get())->InitializeFromFile([network_path UTF8String]);
+    if (!mmap_status.ok()) {
+        LOG(ERROR) << "MMap failed with " << mmap_status.error_message();
+        return mmap_status;
+    }
+
+    tensorflow::GraphDef tensorflow_graph;
+    tensorflow::Status load_graph_status = ReadBinaryProto(
+                                                           memmapped_env->get(),
+                                                           tensorflow::MemmappedFileSystem::kMemmappedPackageDefaultGraphDef,
+                                                           &tensorflow_graph);
+    if (!load_graph_status.ok()) {
+        LOG(ERROR) << "MMap load graph failed with "
+        << load_graph_status.error_message();
+        return load_graph_status;
+    }
+
+    tensorflow::SessionOptions options;
+    // Disable optimizations on this graph so that constant folding doesn't
+    // increase the memory footprint by creating new constant copies of the weight
+    // parameters.
+    options.config.mutable_graph_options()
+    ->mutable_optimizer_options()
+    ->set_opt_level(::tensorflow::OptimizerOptions::L0);
+    options.env = memmapped_env->get();
+
+    tensorflow::Session* session_pointer = nullptr;
+    tensorflow::Status session_status =
+    tensorflow::NewSession(options, &session_pointer);
+    if (!session_status.ok()) {
+        LOG(ERROR) << "Could not create TensorFlow Session: " << session_status;
+        return session_status;
+    }
+
+    tensorflow::Status create_status = session_pointer->Create(tensorflow_graph);
+    //tensorflow::Status create_status = session_pointer->Create(*(tensorflow::GraphDef *)tensorflow_graph);
+
+    if (!create_status.ok()) {
+        LOG(ERROR) << "Could not create TensorFlow Graph: " << create_status;
+        return create_status;
+    }
+
+    session->reset(session_pointer);
+
+
+    return tensorflow::Status::OK();
+}
+
+and I load the graph and run inference like this
+NSString* RunInferenceOnImage() {
+  tensorflow::SessionOptions options;
+    std::unique_ptr<tensorflow::Session> session;
+
+  tensorflow::GraphDef tensorflow_graph;
+  LOG(INFO) << "Graph created.";
+
+    tensorflow::Status load_status;
+
+    if (model_uses_memory_mapping) {
+        //use memmapped graph - gives me an error
+        std::unique_ptr<tensorflow::MemmappedEnv>  tf_memmapped_env;
+        load_status = LoadMemoryMappedModel(model_file_name, model_file_type, &session, &tf_memmapped_env);
+    } else {
+        // use optimized or quantized graph - this works well
+        NSString* network_path = FilePathForResourceName(model_file_name, model_file_type);
+        load_status = PortableReadFileToProto([network_path UTF8String],&session, &tensorflow_graph);
+    }
+
+    if (!load_status.ok()) {
+        LOG(FATAL) << "Couldn't load model: " << load_status;
+    }
+
+  // Read the label list
+  NSString* labels_path = FilePathForResourceName(@"retrained_labels", @"txt");
+  std::vector<std::string> label_strings;
+  std::ifstream t;
+  t.open([labels_path UTF8String]);
+  std::string line;
+  while(t){
+    std::getline(t, line);
+    label_strings.push_back(line);
+  }
+  t.close();
+
+  // Read the image.
+  NSString* image_path = FilePathForResourceName(@"testimage", @"jpg");
+  int image_width;
+  int image_height;
+  int image_channels;
+  std::vector<tensorflow::uint8> image_data = LoadImageFromFile(
+    [image_path UTF8String], &image_width, &image_height, &image_channels);
+    LOG(INFO) << "Graph created5.";
+
+  // image_channel is set to 4 from LoadImageFromFile method (not modified)
+
+  assert(image_channels >= wanted_channels);
+  tensorflow::Tensor image_tensor(
+      tensorflow::DT_FLOAT,
+      tensorflow::TensorShape({
+          1, wanted_height, wanted_width, wanted_channels}));
+  auto image_tensor_mapped = image_tensor.tensor<float, 4>();
+
+  tensorflow::uint8* in = image_data.data();
+  tensorflow::uint8* in_end = (in + (image_height * image_width * image_channels));
+  float* out = image_tensor_mapped.data();
+  for (int y = 0; y < wanted_height; ++y) {
+    const int in_y = (y * image_height) / wanted_height;
+    tensorflow::uint8* in_row = in + (in_y * image_width * image_channels);
+    float* out_row = out + (y * wanted_width * wanted_channels);
+    for (int x = 0; x < wanted_width; ++x) {
+      const int in_x = (x * image_width) / wanted_width;
+      tensorflow::uint8* in_pixel = in_row + (in_x * image_channels);
+      float* out_pixel = out_row + (x * wanted_channels);
+      for (int c = 0; c < wanted_channels; ++c) {
+        out_pixel[c] = (in_pixel[c] - input_mean) / input_std;
+      }
+    }
+  }
+    NSString* result = @" Graph loaded!";
+  result = [NSString stringWithFormat: @"%@ - %d, %s - %dx%d", result,
+    label_strings.size(), label_strings[0].c_str(), image_width, image_height];
+
+  std::vector<tensorflow::Tensor> outputs;
+    if(session.get()) {
+        LOG(INFO) << "SESSION OK!!!!!!";
+    }
+
+
+  tensorflow::Status run_status = session->Run({{input_layer, image_tensor}},
+                               {output_layer}, {}, &outputs);
+  // EXC_BAD_ACCESS error occur when session Run method called
+
+  if (!run_status.ok()) {
+  //  LOG(ERROR) << "Running model failed: " << run_status;
+    tensorflow::LogAllRegisteredKernels();
+    result = @"Error running model";
+    return result;
+  }
+  tensorflow::string status_string = run_status.ToString();
+  result = [NSString stringWithFormat: @"%@ - %s", result,
+    status_string.c_str()];
+
+  tensorflow::Tensor* output = &outputs[0];
+  const int kNumResults = 5;
+  const float kThreshold = 0.1f;
+  std::vector<std::pair<float, int> > top_results;
+  GetTopN(output->flat<float>(), kNumResults, kThreshold, &top_results);
+
+  std::stringstream ss;
+  ss.precision(3);
+  for (const auto& result : top_results) {
+    const float confidence = result.first;
+    const int index = result.second;
+
+    ss << index << " " << confidence << "  ";
+
+    // Write out the result as a string
+    if (index < label_strings.size()) {
+      // just for safety: theoretically, the output is under 1000 unless there
+      // is some numerical issues leading to a wrong prediction.
+      ss << label_strings[index];
+    } else {
+      ss << "Prediction: " << index;
+    }
+
+    ss << "\n";
+  }
+
+  LOG(INFO) << "Predictions: " << ss.str();
+
+  tensorflow::string predictions = ss.str();
+  result = [NSString stringWithFormat: @"%@ - %s", result,
+    predictions.c_str()];
+
+  return result;
+}
+
+You can find original (unmodified) simple example project here: https://github.com/tensorflow/tensorflow/tree/v1.1.0/tensorflow/contrib/ios_examples/simple
+https://github.com/tensorflow/tensorflow/blob/v1.1.0/tensorflow/contrib/ios_examples/simple/RunModelViewController.mm
+also you can find LoadImageFromFile method here: https://github.com/tensorflow/tensorflow/blob/v1.1.0/tensorflow/contrib/ios_examples/simple/ios_image_load.mm

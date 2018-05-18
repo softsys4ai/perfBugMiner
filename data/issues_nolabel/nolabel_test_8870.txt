@@ -1,0 +1,24 @@
+Bugs when dequeue a 3-D input tensor from FIFOQueue
+
+x = tf.random_normal([time_length, batch_size, feature_size], mean=0, stddev=1)
+## prepare data
+q = tf.FIFOQueue(capacity=4, dtypes=tf.float32) 
+enqueue_op = q.enqueue(x)
+num_threads = 1 
+qr = tf.train.QueueRunner(q, [enqueue_op] * num_threads)
+tf.train.add_queue_runner(qr)
+inputs = q.dequeue() 
+As above code shows, when I use FIFOQueue and Cordinator to do input pipeline, the input is a 3-D tensor variable, but when I dequeue it from the FIFOQueue, errors comes:
+ValueError: as_list() is not defined on an unknown TensorShape.
+Thus, I go to the source code of FIFOQueue, I found that FIFOQueue.enqueue method doesn't use a shape function. So, I add a line of code as following, it works well.
+x = tf.random_normal([time_length, batch_size, feature_size], mean=0, stddev=1)
+
+## prepare data
+q = tf.FIFOQueue(capacity=4, dtypes=tf.float32) 
+enqueue_op = q.enqueue(x)
+num_threads = 1 
+qr = tf.train.QueueRunner(q, [enqueue_op] * num_threads)
+tf.train.add_queue_runner(qr)
+inputs = q.dequeue() 
+inputs.set_shape(x.get_shape())
+But if I change my input from 3-D tensor into 2-D tensor, the code runs very well without set_shape function manually. So I want to know why my 3-D input tensor can't work well but 2-D tensor input work well? Can the source code of FIFOQueue or QueueBase support shape function?

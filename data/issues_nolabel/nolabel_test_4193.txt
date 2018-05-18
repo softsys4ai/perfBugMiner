@@ -1,0 +1,35 @@
+CTC loss is numerically unstable for long sequence lengths
+
+Hi All, great work TF team, thanks for implementing CTC loss ops recently!
+I've noticed that CTC loss becomes quite numerically unstable for long sequences, in the attached code that reproduces the plot from the CTC paper, sequences longer than 10,000 or so degrade the quality of the gradients quite severely.
+I'm not sure what the best fix is, trying to improve the numerical stability of CTC loss calculation could help, but I have no idea how difficult this would be.
+In the interim, I suppose it might be worth issuing a warning when the op is used with long sequences, or placing internal consistency checks that warn the user when CTC loss may be producing bogus outputs. Or even just improving the documentation for CTC loss so that users know that this is a pitfall.
+This is also sort of a public service announcement so nobody gets burned on long sequences.
+Again, great work, thanks for all your effort.
+:)
+Environment info
+Pip Package Version: 0.10.0rc0
+Minimal Example
+import numpy as np
+import tensorflow as tf
+
+%matplotlib inline
+import matplotlib.pyplot as plt
+
+# n = 100
+n = 20000
+k = 4
+
+with tf.Session() as sess:
+    inputs = tf.zeros((n, 1, k+1), dtype=tf.float32)
+    labels_indices = tf.constant([[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]], dtype=tf.int64)
+    labels_values  = tf.constant([0, 1, 2, 3, 4], dtype=tf.int32)
+    labels = tf.SparseTensor(indices=labels_indices, values=labels_values, shape=(1, k+1))
+    sequence_length = np.array([n])
+
+    loss = tf.nn.ctc_loss(inputs, labels, sequence_length)
+    g, = tf.gradients(loss, inputs)
+
+    g_v = sess.run(g)
+
+plt.plot(-g_v[:,0,:])

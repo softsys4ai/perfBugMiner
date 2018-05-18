@@ -1,0 +1,215 @@
+Attempt failed to use tf.ConditionalAccumulator.take_grad() with GradientDescentOptimizer.apply_gradients
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 10 Home 64-bit
+TensorFlow installed from (source or binary):
+Binary
+TensorFlow version (use command below):
+1.4.0
+Python version:
+3.6.3
+Bazel version (if compiling from source):
+N/A
+GCC/Compiler version (if compiling from source):
+N/A
+CUDA/cuDNN version:
+8.0/6.0
+GPU model and memory:
+NVIDIA 1050Ti 4Gb
+Exact command to reproduce:
+N/A
+
+Describe the problem
+I have implemented 3 convolutional neural network and I have used one of the tf.ConditionalAccumulator for each network to aggregate the partial gradients during the training for every network. More precisely, I have used tf.GradientDescentOptimizer.compute_gradients(<a_network_loss>,<trainable_var_of_a_network>) to take these partial gradients feeding the necessary placeholders to calculate the loss with partial values.
+After accumulating all the necessary gradients for all networks, I have used tf.ConditionalAccumulator.take_grad() to take the whole gradients for each tf.ConditionalAccumulator, then I have zipped all the gradients with variables name and finally I have used tf.GradientDescentOptimizer.apply_gradients(<zip>).
+Tensorflow returns error when get called the apply_gradients because it wants  that palceholders will be feeded again
+Source code
+This code is just an example to show the working of my code for one tf.ConditionalAccumulator:
+optimizer=tf.GradientDescentOptimizer(lr)
+accumulator=tf.ConditionalAccumulator(tf.float32,shape=[3,3,3,1,64])
+grad_ph=tf.placeholder(tf.float32)        
+accumulator_add_gradient_op=accumulator.apply_grad(grad)
+grads_vars_=self.optimizer.compute_gradients(first_net.loss, var_list=first_net.vars)
+grads_list=[grad_var[0] for grad_var in grads_vars]
+vars_list=[grad_var[1] for grad_var in grads_vars]
+
+count_ph=tf.placeholder(tf.int32,[])
+grads_us=tf.unstack(accumulator.take_grad(count_ph))
+
+n=0
+while(...):
+    ...
+    grads=sess.run(grads_list,{<feeding_placeholders_with_partial_values>})
+    sess.run(accumulator_add_gradient_op,{grad_ph:grads}
+    n+=1
+grads_and_vars=list(zip(sess.run(grads_us,{count_ph:n}),vars_list))
+sess.run(optimizer.apply_gradients(grads_and_vars))
+I have used list in grads_and_vars=list(zip(sess.run(grads_us,{count_ph:n}),vars_list)) because i need to use grads_and_vars.extend(<other_grads_and_vars>) for other tf.ConditionalAccumulator. I tried not used sess.run() in zip(), but have the same problem.
+logs
+2018-03-02 11:52:16.233461: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.233946: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.234279: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.234580: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.235302: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.235649: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.235928: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.236210: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.236497: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.236802: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.237108: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.237419: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.237746: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.238071: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.238404: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.238748: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.240460: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.240933: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.241344: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.241868: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.242252: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.242531: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.242811: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.243095: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.243858: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.244213: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.244493: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.244773: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.245057: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.245343: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.246162: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.246591: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.246872: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.247152: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.247492: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.248138: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.248582: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.249021: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.249406: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.249970: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.250396: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.250990: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.251452: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.252026: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.252518: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.253006: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.253455: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.253760: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.254429: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.254957: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.255390: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.255867: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+2018-03-02 11:52:16.256557: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\framework\op_kernel.cc:1192] Invalid argument: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+Traceback (most recent call last):
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\client\session.py", line 1323, in _do_call
+    return fn(*args)
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\client\session.py", line 1302, in _run_fn
+    status, run_metadata)
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\framework\errors_impl.py", line 473, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+	 [[Node: first_CCNN/conv4/weights/read/_1163 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device_incarnation=1, tensor_name="edge_958_first_CCNN/conv4/weights/read", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\User\Desktop\LiClipse Workspace\CCNN+\src\main.py", line 44, in <module>
+    s.train(args)
+  File "D:\User\Desktop\LiClipse Workspace\CCNN+\src\temp.py", line 46, in train
+    self.train_all(args)    
+  File "D:\User\Desktop\LiClipse Workspace\CCNN+\src\temp.py", line 416, in train_all
+    _,total_loss,summary=self.sess.run([self.optimizer.apply_gradients(grads_and_vars),self.loss,self.summary_op],{self.learning_rate:lr})
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\client\session.py", line 889, in run
+    run_metadata_ptr)
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\client\session.py", line 1120, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\client\session.py", line 1317, in _do_run
+    options, run_metadata)
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\client\session.py", line 1336, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+	 [[Node: first_CCNN/conv4/weights/read/_1163 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device_incarnation=1, tensor_name="edge_958_first_CCNN/conv4/weights/read", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"]()]]
+
+Caused by op 'gt1', defined at:
+  File "D:\User\Desktop\LiClipse Workspace\CCNN+\src\main.py", line 42, in <module>
+    load_first_model=args.load_first_model)
+  File "D:\User\Desktop\LiClipse Workspace\CCNN+\src\temp.py", line 31, in __init__
+    self.first_CCNN=CCNN(sess,load_model=self.load_first_model,patch_size=self.patch_size,batch_size=self.batch_size,isTraining=self.train_first_model,version=self.first_CCNN_version,model_name=first_CCNN_model_path)
+  File "D:\User\Desktop\LiClipse Workspace\CCNN+\src\model.py", line 36, in __init__
+    self.build()
+  File "D:\User\Desktop\LiClipse Workspace\CCNN+\src\model.py", line 46, in build
+    self.CCNN_build()
+  File "D:\User\Desktop\LiClipse Workspace\CCNN+\src\model.py", line 127, in CCNN_build
+    self.gt = tf.placeholder(tf.float32, [None,1,1, 1], name='gt1')
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\ops\array_ops.py", line 1599, in placeholder
+    return gen_array_ops._placeholder(dtype=dtype, shape=shape, name=name)
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\ops\gen_array_ops.py", line 3090, in _placeholder
+    "Placeholder", dtype=dtype, shape=shape, name=name)
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\framework\ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "D:\Python\Python36\lib\site-packages\tensorflow\python\framework\ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'gt1' with dtype float and shape [?,1,1,1]
+	 [[Node: gt1 = Placeholder[dtype=DT_FLOAT, shape=[?,1,1,1], _device="/job:localhost/replica:0/task:0/device:GPU:0"]()]]
+	 [[Node: first_CCNN/conv4/weights/read/_1163 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device_incarnation=1, tensor_name="edge_958_first_CCNN/conv4/weights/read", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"]()]]

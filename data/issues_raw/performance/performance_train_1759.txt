@@ -1,0 +1,64 @@
+[WIP] CuDNN Batch Normalization Op
+
+This pull request is a WIP for adding a cudnn batchnorm op that works on NCHW data layout. Others and myself (#1502) have noticed very poor performance. Currently, the code is very rough and is just enough to do performance evaluations.
+Code used to create the following numbers can be found here (https://gist.github.com/lukemetz/bdb58d2f006b64fe234cb04f7f0e8185). I tested 3 variations: current batch norm implementation plus moments in NHWC (tf_NHWC), current batch norm implementation and moments in NCHW (tf_NCHW), and my proposed op in NCHW format (cudnn_NCHW). All tests done were done on a 980, and the number listed is time taken for 100 iterations computing forward and backward passes.
+
+
+
+Shape
+tf_NHWC
+tf_NCHW
+cudnn_NCHW
+percent faster tf_NHWC
+percent faster tf_NCWH
+
+
+
+
+(32, 8, 8, 32)
+125.5 ms
+196.8 ms
+85.6 ms
+47%
+130%
+
+
+(128, 4, 4, 32)
+133.4 ms
+171.7 ms
+77.1 ms
+73%
+123%
+
+
+(256, 16, 16, 32)
+648.7 ms
+4624.5 ms
+388.6 ms
+67%
+1090%
+
+
+(128, 64, 64, 32)
+4900.5 ms
+37107.5 ms
+3011.5 ms
+63 %
+1132%
+
+
+(128, 128, 128, 32)
+19087.1 ms
+171175.2 ms
+11815.6 ms
+62%
+1349%
+
+(Note:  in my experience it is faster to transpose batchnorm transpose instead of using NCHW moments and batchnorm.)
+When testing on an largish net on a single GPU, there are also performance improvements. My test network is an 8 layer residual-like network on 32x32 images with batchsize 128.
+NCHW batchnorm and HCHW convs: approximately 2700 examples a second.
+NHWC with Tensorflow implementation and NHWC convs: approximately 1900 examples a second.
+(Note: this difference is in large part to do with using NCHW convolutions with no transposes, but this was not possible before a fast NCHW batchnorm.)
+The one odd thing I have encountered is that performance takes a hit when using multiple GPUs with data parallelism. . . It is actually slower than using a single GPU. If anybody has an idea as to why, or solutions, I would love to know. To my knowledge each GPU has one cuda stream so the cudnn locks shouldn't interfere with each other ???
+If the concept behind this PR looks good, let me know. I wanted to share results early but there is a still a lot to do in terms of cleanup/standardization, error checking, testing, and documentation as well as a front end python api.
+Thanks, all. Any comments appreciated.

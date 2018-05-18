@@ -1,0 +1,102 @@
+Issue in understanding tf.record and tf-slim. (I couldn't find Documentation)
+
+I am trying to fine-tune inceptionv3 model using slim tensorflow library.
+I tried to read source code (no proper documentation) and figured out few things and I am able to fine-tune it and save the checkpoint. However, I am unable to understand certain things while writing the code for it.   Here are the steps I followed
+
+I created a tf.record for my training data which is fine, now I am reading the data using the below code.
+[
+
+import tensorflow as tf
+  import tensorflow.contrib.slim.nets as nets
+  import tensorflow.contrib.slim as slim
+  import matplotlib.pyplot as plt
+  import numpy as np
+  
+  # get the data and labels here
+  
+  data_path = '/home/sfarkya/nvidia_challenge/datasets/detrac/train1.tfrecords'
+  
+  # Training setting
+  num_epochs = 100
+  initial_learning_rate = 0.0002
+  learning_rate_decay_factor = 0.7
+  num_epochs_before_decay = 5
+  num_classes = 5980
+  
+  # load the checkpoint
+  model_path = '/home/sfarkya/nvidia_challenge/datasets/detrac/inception_v3.ckpt'
+  
+  # log directory
+  log_dir = '/home/sfarkya/nvidia_challenge/datasets/detrac/fine_tuned_model'
+  
+  with tf.Session() as sess:
+      feature = {'train/image': tf.FixedLenFeature([], tf.string),
+                 'train/label': tf.FixedLenFeature([], tf.int64)}
+  
+      # Create a list of filenames and pass it to a queue
+      filename_queue = tf.train.string_input_producer([data_path], num_epochs=1)
+  
+      # Define a reader and read the next record
+      reader = tf.TFRecordReader()
+      _, serialized_example = reader.read(filename_queue)
+  
+      # Decode the record read by the reader
+      features = tf.parse_single_example(serialized_example, features=feature)
+  
+      # Convert the image data from string back to the numbers
+      image = tf.decode_raw(features['train/image'], tf.float32)
+  
+      # Cast label data into int32
+      label = tf.cast(features['train/label'], tf.int32)
+  
+      # Reshape image data into the original shape
+      image = tf.reshape(image, [128, 128, 3])
+  
+      # Creates batches by randomly shuffling tensors
+      images, labels = tf.train.shuffle_batch([image, label], batch_size=64, capacity=128, num_threads=2,
+                                              min_after_dequeue=64)](url)
+
+Now I am finetuning the model using slim and this is the code.
+  init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+    sess.run(init_op)
+
+    # Create a coordinator and run all QueueRunner objects
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
+
+    # load model
+
+    # load the inception model from the slim library - we are using inception v3
+    #inputL = tf.placeholder(tf.float32, (64, 128, 128, 3))
+
+    img, lbl = sess.run([images, labels])
+    one_hot_labels = slim.one_hot_encoding(lbl, num_classes)
+
+    with slim.arg_scope(slim.nets.inception.inception_v3_arg_scope()):
+        logits, inceptionv3 = nets.inception.inception_v3(inputs=img, num_classes=5980, is_training=True,
+                                                          dropout_keep_prob=.6)
+
+    # Restore convolutional layers:
+
+    variables_to_restore = slim.get_variables_to_restore(exclude=['InceptionV3/Logits', 'InceptionV3/AuxLogits'])
+    init_fn = slim.assign_from_checkpoint_fn(model_path, variables_to_restore)
+
+    # loss function
+    loss = tf.losses.softmax_cross_entropy(onehot_labels=one_hot_labels, logits = logits)
+    total_loss = tf.losses.get_total_loss()
+
+    # train operation
+    train_op = slim.learning.create_train_op(total_loss + loss, optimizer= tf.train.AdamOptimizer(learning_rate=1e-4))
+
+    print('Im here')
+    # Start training.
+    slim.learning.train(train_op, log_dir, init_fn=init_fn, save_interval_secs=20, number_of_steps= 10)
+
+Now I have few questions about the code, which I am quite unable to figure out. Once, the code reaches slim.learning.train I don't see anything printing however, it's training, I can see in the log. Now,
+
+How do I give the number of epochs to the code? Right now it's running step by step with each step has batch_size = 64.
+How do I make sure that in the code tf.train.shuffle_batch I am not repeating my images and I am training over the whole dataset?
+How can I print the loss values while it's training?
+If I create a validation set then how can I switch betweem training the model and validation?
+
+Thanks for the help!

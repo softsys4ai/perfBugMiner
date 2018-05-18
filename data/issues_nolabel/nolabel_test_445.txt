@@ -1,0 +1,80 @@
+tensorflow in armv7l
+
+Hi,
+I've cross-compiled tensorflow for armv7l and generated a wheel successfully however when deploying it into an embedded board with the same architecture (e.g.: Raspberry Pi 2), i get the following when executing https://github.com/aymericdamien/TensorFlow-Examples/blob/master/examples/1%20-%20Introduction/helloworld.py:
+erle@erle-brain-2 ~/TensorFlow-Examples/examples/1 - Introduction $ python helloworld.py 
+I tensorflow/core/common_runtime/local_device.cc:40] Local device intra op parallelism threads: 4
+pure virtual method called
+terminate called without an active exception
+I tensorflow/core/common_runtime/direct_session.cc:60] Direct session inter op parallelism threads: 4
+Aborted
+
+Digging a bit more:
+erle@erle-brain-2 ~/TensorFlow-Examples/examples/1 - Introduction $ gdb -ex r --args python helloworld.py
+GNU gdb (Raspbian 7.7.1+dfsg-5) 7.7.1
+Copyright (C) 2014 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "arm-linux-gnueabihf".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+<http://www.gnu.org/software/gdb/documentation/>.
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from python...(no debugging symbols found)...done.
+Starting program: /usr/bin/python helloworld.py
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/arm-linux-gnueabihf/libthread_db.so.1".
+
+Program received signal SIGILL, Illegal instruction.
+0x73f1cd08 in ?? () from /usr/lib/arm-linux-gnueabihf/libcrypto.so.1.0.0
+(gdb) bt
+#0  0x73f1cd08 in ?? () from /usr/lib/arm-linux-gnueabihf/libcrypto.so.1.0.0
+#1  0x73f193f4 in OPENSSL_cpuid_setup () from /usr/lib/arm-linux-gnueabihf/libcrypto.so.1.0.0
+#2  0x76fdf058 in call_init (l=<optimized out>, argc=2, argv=0x7efff184, env=0x7efff190) at dl-init.c:78
+#3  0x76fdf134 in _dl_init (main_map=main_map@entry=0x8e9268, argc=2, argv=0x7efff184, env=0x7efff190) at dl-init.c:126
+#4  0x76fe36b4 in dl_open_worker (a=<optimized out>) at dl-open.c:577
+#5  0x76fdeef0 in _dl_catch_error (objname=0x76fdeef0 <_dl_catch_error+112>, objname@entry=0x7effcc04, errstring=0x76ff6510, errstring@entry=0x7effcc08, 
+    mallocedp=0x7effcc04, mallocedp@entry=0x7effcc03, operate=0x7effcc03, args=args@entry=0x7effcc0c) at dl-error.c:187
+#6  0x76fe2da4 in _dl_open (file=0x9094e0 "/usr/lib/python2.7/lib-dynload/_hashlib.arm-linux-gnueabihf.so", mode=-2147483646, 
+    caller_dlopen=0x10aa94 <_PyImport_GetDynLoadFunc+272>, nsid=-2, argc=2, argv=0x7efff184, env=0x7efff190) at dl-open.c:661
+#7  0x76f66ba8 in dlopen_doit (a=0x7effce58) at dlopen.c:66
+#8  0x76fdeef0 in _dl_catch_error (objname=0x76fdeef0 <_dl_catch_error+112>, errstring=0x76ff6510, mallocedp=0x4e93a4, operate=0x4e93a0, args=0x7effce58)
+    at dl-error.c:187
+#9  0x76f672a8 in _dlerror_run (operate=0x76f66b28 <dlopen_doit>, args=args@entry=0x7effce58) at dlerror.c:163
+#10 0x76f66c74 in __dlopen (file=<optimized out>, mode=<optimized out>) at dlopen.c:87
+#11 0x0010aa94 in _PyImport_GetDynLoadFunc ()
+#12 0x0010a338 in _PyImport_LoadDynamicModule ()
+#13 0x00067844 in ?? ()
+Backtrace stopped: previous frame identical to this frame (corrupt stack?)
+(gdb) Quit
+(gdb) quit
+A debugging session is active.
+
+cryt* libraries in the machine used to cross compile tensorflow:
+root@debian-arm:~/TensorFlow-Examples/examples/1 - Introduction# dpkg -l|grep crypt
+ii  libcryptsetup4:armhf          2:1.6.6-5                 armhf        disk encryption support - shared library
+ii  libgcrypt20:armhf             1.6.3-2                   armhf        LGPL Crypto library - runtime library
+ii  libhogweed2:armhf             2.7.1-5                   armhf        low level cryptographic library (public-key cryptos)
+ii  libk5crypto3:armhf            1.12.1+dfsg-19            armhf        MIT Kerberos runtime libraries - Crypto Library
+ii  libnettle4:armhf              2.7.1-5                   armhf        low level cryptographic library (symmetric and one-way cryptos)
+ii  openssl                       1.0.1k-3+deb8u1           armhf        Secure Sockets Layer toolkit - cryptographic utility
+ii  python-cryptography           0.6.1-1                   armhf        Python library exposing cryptographic recipes and primitives (Python 2)
+
+
+cryt* libraries in the target machine (Raspberry Pi 2):
+erle@erle-brain-2 ~/TensorFlow-Examples/examples/1 - Introduction $ dpkg -l|grep crypt
+ii  cryptsetup-bin                         2:1.6.6-5                                 armhf        disk encryption support - command line tools
+ii  libcryptsetup4:armhf                   2:1.6.6-5                                 armhf        disk encryption support - shared library
+ii  libgcrypt20:armhf                      1.6.3-2                                   armhf        LGPL Crypto library - runtime library
+ii  libhcrypto4-heimdal:armhf              1.6~rc2+dfsg-9+rpi1                       armhf        Heimdal Kerberos - crypto library
+ii  libhogweed2:armhf                      2.7.1-5                                   armhf        low level cryptographic library (public-key cryptos)
+ii  libk5crypto3:armhf                     1.12.1+dfsg-19                            armhf        MIT Kerberos runtime libraries - Crypto Library
+ii  libmhash2:armhf                        0.9.9.9-7                                 armhf        Library for cryptographic hashing and message authentication
+ii  libnettle4:armhf                       2.7.1-5                                   armhf        low level cryptographic library (symmetric and one-way crypos)
+ii  libpococrypto9                         1.3.6p1-5                                 armhf        C++ Portable Components (POCO) Crypto library
+ii  openssl                                1.0.1k-3+deb8u1                           armhf        Secure Sockets Layer toolkit - cryptographic utility

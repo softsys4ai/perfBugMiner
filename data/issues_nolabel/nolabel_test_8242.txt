@@ -1,0 +1,83 @@
+Operations used for inference are dropped by optimize_for_inference
+
+Inspired by the TensorFlow for Poets, I have been exporting models optimized for inference with the freeze_graph and optimize_for_inference. I have run into an issue where some of the nodes required for inference get dropped by optimize_for_inference. The most critical one being the output node being dropped, even though it was explicitly given to freeze_graph and optimize_for_inference (through the output_node_name/output_names).
+I think that might be related to the output node being a tf.identity (to give an explicit name to the result of a tf.layers for example).
+Minimal working example
+Here is a piece of code to create a very simple model, running on TensorFlow v.1.0.1.
+import tensorflow as tf
+
+l_input = tf.placeholder(tf.float32, shape=(None, 2), name='input')
+l_dense = tf.layers.dense(l_input, units=1, activation=None)
+l_output = tf.identity(l_dense, name='output')
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    saver = tf.train.Saver(tf.global_variables())
+    
+    # Save GraphDef
+    tf.train.write_graph(sess.graph_def, '.', 'graph.pb')
+    # Save Checkpoint
+    saver.save(sess, 'model.ckpt', write_meta_graph=False)
+I am exporting the model using the freeze_graph and optimize_for_inference tools, inspired by the TensorFlow for Poets post.
+bazel-bin/tensorflow/python/tools/freeze_graph --input_graph graph.pb --input_checkpoint model.ckpt --output_graph graph_frozen.pb --output_node_name=output
+
+bazel-bin/tensorflow/python/tools/optimize_for_inference --input graph_frozen.pb --output graph_optimized.pb --input_names=input --output_names=output
+
+I am using Python to load both of these models (graph_frozen.pb and graph_optimized.pb). The model defined by graph_frozen.pb works as expected, but the model defined by graph_optimized.pb is missing some operations (import/dense/BiasAdd and import/output).
+import tensorflow as tf
+import numpy as np
+
+# Data
+x = np.random.rand(3, 2)
+
+# Frozen Graph
+with tf.gfile.GFile('graph_frozen.pb', 'rb') as f:
+    graph_def_frozen = tf.GraphDef()
+    graph_def_frozen.ParseFromString(f.read())
+
+with tf.Graph().as_default() as graph:
+    l_output, = tf.import_graph_def(graph_def_frozen,
+        return_elements=['output:0'], 
+        name='import'
+    )
+    print('Operations in Frozen Graph:')
+    print([op.name for op in graph.get_operations()])
+    # >>> [u'import/input', u'import/dense/kernel',
+    #      u'import/dense/kernel/read', u'import/dense/bias',
+    #      u'import/dense/bias/read', u'import/dense/MatMul',
+    #      u'import/dense/BiasAdd', u'import/output']
+
+    l_input = graph.get_tensor_by_name('import/input:0')
+
+    with tf.Session(graph=graph) as sess:
+        sess.run(l_output, feed_dict={l_input: x})
+
+# Optimized Graph
+with tf.gfile.GFile('graph_optimized.pb', 'rb') as f:
+    graph_def_optimized = tf.GraphDef()
+    graph_def_optimized.ParseFromString(f.read())
+
+with tf.Graph().as_default() as graph:
+    # Using `return_elements=['output:0']` raises a ValueError
+    # ValueError: Requested return_element 'output:0' not found in graph_def.
+    tf.import_graph_def(graph_def_optimized, name='import')
+    print('Operations in Optimized Graph:')
+    print([op.name for op in graph.get_operations()])
+    # >>> [u'import/input', u'import/dense/kernel',
+    #      u'import/dense/bias', u'import/dense/MatMul']
+
+    l_input = graph.get_tensor_by_name('import/input:0')
+
+    # Raises a KeyError
+    # KeyError: "The name 'import/output:0' refers to a Tensor which does
+    # not exist. The operation, 'import/output', does not exist in the graph."
+    l_output = graph.get_tensor_by_name('import/output:0')
+    
+    with tf.Session(graph=graph) as sess:
+        sess.run(l_output, feed_dict={l_input: x})
+Environment info
+
+Operating System: OSX 10.11.1
+TensorFlow installed through pip (tensorflow-1.0.1-cp27-cp27m-macosx_10_11_x86_64.whl)
+TensorFlow v.1.0.1
+To export the models, I built freeze_graph and optimize_for_inference with bazel (version 0.4.3-homebrew) in 100552f

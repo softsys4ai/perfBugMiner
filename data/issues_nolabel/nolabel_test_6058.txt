@@ -1,0 +1,60 @@
+tf.cond() + tf.dynamic_rnn() gives AttributeError: 'NoneType' object has no attribute 'pivot'
+
+Environment info
+Operating System: ubuntu 14.04.5
+Installed version of CUDA and cuDNN: cuda7.5 + cuDNNv5
+Installed from pip package: python 2.7+0.11.0rc0
+Code
+import tensorflow as tf
+
+def linear(input_, output_size, scope, init_bias=0.0):
+    shape = input_.get_shape().as_list()
+    with tf.variable_scope(scope):
+        W = tf.get_variable("Matrix", [shape[-1], output_size], tf.float32, tf.random_normal_initializer(stddev=1.0 / math.sqrt(shape[-1])))
+    with tf.variable_scope(scope):
+        b = tf.get_variable("bias", [output_size], initializer=tf.constant_initializer(init_bias))
+    return tf.matmul(input_, W) + b
+
+batch_size = 64
+hidden_size = 300
+vocab_size = 10000
+
+session = tf.Session()
+source = tf.placeholder(tf.float32, [batch_size, 10, hidden_size])
+src_len = tf.placeholder(tf.int32, [batch_size])
+enc_holder = tf.placeholder(tf.float32, [batch_size, hidden_size])
+decode_mode = tf.placeholder(tf.bool)
+label = tf.placeholder(tf.int32, [batch_size])
+
+def encoder():
+    src_cell = tf.nn.rnn_cell.GRUCell(hidden_size)
+    src_init = src_cell.zero_state(batch_size, tf.float32)
+    src_hiddens, src_final = tf.nn.dynamic_rnn(src_cell, source, initial_state=src_init, sequence_length=src_len, scope="encoder")
+    return src_final
+
+decode_state = tf.cond(decode_mode, lambda:enc_holder, lambda:encoder())
+outputs = linear(decode_state, vocab_size, "output")
+loss = tf.nn.sparse_softmax_cross_entropy_with_logits(outputs, label)
+optimizer = tf.train.AdamOptimizer().minimize(loss)
+Error Message:
+Traceback (most recent call last):
+  File "issue.py", line 33, in <module>
+    optimizer = tf.train.AdamOptimizer().minimize(loss)
+  File "~/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 196, in minimize
+    grad_loss=grad_loss)
+  File "~/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 253, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "~/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/gradients.py", line 469, in gradients
+    in_grads = _AsList(grad_fn(op, *out_grads))
+  File "~/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_grad.py", line 91, in _MergeGrad
+    return control_flow_ops._SwitchRefOrTensor(grad, grad_ctxt.pivot)
+AttributeError: 'NoneType' object has no attribute 'pivot'
+
+Note
+If I change the line
+decode_state = tf.cond(decode_mode, lambda:enc_holder, lambda:encoder())
+to
+decode_state = tf.cond(decode_mode, lambda:enc_holder, lambda:enc_holder)
+or
+decode_state = encoder()
+No error thrown. So I guess there must be something wrong when tf.cond() + tf.dynamic_rnn() is combined.

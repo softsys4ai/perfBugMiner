@@ -1,0 +1,77 @@
+Multi-core CPU performance dropped for MKL TF build
+
+System information
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04 LTS (64-bit)
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): Tensorflow r1.4
+Python version: Python version: 2.7.12
+Bazel version (if compiling from source): Bazel release 0.7.0
+GCC/Compiler version (if compiling from source): gcc (Ubuntu 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609
+CUDA/cuDNN version: no CUDA
+GPU model and memory: no GPU, but i7-6850K with 32Gb ddr4
+Exact command to reproduce: run the script below
+
+Tested on two machines:
+
+i7-6850K with 32Gb ddr4
+two Xeon x5650 with 24Gb ddr3
+
+Describe the problem
+When I build Tensorflow with MKL it dropped CPU performance in a strange way. Performance of individual core is much higher, but for multicore is much worse.
+It's a big epic bottleneck for my project and I can't solve it by myself. I will appreciate any help!
+
+TF installation from sources with MKL support
+
+
+Tensorflow r1.4 installed from source. Configured with jemalloc as malloc support and other configure settings ignored.
+$ bazel build --config=mkl -c opt //tensorflow/tools/pip_package:build_pip_package
+$ bazel-bin/tensorflow/tools/pip_package/build_pip_package /tmp/tensorflow_pkg
+$ pip install /tmp/tensorflow_pkg/tensorflow-1.4.1-cp27-cp27mu-linux_x86_64.whl
+
+Run tests:
+one core: 0.03s
+all cores: 0.12s
+
+TF installation with pip
+
+
+$ pip install tensorflow
+(tensorflow-1.4.1-cp27-cp27mu-manylinux1_x86_64.whl installed)
+
+Run tests:
+one core: 0.16s
+all cores: 0.03s
+Source code / logs
+    import time
+    import numpy as np
+    import tensorflow as tf
+
+    from tensorflow.contrib import slim
+    from tensorflow.contrib.slim.python.slim.nets.inception_v1 import inception_v1, inception_v1_arg_scope
+
+
+    input_shape = (1, 224, 224, 3)
+    features = tf.placeholder(tf.float32, input_shape)
+
+    with slim.arg_scope(inception_v1_arg_scope()):
+        predictions, end_points = inception_v1(features, is_training=False)
+
+    # remove to utilize all cores
+    session_conf = tf.ConfigProto(intra_op_parallelism_threads=1,
+                                  inter_op_parallelism_threads=1)
+
+    with tf.Session(config=session_conf) as sess:
+        sess.run(tf.global_variables_initializer())
+        sess.run(tf.local_variables_initializer())
+
+        images = np.random.random(input_shape)
+        consumption = []
+        for i in range(10):
+            tick = time.time()
+            sess.run(predictions, feed_dict={features: images})
+            consumption.append(time.time() - tick)
+
+        print np.mean(consumption)

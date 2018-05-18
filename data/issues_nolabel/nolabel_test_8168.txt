@@ -1,0 +1,67 @@
+tf.case evaluating all outputs when using batches (?)
+
+Hello,
+I may be missing something here, but I couldn't find any useful information on the documentation, so I'm posting this behavior as a bug, hoping someone can clarify what's going on. Questions at the end of this issue
+Operating System: Debian 4.8.15-2
+Installed version of CUDA and cuDNN: CUDA 8, cuDNN 5
+python3 -c "import tensorflow; print(tensorflow.version)": 1.0.0
+Reproducible example
+import tensorflow as tf
+
+a = ([tf.constant(i) for i in range(2)],[tf.constant(i) for i in range(2)])
+b = ([tf.constant(i) for i in range(2)],[tf.constant(i) for i in range(2)])
+
+q1 = tf.train.slice_input_producer(a, num_epochs=3, shuffle=True, capacity=4)
+q2 = tf.train.batch(q1, batch_size=2, num_threads=1, enqueue_many=False, capacity=4, allow_smaller_final_batch=True)
+
+q3 = tf.train.slice_input_producer(b, num_epochs=1, shuffle=True, capacity=4)
+q4 = tf.train.batch(q3, batch_size=2, num_threads=1, enqueue_many=False, capacity=4, allow_smaller_final_batch=True)
+
+q4p = [tf.Print(q4[0], ['q4a']), tf.Print(q4[1], ['q4b'])]
+q2p = [tf.Print(q2[0], ['q2a']), tf.Print(q2[1], ['q2b'])]
+
+def get_op1():
+	print('call1')
+	return tf.Print(q2p, ['op1'])
+
+def get_op2():
+	print('call2')
+	return tf.Print(q4p, ['op2'])
+
+switcher = tf.placeholder(tf.bool)
+test = tf.case([(switcher, get_op1)], default=get_op2, exclusive=True)
+
+init = [tf.global_variables_initializer(), tf.local_variables_initializer()]
+sess = tf.Session()
+coord = tf.train.Coordinator()
+sess.run(init)
+threads = tf.train.start_queue_runners(coord=coord, sess=sess)
+
+ignore = sess.run(test, feed_dict={switcher: True})
+
+wait = input("So far, so good. We're evaluating q1/q2, but now q3/q4 will run out of examples. Press enter to continue.")
+
+ignore = sess.run(test, feed_dict={switcher: True})
+
+Output
+call2
+call2
+call1
+[None, None]
+I tensorflow/core/kernels/logging_ops.cc:79] [q4b]
+I tensorflow/core/kernels/logging_ops.cc:79] [q2a]
+I tensorflow/core/kernels/logging_ops.cc:79] [q4a]
+I tensorflow/core/kernels/logging_ops.cc:79] [q2b]
+I tensorflow/core/kernels/logging_ops.cc:79] [op1]
+(some warnings/errors)
+So far, so good. We're evaluating q1/q2, but now q3/q4 will run out of examples. Press enter to continue. (enter pressed)
+(big errors, queue is empty)
+
+Questions
+
+Why is get_op2() called 2 times before init?
+Why are there so many messages after the first sess.run(test...)? And why do they say OutOfRange, when I have enough examples in the queue? (I can only imagine it's because the threads feeding the queue are dying, but weird nevertheless)
+Although op2 is not printed, q4a and q4b are, and they shouldn't, since we're evaluating q2. This led me to believe examples are being pulled from q4 even though I didn't ask for them, and that is why the second sess.run(test...) crashes : no more examples in q4.
+
+It seems tf.case is evaluating everything (weirdly, without printing op2), because q4 goes to exhaustion without being used at all. I am using this system to switch between train/validation sets, but I'm being restricted by the amount of images in validation, which doesn't make any sense. So far I can only imagine either there is a bizarre bug on tf.case or I misunderstood something. Could you clarify this please?
+Thanks in advance.

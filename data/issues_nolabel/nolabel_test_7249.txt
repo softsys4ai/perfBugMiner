@@ -1,0 +1,60 @@
+ValueError: Only call `sigmoid_cross_entropy_with_logits` with named arguments (labels=..., logits=..., ...)
+
+OS:
+macOS 10.12, CUDA 8.0 / cudnn 5, GeForce GTX 780
+Tensorflow version:
+0.12.head, build from source with CUDA 8 support. Is working!
+
+Problem:
+Trying to run the code of this project (written for tensorflow 0.10 – and i have 0.12):
+https://github.com/david-gpu/srez
+And am getting the following error:
+Traceback (most recent call last):
+  File "srez_main.py", line 190, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python3.5/site-packages/tensorflow/python/platform/app.py", line 44, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "srez_main.py", line 187, in main
+    _train()
+  File "srez_main.py", line 168, in _train
+    gene_loss = srez_model.create_generator_loss(disc_fake_output, gene_output, train_features)
+  File "/Users/david/github/image-manipulation/srez/srez_model.py", line 452, in create_generator_loss
+    cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(disc_output, tf.ones_like(disc_output))
+  File "/usr/local/lib/python3.5/site-packages/tensorflow/python/ops/nn_impl.py", line 147, in sigmoid_cross_entropy_with_logits
+    _sentinel, labels, logits)
+  File "/usr/local/lib/python3.5/site-packages/tensorflow/python/ops/nn_ops.py", line 1535, in _ensure_xent_args
+    "named arguments (labels=..., logits=..., ...)" % name)
+ValueError: Only call `sigmoid_cross_entropy_with_logits` with named arguments (labels=..., logits=..., ...)
+
+The file which generates the "ValueError: Only call sigmoid_cross_entropy_with_logits with named arguments (labels=..., logits=..., ...)" error contains this code:
+def create_generator_loss(disc_output, gene_output, features):
+    # I.e. did we fool the discriminator?
+    cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(disc_output, tf.ones_like(disc_output))
+    gene_ce_loss  = tf.reduce_mean(cross_entropy, name='gene_ce_loss')
+
+    # I.e. does the result look like the feature?
+    K = int(gene_output.get_shape()[1])//int(features.get_shape()[1])
+    assert K == 2 or K == 4 or K == 8    
+    downscaled = _downscale(gene_output, K)
+    
+    gene_l1_loss  = tf.reduce_mean(tf.abs(downscaled - features), name='gene_l1_loss')
+
+    gene_loss     = tf.add((1.0 - FLAGS.gene_l1_factor) * gene_ce_loss,
+                           FLAGS.gene_l1_factor * gene_l1_loss, name='gene_loss')
+    
+    return gene_loss
+
+def create_discriminator_loss(disc_real_output, disc_fake_output):
+    # I.e. did we correctly identify the input as real or not?
+    cross_entropy_real = tf.nn.sigmoid_cross_entropy_with_logits(disc_real_output, tf.ones_like(disc_real_output))
+    disc_real_loss     = tf.reduce_mean(cross_entropy_real, name='disc_real_loss')
+    
+    cross_entropy_fake = tf.nn.sigmoid_cross_entropy_with_logits(disc_fake_output, tf.zeros_like(disc_fake_output))
+    disc_fake_loss     = tf.reduce_mean(cross_entropy_fake, name='disc_fake_loss')
+
+    return disc_real_loss, disc_fake_loss
+The project was written for tensorflow 0.10 and i already had to change a deprecated function name.
+What do i need to change in
+tf.nn.sigmoid_cross_entropy_with_logits(disc_output, tf.ones_like(disc_output))
+to get rid of the error?
+Thanks!

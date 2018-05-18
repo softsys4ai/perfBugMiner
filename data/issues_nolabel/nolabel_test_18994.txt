@@ -1,0 +1,54 @@
+[r1.7][TensorRT] Will it be able to use TRT to optimized the GraphDef that gained from a TF saved_model?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Red Hat 4.8.5-16, Linux version 3.10.0-693.5.2.el7.x86_64
+TensorFlow installed from (source or binary): pip (python 2.7)
+TensorFlow version (use command below): tensorflow-gpu==1.7.0
+Python version:  python 2.7
+Bazel version (if compiling from source): NA
+GCC/Compiler version (if compiling from source): gcc 5.3
+CUDA/cuDNN version: CUDA9.0, cuDNN7.0.5
+GPU model and memory: Tesla P4, 8GB
+Exact command to reproduce: NA
+
+Describe the problem
+I tried to load the saved_model and optimize it by integrated TensorRT to do the prediction. The TensorRT will optimize the GraphDef and eventually get about 50% throughput speed-up. I verified this on frozen model, but when trying to apply that on the saved_model, I encountered an error during the graph conversion like below:
+2018-05-01 11:36:30.553143: I tensorflow/core/grappler/devices.cc:51] Number of eligible GPUs (core count >= 8): 1
+2018-05-01 11:36:41.562979: W tensorflow/contrib/tensorrt/convert/convert_nodes.cc:2524] Type conversion failed for InceptionV3/Conv2d_2a_3x3/BatchNorm/moving_mean
+2018-05-01 11:36:41.563063: W tensorflow/contrib/tensorrt/convert/convert_graph.cc:412] subgraph conversion error for subgraph_index:0 due to: "Invalid argument: Unsupported data type float_ref" SKIPPING......( 803 nodes)
+Tensor("input:0", shape=(?, 299, 299, 3), dtype=float32)
+
+I printed out the GraphDef but not found key name "float_ref", so not quite sure how to address this issue.
+Source code / logs
+Some essential part of my script:
+    with tf.Graph().as_default():                                                                                                            
+        with tf.Session(graph=tf.Graph()) as sess:
+            if args.image:
+                import numpy as np
+                func = TestKit.preprocess_func['tensorflow'][args.network]
+                img = func(args.image)
+                img = np.expand_dims(img, axis = 0)                                                                  
+            inp, out = importer.import_graph_def(graph_def=sess.graph_def, return_elements=['input','InceptionV3/Logits/SpatialSqueeze'])
+            t0 = time.time()                                                                                                                                   
+            print sess.graph_def
+            f32_graph = trt.create_inference_graph(    #<<<<< Breakpoint
+                input_graph_def=sess.graph_def,
+                #outputs=[logits],                                                                                                                                              
+                outputs=['InceptionV3/Logits/SpatialSqueeze'],
+                #  max_batch_size = int(input_dims[0]),                                                                                                                         
+                max_batch_size = 1,
+                max_workspace_size_bytes=1 << 20,
+                precision_mode="FP32",  # TRT Engine precision "FP32","FP16" or "INT8"                                                                                          
+                minimum_segment_size=2  # minimum number of nodes in an engine      
+            )                                                                                                                                         
+        features_tensor = sess.graph.get_tensor_by_name("InceptionV3/Logits/SpatialSqueeze:0")
+        data_input = sess.graph.get_tensor_by_name("input:0")
+        print data_input
+    init_g = tf.global_variables_initializer()
+    init_l = tf.local_variables_initializer()
+    g = ops.Graph()
+
+Any idea will be welcome.
+Thanks,

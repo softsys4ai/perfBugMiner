@@ -1,0 +1,45 @@
+Is my code right to use batch normalization layers in tensorflow?
+
+I have two inputs: qi_pos & qi_neg with the same shape. They should be processed by the two mlp layers, and finally get two results which acts as score. Here is my codes:
+  self.mlp1_pos  =    nn_layers.full_connect_(qi_pos,        256, activation='relu', use_bn = None, keep_prob=self.keep_prob,  name = 'deep_mlp_1')
+  self.mlp2_pos  =    nn_layers.full_connect_(self.mlp1_pos, 128,  activation='relu', use_bn = True, keep_prob=self.keep_prob,  name = 'deep_mlp_2')
+  self.pos_pair_sim = nn_layers.full_connect_(self.mlp2_pos,  1,  activation=None, use_bn = True, keep_prob=self.keep_prob,  name = 'deep_mlp_3')
+  tf.get_variable_scope().reuse_variables()
+  self.mlp1_neg  =    nn_layers.full_connect_(qi_neg,        256, activation='relu', use_bn = None, keep_prob=self.keep_prob,  name = 'deep_mlp_1')
+  self.mlp2_neg  =    nn_layers.full_connect_(self.mlp1_neg, 128,  activation='relu', use_bn = True, keep_prob=self.keep_prob,  name = 'deep_mlp_2')
+  self.neg_pair_sim = nn_layers.full_connect_(self.mlp2_neg,  1,  activation=None, use_bn = True, keep_prob=self.keep_prob,  name = 'deep_mlp_3')
+
+I use BN layer to normalize the nodes in hidden layers:
+def full_connect_(inputs, num_units, activation=None, use_bn = None, keep_prob = 1.0, name='full_connect_'):
+  with tf.variable_scope(name):
+    shape = [inputs.get_shape()[-1], num_units]
+    weight = weight_variable(shape)
+    bias = bias_variable(shape[-1])
+    outputs_ = tf.matmul(inputs, weight) + bias
+    if use_bn:
+        outputs_ = tf.contrib.layers.batch_norm(outputs_, center=True, scale=True, is_training=True,decay=0.9,epsilon=1e-5, scope='bn')
+    if activation=="relu":
+      outputs = tf.nn.relu(outputs_)
+    elif activation == "tanh":
+      outputs = tf.tanh(outputs_)
+    elif activation == "sigmoid":
+      outputs = tf.nn.sigmoid(outputs_)
+    else:
+      outputs = outputs_
+    return  outputs
+
+   with tf.name_scope('predictions'):
+      self.sim_diff = self.pos_pair_sim - self.neg_pair_sim # shape = (batch_size, 1)
+      self.preds = tf.sigmoid(self.sim_diff) # shape = (batch_size, 1)
+      self.infers = self.pos_pair_sim
+
+Below is the loss definition.It seems all right.
+with tf.name_scope('predictions'):
+sim_diff = pos_pair_sim - neg_pair_sim
+predictions = tf.sigmoid(sim_diff)
+self.infers = pos_pair_sim
+loss and optim
+with tf.name_scope('loss'):
+self.loss = nn_layers.cross_entropy_loss_with_reg(self.labels, self.preds)
+tf.summary.scalar('loss', self.loss)
+I am not sure whether I have use the BN layers in right way. I mean that the BN parameters are derived from the hidden units from the two separate parts, which are based on qi_pos and qi_neg tensors as inputs. Anyway, anyone could help check it ?

@@ -1,0 +1,70 @@
+Windows cuptiActivityRegisterCallbacks not found
+
+Environment info
+Operating System:
+Windows 10 64bit
+Python 3.5.2
+nVidia GTX 760 (compute capability 3.0)
+Installed version of CUDA and cuDNN:
+CUDA 8.0
+cuDNN 5.1
+A link to the pip package you installed:
+Latest nightly build (at least latest I could find)
+http://ci.tensorflow.org/job/nightly-win/DEVICE=gpu,OS=windows/lastSuccessfulBuild/artifact/*zip*/archive.zip
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.12.head
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+This is the complete code:
+import tensorflow as tf
+import matplotlib.image as mpimg
+from tensorflow.python.client import timeline
+
+filename = 'data/MarshOrchid.jpg'
+image = mpimg.imread(filename)
+
+with tf.device('/gpu:0'):
+    x = tf.Variable(image, name='x', dtype=tf.float32)
+    y = tf.transpose(x, perm=[1, 0, 2])
+    model = tf.global_variables_initializer()
+
+with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
+    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+    sess.run(model)
+    result = sess.run(y, options=run_options, run_metadata=run_metadata)
+
+    tl = timeline.Timeline(run_metadata.step_stats)
+    ctf = tl.generate_chrome_trace_format()
+    with open('timeline.json', 'w') as f:
+        f.write(ctf)
+
+
+What other attempted solutions have you tried?
+Works OK:
+tf.RunOptions.SOFTWARE_TRACE
+Don't work:
+tf.RunOptions.HARDWARE_TRACE
+tf.RunOptions.FULL_TRACE
+Logs or other output that would be helpful
+"C:\Program Files\Python35\python.exe" E:/Documents/Workspace/machine_learning/test/test-1.py
+E c:\tf_jenkins\home\workspace\nightly-win\device\gpu\os\windows\tensorflow\core\common_runtime\gpu\gpu_device.cc:586] Could not identify NUMA node of /job:localhost/replica:0/task:0/gpu:0, defaulting to 0.  Your kernel may not have been built with NUMA support.
+Device mapping:
+/job:localhost/replica:0/task:0/gpu:0 -> device: 0, name: GeForce GTX 760, pci bus id: 0000:01:00.0
+x: (Variable): /job:localhost/replica:0/task:0/gpu:0
+x/read: (Identity): /job:localhost/replica:0/task:0/gpu:0
+transpose: (Transpose): /job:localhost/replica:0/task:0/gpu:0
+x/Assign: (Assign): /job:localhost/replica:0/task:0/gpu:0
+init: (NoOp): /job:localhost/replica:0/task:0/gpu:0
+transpose/perm: (Const): /job:localhost/replica:0/task:0/gpu:0
+x/initial_value: (Const): /job:localhost/replica:0/task:0/gpu:0
+F c:\tf_jenkins\home\workspace\nightly-win\device\gpu\os\windows\tensorflow\core\platform\default\gpu\cupti_wrapper.cc:59] Check failed: ::tensorflow::Status::OK() == (::tensorflow::Env::Default()->GetSymbolFromLibrary( GetDsoHandle(), kName, &f)) (OK vs. Not found: cuptiActivityRegisterCallbacks not found)could not find cuptiActivityRegisterCallbacksin libcupti DSO
+
+Process finished with exit code -1073740791 (0xC0000409)
+
+I suppressed "I" messages with "TF_CPP_MIN_LOG_LEVEL = 1". I don't know if I'm missing something but it seems like it's trying to load libcupti.so from "c:\tf_jenkins..." path witch doesn't exist. I do have:
+"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v8.0\bin"
+"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v8.0\libnvvp"
+in path environment variable. Program works OK. It just gives me an error when I try to trace execution.
+I don't know if I messed up something or is this a bug.

@@ -1,0 +1,98 @@
+Scope issue with Adam after upgrade from 0.12 to 1.0.0.
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+None directly related, but indirectly this one is related: #7462 (but seems to be code error).
+THE ISSUE:
+My code works with r0.12:
+git@github.com:pseudotensor/temporal_autoencoder.git (branch timeconv, commit 3cfc56566931ad592eef7a9b7ddbb32f3346819c, i.e. just below HEAD)
+Bit Fails with r1.0.0 (after using upgrade script):
+git@github.com:pseudotensor/temporal_autoencoder.git (branch timeconv, commit f7ee1e5325797173cc26e132f152f969839f9975, i.e. HEAD)
+Error:
+Traceback (most recent call last):
+File "main.py", line 476, in 
+tf.app.run()
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 44, in run
+_sys.exit(main(_sys.argv[:1] + flags_passthrough))
+File "main.py", line 473, in main
+autoencode(continuetrain=continuetrain,modeltype=modeltype,num_balls=num_balls)
+File "main.py", line 273, in autoencode
+train_operation = tf.train.AdamOptimizer(FLAGS.adamvar).minimize(loss)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 289, in minimize
+name=name)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 403, in apply_gradients
+self._create_slots(var_list)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/adam.py", line 117, in _create_slots
+self._zeros_slot(v, "m", self._name)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 647, in _zeros_slot
+named_slots[var] = slot_creator.create_zeros_slot(var, op_name)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/slot_creator.py", line 123, in create_zeros_slot
+colocate_with_primary=colocate_with_primary)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/slot_creator.py", line 101, in create_slot
+return _create_slot_var(primary, val, '')
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/slot_creator.py", line 55, in _create_slot_var
+slot = variable_scope.get_variable(scope, initializer=val, trainable=False)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.py", line 988, in get_variable
+custom_getter=custom_getter)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.py", line 890, in get_variable
+custom_getter=custom_getter)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.py", line 348, in get_variable
+validate_shape=validate_shape)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.py", line 333, in _true_getter
+caching_device=caching_device, validate_shape=validate_shape)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.py", line 657, in _get_single_variable
+"VarScope?" % name)
+ValueError: Variable cnn_1_cnn/weights/Adam/ does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+Hypothesis1:  Something changed in how tensorflow1.0.0 handles scope so that Adam for some reason thinks it should be under cnn_1_cnn_weights scope, when should be in base scope
+Hypothesis2: Code was "wrong" to begin with, even though worked perfectly with r0.12, but now stricter tensorflow 1.0.0 checks led to this message.
+In either case, I'm not sure what to do, but I'll continue checking that what I'm doing is correct as per examples at: https://www.tensorflow.org/programmers_guide/variable_scope
+Environment info
+Operating System:
+Ubuntu 16.04.2 LTS (latest updates/upgrades)
+Installed version of CUDA and cuDNN:
+ls -l $CUDA_HOME/lib64/libcud*
+-rwxr-xr-x 1 root root    558720 Jan 29 16:23 /usr/local/cuda/lib64/libcudadevrt.a*
+lrwxrwxrwx 1 root root        16 Jan 29 16:23 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0*
+lrwxrwxrwx 1 root root        19 Jan 29 16:23 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44*
+-rwxr-xr-x 1 root root    415432 Jan 29 16:23 /usr/local/cuda/lib64/libcudart.so.8.0.44*
+-rwxr-xr-x 1 root root    775162 Jan 29 16:23 /usr/local/cuda/lib64/libcudart_static.a*
+lrwxrwxrwx 1 jon  users       13 Jul 26  2016 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5*
+lrwxrwxrwx 1 jon  users       17 Jul 26  2016 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5*
+-rwxrwxr-x 1 jon  users 79337624 Jul 26  2016 /usr/local/cuda/lib64/libcudnn.so.5.1.5*
+-rwxrwxr-x 1 jon  users 69756172 Jul 26  2016 /usr/local/cuda/lib64/libcudnn_static.a*
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+jon@pseudotensor:/tensorflow$ cd ..
+jon@pseudotensor:$ python -c "import tensorflow; print(tensorflow.version)"
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+1.0.0
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+
+jon@pseudotensor:~/tensorflow$ git rev-parse HEAD
+29a6b46
+
+The output of bazel version
+
+jon@pseudotensor:~/tensorflow$ bazel version
+.....................
+Build label: 0.4.4
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Feb 1 18:54:21 2017 (1485975261)
+Build timestamp: 1485975261
+Build timestamp as int: 1485975261
+I also tried the latest nightly build: https://ci.tensorflow.org/view/Nightly/job/nightly-matrix-linux-gpu/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON2,label=gpu-linux/lastSuccessfulBuild/artifact/pip_test/whl/tensorflow_gpu-1.0.0-cp27-none-linux_x86_64.whl  and this fails in the same way as my compiled-from-source version.
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Step 1) git@github.com:pseudotensor/temporal_autoencoder.git
+Step 2) cd temporal_autoencoder
+Step 3) git checkout timecov
+Step 4) python main.py
+What other attempted solutions have you tried?
+Checking scope makes sense, googling, looking at existing issues.  No positive result.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).

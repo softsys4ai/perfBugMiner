@@ -1,0 +1,84 @@
+Estimators cause Out of range warning on FIFOQueue and fail to run all training steps
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): 4.13.12-1-ARCH
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): 1.4.0
+Python version: 3.6.3
+CUDA/cuDNN version: 9.0.176-4/7.0.3-1
+GPU model and memory: 1080/1070
+
+Describe the problem
+Trying to use estimators with a trivially small network fails to train for more than one step due to FIFOQueue closing with insufficient elements.
+Source code / logs
+In the following example I try to train a single neuron for 1000 steps at a time.  set_size changes the training set's size.  With set_size=1000 I would expect training to complete 1000 steps however only 8 steps are completed and an Out of range warning is printed.  Setting set_size to 10 leads to only a single step being completed, I would expect at least 10 steps to complete, possible all 1000 if the input_fn is called repeatedly to fill a queue(not sure what default behaviour is supposed to be).  Setting set_size=1000000 allows the entire 1k training steps to complete.
+code:
+import numpy as np
+import tensorflow as tf
+import models
+
+set_size = 1000
+
+params = {"learning_rate":0.00001}
+
+def model_fn(features, labels, mode, params):
+    """Build model for Estimator here"""
+    ####Build graph
+    input_layer = tf.reshape(features["x"],[-1,1])
+    hidden_layer = tf.layers.dense(input_layer,1,activation=tf.nn.relu)
+    output_layer = hidden_layer
+    
+    ####Prediction mode
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        predictions = {"y":output_layer}
+        return tf.estimator.EstimatorSpec(mode=mode,predictions=predictions)
+    
+    loss = tf.losses.mean_squared_error(labels,output_layer)
+    
+    ####Training mode
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=params["learning_rate"])
+        train_op = optimizer.minimize(loss=loss,global_step=tf.train.get_global_step())
+        return tf.estimator.EstimatorSpec(
+            mode=mode,
+            loss=loss,
+            train_op=train_op)
+    
+    ####Eval mode
+    elif mode == tf.estimator.ModeKeys.EVAL:
+        eval_metric_ops = {"rmse":tf.metrics.root_mean_squared_error(labels,output_layer)}
+        return tf.estimator.EstimatorSpec(
+            mode=mode,
+            loss=loss,
+            eval_metric_ops=eval_metric_ops)
+        
+
+input_fn = tf.estimator.inputs.numpy_input_fn(
+    x={'x':np.array([[float(x)] for x in range(set_size)])},
+    y=np.array([[float(x*2)] for x in range(set_size)]),
+    shuffle=False
+)
+
+
+def test():
+    nn = tf.estimator.Estimator(model_fn=model_fn, params=params)
+    for x in range(5):
+        print('START LOOP:',x)
+        a = nn.train(input_fn=input_fn,steps=1000)
+        print('--------')
+        b = nn.evaluate(input_fn=input_fn)
+        print("----STATS----",b)
+    print('Done loop')
+    c = nn.predict(input_fn=input_fn)
+    #print('Predictions:',[x for x in c])
+
+if __name__ == "__main__":
+    test()
+
+warning:
+
+2017-11-23 11:23:52.370395: W tensorflow/core/framework/op_kernel.cc:1192] Out of range: FIFOQueue '_2_enqueue_input/fifo_queue' is closed and has insufficient elements (requested 128, current size 0)
+[[Node: fifo_queue_DequeueUpTo = QueueDequeueUpToV2[component_types=[DT_INT64, DT_DOUBLE, DT_DOUBLE], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/device:CPU:0"](enqueue_input/fifo_queue, fifo_queue_DequeueUpTo/n)]]
+
+Edit: This may be due to something in tf.estimator.inputs.numpy_input_fn as creating the input_fn manually does not cause the warning and early termination of training.

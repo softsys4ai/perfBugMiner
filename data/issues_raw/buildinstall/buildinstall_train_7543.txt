@@ -1,0 +1,89 @@
+Error on building with non-system GCC: "gcc: error trying to exec 'as': execvp: No such file or directory"
+
+Description
+Hi,
+I am trying to compile TensorFlow with non-default GCC. 5.4.0, and get follwing error:
+gcc: error trying to exec 'as': execvp: No such file or directory
+ERROR: /local/cvsupport/_bazel_cvsupport/c61d2ac558d6d30ef2694b9af72e4144/external/nccl_archive/BUILD.bazel:33:1: output 'external/nccl_archive/_objs/nccl/external/nccl_archive/src/libwrap.cu.pic.o' was not created.
+ERROR: /local/cvsupport/_bazel_cvsupport/c61d2ac558d6d30ef2694b9af72e4144/external/nccl_archive/BUILD.bazel:33:1: not all outputs were created or valid.
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+
+Environment
+$ cat /etc/redhat-release 
+CentOS Linux release 7.3.1611 (AltArch)
+
+$ uname -a
+Linux power004.cluster 3.10.0-514.6.1.el7.ppc64le #1 SMP Thu Jan 19 14:34:54 GMT 2017 ppc64le ppc64le ppc64le GNU/Linux
+
+$ ls -l /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcud*
+-rw-r--r-- 1 root root 559800 Oct 29 10:22 /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Feb 14 23:26 /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root     19 Feb 14 23:26 /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.54
+-rwxr-xr-x 1 root root 476024 Oct 29 10:22 /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcudart.so.8.0.54
+-rw-r--r-- 1 root root 966166 Oct 29 10:22 /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcudart_static.a
+
+$ git rev-parse HEAD
+16485a3fb5ffcbaa244e55c388e43279d2770982
+
+$ bazel version
+INFO: $TEST_TMPDIR defined: output root default is '/local/cvsupport'.
+................
+Build label: 0.4.4- (@non-git)
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Feb 9 23:48:24 2017 (1486684104)
+Build timestamp: 1486684104
+Build timestamp as int: 1486684104
+
+Steps to reproduce
+$ module display gcc/5.4.0
+-------------------------------------------------------------------
+/trinity/shared/modulefiles/cv-ppc64le/gcc/5.4.0:
+
+module-whatis    loads the gcc/5.4.0 environment 
+prepend-path     PATH /trinity/shared/apps/cv-ppc64le/gcc/5.4.0/bin 
+prepend-path     LD_LIBRARY_PATH /trinity/shared/apps/cv-ppc64le/gcc/5.4.0/lib 
+prepend-path     LD_LIBRARY_PATH /trinity/shared/apps/cv-ppc64le/gcc/5.4.0/lib64 
+prepend-path     LIBRARY_PATH /trinity/shared/apps/cv-ppc64le/gcc/5.4.0/lib 
+prepend-path     LIBRARY_PATH /trinity/shared/apps/cv-ppc64le/gcc/5.4.0/lib64 
+prepend-path     C_INCLUDE_PATH /trinity/shared/apps/cv-ppc64le/gcc/5.4.0/include 
+prepend-path     INCLUDE /trinity/shared/apps/cv-ppc64le/gcc/5.4.0/include 
+prepend-path     CPATH /trinity/shared/apps/cv-ppc64le/gcc/5.4.0/include 
+prepend-path     MANPATH /trinity/shared/apps/cv-ppc64le/gcc/5.4.0/share/man 
+
+$ cat ../build_vars.sh
+export TEST_TMPDIR=/local/cvsupport
+export PYTHON_BIN_PATH=/usr/bin/python3.4
+export PYTHON_LIB_PATH=/usr/lib64/python3.4/site-packages
+export TF_NEED_JEMALLOC=1
+export TF_NEED_GCP=0
+export TF_NEED_HDFS=0
+export TF_NEED_OPENCL=0
+export TF_NEED_CUDA=1
+export TF_ENABLE_XLA=0
+export CC_OPT_FLAGS="-march=native"
+export TF_CUDA_VERSION=8.0
+export TF_CUDNN_VERSION=5.1.10
+export TF_CUDA_COMPUTE_CAPABILITIES=6.0
+export GCC_HOST_COMPILER_PATH=/trinity/shared/apps/cv-ppc64le/gcc/5.4.0/bin/gcc
+export CUDA_TOOLKIT_PATH=/trinity/shared/apps/cv-ppc64le/nvidia/cuda/${TF_CUDA_VERSION}
+export CUDNN_INSTALL_PATH=/trinity/shared/apps/cv-ppc64le/nvidia/cudnn/${TF_CUDA_VERSION}
+
+$ module load nvidia/cuda/8.0 nvidia/cudnn/8.0 gcc/5.4.0 bazel/0.4.4
+$ source ../build_vars.sh
+$ ./configure
+$ bazel build -c opt --config=cuda //tensorflow/tools/pip_package:build_pip_package
+
+Investigation
+as is installed on my system, but wasn't built by gcc-5.4, I am using system-default one:
+$ rpm -qf /usr/bin/as
+binutils-2.25.1-22.base.el7.ppc64le
+
+Digging into stace output, It seems like builder is trying to find as using some incorrect assumptions, and failed:
+134767 execve("external/local_config_cuda/crosstool/clang/bin/../../../cuda/bin/../open64/bin/as", ["as", "-I", ".", "-I", "external/nccl_archive/src", "-I", "external/local_config_cuda/cross"..., "-a64", "-mppc64", "-many", "-mlittle", "-o", "bazel-out/local_linux-py3-opt/bi"..., "/tmp/cc7ZvHce.s"], [/* 19 vars */] <unfinished ...>
+134767 <... execve resumed> )           = -1 ENOENT (No such file or directory)
+134767 execve("external/local_config_cuda/crosstool/clang/bin/../../../cuda/bin/../nvvm/bin/as", ["as", "-I", ".", "-I", "external/nccl_archive/src", "-I", "external/local_config_cuda/cross"..., "-a64", "-mppc64", "-many", "-mlittle", "-o", "bazel-out/local_linux-py3-opt/bi"..., "/tmp/cc7ZvHce.s"], [/* 19 vars */] <unfinished ...>
+134767 <... execve resumed> )           = -1 ENOENT (No such file or directory)
+134767 execve("external/local_config_cuda/crosstool/clang/bin/../../../cuda/bin/as", ["as", "-I", ".", "-I", "external/nccl_archive/src", "-I", "external/local_config_cuda/cross"..., "-a64", "-mppc64", "-many", "-mlittle", "-o", "bazel-out/local_linux-py3-opt/bi"..., "/tmp/cc7ZvHce.s"], [/* 19 vars */] <unfinished ...>
+134767 <... execve resumed> )           = -1 ENOENT (No such file or directory)
+134767 execve("/trinity/shared/apps/cv-ppc64le/gcc/5.4.0/bin/as", ["as", "-I", ".", "-I", "external/nccl_archive/src", "-I", "external/local_config_cuda/cross"..., "-a64", "-mppc64", "-many", "-mlittle", "-o", "bazel-out/local_linux-py3-opt/bi"..., "/tmp/cc7ZvHce.s"], [/* 19 vars */] <unfinished ...>
+134767 <... execve resumed> )           = -1 ENOENT (No such file or directory)

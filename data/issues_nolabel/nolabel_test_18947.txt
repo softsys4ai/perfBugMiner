@@ -1,0 +1,62 @@
+tf.contrib.data.prefetch_to_device throws an error when used with tf.data.Iterator.from_structure
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.8.0
+Python version: 2.7.12
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+I'm using tf.data.Iterator.from_structure mechanism to switch between training/validation datasets during training
+However, when tf.contrib.data.prefetch_to_device is added at the end of the dataset pipeline, the code crashes with the following error:
+NotImplementedError: `prefetch_to_device()` must be the last transformation in a dataset pipeline.
+Explicit one shot iterator works fine
+Source code / logs
+with tf.Graph().as_default():
+    with tf.Session() as sess:
+        dataset = tf.data.Dataset.range(10).apply(tf.contrib.data.prefetch_to_device('/cpu:0'))
+
+        # 1) works fine
+        iterator = dataset.make_one_shot_iterator()
+        print sess.run(iterator.get_next())
+        
+        # 2) fails
+        iterator = tf.data.Iterator.from_structure((tf.int64), ([]))
+        sess.run(iterator.make_initializer(dataset))
+        print sess.run(iterator.get_next())
+
+0
+
+---------------------------------------------------------------------------
+NotImplementedError                       Traceback (most recent call last)
+<ipython-input-34-dbae58b82de0> in <module>()
+      6 
+      7         iterator = tf.data.Iterator.from_structure((tf.int64), ([]))
+----> 8         sess.run(iterator.make_initializer(dataset))
+      9         print sess.run(iterator.get_next())
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/data/ops/iterator_ops.pyc in make_initializer(self, dataset, name)
+    306     with ops.colocate_with(self._iterator_resource):
+    307       return gen_dataset_ops.make_iterator(
+--> 308           dataset._as_variant_tensor(), self._iterator_resource, name=name)  # pylint: disable=protected-access
+    309 
+    310   def get_next(self, name=None):
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/data/python/ops/prefetching_ops.pyc in _as_variant_tensor(self)
+    289     # TODO(mrry): Investigate support for chaining further transformations after
+    290     # the prefetch, including GPU support.
+--> 291     raise NotImplementedError("`prefetch_to_device()` must be the last "
+    292                               "transformation in a dataset pipeline.")
+    293 
+
+NotImplementedError: `prefetch_to_device()` must be the last transformation in a dataset pipeline.
+
+I guess, prefetching is still under development? Is there a temporary workaround for this kind of scenario?

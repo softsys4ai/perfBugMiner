@@ -1,0 +1,55 @@
+Discussion Online Expanding the Number of Distributed Training Workers
+
+Tensorflow distributed training adds a new feature:
+When we use the distributed tensorflow training task, if the number of workers is too small to start, but not very good convergence. . Especially when used in conjunction with k8s, then tensorflow should support the online expansion of the current number of workers training tasks.
+My idea is: Use python interface, notify the ps server, the new worker task_index and worker addr. such as:
+We pre-start the cluster as follows:
+On ps0.example.com:
+$ Python trainer.py 
+     --ps_hosts = ps0.example.com: 2222, ps1.example.com: 2222 
+     --worker_hosts = worker0.example.com: 2222, worker1.example.com: 2222 
+     --job_name = ps --task_index = 0
+On ps1.example.com:
+$ Python trainer.py 
+     --ps_hosts = ps0.example.com: 2222, ps1.example.com: 2222 
+     --worker_hosts = worker0.example.com: 2222, worker1.example.com: 2222 
+     --job_name = ps --task_index = 1
+On worker0.example.com:
+$ Python trainer.py 
+     --ps_hosts = ps0.example.com: 2222, ps1.example.com: 2222 
+     --worker_hosts = worker0.example.com: 2222, worker1.example.com: 2222 
+     --job_name = worker --task_index = 0
+On worker1.example.com:
+$ Python trainer.py 
+     --ps_hosts = ps0.example.com: 2222, ps1.example.com: 2222 
+     --worker_hosts = worker0.example.com: 2222, worker1.example.com: 2222 
+     --job_name = worker --task_index = 1
+We started the original two ps server ,,, two workers. .
+Now let's add a third worker
+Import tensorflow as tf
+Def main (_):
+    With tf.Session ('grpc: //ps0.example.com:2222') as sess:
+        Sess.add_onlineworker (2, 'worker2.example.com: 2222')
+    With tf.Session ('grpc: //ps1.example.com:2222') as sess:
+        Sess.add_onlineworker (2, 'worker2.example.com: 2222')
+If name == "main":
+    Tf.app.run ()
+Just run this python script, and then start worker2.
+Worker2 startup script:
+$ Python trainer.py
+     --ps_hosts = ps0.example.com: 2222, ps1.example.com: 2222
+    --worker_hosts = worker0.example.com: 2222, worker1.example.com: 2222,
+     --worker2.example.com:2222 --job_name = worker --task_index = 2
+At this point you should be able to see the worker2 has started training.
+If ps0 or ps1 restart, it should be added worker2:
+$ Python trainer.py
+     --ps_hosts = ps0.example.com: 2222, ps1.example.com: 2222
+    --worker_hosts = worker0.example.com: 2222, worker1.example.com: 2222,
+     --worker2.example.com:2222 --job_name = ps --task_index = 0
+The design idea is as follows:
+
+Increase the number of workers online, only need to notify all of the ps server can be.
+Through the use of the python session interface, you can connect a different ps server, and then send an increase in worker instructions can be given to them.
+
+I've done this at https://github.com/ipdcode/tensorflow.
+Welcome to the official google and we discuss to see if there is a need to increase this feature.

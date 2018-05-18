@@ -1,0 +1,42 @@
+Android demo fails to build due to protobuf visibility error
+
+When running the instructions to build the Android demo with the latest open-source repo, a protobuf visibility error causes the build to fail.
+Steps to reproduce:
+
+On an Ubuntu system, git clone the repo following the install instructions.
+Run bazel build //tensorflow/examples/android:tensorflow_demo.
+
+Results:
+ERROR: /usr/local/google/home/petewarden/projects/tensorflow/tensorflow/core/BUILD:77:1: Target '//google/protobuf:cc_wkt_protos' is not visible from target '//tensorflow/core:protos_all_cc'. Check the visibility declaration of the former target if you think the dependency is legitimate.
+
+Notes:
+I think this might be a protobuf Bazel rule problem. I was able to fix it by patching google/protobuf/protobuf.bzl like so:
++++ b/protobuf.bzl
+@@ -132,6 +132,11 @@ def cc_proto_library(
+   if include != None:
+     includes = [include]
+
++  if "visibility" in kargs:
++    visibility = kargs["visibility"]
++  else:
++    visibility = None
++
+   if internal_bootstrap_hack:
+     # For pre-checked-in generated files, we add the internal_bootstrap_hack
+     # which will skip the codegen action.
+@@ -141,6 +146,7 @@ def cc_proto_library(
+         deps=[s + "_genproto" for s in deps],
+         includes=includes,
+         protoc=protoc,
++        visibility=visibility,
+     )
+     # An empty cc_library to make rule dependency consistent.
+     native.cc_library(
+@@ -157,6 +163,7 @@ def cc_proto_library(
+       protoc=protoc,
+       gen_cc=1,
+       outs=outs,
++      visibility=visibility,
+   )
+
+   if default_runtime and not default_runtime in cc_libs:

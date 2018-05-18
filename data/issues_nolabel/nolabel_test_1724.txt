@@ -1,0 +1,63 @@
+Updating ExponentialMovingAverage based on a condition
+
+Using tensorflow 0.7.1.
+I have followed issue #804 to make use of batch normalization with tensorflow. However, I struggle to get the snippet to work as expected and have nailed down the problem to something more concise.
+Let us assume we want to perform a moving average over incoming scalars; sometimes we want to update the statistics of that moving average, sometimes we don't. We will model that with a placeholder do_update, which we can set to True or False in the feed_dict passed to sess.run(...). Basically, this is the code from #804 but greatly simplified.
+import tensorflow as tf
+import numpy as np
+
+inpt = tf.Variable(np.array([1.]))
+do_update = tf.placeholder(tf.bool)
+
+ema = tf.train.ExponentialMovingAverage(.9)
+ema_assign = ema.apply([inpt])
+
+
+def update():
+    with tf.control_dependencies([ema_assign]):
+        return tf.identity(ema.average(inpt))      # note the identity.
+
+def no_update():
+    return ema.average(inpt)
+
+run = tf.python.control_flow_ops.cond(do_update, update, no_update)
+
+However, when I execute run updating will happen. It does not matter what the value of do_update is.
+print run.eval({inpt: np.array([2.]), do_update: True})
+print run.eval({inpt: np.array([2.]), do_update: True})
+print run.eval({inpt: np.array([2.]), do_update: True})
+
+# prints:
+# [ 1.10000002]
+# [ 1.19000004]
+# [ 1.27100006]
+
+print run.eval({inpt: np.array([2.]), do_update: False})
+print run.eval({inpt: np.array([2.]), do_update: False})
+print run.eval({inpt: np.array([2.]), do_update: False})
+
+# prints:
+# [ 1.34390007]
+# [ 1.40951008]
+# [ 1.46855908]
+
+Curiously, if I remove the tf.identity above in the definition of update, neither of them performs an update after starting a new session.
+print run.eval({inpt: np.array([2.]), do_update: True})
+print run.eval({inpt: np.array([2.]), do_update: True})
+print run.eval({inpt: np.array([2.]), do_update: True})
+
+# prints:
+# [ 1.]
+# [ 1.]
+# [ 1.]
+
+print run.eval({inpt: np.array([2.]), do_update: False})
+print run.eval({inpt: np.array([2.]), do_update: False})
+print run.eval({inpt: np.array([2.]), do_update: False})
+
+# prints:
+# [ 1.]
+# [ 1.]
+# [ 1.]
+
+This seems as uninteded behaviour to me, but maybe I am missing something.

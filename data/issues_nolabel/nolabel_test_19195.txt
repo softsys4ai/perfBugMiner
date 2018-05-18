@@ -1,0 +1,144 @@
+Build TF lite benchmark model failed
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Ubuntu 16.04
+TensorFlow installed from (source or binary):source
+TensorFlow version (use command below):('v1.7.0-3-g024aecf414', '1.7.0')
+Python version: Python 2.7.12
+Bazel version (if compiling from source):0.13.0
+GCC/Compiler version (if compiling from source):c++ (Ubuntu 5.4.0-6ubuntu1~16.04.9) 5.4.0 20160609
+CUDA/cuDNN version:No
+GPU model and memory:No
+Exact command to reproduce:
+
+I want to build tensorflow lite benchmark model for Android, so I change the WORKSPACE like follows:
+android_sdk_repository(
+    name = "androidsdk",
+    api_level = 26,
+    # Ensure that you have the build_tools_version below installed in the
+    # SDK manager as it updates periodically.
+    build_tools_version = "26.0.1",
+    # Replace with path to Android SDK on your system
+    path = "/home/libin11/Android/Sdk",
+)
+
+android_ndk_repository(
+    name="androidndk",
+    path="/home/libin11/opt/android-ndk-r14b/",
+    # This needs to be 14 or higher to compile TensorFlow.
+    # Please specify API level to >= 21 to build for 64-bit
+    # archtectures or the Android NDK will automatically select biggest
+    # API level that it supports without notice.
+    # Note that the NDK version is not the API level.
+    api_level=21)
+
+And then build:
+bazel build --config android_arm64 --config monolithic --cxxopt=-std=c++11 //tensorflow/contrib/lite/tools:benchmark_model
+
+But it failed after building awhile:
+ERROR: /home/libin11/workspace/tensorflow/tensorflow/contrib/lite/tools/BUILD:31:1: C++ compilation of rule '//tensorflow/contrib/lite/tools:benchmark_model' failed (Exit 1)
+tensorflow/contrib/lite/tools/benchmark_model.cc:306:37: error: unknown type name 'int64'; did you mean 'tensorflow::int64'?
+                      int num_runs, int64* total_time_us) {
+                                    ^~~~~
+                                    tensorflow::int64
+./tensorflow/core/platform/default/integral_types.h:27:19: note: 'tensorflow::int64' declared here
+typedef long long int64;
+                  ^
+tensorflow/contrib/lite/tools/benchmark_model.cc:425:3: error: unknown type name 'int64'; did you mean 'tensorflow::int64'?
+  int64 initialization_start_us = Env::Default()->NowMicros();
+  ^~~~~
+  tensorflow::int64
+./tensorflow/core/platform/default/integral_types.h:27:19: note: 'tensorflow::int64' declared here
+typedef long long int64;
+                  ^
+tensorflow/contrib/lite/tools/benchmark_model.cc:436:3: error: unknown type name 'int64'; did you mean 'tensorflow::int64'?
+  int64 initialization_end_us = Env::Default()->NowMicros();
+  ^~~~~
+  tensorflow::int64
+./tensorflow/core/platform/default/integral_types.h:27:19: note: 'tensorflow::int64' declared here
+typedef long long int64;
+                  ^
+tensorflow/contrib/lite/tools/benchmark_model.cc:447:3: error: unknown type name 'int64'; did you mean 'tensorflow::int64'?
+  int64 warmup_time_us = 0;
+  ^~~~~
+  tensorflow::int64
+./tensorflow/core/platform/default/integral_types.h:27:19: note: 'tensorflow::int64' declared here
+typedef long long int64;
+                  ^
+tensorflow/contrib/lite/tools/benchmark_model.cc:458:3: error: unknown type name 'int64'; did you mean 'tensorflow::int64'?
+  int64 no_stat_time_us = 0;
+  ^~~~~
+  tensorflow::int64
+./tensorflow/core/platform/default/integral_types.h:27:19: note: 'tensorflow::int64' declared here
+typedef long long int64;
+                  ^
+5 errors generated.
+Target //tensorflow/contrib/lite/tools:benchmark_model failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+INFO: Elapsed time: 332.588s, Critical Path: 68.13s
+INFO: 513 processes, local.
+FAILED: Build did NOT complete successfully
+
+So I change int64 from benchmark_model.cc to int64_t and rebuild..
+And it failed again:
+ERROR: /home/libin11/workspace/tensorflow/tensorflow/contrib/lite/tools/BUILD:31:1: Linking of rule '//tensorflow/contrib/lite/tools:benchmark_model' failed (Exit 1)
+bazel-out/arm64-v8a-opt/bin/tensorflow/core/libandroid_tensorflow_lib_lite.lo(logging.o): In function `tensorflow::internal::LogMessage::GenerateLogMessage()':
+/proc/self/cwd/tensorflow/core/platform/default/logging.cc:65: undefined reference to `__android_log_write'
+bazel-out/arm64-v8a-opt/bin/external/protobuf_archive/libprotobuf_lite.a(common.o): In function `google::protobuf::internal::DefaultLogHandler(google::protobuf::LogLevel, char const*, int, std::string const&)':
+/proc/self/cwd/external/protobuf_archive/src/google/protobuf/stubs/common.cc:142: undefined reference to `__android_log_write'
+/proc/self/cwd/external/protobuf_archive/src/google/protobuf/stubs/common.cc:150: undefined reference to `__android_log_write'
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+Target //tensorflow/contrib/lite/tools:benchmark_model failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+INFO: Elapsed time: 28.330s, Critical Path: 27.94s
+INFO: 5 processes, local.
+FAILED: Build did NOT complete successfully
+
+So I add "-llog" to benchmark_model's linkopts. Finally, it worked:
+$ bazel build --config android_arm64 --config monolithic --cxxopt=-std=c++11 //tensorflow/contrib/lite/tools:benchmark_model
+WARNING: /home/libin11/.cache/bazel/_bazel_libin11/ee99114ce55f575758aad31c3fa3e774/external/protobuf_archive/WORKSPACE:1: Workspace name in /home/libin11/.cache/bazel/_bazel_libin11/ee99114ce55f575758aad31c3fa3e774/external/protobuf_archive/WORKSPACE (@com_google_protobuf) does not match the name given in the repository's definition (@protobuf_archive); this will cause a build error in future versions
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:avgpooling_op.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:batch_util.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:bounds_check.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:cwise_ops.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:cwise_ops_common.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:cwise_ops_gradients.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:eigen_activations.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:eigen_attention.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:eigen_backward_cuboid_convolutions.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:eigen_backward_spatial_convolutions.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:eigen_cuboid_convolution.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:eigen_pooling.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:eigen_softmax.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:eigen_spatial_convolutions.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:eigen_volume_patch.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:fifo_queue.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:maxpooling_op.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:ops_util.cc' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:ops_util.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:padding_fifo_queue.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:pooling_ops_common.cc' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:pooling_ops_common.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:queue_base.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:queue_op.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/kernels:typed_queue.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/util/ctc:ctc_beam_entry.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/util/ctc:ctc_beam_scorer.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/util/ctc:ctc_beam_search.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/util/ctc:ctc_decoder.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/util/ctc:ctc_loss_util.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/util/tensor_bundle:naming.cc' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/util/tensor_bundle:naming.h' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/util/tensor_bundle:tensor_bundle.cc' directly. You should either move the file to this package or depend on an appropriate rule there
+WARNING: /home/libin11/workspace/tensorflow/tensorflow/core/BUILD:1245:12: in srcs attribute of cc_library rule //tensorflow/core:android_tensorflow_lib_lite: please do not import '//tensorflow/core/util/tensor_bundle:tensor_bundle.h' directly. You should either move the file to this package or depend on an appropriate rule there
+INFO: Analysed target //tensorflow/contrib/lite/tools:benchmark_model (1 packages loaded).
+INFO: Found 1 target...
+Target //tensorflow/contrib/lite/tools:benchmark_model up-to-date:
+  bazel-bin/tensorflow/contrib/lite/tools/benchmark_model
+INFO: Elapsed time: 23.555s, Critical Path: 18.58s
+INFO: 1 process, local.
+INFO: Build completed successfully, 2 total actions
+
+So my question is, is this the right way to build tensorflow lite benchmark model?

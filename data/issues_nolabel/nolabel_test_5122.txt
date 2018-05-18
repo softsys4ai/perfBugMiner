@@ -1,0 +1,100 @@
+custom CUDA op example returns random values
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Nothing
+Environment info
+Operating System:
+$ uname -a
+Linux n-62-18-47 2.6.32-642.6.1.el6.x86_64 #1 SMP Wed Oct 5 08:48:31 CDT 2016 x86_64 x86_64 x86_64 GNU/Linux
+
+Installed version of CUDA and cuDNN: CUDA: 8, cuDNN 5.1
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+$ ls -l /appl/cuda/8.0/lib64/libcud*
+-rw-r--r-- 1 sebo root 560184 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 sebo root     16 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 sebo root     19 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.27
+-rwxr-xr-x 1 sebo root 394472 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart.so.8.0.27
+-rw-r--r-- 1 sebo root 737516 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart_static.a
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD) 5a5a25e
+The output of bazel version
+
+$ bazel version
+Build label: 0.3.2- (@non-git)
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Fri Oct 21 15:09:04 2016 (1477062544)
+Build timestamp: 1477062544
+Build timestamp as int: 1477062544
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Using the CUDA example from: https://github.com/tensorflow/tensorflow/tree/r0.11/tensorflow/g3doc/how_tos/adding_an_op
+
+compile example
+
+export TF_INC=/zhome/ff/2/77654/stdpy3/lib/python3.5/site-packages/tensorflow/include
+
+nvcc -std=c++11 -c -o cuda_op_kernel.cu.o cuda_op_kernel.cu.cc \
+-I $TF_INC -D GOOGLE_CUDA=1 -x cu -Xcompiler -fPIC
+
+g++ -std=c++11 -shared -o cuda_op_kernel.so cuda_op_kernel.cc \
+cuda_op_kernel.cu.o -I $TF_INC -fPIC -L /appl/cuda/8.0/lib64 -L /appl/cudnn/v5.1-prod/lib64 -lcudart
+
+
+edit tensorflow.g3doc.how_tos.adding_an_op import cuda_op to import cuda_op in cuda_op_test.py.
+
+What other attempted solutions have you tried?
+
+I tried a non CUDA example, worked fine.
+I tried a diffrent cuda kernel (square operator) also failed.
+I added printf to the kernel launcher and made sure it was executed.
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+CUDA_VISIBLE_DEVICES=3 python3 cuda_op_test.py
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcurand.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:944] Found device 0 with properties:
+name: Tesla K40c
+major: 3 minor: 5 memoryClockRate (GHz) 0.745
+pciBusID 0000:02:00.0
+Total memory: 11.25GiB
+Free memory: 11.15GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:965] DMA: 0
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] 0:   Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:1034] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla K40c, pci bus id: 0000:02:00.0)
+Failed to get the number of CUDA devices: CUDA driver version is insufficient for CUDA runtime version
+not equal where =  (array([0, 1, 2, 3, 4]),)
+not equal lhs =  [ 280541332  143397048 2031878174 1533025280 1612453930]
+not equal rhs =  [6 5 4 3 2]
+F.
+======================================================================
+FAIL: test (__main__.AddOneTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "cuda_op_test.py", line 31, in test
+    self.assertAllEqual(result.eval(), [6, 5, 4, 3, 2])
+  File "/zhome/ff/2/77654/stdpy3/lib/python3.5/site-packages/tensorflow/python/framework/test_util.py", line 499, in assertAllEqual
+    np.testing.assert_array_equal(a, b)
+  File "/zhome/ff/2/77654/stdpy3/lib/python3.5/site-packages/numpy/testing/utils.py", line 813, in assert_array_equal
+    verbose=verbose, header='Arrays are not equal')
+  File "/zhome/ff/2/77654/stdpy3/lib/python3.5/site-packages/numpy/testing/utils.py", line 739, in assert_array_compare
+    raise AssertionError(msg)
+AssertionError:
+Arrays are not equal
+
+(mismatch 100.0%)
+ x: array([ 280541332,  143397048, 2031878174, 1533025280, 1612453930], dtype=int32)
+ y: array([6, 5, 4, 3, 2])
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.213s
+
+FAILED (failures=1)
+
+
+It looks like the output just contains random memory. Perhaps the GPU memory isn't copied back to the host memory.

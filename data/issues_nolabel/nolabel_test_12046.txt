@@ -1,0 +1,101 @@
+tf.scatter_update to variable pinned on GPU fails
+
+System information
+
+Linux Ubuntu 16.04
+tensorflow-gpu v1.2.0 binary installed from pip
+Python 3.5
+CUDA 8.0, cuDNN v5.1
+GeForce GTX 1080 Ti, 11GB
+A simple example I came up with which reproduces the error follows below:
+
+
+import tensorflow as tf
+with tf.device("/gpu:0"):
+    a = tf.Variable([1, 2, 3, 4, 5, 6, 7, 8])
+    c = tf.Variable([0, 0, 0, 0, 0, 0, 0, 0])
+    step_sos = tf.Variable([False, False, True, True, False, False, True, True])
+    write_ops = []
+    for b in range(8):
+        write_ops.append(tf.cond(step_sos[b], lambda: tf.scatter_update(a, b, 0), lambda: a))
+
+    with tf.control_dependencies(write_ops):
+       d = tf.assign(c, a)
+
+
+session_config = tf.ConfigProto(allow_soft_placement=False, log_device_placement=True)
+
+with tf.Session(config=session_config) as sess:
+    init_op = tf.global_variables_initializer()
+    sess.run(init_op)
+    sess.run(d)
+    print(sess.run(c))
+
+
+When setting allow_soft_placement=True the error is solved but the variable and some operations which are often used are placed in the CPU, which leads to fluctuating GPU utilization.
+Source code / logs
+Traceback (most recent call last):
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1139, in _do_call
+    return fn(*args)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1117, in _run_fn
+    self._extend_graph()
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1166, in _extend_graph
+    self._session, graph_def.SerializeToString(), status)
+  File "/usr/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Cannot assign a device for operation 'Variable_2': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+Colocation Debug Info:
+Colocation group had the following types and devices: 
+Assign: CPU 
+Identity: CPU 
+VariableV2: CPU 
+	 [[Node: Variable_2 = VariableV2[container="", dtype=DT_BOOL, shape=[8], shared_name="", _device="/device:GPU:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "scatter_test.py", line 20, in <module>
+    sess.run(init_op)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 789, in run
+    run_metadata_ptr)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 997, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1132, in _do_run
+    target_list, options, run_metadata)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1152, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Cannot assign a device for operation 'Variable_2': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+Colocation Debug Info:
+Colocation group had the following types and devices: 
+Assign: CPU 
+Identity: CPU 
+VariableV2: CPU 
+	 [[Node: Variable_2 = VariableV2[container="", dtype=DT_BOOL, shape=[8], shared_name="", _device="/device:GPU:0"]()]]
+
+Caused by op 'Variable_2', defined at:
+  File "scatter_test.py", line 7, in <module>
+    step_sos = tf.Variable([False, False, True, True, False, False, True, True])
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/ops/variables.py", line 200, in __init__
+    expected_shape=expected_shape)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/ops/variables.py", line 297, in _init_from_args
+    name=name)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/ops/state_ops.py", line 128, in variable_op_v2
+    shared_name=shared_name)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/ops/gen_state_ops.py", line 684, in _variable_v2
+    name=name)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2506, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/ylli/neuralattention/code/venv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1269, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Cannot assign a device for operation 'Variable_2': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+Colocation Debug Info:
+Colocation group had the following types and devices: 
+Assign: CPU 
+Identity: CPU 
+VariableV2: CPU 
+	 [[Node: Variable_2 = VariableV2[container="", dtype=DT_BOOL, shape=[8], shared_name="", _device="/device:GPU:0"]()]]

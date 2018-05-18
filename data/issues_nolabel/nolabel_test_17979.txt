@@ -1,0 +1,51 @@
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Invalid JPEG data or crop window, data size 15022
+
+On the terminal window, it runs fine when an image is passed to tensorflow for image object recognition using:
+python run.py http://image_url.jpg
+However, with JSON data that contains stream of imageURL, it failed with the following main error:
+InvalidArgumentError: Invalid JPEG data or crop window, data size 15022
+ [[Node: DecodeJpeg = DecodeJpeg[acceptable_fraction=1, channels=3, dct_method="", fancy_upscaling=true, ratio=1, try_recover_truncated=false, _device="/job:localhost/replica:0/task:0/device:CPU:0"](_arg_DecodeJpeg/contents_0_0)]]
+Caused by op u'DecodeJpeg'
+
+Another error encountered:
+ValueError: GraphDef cannot be larger than 2GB.
+Below is my tensorflow source code as a function(again it runs with single ImageUrl passed as parameter):
+import tensorflow as tf
+import sys
+import os
+import urllib2
+
+def tensorflow_pred(imageUrl):
+
+    #suppress TF log-info messages - remove to display TF logs 
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+    response = urllib2.urlopen(imageUrl)
+
+    image_data = response.read()
+
+    # Loads label file, strips off carriage return
+    label_lines = [line.rstrip() for line 
+                    in tf.gfile.GFile("./retrained_labels.txt")]
+
+    # Unpersists graph from file
+    with tf.gfile.FastGFile("./retrained_graph.pb", 'rb') as f:
+        graph_def = tf.GraphDef()
+        graph_def.ParseFromString(f.read())
+        _ = tf.import_graph_def(graph_def, name='')
+
+    with tf.Session() as sess:
+        # Feed the image_data as input to the graph and get first prediction
+        softmax_tensor = sess.graph.get_tensor_by_name('final_result:0')
+        
+        predictions = sess.run(softmax_tensor, \
+                {'DecodeJpeg/contents:0': image_data})
+        
+        # Sort to show labels of first prediction in order of confidence
+        top_k = predictions[0].argsort()[-len(predictions[0]):][::-1]
+        
+        for node_id in top_k:
+            classification = label_lines[node_id]
+            score = predictions[0][node_id]
+            if (score >=0.5):
+                return ('%s (score = %.5f)' % (classification, score))

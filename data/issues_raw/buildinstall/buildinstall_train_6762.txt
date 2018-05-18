@@ -1,0 +1,23 @@
+configure assumes ldconfig can be called and that CuDNN is installed in a system library location
+
+The configure script calls "ldconfig" to locate the CuDNN library but this makes 2 assumptions that can be wrong:
+
+It assumes that "ldconfig" can be called. However, on some GNU/Linux systems such as openSUSE Leap 42.1, only root has it in their path. (On Leap 42.1, normal users get the desired output from "/sbin/ldconfig -p".)
+It assumes that the CuDNN library is installed in a system library location that is searched by ldconfig. However, users may install it in their home directory and use LD_LIBRARY_PATH to load it for various reasons. I, for example, was not fully satisfied from reading the licence terms that I am allowed to share the library with other users of the system and therefore did not install it system-wide as root.
+
+Severity is low as normally the CuDNN library location should be auto-detected from the CuDNN library path before "ldconfig" is tried.
+How to reproduce:
+
+git clone this repo on a system with ldconfig not in your PATH
+cd tensorflow and run ./configure
+when asked for the CuDNN path, enter a valid and readable path (to avoid other errors), for example /usr/bin, that does not contain CuDNN
+Error message: ./configure: line 337: ldconfig: command not found
+
+Workaround options:
+
+First double check the CuDNN library path (the default path suggests that the last component "lib64" or "lib" should be omitted) and verify that standard folder names are used under this location for library and header files, for example "lib64" and "include".
+If you can call /sbin/ldconfig and if CuDNN is in a standard system library location the user can temporarily add /sbin to their PATH before running "./configure"
+Edit the "configure" script to provide the location manually, for example CUDNN_PATH_FROM_LDCONFIG="$HOME/local/cuda/lib64/libcudnn.so"
+
+A fix should test whether "ldconfig" can be called before trying to call it. Also try /sbin/ldocnfig. Given that the library should normally be found already earlier in the code using the user-provided CuDNN path, a simple solution may be to set CUDNN_PATH_FROM_LDCONFIG to the empty string if ldconfig cannot be called.
+If you like to automate the locating of the library as much as possible, you could furthermore check all locations in LD_LIBRARY_PATH.

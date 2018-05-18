@@ -1,0 +1,56 @@
+Bug with cifar10 ?
+
+Hi everyone,
+I'm trying to make prediction with the cifar-10 model in /tensorflow/models/image/cifar10
+But it don't work.
+Here is the code I tried :
+from PIL import Image
+import tensorflow as tf
+from tensorflow.models.image.cifar10 import cifar10
+import itertools
+width = 24
+height = 24
+
+categories = [ "airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck" ]
+
+filename = "toto.jpg" # absolute path to input image
+im = Image.open(filename)
+im.save(filename, format='JPEG', subsampling=0, quality=100)
+x = tf.placeholder(tf.float32, [None, 24, 24, 3])
+logits = cifar10.inference(x)
+_, top_k_pred = tf.nn.top_k(logits, k=5)
+init_op = tf.initialize_all_variables()
+with tf.Session() as sess:
+ # Restore variables from training checkpoint.
+    input_img = tf.image.decode_jpeg(tf.read_file(filename), channels=3)
+    tf_cast = tf.cast(input_img, tf.float32)
+    float_image = tf.image.resize_image_with_crop_or_pad(tf_cast, height, width)
+    images = tf.expand_dims(float_image, 0)
+    i = images.eval()
+    print (i)
+    sess.run(init_op, feed_dict={x: i})
+    variable_averages = tf.train.ExponentialMovingAverage(
+        cifar10.MOVING_AVERAGE_DECAY)
+    variables_to_restore = variable_averages.variables_to_restore()
+    saver = tf.train.Saver(variables_to_restore)
+    ckpt = tf.train.get_checkpoint_state('/tmp/cifar10_train')
+    if ckpt and ckpt.model_checkpoint_path:
+        print("ckpt.model_checkpoint_path ", ckpt.model_checkpoint_path)
+        saver.restore(sess, ckpt.model_checkpoint_path)
+    else:
+        print('No checkpoint file found')
+        exit(0)
+    _, top_indices = sess.run([_, top_k_pred])
+    for key, value in enumerate(top_indices[0]):
+        print (categories[value] + ", " + str(_[0][key]))
+
+And here is the error I got :
+InvalidArgumentError (see above for traceback): Assign requires shapes of both tensors to match. lhs shape= [18,384] rhs shape= [2304,384]
+     [[Node: save/Assign_5 = Assign[T=DT_FLOAT, _class=["loc:@local3/weights"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/cpu:0"](local3/weights, save/RestoreV2_5)]]
+
+So, it seems than Tensorflow is not happy because the shape of the single image I want to predict [1,24,24,3] don't fit with the shape of a normal batch [128,24,24,3]
+But, for one single image, it's necessary like this.
+Maybe I miss something but I don't get it... Or maybe it's a bug ?
+I already asked the question on stackoverflow in first place, here : http://stackoverflow.com/questions/40266275/tensorflow-and-cifar-10-testing-single-images#
+But since it could be a bug, and nobody answered, I post here..
+Thanks in advance!

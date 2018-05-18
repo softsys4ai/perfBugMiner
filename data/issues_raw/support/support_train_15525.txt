@@ -1,0 +1,130 @@
+Op type not registered HashTableV2 error while deploying model in cloud ml
+
+Problem while deploying model in Tensorflow 1.4.
+Code :
+def model_fn(features, labels, mode):
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        tf.keras.backend.set_learning_phase(True)
+    else:
+        tf.keras.backend.set_learning_phase(False)
+
+    input_feature = features['x']
+    table = lookup.index_table_from_file(vocabulary_file='vocab.txt', num_oov_buckets=1, default_value=-1)
+    text = tf.squeeze(input_feature, [1])
+    words = tf.string_split(text)
+    dense_words = tf.sparse_tensor_to_dense(words, default_value=PADWORD)
+    numbers = table.lookup(dense_words)
+    padding = tf.constant([[0, 0], [0, MAX_LEN]])
+    padded = tf.pad(numbers, padding)
+    sliced = tf.slice(padded, [0, 0], [-1, MAX_LEN])
+    print('words_sliced={}'.format(words))
+
+    embeds = tf.keras.layers.Embedding(MAX_FEATURES+1, 128, input_length=MAX_LEN)(sliced)
+
+    print('words_embed={}'.format(embeds))
+    f1 = tf.keras.layers.Dropout(0.2)(embeds)
+    f1 = tf.keras.layers.Conv1D(filters, kernel_size, padding='valid', activation='relu', strides=1)(f1)
+    f1 = tf.keras.layers.GlobalAveragePooling1D()(f1)
+    f1 = tf.keras.layers.Dense(hidden_dims)(f1)
+    f1 = tf.keras.layers.Dropout(0.5)(f1)
+    f1 = tf.keras.layers.Activation('relu')(f1)
+    logits = tf.keras.layers.Dense(11)(f1)
+
+    predictions_dict = {
+        'class': tf.argmax(logits, 1),
+        'prob': tf.nn.softmax(logits)
+    }
+
+    '''prediction_output = tf.estimator.export.PredictOutput({"classes": tf.argmax(input=logits, axis=1),
+                                                           "probabilities": tf.nn.softmax(logits,
+                                                                                          name="softmax_tensor")})'''
+
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions_dict, export_outputs={
+            'prediction': tf.estimator.export.PredictOutput(predictions_dict)
+        })
+
+    loss = tf.losses.sparse_softmax_cross_entropy(labels, logits=logits)
+
+    if mode == tf.contrib.learn.ModeKeys.TRAIN:
+        train_op = tf.contrib.layers.optimize_loss(loss, tf.contrib.framework.get_global_step(), optimizer='Adam',
+                                                   learning_rate=0.001)
+        return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
+
+    eval_metrics_ops = {
+        'accuracy': tf.metrics.accuracy(labels=labels, predictions=predictions_dict['class']),
+        'precision': tf.metrics.precision(labels=labels, predictions=predictions_dict['class']),
+        'recall': tf.metrics.recall(labels=labels, predictions=predictions_dict['class'])
+    }
+    return tf.estimator.EstimatorSpec(mode=mode, loss=loss, eval_metric_ops=eval_metrics_ops)
+
+def get_train_record(record):
+    vector = tf.decode_csv(record, DEFAULTS, use_quote_delim=True)
+    return vector[1:], vector[0]
+
+def preprocess(text):
+    text = text.lower()
+    result = ' '.join([word for word in text.split() if word not in (stop_words)])
+    return result
+
+
+def build_vocab(file_name, vocab_file_name):
+    df = pd.read_csv(file_name, header=None, sep=',', skiprows=[1], names=['product', 'consumer_complaint_narrative'])
+    df['consumer_complaint_narrative'] = df['consumer_complaint_narrative'].apply(preprocess)
+    print(df['consumer_complaint_narrative'][0])
+    vocab_processor = tflearn.preprocessing.VocabularyProcessor(max_document_length=MAX_FEATURES, min_frequency=10,
+                                                                tokenizer_fn=tflearn.preprocessing.tokenizer)
+    vocab_processor.fit(df['consumer_complaint_narrative'])
+    with gfile.Open(vocab_file_name, 'wb') as f:
+        f.write("{}\n".format(PADWORD))
+        for word, index in vocab_processor.vocabulary_._mapping.items():
+            f.write("{}\n".format(word))
+    nwords = len(vocab_processor.vocabulary_)
+    print('{} words into {}'.format(nwords, vocab_file_name))
+
+
+def input_fn(file_name, batch_size, repeat_count, shuffle=False):
+    def _input_fn():
+        data_set = tf.data.TextLineDataset(filenames=file_name)
+        data_set = data_set.map(get_train_record)
+        if shuffle:
+            data_set = data_set.shuffle(shuffle)
+        data_set = data_set.repeat(repeat_count)
+        batch = data_set.batch(batch_size)
+        iterator = batch.make_one_shot_iterator()
+        features, labels = iterator.get_next()
+        return {'x': features}, labels
+
+    return _input_fn()
+
+
+def get_train_spec(file_name, batch_size, repeat_count):
+    return tf.estimator.TrainSpec(input_fn=lambda: input_fn(file_name, batch_size, repeat_count, shuffle=True), max_steps=1000)
+
+
+def get_test_spec(file_name, batch_size, repeat_count=1):
+    return tf.estimator.EvalSpec(input_fn=lambda: input_fn(file_name, batch_size, repeat_count, shuffle=True))
+
+
+def serving_input_fn():
+    feature_tensor = tf.placeholder(tf.string, [None])
+    # features = tf.py_func(preprocess, [feature_tensor], tf.string)
+    features = tf.expand_dims(feature_tensor, -1)
+    return tf.estimator.export.ServingInputReceiver({'x': features}, {'x': features})
+
+finance_classifier = tf.estimator.Estimator(model_fn=model_fn, model_dir=model_dir)
+
+print('\n Training .....')
+finance_classifier.train(input_fn=lambda: input_fn('dataset/train.csv', batch_size, repeat_count=5, shuffle=True))
+
+print('\n Evaluating.....')
+eval_results = finance_classifier.evaluate(input_fn=lambda: input_fn('dataset/valid.csv', batch_size, repeat_count=1,
+                                                                  shuffle=False))
+for key in eval_results:
+    print(" {} was {}".format(key, eval_results[key]))
+
+print('\n Exporting')
+exported_model_dir = finance_classifier.export_savedmodel(model_dir, serving_input_receiver_fn=serving_input_fn)
+decoded_model_dir = exported_model_dir.decode("utf-8")
+Screenshot
+But when I tried with tf1.2 with some changes in the code in model_fn. Basically not using tf.keras but using tf.contrib.keras it was working. is this bug ?

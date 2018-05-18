@@ -1,0 +1,49 @@
+GPU Host To Device copies don't appear to respect GPU operation dependencies
+
+I've been trying out the fancy new tracing functionality in the Tensorflow nightlies. It's really great, thanks for providing it!
+One thing I noticed while enqueueing multiple GPU operations with tf.control_dependencies is that Host to Device memory copies for the inputs of consecutive GPU ops can be scheduled in an interleaved pattern, instead of consecutively. In my case I have something like this:
+
+op EBeam with inputs: ebeam
+op SumCoherencies with inputs: gterm, ant2, model_vis, flag, ant1, ant2
+
+but in the trace I see the memory copies scheduled as:
+
+ant1, flag, ebeam, gterm, ant2, model_vis
+
+when I would expect, due to the the consecutive scheduling of EBeam and SumCoherencies ops, that the memory copies would be scheduled as:
+
+ebeam, ant1, flag,  gterm, ant2, model_vis
+
+I also notice that the EBeam op only starts executing on the GPU after all the SumCoherencies inputs have been copied to the GPU (rather than just the ebeam input) so the GPU is idle. There is no dependency on SumCoherencies by EBeam (Its the other way round).
+There are several other ops and inputs that I haven't mentioned for the sake of brevity
+Environment info
+Operating System: Ubuntu 14.04.4
+Installed version of CUDA and cuDNN: CUDA 7.5 and cuDNN 4.0.7
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+~$ ls -l /usr/local/cuda/lib64/libcud*
+-rw-r--r-- 1 root root    322936 Aug 15  2015 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root        16 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root        19 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root    383336 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root    720192 Aug 15  2015 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 3319 users       13 Feb  9 19:48 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.4
+lrwxrwxrwx 1 3319 users       17 Feb  9 19:48 /usr/local/cuda/lib64/libcudnn.so.4 -> libcudnn.so.4.0.7
+-rwxrwxr-x 1 3319 users 61453024 Feb  9 00:12 /usr/local/cuda/lib64/libcudnn.so.4.0.7
+-rw-rw-r-- 1 3319 users 62025862 Feb  9 00:12 /usr/local/cuda/lib64/libcudnn_static.a
+If installed from binary pip package, provide:
+
+Which pip package you installed. python 2 GPU nightly
+The output from python -c "import tensorflow; print(tensorflow.__version__)". 0.8.0
+
+If installed from sources, provide the commit hash: N/A
+Steps to reproduce
+
+Ran this script. (If necessary, source with Makefile is here and relevent commit is 29b264ee)
+Inspected the timeline (timeline.json.zip) in chrome://tracing/
+
+What have you tried?
+
+Using tf.control_dependencies to modify op execution order
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).

@@ -1,0 +1,39 @@
+Prevent/warn user setting up infinite loops with Defun/symbolic_gradient
+
+After session.run, the node dx seems to be evaluated in an infinite loop. Tensorflow version 12.1 and also in HEAD.
+import tensorflow as tf
+
+from tensorflow.python.framework import function
+from tensorflow.python.ops import functional_ops
+
+
+@function.Defun(tf.float32, tf.float32)
+def XSquarePlusOneGrad(x, dy):
+    message = tf.Print(1, [1], "back prop")
+    with tf.control_dependencies([message]):
+        dx = functional_ops._symbolic_gradient(input=[x, dy], Tout=[tf.float32], f="XSquarePlusOneFn", name="dx")
+    return dx
+
+@function.Defun(tf.float32, func_name="XSquarePlusOneFn", grad_func=XSquarePlusOneGrad)
+def XSquarePlusOne(x):
+    message = tf.Print(1, [1], "forward prop")
+    with tf.control_dependencies([message]):
+        y = tf.square(x, name="fprop_square")
+    return y
+
+
+x = tf.placeholder(tf.float32, shape=(), name="x_input")
+fprop = XSquarePlusOne(x)
+grad = tf.gradients(fprop, [x])[0]
+sess = tf.Session()
+sess.run([fprop, grad], feed_dict={x: 4})
+
+You see
+I tensorflow/core/kernels/logging_ops.cc:79] back prop[1]
+I tensorflow/core/kernels/logging_ops.cc:79] back prop[1]
+I tensorflow/core/kernels/logging_ops.cc:79] back prop[1]
+I tensorflow/core/kernels/logging_ops.cc:79] back prop[1]
+I tensorflow/core/kernels/logging_ops.cc:79] back prop[1]
+I tensorflow/core/kernels/logging_ops.cc:79] back prop[1]
+I tensorflow/core/kernels/logging_ops.cc:79] back prop[1]
+...

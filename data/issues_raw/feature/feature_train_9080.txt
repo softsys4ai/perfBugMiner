@@ -1,0 +1,91 @@
+Support for nvidia-cuda-mps-server
+
+I'm experimenting with multiple Tensorflow GPU processes and the NVIDIA Multi-Process Server.
+https://docs.nvidia.com/deploy/pdf/CUDA_Multi_Process_Service_Overview.pdf
+I have the following MNIST example as a benchmark (neural.py)
+import tensorflow as tf
+import os
+
+from tensorflow.examples.tutorials.mnist import input_data
+data = input_data.read_data_sets('MNIST_data_%d' % os.getpid(), one_hot=True)
+
+# construction phase
+x = tf.placeholder(tf.float32, shape=[None, 784])
+y = tf.placeholder(tf.float32, shape=[None, 10])
+
+with tf.name_scope('fc_1'):
+  W1 = tf.Variable(tf.truncated_normal([784, 200], stddev=0.1))
+  b1 = tf.Variable(tf.truncated_normal([200], stddev=0.1))
+  h = tf.sigmoid(tf.matmul(x, W1) + b1)
+
+with tf.name_scope('fc_2'):
+  W2 = tf.Variable(tf.truncated_normal([200, 10], stddev=0.1))
+  b2 = tf.Variable(tf.truncated_normal([10], stddev=0.1))
+  y_predict = tf.nn.softmax(tf.matmul(h, W2) + b2)
+
+with tf.name_scope('eval'):
+  with tf.name_scope('loss'):
+    cross_entropy = tf.reduce_mean(-tf.reduce_sum(y*tf.log(y_predict), reduction_indices=[1]))
+
+learning_rate = 0.5
+
+backprop = tf.train.GradientDescentOptimizer(learning_rate).minimize(cross_entropy)
+
+correct = tf.equal(tf.argmax(y, 1), tf.argmax(y_predict, 1))
+accuracy = tf.reduce_mean(tf.cast(correct, tf.float32))
+
+#execution
+
+sess = tf.Session()
+
+sess.run(tf.initialize_all_variables())
+
+train_steps = 2000
+batch_size = 50
+
+for i in range(train_steps):
+  batch_x, batch_y = data.train.next_batch(batch_size)
+  sess.run(backprop, feed_dict={x: batch_x, y: batch_y})
+
+print(sess.run(accuracy, feed_dict={x: data.test.images, y: data.test.labels}))
+
+And I'm running two processes like this:
+$ time python neural.py & time python neural.py
+Without nvidia-cuda-mps-control running as a daemon, this is the output:
+0.9483
+0.947
+
+real    0m15.602s
+user    0m6.172s
+sys     0m5.092s
+
+real    0m15.861s
+user    0m6.288s
+sys     0m1.964s
+
+With nvidia-cuda-mps-control running as a daemon, I'm getting an internal error:
+F tensorflow/core/common_runtime/gpu/gpu_device.cc:121] Check failed: err == cudaSuccess (71 vs. 0)
+F tensorflow/core/common_runtime/gpu/gpu_device.cc:121] Check failed: err == cudaSuccess (71 vs. 0)
+-bash: line 76: 47018 Aborted                 (core dumped) python neural.py
+
+I can verify from the nvidia-mps logs in /var/log/nvidia-mps that the tensorflow Cuda context successfully started an nvidia-cuda-mps-server and connected to it.
+/var/log/nvidia-mps/control.log
+
+[2017-04-09 10:05:09.539 Control 46322] Start
+[2017-04-09 10:05:21.023 Control 46322] Accepting connection...
+[2017-04-09 10:05:21.024 Control 46322] NEW CLIENT 46325 from user 1000: Server is not ready, push client to pending list
+[2017-04-09 10:05:21.024 Control 46322] Starting new server 46348 for user 1000
+
+The MPS server should be compatible with the Cuda API which Tensorflow uses, so I'm uncertain about why I'm getting this error.
+Tensorflow version: 1.01
+Ubuntu 16.04
+Cuda 8.0, CuDNN
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 375.39                 Driver Version: 375.39                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  Tesla K80           Off  | 8915:00:00.0     Off |                  Off |
+| N/A   51C    P8    28W / 149W |     82MiB / 12205MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+

@@ -1,0 +1,126 @@
+tf.errors.OutOfRangeError error not raised when using tf.train.MonitoredTrainingSession
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+I am providing a mini snippet to reproduce bug.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 7 - 64 bit
+TensorFlow installed from (source or binary):
+From binary for windows (tensorflow_gpu)
+TensorFlow version (use command below):
+1.4.0
+Python version:
+3.6
+Bazel version (if compiling from source):
+Not Applicable
+GCC/Compiler version (if compiling from source):
+Not Applicable
+CUDA/cuDNN version:
+CUDA 8.5
+GPU model and memory:
+Titan X
+Exact command to reproduce:
+Just run the snippet as it is.
+
+Describe the problem
+When Dataset iterator reaches at the end it should raise tf.errors.OutOfRangeError. But when using tf.train.MonitoredTrainingSession with custom hook I do not get the error. Ideally I need to get the Error.
+Source code / logs
+Reproducible bug snippet:
+# coding=utf-8
+import tensorflow as tf
+import numpy as np
+
+print(tf.GIT_VERSION, tf.VERSION)
+
+
+class MyHook(tf.train.SessionRunHook):
+
+    def __init__(
+            self,
+            place_holders,
+            batch_size, epochs
+    ):
+        super(MyHook, self).__init__()
+        self._create_iterator(place_holders, batch_size, epochs)
+        self._session = None
+        self._handle = None
+
+    def _create_iterator(self, place_holders, batch_size, epochs):
+
+        self._dataset = tf.data.Dataset.from_tensor_slices(
+            place_holders
+        ).batch(
+            batch_size
+        ).repeat(
+            epochs
+        )  # type: tf.data.Dataset
+
+        self._iterator = self._dataset.make_initializable_iterator()
+        self._next_op = self._iterator.get_next()
+
+    def reinit(self, feed_dict):
+        self._session.run(self._iterator.initializer, feed_dict=feed_dict)
+
+    @property
+    def next(self):
+        return self._session.run(self._next_op)
+
+    def after_create_session(self, session, coord):
+        self._session = session
+
+
+if __name__ == "__main__":
+
+    data_dict = {
+        'labels': np.arange(20, dtype=np.int32)
+    }
+
+    placeholders_dict = {
+        'labels': tf.placeholder(
+            dtype=data_dict['labels'].dtype,
+            shape=data_dict['labels'].shape,
+            name='labels')
+    }
+
+    feed_dict = {}
+    for k, v in placeholders_dict.items():
+        feed_dict[v] = data_dict[k]
+
+    hook_twice = MyHook(place_holders=placeholders_dict, batch_size=10, epochs=2)
+    hook_infinite = MyHook(place_holders=placeholders_dict, batch_size=10, epochs=None)
+
+    with tf.train.MonitoredTrainingSession(
+        hooks=[hook_twice, hook_infinite]
+    ):
+        hook_twice.reinit(feed_dict=feed_dict)
+        hook_infinite.reinit(feed_dict=feed_dict)
+        while True:
+            print("...")
+            print(hook_twice.next)
+            print(hook_infinite.next)
+
+As you can see hook_twice should repeat twice on dataset and then throw Error. Whereas hook_infinite should repeat infinitely but because of hook_twice should be abrupt-ed. But the program runs without throwing error after two iterations because of hook_twice.
+Output:
+b'unknown' 1.4.0
+2018-01-22 19:55:01.223557: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\platform\cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX AVX2
+2018-01-22 19:55:01.519963: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1030] Found device 0 with properties: 
+name: GeForce GTX TITAN X major: 5 minor: 2 memoryClockRate(GHz): 1.076
+pciBusID: 0000:03:00.0
+totalMemory: 12.00GiB freeMemory: 11.78GiB
+2018-01-22 19:55:01.519963: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:03:00.0, compute capability: 5.2)
+...
+{'labels': array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])}
+{'labels': array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])}
+...
+{'labels': array([10, 11, 12, 13, 14, 15, 16, 17, 18, 19])}
+{'labels': array([10, 11, 12, 13, 14, 15, 16, 17, 18, 19])}
+...
+{'labels': array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])}
+{'labels': array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])}
+...
+{'labels': array([10, 11, 12, 13, 14, 15, 16, 17, 18, 19])}
+{'labels': array([10, 11, 12, 13, 14, 15, 16, 17, 18, 19])}
+...
+
+Process finished with exit code 0

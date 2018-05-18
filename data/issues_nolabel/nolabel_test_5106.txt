@@ -1,0 +1,47 @@
+Problems with TF_GraphGetTensorNumDims when applied to "Variable" operations
+
+For some reason, when applying TF_GraphGetTensorNumDims to a "Variable" operation,
+the functions returns -1, even though the shape and number of dimensions are
+well defined.
+A simple example:
+#include <string>
+#include <iostream>
+#include "tensorflow/c/c_api.h"
+
+int main() {
+
+  // creating a TF_Graph
+  TF_Graph* graph = TF_NewGraph();
+
+  // creating a "Variable" operation
+  TF_OperationDescription* opDesc = TF_NewOperation(graph, "Variable", "w");
+  const long long dims[2] = {2, 2};
+  TF_SetAttrShape(opDesc, "shape", dims, 2);
+  TF_SetAttrType(opDesc, "dtype", TF_DOUBLE);
+
+  TF_Status* status = TF_NewStatus();
+  TF_Operation* w = TF_FinishOperation(opDesc, status);
+  std::string finish_message = std::string(TF_Message(status));
+
+  TF_Port w_port = {w, 0};
+  int w_num_dims = TF_GraphGetTensorNumDims(graph, w_port, status);
+  std::string num_dims_message = std::string(TF_Message(status));
+
+  std::cout << "finish_message: " << finish_message << '\n';
+  std::cout << "w_num_dims: " << w_num_dims << '\n';
+  std::cout << "num_dims_message: " << num_dims_message << '\n';
+
+  TF_DeleteGraph(graph);
+  TF_DeleteStatus(status);
+
+  return 0;
+}
+The program returns:
+finish_message:
+w_num_dims: -1
+num_dims_message:
+
+However, if I do the same for a "Placeholder" operation (by simply replacing
+"Variable" with "Placeholder), the returned number of dimensions is 2 (as expected).
+It seems to me like a bug. It might be related to the previous issue that
+I reported (#5059), since the inability to determine the shape of a tensor at a particular node propagates through the graph.

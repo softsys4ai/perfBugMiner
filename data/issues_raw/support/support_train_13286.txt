@@ -1,0 +1,206 @@
+[bug/docs] tf.Estimator: 'train' method is missing
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Used doc
+
+
+OS Platform and Distribution, versions etc:
+
+
+
+== cat /etc/issue ===============================================
+Darwin PEDS-0MAHH2C-LT 16.7.0 Darwin Kernel Version 16.7.0: Thu Jun 15 17:36:27 PDT 2017; root:xnu-3789.70.16~2/RELEASE_X86_64 x86_64
+Mac OS X 10.12.6
+== are we in docker =============================================
+No
+== compiler =====================================================
+Apple LLVM version 8.1.0 (clang-802.0.42)
+Target: x86_64-apple-darwin16.7.0
+Thread model: posix
+InstalledDir: /Library/Developer/CommandLineTools/usr/bin
+== uname -a =====================================================
+Darwin PEDS-0MAHH2C-LT 16.7.0 Darwin Kernel Version 16.7.0: Thu Jun 15 17:36:27 PDT 2017; root:xnu-3789.70.16~2/RELEASE_X86_64 x86_64
+== check pips ===================================================
+numpy (1.13.1)
+protobuf (3.3.0)
+tensorflow (1.2.1)
+== check for virtualenv =========================================
+False
+== tensorflow import ============================================
+tf.VERSION = 1.2.1
+tf.GIT_VERSION = v1.2.0-5-g435cdfc
+tf.COMPILER_VERSION = v1.2.0-5-g435cdfc
+Sanity check: array([1], dtype=int32)
+== env ==========================================================
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+== nvidia-smi ===================================================
+tf_env_collect.sh: line 105: nvidia-smi: command not found
+No GPU
+
+
+Exact command to reproduce:
+I am modifying this script that works + documentation as referenced below. The resulting code is following:
+
+
+# coding: utf-8
+import sys
+sys.path.append("/data/dlituiev/target2/")
+from inception import get_model
+from keras.models import Sequential, Model
+from keras.layers import Dense, Dropout, Activation, Flatten, InputLayer, Reshape, Input
+import tensorflow as tf
+from tensorflow.python.framework.ops import _get_graph_from_inputs
+from tensorflow.contrib.learn.python.learn.estimators import model_fn as model_fn_lib
+import numpy as np
+from keras import backend as K
+K.set_image_dim_ordering('tf')
+
+BATCH_SIZE = 4
+n_classes=10
+final_activation='linear'
+lr=1e-4
+opt_name = "Adadelta"
+epochs = 20
+HEIGHT, WIDTH = 512, 512
+
+def get_model():
+    model = Sequential()
+    model.add(InputLayer(input_shape=[512 , 512, 1], batch_size=BATCH_SIZE))
+    #     model.add(Reshape([512*512,]))
+    model.add(Flatten())
+    model.add(Dense(n_classes, activation='relu', ))
+    return model
+
+
+g = tf.Graph()
+with g.as_default():
+    model = get_model()
+    model.build()
+    funcmodel = model.model
+
+    def model_fn(features, labels, params):
+        optimizer = params["optimizer"]
+        opt_params= params.get("opt_params", {})
+    #     x = tf.placeholder(tf.float32, shape=model.layers[0].input.shape)
+        print("features", features.shape)
+        logyhat = funcmodel(features)
+
+        if (mode == tf.estimator.ModeKeys.TRAIN or
+            mode == tf.estimator.ModeKeys.EVAL):
+    #         loss = tf.contrib.keras.backend.categorical_crossentropy()
+            loss = tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=logyhat)
+        else:
+            loss = None
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            optimizer = getattr(tf.train, optimizer)
+            train_op = optimizer(opt_params).minimize(loss)
+        else:
+            train_op = None
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            predictions = tf.nn.softmax(logyhat)
+        else:
+            predictions = None
+
+        """
+        return tf.estimator.EstimatorSpec(
+              mode=mode,
+              predictions=predictions,
+              loss=loss,
+              train_op=train_op)
+              """
+
+        return model_fn_lib.ModelFnOps(
+              mode=mode,
+              predictions=predictions,
+              loss=loss,
+              train_op=train_op,
+              #eval_metric_ops=eval_metric_ops
+              )
+    ##############################################
+
+    def parser(record):
+        keys_to_features = {
+            'height': tf.FixedLenFeature([], tf.int64),
+            'width': tf.FixedLenFeature([], tf.int64),
+            'image_raw': tf.FixedLenFeature([], tf.string),
+            'label': tf.FixedLenFeature([], tf.int64)
+            }
+        features = tf.parse_single_example(
+          record,
+          features=keys_to_features)
+
+        # Convert from a scalar string tensor (whose single string has
+        # length mnist.IMAGE_PIXELS) to a uint8 tensor with shape
+        # [mnist.IMAGE_PIXELS].
+        image = tf.decode_raw(features['image_raw'], tf.float32)
+        #annotation = tf.decode_raw(features['mask_raw'], tf.uint8)
+
+        height = tf.cast(features['height'], tf.int32)
+        width = tf.cast(features['width'], tf.int32)
+
+#         image_shape = tf.stack([height, width, 1])
+        image_shape = tf.stack([HEIGHT, WIDTH,1])
+        #annotation_shape = tf.pack([height, width, 1])
+
+        image = tf.reshape(image, image_shape)
+        label = tf.cast(features["label"], tf.int32)
+        return image, label
+
+    def get_dataset_inp_fn(filenames, epochs=20, batch_size=2,
+                           buffer_size=100):
+        def dataset_input_fn():
+            dataset = tf.contrib.data.TFRecordDataset(filenames)
+
+            # Use `tf.parse_single_example()` to extract data from a `tf.Example`
+            # protocol buffer, and perform any additional per-record preprocessing.
+
+            # Use `Dataset.map()` to build a pair of a feature dictionary and a label
+            # tensor for each example.
+            dataset = dataset.map(parser)
+            dataset = dataset.shuffle(buffer_size=buffer_size)
+            dataset = dataset.batch(batch_size)
+            dataset = dataset.repeat(epochs)
+            iterator = dataset.make_one_shot_iterator()
+
+            # `features` is a dictionary in which each value is a batch of values for
+            # that feature; `labels` is a batch of labels.
+            features, labels = iterator.get_next()
+            return features, labels
+        return dataset_input_fn
+
+##############################################
+def get_optimizer(opt_name = "Adadelta", **kwargs):
+    #lr=kwargs.pop("lr", 1e-4)
+    opt_name = opt_name if opt_name.endswith("Optimizer") else opt_name.title()+"Optimizer"
+    optimizer = getattr(tf.train, opt_name)
+    return optimizer#(lr, **kwargs)
+##############################################
+
+from tensorflow.contrib.learn.python.learn.estimators import estimator
+LEARNING_RATE = 0.001
+# Set model params
+model_params = {"opt_params":{"learning_rate": LEARNING_RATE}, 'optimizer' : get_optimizer()}
+
+inpfun = get_dataset_inp_fn(["example.tfrecords"],
+                                epochs=epochs,
+                                batch_size=BATCH_SIZE)
+# Instantiate Estimator
+est = estimator.Estimator(model_fn=model_fn, params=model_params)
+
+print(help(est))
+
+### Option 1 ###
+est.train(input_fn=inpfun, steps=5000)
+
+### Option 2 ###
+est.fit(input_fn=inpfun, steps=5000)
+
+
+Describe the problem
+In this manual it implies that tf.Estimator has a method train():
+https://www.tensorflow.org/extend/estimators
+When I instantiate an estimator and run est.train(input_fn=inpfun, steps=5000) I am getting:
+ AttributeError: 'Estimator' object has no attribute 'train'

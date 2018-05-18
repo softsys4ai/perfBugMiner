@@ -1,0 +1,41 @@
+Performance of Tensorflow distributed training is much slower than caffe multi-GPU training
+
+I have trained inceptionv3 using tensorflow both on multi-GPU version and distributed version (two machine, four GPU each). Each GPU processes 32 images per iteration under both settings. However, the distributed training speed is twice as slow as the caffe multi-GPU version. I'm wondering how to improve the performance of distributed training.
+Configuration:
+Two machine, both of them have totally same environment: CentOS 7, 4 GTX TITAN X GPUs, 32 Intel Xeon CPU E5-2630 v3 2.40GHz processors, and 131GB Memory. Network IO between machines is 125MB/s, ping delay is 0.1ms and local read speed is 1GB/s (RAID5). The distributed training code is the newest master branch here. In distributed version, there are 4 workers on each machine, each work are assigned to 1 GPU and there is only one ps server started. I read data file from local disk.
+the start script for each worker (8 workers in total) is
+~/models/inception/bazel-bin/inception/imagenet_distributed_train \
+--batch_size=32 \
+--data_dir=/data1/imagenet1k \
+--job_name='worker' \
+--task_id=2 \
+--ps_hosts='10.10.102.28:2220' \
+--worker_hosts='10.10.102.28:2221,10.10.102.28:2222,10.10.102.28:2223,10.10.102.28:2224,10.10.102.29:2221,10.10.102.29:2222,10.10.102.29:2223,10.10.102.29:2224' &
+
+Runtime logging:
+The training speed is
+INFO:tensorflow:Worker 6: 2016-05-16 21:07:22.101672: step 390, loss = 8.15(24.0 examples/sec; 1.334  sec/batch)
+INFO:tensorflow:Worker 5: 2016-05-16 21:07:22.101666: step 390, loss = 8.10(24.0 examples/sec; 1.335  sec/batch)
+INFO:tensorflow:Worker 4: 2016-05-16 21:07:22.101768: step 390, loss = 8.11(24.0 examples/sec; 1.333  sec/batch)
+INFO:tensorflow:Worker 7: 2016-05-16 21:07:22.102245: step 390, loss = 8.03(24.1 examples/sec; 1.330  sec/batch)
+
+This speed is twice as slow as caffe multi-GPU training on one machine(ensure that experiments are under same settings, each GPU process 32 images per iteration). I used nvidia-smi -l 1 to watch the GPU usage, and find that GPUs only busy in 25% running time. The top command print like this:
+ %Cpu(s):  2.4 us, 35.2 sy,  0.0 ni, 62.3 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st
+KiB Mem : 13174038+total, 21064972 free, 18241616 used, 92433792 buff/cache
+KiB Swap: 16777212 total, 16724332 free,    52880 used. 88948128 avail Mem 
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND     
+  685 peter+  20   0  0.191t 2.336g 453624 S 878.1  1.9  83:03.03 python      
+15102 peter+  20   0 13.715g 5.522g  41820 S 293.7  4.4 348:39.74 python      
+  682 peter+  20   0  0.192t 2.476g 453608 S  13.0  2.0  69:18.00 python      
+  683 peter+  20   0  0.193t 4.093g 978228 S  11.6  3.3  84:40.56 python      
+  684 peter+  20   0  0.191t 2.410g 453612 S  10.6  1.9  88:50.77 python 
+
+What I have tried
+
+By modifying the num_preprocess_threads and the num_readers, I got the best performance 1.333 sec/batch, when I set both variable to 1.
+Modify the queue capacity is not helpful.
+I believe the bath_inputs() is executed on CPU:0, because in image_processing.py line 132: with tf.device('/cpu:0'):
+I refered to this issue and wondering if the bottleneck is CPU/IO.
+
+How to get a better performance ?

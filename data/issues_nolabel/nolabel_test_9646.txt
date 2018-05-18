@@ -1,0 +1,77 @@
+Memory leaking when session.run in a certain situation
+
+Hi,
+Here I find a possible memory leaking bug.
+Describe the problem
+When we doing
+session.run( var )
+if we add operator before that variable, such as
+session.run(-var )
+Memory will keep growing by the iteration, when we call the train function with -var thousands of times it will use up all the memory and also let the running time become much slower.
+Source code / logs
+Here is a minimal example code:
+Normal situation:
+import tensorflow as tf
+@profile
+def run():
+    a = tf.constant(5.0)
+    b = tf.constant(6.0)
+    c = a * b
+    sess = tf.Session()
+    for i in range(1000):
+        b = sess.run(c) 
+run()
+
+
+Line     Mem usage    Increment   Line Contents
+================================================
+     4   80.816 MiB    0.000 MiB   @profile
+     5                             def run():
+     6   80.957 MiB    0.141 MiB       a = tf.constant(5.0)
+     7   80.980 MiB    0.023 MiB       b = tf.constant(6.0)
+     8   82.691 MiB    1.711 MiB       c = a * b
+     9   82.879 MiB    0.188 MiB       sess = tf.Session()
+    10                             
+    11   83.570 MiB    0.691 MiB       for i in range(1000):
+    12   83.570 MiB    0.000 MiB           b = sess.run(c)
+
+
+**Memory leaking **
+import tensorflow as tf
+
+@profile
+def run():
+    a = tf.constant(5.0)
+    b = tf.constant(6.0)
+    c = a * b
+    sess = tf.Session()
+
+    for i in range(1000):
+        b = sess.run(-c)
+
+run()
+
+ 
+
+Line     Mem usage    Increment   Line Contents
+================================================
+     4   80.805 MiB    0.000 MiB   @profile
+     5                             def run():
+     6   80.938 MiB    0.133 MiB       a = tf.constant(5.0)
+     7   80.949 MiB    0.012 MiB       b = tf.constant(6.0)
+     8   82.652 MiB    1.703 MiB       c = a * b
+     9   82.848 MiB    0.195 MiB       sess = tf.Session()
+    10                             
+    11  134.258 MiB   51.410 MiB       for i in range(1000):
+    12  134.258 MiB    0.000 MiB           b = sess.run(-c)
+
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): mac os 10.12.4  and Linux Ubuntu 14.04
+TensorFlow installed from (source or binary): pip version
+TensorFlow version (use command below): ('v1.0.0-65-g4763edf-dirty', '1.0.1')
+Bazel version (if compiling from source):
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: see above

@@ -1,0 +1,143 @@
+CUDA crashes during Cholesky_grad procedure
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes (see command below)
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): Binary (pip)
+TensorFlow version (use command below): 'unknown' 1.4.0
+Python version: 3.5.2
+CUDA/cuDNN version: Cuda: 8.0.61.2; cuDNN: 6.1
+GPU model and memory: GeForce GTX 770M (3GB); NVIDIA driver 388.71
+Bazel version: N/A
+Exact command to reproduce:
+
+import tensorflow as tf
+import numpy as np
+
+with tf.Session() as sess:
+    x = tf.placeholder(tf.float64, [None, None])
+    f = tf.reduce_sum(tf.cholesky(x))
+    sess.run(tf.global_variables_initializer())
+    print(sess.run(tf.gradients(f, x), {x:np.array(1.).reshape(1, 1)}))
+
+Describe the problem
+Python crashes when running the code above. It was initially encountered when trying to perform a Cholesky decomposition during sparse Gaussian process regression (see GPflow/GPflow#602). I am out of my depth here, but the following error messages seemed interesting:
+
+Address 0x00000000 is out of bounds
+Blas GEMV launch failed
+failed to run cuBLAS routine cublasDgemv_v2: CUBLAS_STATUS_EXECUTION_FAILED
+
+I have run various CUDA profiling tests and have had no issues. The cholesky decomposition example that comes with CUDA could also execute just fine. I have tried both reducing the amount of GPU memory available to tensorflow and setting it grow-able, to no effect.
+Source code / logs
+See above for source code.
+stdout/stderr:
+2018-01-02 18:14:34.305556: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\platform\cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX AVX2
+2018-01-02 18:14:35.110794: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1030] Found device 0 with properties:
+name: GeForce GTX 770M major: 3 minor: 0 memoryClockRate(GHz): 0.797
+pciBusID: 0000:01:00.0
+totalMemory: 3.00GiB freeMemory: 2.50GiB
+2018-01-02 18:14:35.110932: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 770M, pci bus id: 0000:01:00.0, compute capability: 3.0)
+2018-01-02 18:14:35.290410: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\kernels\cuda_solvers.cc:159] Creating CudaSolver handles for stream 00000189FC81C670
+2018-01-02 18:14:35.615695: E C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\stream_executor\cuda\cuda_event.cc:49] Error polling for event status: failed to query event: CUDA_ERROR_ILLEGAL_ADDRESS
+2018-01-02 18:14:35.615847: F C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_event_mgr.cc:203] Unexpected Event status: 1
+2018-01-02 18:14:35.615695: E C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\stream_executor\cuda\cuda_driver.cc:1110] could not synchronize on CUDA context: CUDA_ERROR_ILLEGAL_ADDRESS :: No stack trace available
+
+cuda-memcheck:
+========= CUDA-MEMCHECK
+2018-01-02 18:15:26.061068: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\platform\cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX AVX2
+2018-01-02 18:15:26.872851: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\common_runtime\gpu\gpu_device.cc:1030] Found device 0 with properties:
+name: GeForce GTX 770M major: 3 minor: 0 memoryClockRate(GHz): 0.797
+pciBusID: 0000:01:00.0
+totalMemory: 3.00GiB freeMemory: 2.52GiB
+2018-01-02 18:15:26.873028: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\common_runtime\gpu\gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 770M, pci bus id: 0000:01:00.0, compute capability: 3.0)
+2018-01-02 18:15:27.425673: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\core\kernels\cuda_solvers.cc:159] Creating CudaSolver handles for stream 00000162C1EBD150
+2018-01-02 18:15:30.721433: E C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\35\tensorflow\stream_executor\cuda\cuda_blas.cc:551] failed to run cuBLAS routine cublasDgemv_v2: CUBLAS_STATUS_EXECUTION_FAILED
+Traceback (most recent call last):
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1323, in _do_call
+    return fn(*args)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1302, in _run_fn
+    status, run_metadata)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\errors_impl.py", line 473, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.InternalError: Blas GEMV launch failed:  m=1, n=1
+         [[Node: gradients/Cholesky_grad/MatMul_1 = MatMul[T=DT_DOUBLE, transpose_a=true, transpose_b=false, _device="/job:localhost/replica:0/task:0/device:GPU:0"](gradients/Cholesky_grad/MatrixTriangularSolve, gradients/Cholesky_grad/MatrixBandPart)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "test2.py", line 11, in <module>
+    print(sess.run(tf.gradients(f, x), {x:np.array(1.).reshape(1, 1)}))
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 889, in run
+    run_metadata_ptr)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1120, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1317, in _do_run
+    options, run_metadata)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1336, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InternalError: Blas GEMV launch failed:  m=1, n=1
+         [[Node: gradients/Cholesky_grad/MatMul_1 = MatMul[T=DT_DOUBLE, transpose_a=true, transpose_b=false, _device="/job:localhost/replica:0/task:0/device:GPU:0"](gradients/Cholesky_grad/MatrixTriangularSolve, gradients/Cholesky_grad/MatrixBandPart)]]
+
+Caused by op 'gradients/Cholesky_grad/MatMul_1', defined at:
+  File "test2.py", line 11, in <module>
+    print(sess.run(tf.gradients(f, x), {x:np.array(1.).reshape(1, 1)}))
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\gradients_impl.py", line 581, in gradients
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\gradients_impl.py", line 353, in _MaybeCompile
+    return grad_fn()  # Exit early
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\gradients_impl.py", line 581, in <lambda>
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\linalg_grad.py", line 77, in _CholeskyGrad
+    math_ops.matmul(l_inverse, middle, adjoint_a=True), l_inverse)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\math_ops.py", line 1891, in matmul
+    a, b, transpose_a=transpose_a, transpose_b=transpose_b, name=name)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\gen_math_ops.py", line 2436, in _mat_mul
+    name=name)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+...which was originally created as op 'Cholesky', defined at:
+  File "test2.py", line 9, in <module>
+    f = tf.reduce_sum(tf.cholesky(x))
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\ops\gen_linalg_ops.py", line 419, in cholesky
+    "Cholesky", input=input, name=name)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\framework\ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InternalError (see above for traceback): Blas GEMV launch failed:  m=1, n=1
+         [[Node: gradients/Cholesky_grad/MatMul_1 = MatMul[T=DT_DOUBLE, transpose_a=true, transpose_b=false, _device="/job:localhost/replica:0/task:0/device:GPU:0"](gradients/Cholesky_grad/MatrixTriangularSolve, gradients/Cholesky_grad/MatrixBandPart)]]
+
+========= Invalid __global__ read of size 1
+=========     at 0x00000398 in void Eigen::internal::FullReductionKernel<int=256, int=128, Eigen::TensorEvaluator<Eigen::TensorReductionOp<Eigen::internal::SumReducer<double>, Eigen::DimensionList<__int64, unsigned __int64=2> const , Eigen::TensorGeneratorOp<tensorflow::generator::OverwriteDiagGenerator<double>, Eigen::TensorMap<Eigen::Tensor<double const , int=2, int=1, __int64>, int=16, Eigen::MakePointer> const > const , Eigen::MakePointer> const , Eigen::GpuDevice>, Eigen::internal::SumReducer<double>, __int64>(Eigen::internal::SumReducer<double>, double, __int64, Eigen::internal::SumReducer<double>::CoeffReturnType*, unsigned int*)
+=========     by thread (0,0,0) in block (0,0,0)
+=========     Address 0x00000000 is out of bounds
+=========     Saved host backtrace up to driver entry point at kernel launch time
+=========     Host Frame:C:\WINDOWS\SYSTEM32\nvcuda.dll (cuTexRefSetAddress + 0x1aaaf3) [0x1b8145]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd [0x35d2]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd [0x2365]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (perftools::gputools::cuda::CUDATimer::Stop + 0x1cf760) [0x2202ba0]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (perftools::gputools::cuda::CUDATimer::Stop + 0x1d18f2) [0x2204d32]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (perftools::gputools::cuda::CUDATimer::Stop + 0x1ce985) [0x2201dc5]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (tensorflow::MatrixSetDiagOp<Eigen::GpuDevice,double>::Compute + 0x407) [0x13180d7]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (tensorflow::BaseGPUDevice::ComputeHelper + 0x4f4) [0x3aab84]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (tensorflow::BaseGPUDevice::Compute + 0x18a) [0x3aa3aa]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (tensorflow::NewLocalExecutor + 0xfdb) [0x2aefdb]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (?_Copy@?$_Func_impl@V?$_Binder@U_Unforced@std@@P8ExecutorState@?A0x4546b700@tensorflow@@EAAXUTaggedNode@345@_J@ZQEAV345@AEBU6345@AEA_J@std@@V?$allocator@H@2@X$$V@std@@EEBAPEAV?$_Func_base@X$$V@2@PEAX@Z + 0x78) [0x2b2548]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop + 0x3d9) [0x247839]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop + 0x560) [0x2479c0]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (tensorflow::WindowsFileSystem::Utf8ToWideChar + 0x175) [0x276795]
+=========     Host Frame:C:\Users\tomah\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\_pywrap_tensorflow_internal.pyd (tensorflow::WindowsFileSystem::Utf8ToWideChar + 0xc9) [0x2766e9]
+=========     Host Frame:C:\WINDOWS\System32\ucrtbase.dll (iswascii + 0xa5) [0x1d885]
+=========     Host Frame:C:\WINDOWS\System32\KERNEL32.DLL (BaseThreadInitThunk + 0x14) [0x11fe4]
+=========     Host Frame:C:\WINDOWS\SYSTEM32\ntdll.dll (RtlUserThreadStart + 0x21) [0x6ef91]
+=========
+========= ERROR SUMMARY: 1 error

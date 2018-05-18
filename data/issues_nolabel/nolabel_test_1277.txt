@@ -1,0 +1,45 @@
+Cifar breaking
+
+I am running cifar multiGPU example with different batch sizes and number of GPUs. The code is breaking this way:
+tensorflow.python.framework.errors.OutOfRangeError: RandomShuffleQueue '_1_tower_0/shuffle_batch/random_shuffle_queue' is closed and has insufficient elements (requested 128, current size 0)
+[[Node: tower_0/shuffle_batch = QueueDequeueMany[component_types=[DT_FLOAT, DT_INT32], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](tower_0/shuffle_batch/random_shuffle_queue, tower_0/shuffle_batch/n/_775)]]
+[[Node: tower_1/shuffle_batch/n/_664 = _HostSendT=DT_INT32, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:1", send_device_incarnation=1, tensor_name="edge_170_tower_1/shuffle_batch/n", _device="/job:localhost/replica:0/task:0/gpu:1"]]
+Caused by op u'tower_0/shuffle_batch', defined at:
+File "lib/python2.7/site-packages/tensorflow/models/image/cifar10/cifar10_multi-gpu_train.py", line 224, in 
+tf.app.run()
+File "/home/saoni.m/tensorflow/lib/python2.7/site-packages/tensorflow/python/platform/default/_app.py", line 30, in run
+sys.exit(main(sys.argv))
+File "lib/python2.7/site-packages/tensorflow/models/image/cifar10/cifar10_multi-gpu_train.py", line 222, in main
+train()
+File "lib/python2.7/site-packages/tensorflow/models/image/cifar10/cifar10_multi-gpu_train.py", line 150, in train
+loss = tower_loss(scope)
+File "lib/python2.7/site-packages/tensorflow/models/image/cifar10/cifar10_multi-gpu_train.py", line 65, in tower_loss
+images, labels = cifar10.distorted_inputs()
+File "/home/saoni.m/tensorflow/lib/python2.7/site-packages/tensorflow/models/image/cifar10/cifar10.py", line 119, in distorted_inputs
+batch_size=FLAGS.batch_size)
+File "/home/saoni.m/tensorflow/lib/python2.7/site-packages/tensorflow/models/image/cifar10/cifar10_input.py", line 153, in distorted_inputs
+min_queue_examples, batch_size)
+File "/home/saoni.m/tensorflow/lib/python2.7/site-packages/tensorflow/models/image/cifar10/cifar10_input.py", line 104, in _generate_image_and_label_batch
+min_after_dequeue=min_queue_examples)
+File "/home/saoni.m/tensorflow/lib/python2.7/site-packages/tensorflow/python/training/input.py", line 496, in shuffle_batch
+return queue.dequeue_many(batch_size, name=name)
+File "/home/saoni.m/tensorflow/lib/python2.7/site-packages/tensorflow/python/ops/data_flow_ops.py", line 287, in dequeue_many
+self._queue_ref, n, self._dtypes, name=name)
+File "/home/saoni.m/tensorflow/lib/python2.7/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 319, in _queue_dequeue_many
+timeout_ms=timeout_ms, name=name)
+File "/home/saoni.m/tensorflow/lib/python2.7/site-packages/tensorflow/python/ops/op_def_library.py", line 664, in apply_op
+op_def=op_def)
+File "/home/saoni.m/tensorflow/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1834, in create_op
+original_op=self._default_original_op, op_def=op_def)
+File "/home/saoni.m/tensorflow/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1043, in init
+self._traceback = _extract_stack()
+The values that are passed to shuffle_batch():
+ images, label_batch = tf.train.shuffle_batch(
+      [image, label],
+      batch_size=batch_size,
+      num_threads=num_preprocess_threads,
+      capacity=min_queue_examples + 3 * batch_size,
+      min_after_dequeue=min_queue_examples)
+
+are:
+batch size 128, num_threads 16, capacity 20384, min_after_deque 20000

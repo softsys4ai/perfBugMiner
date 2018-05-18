@@ -1,0 +1,57 @@
+ValueError: Attempt to reuse RNNCell with a different variable scope than its first use
+
+OS: Ubuntu 14.04
+TF installed from source.
+TF version: 1.1.0-rc
+I want to reuse a RNNCell in two different variable scopes, which could simply  be like this:
+import tensorflow as tf
+from tensorflow.contrib import rnn
+
+x = tf.placeholder(tf.int32, [128, 20])
+embedding = tf.get_variable('embedding', [10000, 100])
+cells = []
+for _ in range(10):
+    cell = rnn.BasicLSTMCell(100, state_is_tuple=True)
+    cells.append(cell)
+cell = rnn.MultiRNNCell(cells)
+zero_state = cell.zero_state(128, tf.float32)
+
+inputs = tf.nn.embedding_lookup(embedding, x)
+with tf.variable_scope('rnn1'):
+    _, state = tf.nn.dynamic_rnn(cell, inputs=inputs, initial_state=zero_state)
+with tf.variable_scope('rnn2'):
+    _, state = tf.nn.dynamic_rnn(cell, inputs=inputs, initial_state=zero_state)
+
+But I got following error:
+Traceback (most recent call last):
+  File "test.py", line 18, in <module>
+    _, state = tf.nn.dynamic_rnn(cell, inputs=inputs, initial_state=zero_state)
+  File "/home/swp/test/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 582, in dynamic_rnn
+    dtype=dtype)
+  File "/home/swp/test/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 745, in _dynamic_rnn_loop
+    swap_memory=swap_memory)
+  File "/home/swp/test/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2623, in while_loop
+    result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/home/swp/test/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2456, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/home/swp/test/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2406, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/home/swp/test/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 730, in _time_step
+    (output, new_state) = call_cell()
+  File "/home/swp/test/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 716, in <lambda>
+    call_cell = lambda: cell(input_t, state)
+  File "/home/swp/test/local/lib/python2.7/site-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 968, in __call__
+    cur_inp, new_state = cell(cur_inp, cur_state)
+  File "/home/swp/test/local/lib/python2.7/site-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 242, in __call__
+    with _checked_scope(self, scope or "basic_lstm_cell", reuse=self._reuse):
+  File "/usr/lib/python2.7/contextlib.py", line 17, in __enter__
+    return self.gen.next()
+  File "/home/swp/test/local/lib/python2.7/site-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 84, in _checked_scope
+    type(cell).__name__))
+ValueError: Attempt to reuse RNNCell <tensorflow.contrib.rnn.python.ops.core_rnn_cell_impl.BasicLSTMCell object at 0x7fb1c0aa1e90> with a different variable scope than its first use.  First use of cell was with scope 'rnn1/rnn/multi_rnn_cell/cell_0/basic_lstm_cell', this attempt is with scope 'rnn2/rnn/multi_rnn_cell/cell_0/basic_lstm_cell'.  Please create a new instance of the cell if you would like it to use a different set of weights.  If before you were using: MultiRNNCell([BasicLSTMCell(...)] * num_layers), change to: MultiRNNCell([BasicLSTMCell(...) for _ in range(num_layers)]).  If before you were using the same cell instance as both the forward and reverse cell of a bidirectional RNN, simply create two instances (one for forward, one for reverse).  In May 2017, we will start transitioning this cell's behavior to use existing stored weights, if any, when it is called with scope=None (which can lead to silent model degradation, so this error will remain until then.)
+
+
+I googled this issue and found that #8191 is similar but not identical. That issue was caused by new arg "reuse" of LSTMCell.
+Strangely, when I use TF with version 1.0.1 builf from binary. the same code doesn't have this ValueError.
+So, my questions is how to reuse a RNNCell within different variable scopes correctly in version 1.1.0-rc.
+Thanks!

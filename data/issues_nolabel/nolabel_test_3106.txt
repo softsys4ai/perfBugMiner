@@ -1,0 +1,34 @@
+system memory leak
+
+Running tutorial_example_trainer (similar leak for my own tensorflow scripts) results in ~70MB of memory being lost. free shows the memory is used, but ps shows that no process is using the memory. Nothing short of a reboot seems to free up the memory.
+Reproduce with the following (After the ~10 minute run, you should be down ~7GB of memory)
+for i inseq 1 100; do ./bazel-bin/tensorflow/cc/tutorials_example_trainer --use_gpu; done
+os: 14.04
+gpu: Titan X (361.28)
+commit: 0927e5e (from yesterday)
+cuda: 7.5
+cudnn: 4.0.7
+This leak is also present on an EC2 12.04 with an older version of tensorflow, cuda 7.0, cudnn 6.5.
+Here is the output from a fresh reboot:
+woodward@dev-box:~/install_files/tensorflow$ free -g
+             total       used       free     shared    buffers     cached
+Mem:           125          0        125          0          0          0
+-/+ buffers/cache:          0        125
+Swap:          127          0        127
+woodward@dev-box:~/install_files/tensorflow$ for i in `seq 1 100`; do ./bazel-bin/tensorflow/cc/tutorials_example_trainer --use_gpu &>/dev/null; done
+woodward@dev-box:~/install_files/tensorflow$ free -g
+             total       used       free     shared    buffers     cached
+Mem:           125          7        118          0          0          0
+-/+ buffers/cache:          7        118
+Swap:          127          0        127
+woodward@dev-box:~/install_files/tensorflow$ ps -Ao user,pid,%mem,vsz,rss,command --sort -rss | head -n 10
+USER       PID %MEM    VSZ   RSS COMMAND
+root      1263  0.0 105648  6532 sshd: woodward [priv]
+root      1317  0.0 105648  6512 sshd: woodward [priv]
+woodward  1387  0.0  22756  5560 /bin/bash
+woodward  1388  0.0  22668  5504 /bin/bash
+woodward  1390  0.0  22668  5488 /bin/bash
+woodward  1389  0.0  22668  5464 /bin/bash
+root      1097  0.0  61384  5376 /usr/sbin/sshd -D
+woodward  1366  0.0  22552  5144 -bash
+woodward  1365  0.0 106776  5000 sshd: woodward@pts/0

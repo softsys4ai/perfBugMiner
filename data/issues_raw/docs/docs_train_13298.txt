@@ -1,0 +1,100 @@
+wrong tf.svd documentation in tensorflow 1.3.0 version
+
+In tf.svd documentation, it was said that the tensorflow implementation of svd is simply np.linalg.svd
+in fact it was not the same, in tensorflow, the index for V matrix is transposed..different from np.linalg.svd default setting. Funny thing is, this type of problem is a famous bug in matlab code people usually write, which is row selection and transpose is not equal to transpose then column selection.
+code demonstration:
+import tensorflow as tf
+tf.__version__
+
+## benchmark using numpy svd
+import numpy as np
+
+x = np.array([1.0,2.0,3.0,4.0,5.0,6,7,8,9])
+x = x.reshape(3,3)
+
+u_,s_,v_=np.linalg.svd(x,compute_uv=True)
+# print s_
+print u_
+print v_
+
+r = 2
+diagS = np.diag(s_)
+print diagS
+diagS = diagS[:r,:r]
+x_rank1 = np.matmul(u_[:,:r], np.matmul(diagS, v_[:r,:]))
+
+print 'original = \n',x
+print 'rank1 approximation\n',x_rank1
+
+Result is
+[[-0.21483724  0.88723069  0.40824829]
+ [-0.52058739  0.24964395 -0.81649658]
+ [-0.82633754 -0.38794278  0.40824829]]
+[[-0.47967118 -0.57236779 -0.66506441]
+ [-0.77669099 -0.07568647  0.62531805]
+ [-0.40824829  0.81649658 -0.40824829]]
+[[  1.68481034e+01   0.00000000e+00   0.00000000e+00]
+ [  0.00000000e+00   1.06836951e+00   0.00000000e+00]
+ [  0.00000000e+00   0.00000000e+00   4.41842475e-16]]
+original = 
+[[ 1.  2.  3.]
+ [ 4.  5.  6.]
+ [ 7.  8.  9.]]
+rank1 approximation
+[[ 1.  2.  3.]
+ [ 4.  5.  6.]
+ [ 7.  8.  9.]]
+
+But in tensorflow svd
+X = tf.constant([1.0,2.0,3.0,4.0,5.0,6,7,8,9],shape=[3,3])
+
+sess = tf.InteractiveSession()
+    
+print sess.run(X)
+
+s,u,v = tf.svd(X)
+
+print sess.run(u)
+print sess.run(v)
+
+diagS_tf = tf.diag(s)
+# print sess.run(diagS_tf)
+
+tmp_correct =  tf.matmul(diagS_tf[:r,:r], tf.transpose(v[:,:r]))
+tmp_wrong = tf.matmul(diagS_tf[:r,:r], v[:r,:])
+
+print 'following differs'
+print sess.run(tf.transpose(v[:,:r]))
+print sess.run(v[:r,:])
+
+# print sess.run(tmp)
+
+x_rank1_tf_correct= tf.matmul(u[:,:r], tmp_correct)
+x_rank1_tf_wrong= tf.matmul(u[:,:r], tmp_wrong)
+
+print 'printing rank1 approximation from tensorflow'
+print sess.run(x_rank1_tf_correct)
+print sess.run(x_rank1_tf_wrong)
+
+the output is
+[[ 1.  2.  3.]
+ [ 4.  5.  6.]
+ [ 7.  8.  9.]]
+[[ 0.21483716  0.88723052 -0.40824857]
+ [ 0.52058721  0.24964423  0.81649649]
+ [ 0.82633758 -0.38794291 -0.4082481 ]]
+[[ 0.47967106 -0.77669096  0.40824836]
+ [ 0.57236761 -0.07568647 -0.81649655]
+ [ 0.66506428  0.62531805  0.40824822]]
+following differs
+[[ 0.47967106  0.57236761  0.66506428]
+ [-0.77669096 -0.07568647  0.62531805]]
+[[ 0.47967106 -0.77669096  0.40824836]
+ [ 0.57236761 -0.07568647 -0.81649655]]
+printing rank1 approximation from tensorflow
+[[ 0.99999887  1.99999869  2.99999857]
+ [ 3.9999969   4.99999666  5.99999666]
+ [ 6.99999809  7.99999809  8.99999809]]
+[[  2.27875805  -2.88305187   0.7037462 ]
+ [  4.35980749  -6.83247042   3.36293888]
+ [  6.44085884 -10.78189278   6.0221343 ]]

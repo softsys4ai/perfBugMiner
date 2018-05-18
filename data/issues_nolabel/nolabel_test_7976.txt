@@ -1,0 +1,91 @@
+distributed tensorflow data Data in parallel，ps server can only use cpu? use gpu is faster?
+
+When I use kears and tensorflow to do the parallel,use sgd sync optimizer I have 10 machines,
+each machine has a gpu, so I do
+1.Each gpu corresponds to a worker hosts，use cuda_visible_devices
+2.every ps server only use cpu
+3.use Gigabit Ethernet
+when i run it,i find it is so lower,,
+who can tell me ?what is wrong??
+flags.DEFINE_string("train_desc_file",'train.json','train config')
+flags.DEFINE_string("val_desc_file",'test.json','dev config')
+flags.DEFINE_string("save_dir",'model','save model dir')
+flags.DEFINE_integer('epochs',1000,'epoch number')
+flags.DEFINE_integer('batch_size',64,'batch_size')
+flags.DEFINE_string("ps_hosts","172.16.186.86:2221",
+"Comma-separated list of hostname:port pairs")
+flags.DEFINE_string("worker_hosts", "172.16.186.86:2222,172.16.186.86:2223","Comma-separated list of hostname:port pairs")
+flags.DEFINE_string("job_name", None,"job name: worker or ps")
+flags.DEFINE_integer("task_index", None,
+"Worker task index, should be >= 0. task_index=0 is "
+"the master worker task the performs the variable "
+"initialization ")
+if FLAGS.job_name is None or FLAGS.job_name == "":
+raise ValueError("Must specify an explicit job_name")
+if FLAGS.task_index is None or FLAGS.task_index == "":
+raise ValueError("Must specify an explicit task_index")
+print("job name = %s" % FLAGS.job_name)
+print("task index = %d" % FLAGS.task_index)
+ps_spec = FLAGS.ps_hosts.split(",")
+worker_spec = FLAGS.worker_hosts.split(",")
+num_workers = len(worker_spec)
+cluster = tf.train.ClusterSpec({
+    "ps": ps_spec,
+    "worker": worker_spec})
+server = tf.train.Server(
+    cluster, job_name=FLAGS.job_name, task_index=FLAGS.task_index)
+if FLAGS.job_name == "ps":
+    server.join()
+
+with tf.device(tf.train.replica_device_setter(
+        worker_device="/job:worker/task:%d" % FLAGS.task_index,
+        cluster=cluster)):
+    is_chief = (FLAGS.task_index == 0)
+    model=....
+    acoustic_input = model.inputs[0]
+    network_output = model.outputs[0]
+    network_output = tf.transpose(network_output, [1, 0, 2])
+    ctc_cost = warpctc_tensorflow.ctc(network_output, sess_label, sess_label_lens, sess_output_lens)
+    ctc_cost = tf.reduce_mean(ctc_cost)
+    trainable_vars = model.trainable_weights
+    learning_rate = 2e-4
+
+    global_step = tf.contrib.framework.get_or_create_global_step()
+    # optimizer = SGD(lr=learning_rate, momentum=0.9, nesterov=True,clipnorm=100)
+    optimizer=tf.train.MomentumOptimizer(learning_rate=learning_rate,momentum=0.99,use_nesterov=True)
+    optimizer = tf.train.SyncReplicasOptimizer(
+        optimizer,
+        replicas_to_aggregate=num_workers,
+        total_num_replicas=num_workers,
+        use_locking=True,
+        name="sync_replicas")
+
+    grads = optimizer.compute_gradients(ctc_cost, trainable_vars)
+    grads, _ = tf.clip_by_global_norm(tf.gradients(ctc_cost, trainable_vars), 100)
+    train_op = optimizer.apply_gradients(zip(grads, trainable_vars), global_step=global_step)
+    time_begin = time.time()
+
+    chief_queue_runner = optimizer.get_chief_queue_runner()
+    sync_init_op = optimizer.get_init_tokens_op()
+    ready_for_local_init_op = optimizer.ready_for_local_init_op
+    K.manual_variable_initialization(True)
+    local_init_op = optimizer.local_step_init_op
+    if is_chief:
+        local_init_op = optimizer.chief_init_op
+    sv = tf.train.Supervisor(
+        is_chief=is_chief,
+        logdir='train_log',
+        local_init_op=local_init_op,
+        ready_for_local_init_op=ready_for_local_init_op,
+        recovery_wait_secs=1,
+        global_step=global_step)
+
+    sess = sv.prepare_or_wait_for_session(server.target)
+    K.set_session(sess)
+    K.get_session().run(sync_init_op)
+    sv.start_queue_runners(sess, [chief_queue_runner])
+    print("Training begins @ %f" % time_begin)
+    main(FLAGS.train_desc_file, FLAGS.val_desc_file, FLAGS.epochs, FLAGS.save_dir,
+         FLAGS.sortgrad, model=model, run_require_op=[ctc_cost, train_op], val_fn=val_fn)
+
+but when i run it,

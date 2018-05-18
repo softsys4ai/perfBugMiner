@@ -1,0 +1,29 @@
+Use passed name for leaky relu tensor op
+
+I was experimenting with different activation functions for the final layer of my graph recently when I noticed that the output graph was failing to save because it couldn't find a tensor by a name I had provided, e.g. (my_final_tensor_op).
+It worked correctly with an activation function like tf.nn.sigmoid:
+import tensorflow as tf
+import numpy as np
+
+sample_values = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+sigmoid_tensor = tf.nn.sigmoid(sample_values, name='my_final_tensor_op')
+sigmoid_tensor.name
+>>> 'my_final_tensor_op:0'
+
+But for tf.nn.leaky_relu I noticed that a /Maximum gets appended to whatever name value is passed:
+import tensorflow as tf
+import numpy as np
+
+sample_values = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+leaky_relu_tensor = tf.nn.leaky_relu(sample_values, name='my_final_tensor_op')
+leaky_relu_tensor.name
+>>> 'my_final_tensor_op/Maximum:0'
+
+I suspect the reason why is that the name parameter is not passed in the call to the math_ops.maximum function:
+return math_ops.maximum(alpha * features, features)
+
+Compare this to the case of tf.nn.sigmoid, which does pass in the name parameter into the function call that it returns:
+return gen_math_ops.sigmoid(x, name=name)
+
+This PR makes the change to have the leaky_relu function pass name to the math_ops.maximum function so that the desired name for the op carries down. I also added a unit test that addresses this specific functionality.
+One potential issue that could come up is if there's a lot of existing code that expects the /Maximum string to be appended, such as in the case where no name is set and the tensor op's name becomes LeakyRelu/Maximum:0. If that's the case, I would at least like to change the method's documentation so that the caller is aware of the /Maximum string concatenation side effect.

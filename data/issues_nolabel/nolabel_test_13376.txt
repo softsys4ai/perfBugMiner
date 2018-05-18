@@ -1,0 +1,170 @@
+MatMul in TensorFlow is slower than dot product in numpy
+
+I am observing that on my machine tf.matmul in tensorflow is running significantly slower than dot product in numpy. I have GTX 1080 GPU, and expecting tf.matmul to be at least as fast as when running the code using CPU (numpy).
+**Environment Info
+Operating System**
+lsb_release -a
+No LSB modules are available.
+Distributor ID:	Ubuntu
+Description:	Ubuntu 16.10
+Release:	16.10
+Codename:	yakkety
+
+Installed version of CUDA and cuDNN:
+ls -l /usr/local/cuda-8.0/lib64/libcud*
+-rw-r--r-- 1 root      root    556000 Feb 22  2017 /usr/local/cuda-8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root      root        16 Feb 22  2017 /usr/local/cuda-8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root      root        19 Feb 22  2017 /usr/local/cuda-8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.61
+-rwxr-xr-x 1 root      root    415432 Feb 22  2017 /usr/local/cuda-8.0/lib64/libcudart.so.8.0.61
+-rw-r--r-- 1 root      root    775162 Feb 22  2017 /usr/local/cuda-8.0/lib64/libcudart_static.a
+lrwxrwxrwx 1 voldemaro users       13 Nov  6  2016 /usr/local/cuda-8.0/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 voldemaro users       18 Nov  6  2016 /usr/local/cuda-8.0/lib64/libcudnn.so.5 -> libcudnn.so.5.1.10
+-rwxr-xr-x 1 voldemaro users 84163560 Nov  6  2016 /usr/local/cuda-8.0/lib64/libcudnn.so.5.1.10
+-rw-r--r-- 1 voldemaro users 70364814 Nov  6  2016 /usr/local/cuda-8.0/lib64/libcudnn_static.a
+
+TensorFlow Setup
+python -c "import tensorflow; print(tensorflow.__version__)"
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+1.0.0
+
+Code:
+'''
+Created on Sep 28, 2017
+
+@author: voldemaro
+
+Running on I7/GTX 1080
+
+no MKL
+('TF version: ', 'v1.0.0-rc2-15-g47bba63-dirty')
+('TF url: ', 'https://github.com/tensorflow/tensorflow/commit/47bba63')
+Timing in ms for 2048 x 2048 SVD of type <type 'numpy.float32'> and matmul for 16920 x 2048 of type <type 'numpy.float32'>
+numpy default SVD    min:  3956.20, median:  4127.75, mean:  4264.41
+TF CPU SVD           min:  5926.43, median:  5951.70, mean:  5961.43
+TF GPU SVD           min:  5917.10, median:  6015.87, mean:  6039.63
+numpy default .dot product min:  5816.97, median:  5933.43, mean:  5965.22
+TF CPU matmul        min: 21939.19, median: 22485.99, mean: 22374.69
+TF GPU matmul        min: 22026.52, median: 22109.97, mean: 22199.43
+'''
+
+from scipy import linalg;  # for svd
+import numpy as np;
+import os;
+import sys;
+import time;
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"]="2"  # nospam
+
+import tensorflow as tf;
+import gc; gc.disable();
+
+NUM_RUNS = 5;
+dtype = np.float32;
+N=2048;
+M =  16920;
+
+
+def get_tensorflow_version_url():
+    import tensorflow as tf
+    version=tf.__version__
+    commit = tf.__git_version__
+    # commit looks like this
+    # 'v1.0.0-65-g4763edf-dirty'
+    commit = commit.replace("'","")
+    if commit.endswith('-dirty'):
+        dirty = True
+        commit = commit[:-len('-dirty')]
+    commit=commit.rsplit('-g', 1)[1]
+    url = 'https://github.com/tensorflow/tensorflow/commit/'+commit
+    return url
+
+def get_mkl_version():
+    import ctypes
+    import numpy as np
+    ver = np.zeros(199, dtype=np.uint8)
+    mkl = ctypes.cdll.LoadLibrary("libmkl_rt.so")
+    mkl.MKL_Get_Version_String(ver.ctypes.data_as(ctypes.c_char_p), 198)
+    return ver[ver != 0].tostring()
+
+timeline_counter = 0
+run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE);
+
+
+def benchmark(message, func):
+    time_list = []
+    for i in range(NUM_RUNS):
+        start_time = time.time();
+        func();
+        time_list.append(time.time()-start_time);
+
+    time_list = 1000*np.array(time_list);  # get seconds, convert to ms
+    if len(time_list)>0:
+        min = np.min(time_list);
+        median = np.median(time_list);
+        formatted = ["%.2f"%(d,) for d in time_list[:10]];
+        result = "min: %8.2f, median: %8.2f, mean: %8.2f"%(min, median, np.mean(time_list))
+    else:
+        result = "empty"
+    print("%-20s %s"%(message, result))
+    
+
+if np.__config__.get_info("lapack_mkl_info"):
+    print("MKL version", get_mkl_version())
+else:
+    print("no MKL")
+
+print("TF version: ", tf.__git_version__)
+print("TF url: ", get_tensorflow_version_url())
+
+
+svd_array = np.random.random_sample((N,N)).astype(dtype);
+another_array = np.random.random_sample((M,N)).astype(dtype);
+
+init_OP = tf.global_variables_initializer();
+
+
+with tf.device("/gpu:0"):
+    init_holder_gpu = tf.placeholder(dtype, shape=(M,M));
+    
+    specVarGPU = tf.random_uniform((N,N), dtype=dtype);
+    S_gpu = tf.random_uniform((M,N), dtype=dtype);
+    V_gpu = tf.matmul(tf.matmul(tf.transpose(tf.transpose(tf.conj(S_gpu))), specVarGPU, ), tf.transpose(S_gpu));
+    [D2_gpu, E1_gpu,  E2_gpu] = tf.svd(specVarGPU);
+
+with tf.device("/cpu:0"):
+    init_holder_cpu = tf.placeholder(dtype, shape=(M,M));
+    specVarCPU = tf.random_uniform((N,N), dtype=dtype);
+    S_cpu = tf.random_uniform((M,N), dtype=dtype);
+    V_cpu = tf.matmul(tf.matmul(tf.transpose(tf.transpose(tf.conj(S_cpu))), specVarCPU, ), tf.transpose(S_cpu));
+    
+    
+    [D2_cpu, E1_cpu,  E2_cpu] = tf.svd(specVarCPU);
+    V_cpu = tf.matmul(tf.matmul(tf.transpose(tf.transpose(tf.conj(S_cpu))), E1_cpu), tf.transpose(S_cpu));
+
+print("Timing in ms for %d x %d SVD of type %s and matmul for %d x %d of type %s"%(N, N, dtype, M, N, dtype));
+
+def func(): linalg.svd(svd_array)
+benchmark("numpy default SVD", func)
+
+config = tf.ConfigProto(allow_soft_placement = True, graph_options=tf.GraphOptions(optimizer_options=tf.OptimizerOptions(opt_level=tf.OptimizerOptions.L0)));
+sess = tf.Session(config = config);
+sess.run(init_OP);
+
+def func2(): sess.run([D2_cpu.op, E1_cpu.op,  E2_cpu.op]);
+benchmark("TF CPU SVD", func2);
+
+def func3(): sess.run([D2_gpu.op, E1_gpu.op,  E2_gpu.op]);
+benchmark("TF GPU SVD", func3);
+
+def func1(): np.transpose(np.asmatrix(another_array)).getH().dot(svd_array).dot(np.transpose(another_array));
+benchmark("numpy default .dot product", func1)
+
+def func4(): sess.run([V_cpu]);
+benchmark("TF CPU matmul", func4)
+
+def func5(): sess.run([V_gpu])
+benchmark("TF GPU matmul", func4)

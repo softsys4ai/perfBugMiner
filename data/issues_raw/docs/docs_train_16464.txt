@@ -1,0 +1,61 @@
+AssignAddVariableOp has no output
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Arch Linux
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.5.0-rc1
+Python version: NA (Using Go bindings)
+Bazel version (if compiling from source): 0.9.0
+GCC/Compiler version (if compiling from source): 7.2.1
+CUDA/cuDNN version: 9.1 / 7.0
+GPU model and memory: GTX 1060 6GB
+Exact command to reproduce: See below
+
+Describe the problem
+According to the docs, AssignAddVariableOp "Outputs the incremented value, which can be used to totally order the increments to this variable.". Without this feature, I get non deterministic behavior when reading the value of the variable at the same time as I update it. However, at least in the Go bindings, it returns an operation which has no outputs. I can work around this problem by using two calls to sess.Run(), but this is inelegant.
+Source code / logs
+package main
+
+import (
+	"fmt"
+
+	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	"github.com/tensorflow/tensorflow/tensorflow/go/op"
+)
+
+func main() {
+	s := op.NewScope()
+	value1 := op.Const(s.SubScope("zero"), float32(0))
+	value2 := op.Const(s, float32(3.1415))
+	handle := op.VarHandleOp(s, tf.Float, tf.ScalarShape())
+	init := op.AssignVariableOp(s, handle, value1)
+	update := op.AssignAddVariableOp(s, handle, value2)
+	fmt.Println("NumOutputs:", update.NumOutputs())
+	graph, err := s.Finalize()
+	if err != nil {
+		panic(err)
+	}
+	sess, err := tf.NewSession(graph, nil)
+	if err != nil {
+		panic(err)
+	}
+	_, err = sess.Run(nil, nil, []*tf.Operation{init})
+	if err != nil {
+		panic(err)
+	}
+	_, err = sess.Run(nil, []tf.Output{update.Output(0)}, nil)
+	if err != nil {
+		panic(err)
+	}
+}
+
+$ go run assign_demo.go 
+NumOutputs: 0
+panic: Tried to fetch data for 'AssignAddVariableOp:0', which produces no output.  To run to a node but not fetch any data, pass 'AssignAddVariableOp:0' as an argument to the 'target_node_names' argument of the Session::Run API.
+
+goroutine 1 [running]:
+main.main()
+	/home/isaac/go/src/github.com/is8ac/gotf/assign_demo.go:32 +0x448
+exit status 2

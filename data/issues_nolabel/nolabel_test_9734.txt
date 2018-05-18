@@ -1,0 +1,30 @@
+`tf.while_loop` Bug
+
+I found that tf.while_loop(cond...) has issues on its termination condition which cond is set by using method tf.logical_or(t1, t2). If one of conditions t1 or t2 is satisfied, then while loop should break. But I noticed this is not true. The following is the code for testing and reproducing:
+import tensorflow as tf
+
+
+def condition(i, val):
+    # Termination condition.
+    return tf.logical_or(tf.less(i, 10), tf.less(val, 1))
+
+
+def body(i, val):
+    # Mimic the body loop.
+    i += 1
+    val -= 0.2
+    return i, val
+
+# Build up graph.
+i = tf.Variable(0, trainable=False)
+value = tf.Variable(0.0, trainable=False)
+train_ops = tf.while_loop(condition, body, [i, value])
+init_op = tf.global_variables_initializer()
+
+# Run tf session.
+sess = tf.Session()
+sess.run(init_op)
+print(sess.run(train_ops))
+
+The code logic is quite simple: Inside the termination condition, either i >= 10 or value >= 1 is satisfied, the loop should be terminated. Since i increments by 1 each iteration with initial 0, and second condition is always True, so it should terminate after the 10th iteration. However, if you run the above code, you could see the while loop goes infinity. I also tried other termination condition like tf.logical_or(tf.less(i, 10), tf.less(val, -0.5)) and got the same result (but should terminate after the third iteration, in which val decreases by 0.2 each iteration). But if you try cond liketf.logical_or(tf.less(i, 10), tf.less(val, -100)), it would terminate at the 10th iteration which is also not expected, because val initially is 0, which is greater -100 at the beginning. This means that one of conditions for tf.logical_or(t1, t2) may have bugs when it works with tf.while_loop().
+P.S The above code runs on MacOS 10.12.4 with Python 3.5, and the issue can be reproduced with Tensorflow 0.12/1.0/1.1

@@ -1,0 +1,50 @@
+tf.matmul() fails when matrices are sparse, even if a_is_sparse is set.  Cryptic error.
+
+tf.matmul(A, B, a_is_sparse=True) fails on a = ops.convert_to_tensor(a, name="a") with cryptic error.
+Example code:
+import tensorflow as tf
+import numpy as np
+
+x = tf.sparse_placeholder(tf.float32)
+y = tf.Variable(tf.random_uniform([9, 9], minval=0.0, maxval=1.0, dtype=tf.float32))
+
+with tf.Session() as sess:
+    sess.run(tf.initialize_all_variables())
+    indices = np.array([[3, 2], [4, 5]], dtype=np.int64)
+    values = np.array([1.0, 2.0], dtype=np.float32)
+    shape = np.array([9, 9], dtype=np.int64)
+    _ = sess.run(tf.matmul(x, y), feed_dict={
+        x: tf.SparseTensorValue(indices, values, shape)})
+
+Error:
+line 12, in 
+_ = sess.run(tf.matmul(x, y, a_is_sparse=True), feed_dict={
+File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/math_ops.py", line 1189, in matmul
+a = ops.convert_to_tensor(a, name="a")
+File "/usr/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 620, in convert_to_tensor
+ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/constant_op.py", line 179, in _constant_tensor_conversion_function
+return constant(v, dtype=dtype, name=name)
+File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/constant_op.py", line 162, in constant
+tensor_util.make_tensor_proto(value, dtype=dtype, shape=shape))
+File "/usr/local/lib/python2.7/site-packages/tensorflow/python/framework/tensor_util.py", line 421, in make_tensor_proto
+tensor_proto.string_val.extend([compat.as_bytes(x) for x in proto_values])
+File "/usr/local/lib/python2.7/site-packages/tensorflow/python/util/compat.py", line 44, in as_bytes
+raise TypeError('Expected binary or unicode string, got %r' % bytes_or_text)
+TypeError: Expected binary or unicode string, got <tensorflow.python.framework.ops.SparseTensor object at 0x11d952d90>
+Is fixed by explicitly converting from sparse to dense tensor before multiplication:
+
+import tensorflow as tf
+import numpy as np
+
+x = tf.sparse_placeholder(tf.float32)
+z = tf.sparse_tensor_to_dense(x)
+y = tf.Variable(tf.random_uniform([9, 9], minval=0.0, maxval=1.0, dtype=tf.float32))
+
+with tf.Session() as sess:
+    sess.run(tf.initialize_all_variables())
+    indices = np.array([[3, 2], [4, 5]], dtype=np.int64)
+    values = np.array([1.0, 2.0], dtype=np.float32)
+    shape = np.array([9, 9], dtype=np.int64)
+    _ = sess.run(tf.matmul(z, y), feed_dict={
+        x: tf.SparseTensorValue(indices, values, shape)})

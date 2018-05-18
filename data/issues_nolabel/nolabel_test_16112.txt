@@ -1,0 +1,41 @@
+Define gradient for tf.linspace and make it work with higher-rank tensors, not just scalars.
+
+I needed to feed-forward through tf.linspace, but it seems that it does not have gradient defined.
+I don't know how to define gradient for existing op, but I've implemented my own version of tf.linspace in python using tensorflow with so that automatically defined gradient.
+            def linspace(start, end, num):
+                range = end - start
+                num_steps = num - 1
+                h = range / num_steps
+
+                def cond(ta, x, k):
+                    return tf.less(x, end)
+
+                def body(ta, x, k):
+                    x = x + h
+                    ta = ta.write(k, x)
+                    return ta, x, k+1
+
+                k = tf.constant(0)
+                ta = tf.TensorArray(dtype=tf.float32, size=num)
+                ta = ta.write(k, start)
+                ta = tf.while_loop(cond, body, [ta, start, k+1])[0]
+                return ta.stack()
+One more feature I can suggest adding is improve to linspace so it would work with higher-rank tensors.
+The function I wrote is also very short and simple, but is interesting as a generalization of linspace.
+            def linspace_vectors(start, end, num):
+                cnct = tf.concat([start, end], 1)
+                seq = tf.map_fn(
+                    lambda row_i: linspace(row_i[0], row_i[1], num), cnct)
+                splits = tf.split(seq, num, 1)
+                return tf.stack(splits)
+The function is taken from my project and returns 3-rank tensor with shapes [num, r, 1]. Inputs are 2-rank tensors with shapes [r, 1].
+So that I linspaced vectors-columns, not just scalars as tf.linspace do.
+What do you think? Is it worth adding?
+Have I written custom code: Yes
+OS Platform and Distribution: Ubuntu 16.04
+TensorFlow installed from: pip nightly build
+TensorFlow version: 1.4.1
+Bazel version: N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A

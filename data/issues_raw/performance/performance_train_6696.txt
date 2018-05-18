@@ -1,0 +1,46 @@
+conv2d / Kernel Size > Input does not raise ValueError anymore
+
+I noticed that tensorflow 0.10.0 raises a ValueError when I pass a kernel size that is larger than the first input dimensions. The error occurred when I tried to pass data in NCHW format, while the default data_format is NHWC.
+I used this code for replication of the problem:
+import tensorflow as tf
+
+# NHWC
+input_nhwc = tf.placeholder(tf.float32, [None, 84, 84, 4])
+output_nhwc = tf.contrib.layers.conv2d(input_nhwc, 32, [8, 8], 4)
+
+# NCHW
+input_nchw = tf.placeholder(tf.float32, [None, 4, 84, 84])
+output_nchw = tf.contrib.layers.conv2d(input_nchw, 32, [8, 8], 4)
+
+tensorflow 0.12.1 does not raise any error, whereas tensorflow 0.10.0 raises the following error:
+Traceback (most recent call last):
+  File "conv2d_error.py", line 5, in <module>
+    output_nhwc = tf.contrib.layers.conv2d(input_nhwc, 32, [8, 8], 4)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/framework/python/ops/arg_scope.py", line 171, in func_with_args
+    return func(*args, **current_args)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/layers/python/layers/layers.py", line 411, in convolution2d
+    padding=padding)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_nn_ops.py", line 394, in conv2d
+    data_format=data_format, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 703, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2319, in create_op
+    set_shapes_for_outputs(ret)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1711, in set_shapes_for_outputs
+    shapes = shape_func(op)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/common_shapes.py", line 246, in conv2d_shape
+    padding)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/common_shapes.py", line 184, in get2d_conv_output_size
+    (row_stride, col_stride), padding_type)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/common_shapes.py", line 149, in get_conv_output_size
+    "Filter: %r Input: %r" % (filter_size, input_size))
+ValueError: Filter must not be larger than the input: Filter: (8, 8) Input: (4, 84)
+
+I tried to track if there's any kind of automatic detection of data formats (there is not), and further why the issue persists. All I could find were the filter and input shapes in nn_ops.py, which seem to pass compability tests in tensorflow 0.12.0.
+NHWC
+Filter shape: (8, 8, 4, 32) | input shape: (?, 84, 84, 4)
+----------------
+NCHW
+Filter shape: (8, 8, 84, 32) | input shape: (?, 4, 84, 84)
+
+I'm not sure if this is expected behavior, or if an exception should have been raised in tensorflow 0.12.1 as well.

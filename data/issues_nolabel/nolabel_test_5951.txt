@@ -1,0 +1,156 @@
+possible bug for saver.restore not compact with previous version of tensorflow in tensorflow r-0.12
+
+NOTE: Only file GitHub issues for bugs and feature requests.  All other topics will be closed.
+For general support from the community, see StackOverflow.
+To make bugs and feature requests more easy to find and organize, we close issues that are deemed
+out of scope for GitHub Issues and point people to StackOverflow.
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Environment info
+Operating System: Ubuntu 16.04.1 LTS
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+rw-r--r-- 1 root root 558720 Sep 14 19:02 /usr/local/cuda-8.0/lib64/libcudadevrt.a lrwxrwxrwx 1 root root 16 Sep 14 19:05 /usr/local/cuda-8.0/lib64/libcudart.so -> libcudart.so.8.0 lrwxrwxrwx 1 root root 19 Sep 14 19:05 /usr/local/cuda-8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44 -rw-r--r-- 1 root root 415432 Sep 14 19:02 /usr/local/cuda-8.0/lib64/libcudart.so.8.0.44 -rw-r--r-- 1 root root 775162 Sep 14 19:02 /usr/local/cuda-8.0/lib64/libcudart_static.a lrwxrwxrwx 1 root root 13 Oct 13 23:19 /usr/local/cuda-8.0/lib64/libcudnn.so -> libcudnn.so.5 lrwxrwxrwx 1 root root 17 Oct 13 23:19 /usr/local/cuda-8.0/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5 -rw-r--r-- 1 root root 79337624 Oct 13 23:17 /usr/local/cuda-8.0/lib64/libcudnn.so.5.1.5 -rw-r--r-- 1 root root 69756172 Oct 13 23:17 /usr/local/cuda-8.0/lib64/libcudnn_static.a
+If installed from binary pip package, provide:
+
+A link to the pip package you installed: https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-0.12.0rc0-cp27-none-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.12.0-rc0
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+The output of bazel version
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+I have a model which saved by tensorflow-0.11, for example:
+import tensorflow as tf
+import numpy as np
+x_data = np.random.rand(100).astype(np.float32)
+y_data = x_data * 0.1 + 0.3
+
+W = tf.Variable(tf.random_uniform([1], -1.0, 1.0))
+b = tf.Variable(tf.zeros([1]))
+y = W * x_data + b
+all_vars = tf.trainable_variables()
+sess=tf.InteractiveSession()
+tf.initialize_all_variables().run()
+saver = tf.train.Saver(all_vars)
+
+saver.save(sess,"./model.ckpt")
+
+sess.close()
+
+after update to tensorflow 0.12 version, and when I load the model by:
+import tensorflow as tf
+import numpy as np
+x_data = np.random.rand(100).astype(np.float32)
+y_data = x_data * 0.1 + 0.3
+W = tf.Variable(tf.random_uniform([1], -1.0, 1.0))
+b = tf.Variable(tf.zeros([1]))
+y = W * x_data + b
+all_vars = tf.trainable_variables()
+sess=tf.InteractiveSession()
+tf.initialize_all_variables().run()
+saver = tf.train.Saver(all_vars)
+
+saver.restore(sess,"model.ckpt")
+
+sess.close()
+
+the error rises, log output as follows
+What other attempted solutions have you tried?
+I have no problem to restore it in tensorflow 0.11
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+W tensorflow/core/framework/op_kernel.cc:975] Not found: Unsuccessful TensorSliceReader constructor: Failed to find any matching files for model.ckpt
+W tensorflow/core/framework/op_kernel.cc:975] Not found: Unsuccessful TensorSliceReader constructor: Failed to find any matching files for model.ckpt
+---------------------------------------------------------------------------
+NotFoundError                             Traceback (most recent call last)
+<ipython-input-3-debe9897f9a0> in <module>()
+----> 1 saver.restore(sess,"model.ckpt")
+
+/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.pyc in restore(self, sess, save_path)
+   1386       return
+   1387     sess.run(self.saver_def.restore_op_name,
+-> 1388              {self.saver_def.filename_tensor_name: save_path})
+   1389 
+   1390   @staticmethod
+
+/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in run(self, fetches, feed_dict, options, run_metadata)
+    764     try:
+    765       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 766                          run_metadata_ptr)
+    767       if run_metadata:
+    768         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    962     if final_fetches or final_targets:
+    963       results = self._do_run(handle, final_targets, final_fetches,
+--> 964                              feed_dict_string, options, run_metadata)
+    965     else:
+    966       results = []
+
+/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+   1012     if handle is None:
+   1013       return self._do_call(_run_fn, self._session, feed_dict, fetch_list,
+-> 1014                            target_list, options, run_metadata)
+   1015     else:
+   1016       return self._do_call(_prun_fn, self._session, handle, feed_dict,
+
+/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/client/session.pyc in _do_call(self, fn, *args)
+   1032         except KeyError:
+   1033           pass
+-> 1034       raise type(e)(node_def, op, message)
+   1035 
+   1036   def _extend_graph(self):
+
+NotFoundError: Unsuccessful TensorSliceReader constructor: Failed to find any matching files for model.ckpt
+	 [[Node: save/RestoreV2_1 = RestoreV2[dtypes=[DT_FLOAT], _device="/job:localhost/replica:0/task:0/cpu:0"](_recv_save/Const_0, save/RestoreV2_1/tensor_names, save/RestoreV2_1/shape_and_slices)]]
+	 [[Node: save/RestoreV2_1/_1 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_9_save/RestoreV2_1", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+Caused by op u'save/RestoreV2_1', defined at:
+  File "/usr/bin/ipython", line 5, in <module>
+    start_ipython()
+  File "/home/fctl/.local/lib/python2.7/site-packages/IPython/__init__.py", line 119, in start_ipython
+    return launch_new_instance(argv=argv, **kwargs)
+  File "/home/fctl/.local/lib/python2.7/site-packages/traitlets/config/application.py", line 658, in launch_instance
+    app.start()
+  File "/home/fctl/.local/lib/python2.7/site-packages/IPython/terminal/ipapp.py", line 348, in start
+    self.shell.mainloop()
+  File "/home/fctl/.local/lib/python2.7/site-packages/IPython/terminal/interactiveshell.py", line 440, in mainloop
+    self.interact()
+  File "/home/fctl/.local/lib/python2.7/site-packages/IPython/terminal/interactiveshell.py", line 431, in interact
+    self.run_cell(code, store_history=True)
+  File "/home/fctl/.local/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2717, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/home/fctl/.local/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2821, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/home/fctl/.local/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2881, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-2-ba9a814a49ca>", line 1, in <module>
+    saver = tf.train.Saver(all_vars)
+  File "/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1000, in __init__
+    self.build()
+  File "/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1030, in build
+    restore_sequentially=self._restore_sequentially)
+  File "/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 624, in build
+    restore_sequentially, reshape)
+  File "/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 361, in _AddRestoreOps
+    tensors = self.restore_op(filename_tensor, saveable, preferred_shard)
+  File "/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 200, in restore_op
+    [spec.tensor.dtype])[0])
+  File "/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/ops/gen_io_ops.py", line 441, in restore_v2
+    dtypes=dtypes, name=name)
+  File "/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 759, in apply_op
+    op_def=op_def)
+  File "/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2240, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/fctl/.local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1128, in __init__
+    self._traceback = _extract_stack()
+
+NotFoundError (see above for traceback): Unsuccessful TensorSliceReader constructor: Failed to find any matching files for model.ckpt
+	 [[Node: save/RestoreV2_1 = RestoreV2[dtypes=[DT_FLOAT], _device="/job:localhost/replica:0/task:0/cpu:0"](_recv_save/Const_0, save/RestoreV2_1/tensor_names, save/RestoreV2_1/shape_and_slices)]]
+	 [[Node: save/RestoreV2_1/_1 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_9_save/RestoreV2_1", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]

@@ -1,0 +1,22 @@
+deadlock in fork() because of OpenBlas
+
+TensorFlow: 1.3.0 (v1.3.0-rc2-20-g0787eee)
+I'm not exactly sure whether this is a TF specific problem, or OpenBlas specific, or at what place this should be fixed.
+At some part in my code, I want to start a subprocess, via Popen, and it uses fork() internally. Before that, I already initialized the TF session and thus have initialized the thread pools.
+The fork() will cause a deadlock because OpenBlas has used pthread_atfork() to register blas_thread_shutdown_() to do some cleanup, which will wait for a lock, which probably was acquired by some of the other threads at that time. Stacktrace:
+#0  0x00002b289b1702ad in __lll_lock_wait () from /u/zeyer/tools/glibc217/libpthread.so.0
+#1  0x00002b289b16dabd in pthread_cond_signal@@GLIBC_2.3.2 () from /u/zeyer/tools/glibc217/libpthread.so.0
+#2  0x00002b294d9fb68e in blas_thread_shutdown_ () from /usr/lib/libopenblas.so.0
+#3  0x00002b289b44b965 in fork () from /u/zeyer/tools/glibc217/libc.so.6
+#4  0x00002b28ae1f1c47 in subprocess_fork_exec (self=<optimized out>, args=<optimized out>)
+    at /tmp/python3-20170710-4344-zt9hmb/Python-3.6.1/Modules/_posixsubprocess.c:672
+#5  0x00002b289acf79c9 in _PyCFunction_FastCallDict (func_obj=0x2b28adfa34c8, args=0x1653030, nargs=<optimized out>, 
+    kwargs=kwargs@entry=0x0) at Objects/methodobject.c:234
+#6  0x00002b289acf7c97 in _PyCFunction_FastCallKeywords (func=func@entry=0x2b28adfa34c8, stack=stack@entry=0x1653030, 
+    nargs=<optimized out>, kwnames=kwnames@entry=0x0) at Objects/methodobject.c:295
+#7  0x00002b289ad8b171 in call_function (pp_stack=pp_stack@entry=0x7ffe97057f30, oparg=oparg@entry=17, 
+    kwnames=kwnames@entry=0x0) at Python/ceval.c:4798
+#8  0x00002b289ad8eeb7 in _PyEval_EvalFrameDefault (f=<optimized out>, throwflag=<optimized out>) at Python/ceval.c:3284
+...
+
+This OpenBLAS issue and this Sage issue might be related. Basically the Sage solution is to disable the multi-threading support of OpenBLAS by setting OMP_NUM_THREADS=1 but I actually want to use the multi-threading support if possible.

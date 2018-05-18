@@ -1,0 +1,76 @@
+Android buffer overflow exception when running only a certain model above a certain image resolution?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Android Lollipop
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.2
+Python version: 2.7.12
+Bazel version (if compiling from source): 4.5
+CUDA/cuDNN version: -
+GPU model and memory: -
+Exact command to reproduce: Running app on android studio
+
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+I have met with a very peculiar problem that seem to show that a certain model, Inception V3, which I got from the TF-slim library, seem to consume more memory than usual and cause a bufferoverflow problem like in here:
+08-28 21:23:40.121 1094-1094/com.example.android.androidevaluateimagenet D/AndroidRuntime: Shutting down VM
+08-28 21:23:40.122 1094-1094/com.example.android.androidevaluateimagenet E/AndroidRuntime: FATAL EXCEPTION: main
+                                                                                           Process: com.example.android.androidevaluateimagenet, PID: 1094
+                                                                                           java.nio.BufferOverflowException
+                                                                                               at java.nio.FloatBuffer.put(FloatBuffer.java:444)
+                                                                                               at org.tensorflow.Tensor.writeTo(Tensor.java:390)
+                                                                                               at org.tensorflow.contrib.android.TensorFlowInferenceInterface.fetch(TensorFlowInferenceInterface.java:338)
+                                                                                               at org.tensorflow.contrib.android.TensorFlowInferenceInterface.fetch(TensorFlowInferenceInterface.java:301)
+                                                                                               at com.example.android.androidevaluateimagenet.TensorFlowImageClassifier.recognizeImage(TensorFlowImageClassifier.java:149)
+                                                                                               at com.example.android.androidevaluateimagenet.MainActivity.getInferenceTime(MainActivity.java:267)
+                                                                                               at com.example.android.androidevaluateimagenet.MainActivity$2.onClick(MainActivity.java:345)
+                                                                                               at android.view.View.performClick(View.java:4763)
+                                                                                               at android.view.View$PerformClick.run(View.java:19821)
+                                                                                               at android.os.Handler.handleCallback(Handler.java:739)
+                                                                                               at android.os.Handler.dispatchMessage(Handler.java:95)
+                                                                                               at android.os.Looper.loop(Looper.java:135)
+                                                                                               at android.app.ActivityThread.main(ActivityThread.java:5272)
+                                                                                               at java.lang.reflect.Method.invoke(Native Method)
+                                                                                               at java.lang.reflect.Method.invoke(Method.java:372)
+                                                                                               at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:909)
+                                                                                               at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:704)
+
+Specifically, if you try an image resolution higher than 360x360 in the model, it crashes with the error. The interesting thing is that this doesn't happen for a significantly larger model, the Inception Resnet V2, although it supposedly consumes a lot more memory. With that larger inception resnet v2 model, I can use a resolution of over 400 with no issues. I have rebooted my device, switched it and run it on another identical device and another brand of device, but still there's this problem. I can't exactly locate the issue, but specifically here is what I have traced in the error:
+Specific error stack trace:
+TensorFlowImageClassifier.java:
+    inferenceInterface.fetch(outputName, outputs);
+
+TensorFlowInferenceInterace.java:
+public void fetch(String var1, float[] var2) {
+    this.fetch(var1, FloatBuffer.wrap(var2));
+}
+
+Tensor.java:
+public void writeTo(FloatBuffer var1) {
+    if(this.dtype != DataType.FLOAT) {
+        throw incompatibleBuffer(var1, this.dtype);
+    } else {
+        ByteBuffer var2 = this.buffer();
+        var1.put(var2.asFloatBuffer());
+    }
+}
+
+FloatBuffer.java:
+public FloatBuffer put(FloatBuffer src) {
+    if (src == this)
+        throw new IllegalArgumentException();
+    int n = src.remaining();
+    if (n > remaining())
+        throw new BufferOverflowException();
+    for (int i = 0; i < n; i++)
+        put(src.get());
+    return this;
+}
+
+I am not sure why this happens, as everything else works. In fact, if I try a resolution below 360, the Inception V3 model works perfectly fine. Note that I got the checkpoint model from TF-slim and froze it. I believe the method I used to freeze it works well, since there is no problem for all other models except Inception V3. So I can only conclude the problem lies within the layers. But I am not exactly sure how I can find out which layer is causing the problem, or even if it is because of the layers, I'm not sure how to fix it. I have included the layers of Inception V3 and Inception Resnet V2 in order here:
+Inception V3 Layers: https://gist.github.com/kwotsin/82016b003057cdcffec1bc9d1ea1e02b
+Inception Resnet V2 Layers: https://gist.github.com/kwotsin/893e11fe171af426091b89645d6a86d3
+If it is really the problem within the model, then I thought it could be because of a faulty implementation of a certain operation that is causing overly huge memory consumed.
+As an alternative fix, is there a way to check and raise the limit of the buffer size for the app to run successfully?

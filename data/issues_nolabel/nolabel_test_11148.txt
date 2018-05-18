@@ -1,0 +1,129 @@
+TFDBG Crashing on Windows 10; 'Causality Violated in Timing Relations of Debug Dumps'
+
+I started using TensorFlow and wrote a simple Siamese neural net. I wrote a small script to test the network, and got NaNs for loss, so I decided to learn how to use tfgbd.
+But when I run tfgbd, it crashes with the error 'Causality violated in timing relations of debug dumps: gradients/sub_1_grad/Shape_1 (1498762743063952): these input(s) are not satisfied: [('Sub_1', 0)]'
+
+-Windows 10, up to date
+-Python 3.5
+-TensorFlow 1.2.0, compiled in CPU-only mode
+Source Code:
+I have one script to define the network and one to run the actual test. I will include both.
+sameDiffNet:
+import tensorflow as tf
+
+class SameDiffNet:
+	# class is a siamese FC network for classifying vectors as same/different
+	
+	def __init__(self,inputLen):
+		# settings
+		self.NUM_BRANCHES = 2
+		self.LAYER_SIZES = [100,100]
+		self.DATA_TYPE = tf.float32
+		
+		# input
+		self.inputs = []
+		for branch in range(self.NUM_BRANCHES):
+			self.inputs.append(tf.placeholder(self.DATA_TYPE,[None,inputLen]))
+
+		# network branches
+		self.branches = []
+		self.branchWeights = self.branch_weights(inputLen)
+		for branch in range(self.NUM_BRANCHES):
+			self.branches.append(self.network_branch(branch))
+				
+		# combination layer and loss
+		self.out = self.distance_layer_euclidean()
+		self.target = tf.placeholder(self.DATA_TYPE,None)
+		self.loss = self.cross_entropy_loss()
+		
+	def branch_weights(self,inputLen):
+		# weights are shared, so they are computed once and re-used to make multiple graphs
+		# They are stored as a dictionary of arrays for flexible layer shapes and sizes
+		netWeights = {"weights": [], "bias": []}
+		netWeights["weights"].append(tf.Variable(tf.random_normal([inputLen,self.LAYER_SIZES[1]]),name="weights"))
+		netWeights["bias"].append(tf.Variable(tf.zeros([self.LAYER_SIZES[0]]),name="bias"))
+		
+		for layer in range(1,len(self.LAYER_SIZES)):
+			netWeights["weights"].append(tf.Variable(tf.random_normal([self.LAYER_SIZES[layer-1],self.LAYER_SIZES[layer]]),name="weights"))
+			netWeights["bias"].append(tf.Variable(tf.zeros([self.LAYER_SIZES[layer]]),name="bias"))
+		
+		return netWeights
+		
+	def network_branch(self,branch):
+		fc = self.inputs[branch]
+		for layer in range(len(self.LAYER_SIZES)):
+			fc = tf.nn.relu(tf.nn.bias_add(tf.matmul(fc,self.branchWeights["weights"][layer]), self.branchWeights["bias"][layer]))
+		return fc
+			
+	def distance_layer_euclidean(self):
+		assert self.NUM_BRANCHES == 2
+		dist = tf.subtract(1.0,tf.nn.sigmoid(tf.sqrt(tf.reduce_sum(tf.pow(tf.subtract(self.branches[0],self.branches[1]),2),1))))
+		return dist
+		
+	def cross_entropy_loss(self):
+		loss = tf.add(tf.multiply(self.target,tf.log(self.out)),tf.multiply(1-self.target,tf.log(1-self.out)))
+		return loss`
+
+toyTestTraining:
+''' A simple test where we train our siamese network on toy examples
+Our training data consists of a pair of 0's and 1's, and our truth output will
+simply be the XOR of these two values'''
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.python import debug as tf_debug
+from sameDiffNet import SameDiffNet
+
+numTraining = 1000
+numIter = 1000
+
+sess = tf.InteractiveSession()
+sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
+network = SameDiffNet(2)
+optimizer = tf.train.AdamOptimizer().minimize(network.loss)
+
+data = np.random.randint(0,2,(numTraining,2))
+truth = data[:,0] == data[:,1]
+truth = [float(not truth[b]) for b in range(numTraining)]
+data = data.astype(float)
+
+init = tf.global_variables_initializer().run()
+for iter in range(numIter):
+	permutationL = np.random.permutation(numTraining)
+	permutationR = np.random.permutation(numTraining)
+	target = [float(truth[permutationL[i]] == truth[permutationR[i]]) for i in range(numTraining)]
+
+	totalLoss = 0.0
+	for v in range(numTraining):
+		_, loss = sess.run([optimizer,network.loss], feed_dict={
+						network.inputs[0]:[data[permutationL[v],:]],
+						network.inputs[1]:[data[permutationR[v],:]],
+						network.target: target[v]})
+		totalLoss += loss
+		
+	if np.isnan(totalLoss):
+		print('Model diverged with loss = NaN')
+		quit()
+
+	if iter % 10 == 0:
+		print ('step %d: loss %.3f' % (iter, totalLoss/numTraining))
+
+import toyTestTraining opens tfgbd. I enter 'run' at the first pause, and get the following error dump:
+Traceback (most recent call last):
+File "", line 1, in 
+File "D:\Computer Vision\Siamese Same-Different Network\toyTestTraining.py", line 35, in 
+network.target: target[v]})
+File "C:\Users\Christopher\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\debug\wrappers\framework.py", line 495, in run
+run_end_resp = self.on_run_end(run_end_req)
+File "C:\Users\Christopher\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\debug\wrappers\local_cli_wrapper.py", line 312, in on_run_end
+self._dump_root, partition_graphs=partition_graphs)
+File "C:\Users\Christopher\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\debug\lib\debug_data.py", line 551, in init
+self._load_partition_graphs(partition_graphs, validate)
+File "C:\Users\Christopher\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\debug\lib\debug_data.py", line 809, in _load_partition_graphs
+self._validate_dump_with_graphs()
+File "C:\Users\Christopher\AppData\Local\Programs\Python\Python35\lib\site-packages\tensorflow\python\debug\lib\debug_data.py", line 985, in _validate_dump_with_graphs
+(node, datum.timestamp, repr(pending_inputs[node])))
+ValueError: Causality violated in timing relations of debug dumps: gradients/sub_1_grad/Shape_1 (1498762743063952): these input(s) are not satisfied: [('Sub_1', 0)]
+This error happens 100% of the time I run these commands.
+I apologize in advance if I'm overlooking something obvious. Thank you.

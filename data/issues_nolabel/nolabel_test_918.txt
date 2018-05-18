@@ -1,0 +1,59 @@
+bug in machine translation example - learning rate randomly changes
+
+I'm running into a strange issue with translate.py. I'm getting NaNs in the learning rate, or at least that's what my debug printouts suggest.
+My code is bleeding edge (5572b1a9205d94a0de8dc843f51197ce8bbedf7a) and unmodified except I added print statements like this at the start, and after each model.get_batch and model.step call:
+print('got a batch: lr = %.9f'% model.learning_rate.eval())
+Each run is different, but here are is one example:
+CUDA_VISIBLE_DEVICES=1 python translate.py --data_dir enfr_data --train_dir foo --en_vocab_size=50000 --fr_vocab_size=50000 --size=600 --num_layers=3 --batch_size 128 --steps_per_checkpoint 200 --max_train_data_size 110000
+...
+Creating 3 layers of 600 units.
+Created model with fresh parameters.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:73] Allocating 10.57GiB bytes.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:83] GPU 0 memory begins at 0x2047a0000 extends to 0x4a8b24400
+before loop: lr=0.500000000
+Reading development and training data (limit: 110000).
+  reading data line 100000
+got a batch: lr = 0.500000000
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 7642 get requests, put_count=3359 evicted_count=1000 eviction_rate=0.297708 and unsatisfied allocation rate=0.704397
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:256] Raising pool_size_limit_ from 100 to 110
+did a step: lr = 0.500000000
+got a batch: lr = 0.500000000
+did a step: lr = 0.500000000
+got a batch: lr = 0.500000000
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 22 get requests, put_count=2034 evicted_count=2000 eviction_rate=0.983284 and unsatisfied allocation rate=0
+did a step: lr = 0.500000000
+got a batch: lr = 0.500000000
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 46 get requests, put_count=7059 evicted_count=7000 eviction_rate=0.991642 and unsatisfied allocation rate=0
+did a step: lr = 0.967365444
+got a batch: lr = 0.967365444
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 44 get requests, put_count=6060 evicted_count=6000 eviction_rate=0.990099 and unsatisfied allocation rate=0
+did a step: lr = nan
+got a batch: lr = nan
+did a step: lr = nan
+got a batch: lr = nan
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 6 get requests, put_count=3025 evicted_count=3000 eviction_rate=0.991736 and unsatisfied allocation rate=0
+
+And here is another:
+CUDA_VISIBLE_DEVICES=1 python translate.py --data_dir enfr_data --train_dir foo --en_vocab_size=50000 --fr_vocab_size=50000 --size=600 --num_layers=3 --batch_size 128 --steps_per_checkpoint 2 --max_train_data_size 110000
+
+Creating 3 layers of 600 units.
+Created model with fresh parameters.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:73] Allocating 10.57GiB bytes.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:83] GPU 0 memory begins at 0x2047a0000 extends to 0x4a8b24400
+before loop: lr=0.500000000
+Reading development and training data (limit: 110000).
+  reading data line 100000
+got a batch: lr = 0.500000000
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 7642 get requests, put_count=3316 evicted_count=1000 eviction_rate=0.301568 and unsatisfied allocation rate=0.710024
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:256] Raising pool_size_limit_ from 100 to 110
+did a step: lr = 0.500000000
+got a batch: lr = 0.500000000
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 8 get requests, put_count=5019 evicted_count=5000 eviction_rate=0.996214 and unsatisfied allocation rate=0
+did a step: lr = 0.000000000
+global step 2 learning rate 0.0000 step-time 4.49 perplexity 14766.28
+  eval: bucket 0 perplexity inf
+  eval: bucket 1 perplexity inf
+  eval: bucket 2 perplexity inf
+  eval: bucket 3 perplexity inf
+
+Can anyone else replicate this, or have any idea how to fix it? Seems like a buffer overflow...

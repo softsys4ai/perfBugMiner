@@ -1,0 +1,114 @@
+Exception during running the graph: Unable to get element from the feed as bytes.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Mac OS
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.1.0
+Bazel version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+gcloud ml-engine local predict 
+--model-dir=$MODEL_DIR 
+--json-instances="$DATA_DIR/test2.json" \
+
+Describe the problem
+I'm using a beam pipeline to preprocess my text to integers bag of words, similar to this example https://github.com/GoogleCloudPlatform/cloudml-samples/blob/master/reddit_tft/reddit.py
+  words = tft.map(tf.string_split, inputs[name])
+  result[name + '_bow'] = tft.string_to_int(
+      words, frequency_threshold=frequency_threshold)
+
+Preprocessing and training seem to work fine. I train a simple linear model and point to the transform function and run an experiment.
+When I try to run a prediction I get an error, no idea what I'm doing wrong.
+Source code / logs
+WARNING:root:MetaGraph has multiple signatures 2. Support for multiple signatures is
+limited. By default we select named signatures.
+ERROR:root:Exception during running the graph: Unable to get element from the feed a
+s bytes.
+Traceback (most recent call last):
+File "lib/googlecloudsdk/command_lib/ml_engine/local_predict.py", line 136, in 
+main()
+File "lib/googlecloudsdk/command_lib/ml_engine/local_predict.py", line 131, in mai
+n
+instances=instances)
+File "/Users/xyz/Downloads/google-cloud-sdk/lib/third_party/cloud_ml_engin
+e_sdk/prediction/prediction_lib.py", line 656, in local_predict
+_, predictions = model.predict(instances)
+File "/Users/xyz/Downloads/google-cloud-sdk/lib/third_party/cloud_ml_engin
+e_sdk/prediction/prediction_lib.py", line 553, in predict
+outputs = self._client.predict(columns, stats)
+File "/Users/xyz/Downloads/google-cloud-sdk/lib/third_party/cloud_ml_engin
+e_sdk/prediction/prediction_lib.py", line 382, in predict
+"Exception during running the graph: " + str(e))
+prediction_lib.PredictionError: (4, 'Exception during running the graph: Unable to g
+et element from the feed as bytes.')
+def feature_columns(vocab_size=100000):
+    result = []
+    for key in TEXT_COLUMNS:
+        column = tf.contrib.layers.sparse_column_with_integerized_feature(key, vocab_size, combiner='sum')
+    result.append(column)
+return result
+
+model_fn = tf.contrib.learn.LinearClassifier(
+      feature_columns=feature_columns(),
+      n_classes=15,
+      model_dir=output_dir
+    )  
+
+def get_transformed_reader_input_fn(transformed_metadata,
+                                    transformed_data_paths,
+                                    batch_size,
+                                    mode):
+  """Wrap the get input features function to provide the runtime arguments."""
+  return input_fn_maker.build_training_input_fn(
+      metadata=transformed_metadata,
+      file_pattern=(
+          transformed_data_paths[0] if len(transformed_data_paths) == 1
+          else transformed_data_paths),
+      training_batch_size=batch_size,
+      label_keys=[LABEL_COLUMN],
+      reader=gzip_reader_fn,
+      key_feature_name='key',
+      reader_num_threads=4,
+      queue_capacity=batch_size * 2,
+      randomize_input=(mode != tf.contrib.learn.ModeKeys.EVAL),
+      num_epochs=(1 if mode == tf.contrib.learn.ModeKeys.EVAL else None))
+
+
+transformed_metadata = metadata_io.read_metadata(
+    args.transformed_metadata_path)
+raw_metadata = metadata_io.read_metadata(args.raw_metadata_path)
+
+train_input_fn = get_transformed_reader_input_fn(
+    transformed_metadata, args.train_data_paths, args.batch_size,
+    tf.contrib.learn.ModeKeys.TRAIN)
+
+eval_input_fn = get_transformed_reader_input_fn(
+    transformed_metadata, args.eval_data_paths, args.batch_size,
+    tf.contrib.learn.ModeKeys.EVAL)
+
+serving_input_fn = input_fn_maker.build_parsing_transforming_serving_input_fn(
+        raw_metadata,
+        args.transform_savedmodel,
+        raw_label_keys=[],
+        raw_feature_keys=model.TEXT_COLUMNS)
+
+export_strategy = tf.contrib.learn.utils.make_export_strategy(
+    serving_input_fn,
+    default_output_alternative_key=None,
+    exports_to_keep=5,
+    as_text=True)
+
+return Experiment(
+    estimator=model_fn,
+    train_input_fn=train_input_fn,
+    eval_input_fn=eval_input_fn,
+    export_strategies=export_strategy,
+    eval_metrics=model.get_eval_metrics(),
+    train_monitors=[],
+    train_steps=args.train_steps,
+    eval_steps=args.eval_steps,
+    min_eval_frequency=1
+)

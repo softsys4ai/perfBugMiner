@@ -1,0 +1,184 @@
+XLA CHECK-fails when using tf.random_normal op
+
+this issue is about XLA core dump similar to #12683
+code
+import tensorflow as tf
+import sys
+D = 2
+A = tf.random_normal(shape=[D, D, 2], dtype=tf.float32,name="A")
+B = tf.random_normal(shape=[D, D, 2], dtype=tf.float32, name="B")
+if len(sys.argv)%2:
+    fun = tf.random_normal
+else:
+    fun = tf.ones
+E = fun(shape=[D], dtype=tf.float32, name="EBA")
+H = tf.reshape(tf.constant([[0.25,0,0,0],[0,-0.25,0.5,0],[0,0.5,-0.25,0],[0,0,0,0.25]],
+                           dtype=tf.float32),[2,2,2,2],name="Hamiltonian")
+EA = tf.multiply(A,tf.reshape(E,[D,1,1]))
+AB = tf.tensordot(EA,B,[[1],[0]],name="AB")
+S, U, V = tf.svd(tf.reshape(AB,[2*D,2*D]))
+UU = tf.transpose(tf.multiply(tf.reshape(U[:,:D],[D,2,D]),tf.reshape(E,[D,1,1])),[0,2,1],name="nA")
+data = UU / tf.reduce_max(UU)
+config = tf.ConfigProto()
+if len(sys.argv)>2:
+    config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
+sess = tf.Session(config=config)
+sess.run(tf.global_variables_initializer())
+print(sess.run(data))
+
+output
+ ✘ hzhangxyz@zhanghao  ~/Documents/test  LD_LIBRARY_PATH=/opt/cuda-9.0/lib64 python2 main.py
+2018-02-17 17:13:19.904413: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:898] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2018-02-17 17:13:19.904879: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1331] Found device 0 with properties:
+name: GeForce GTX 950M major: 5 minor: 0 memoryClockRate(GHz): 1.124
+pciBusID: 0000:0a:00.0
+totalMemory: 3.95GiB freeMemory: 3.91GiB
+2018-02-17 17:13:19.904896: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1410] Adding visible gpu devices: 0
+2018-02-17 17:13:20.109302: I tensorflow/core/common_runtime/gpu/gpu_device.cc:911] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-02-17 17:13:20.109333: I tensorflow/core/common_runtime/gpu/gpu_device.cc:917]      0
+2018-02-17 17:13:20.109342: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 0:   N
+2018-02-17 17:13:20.109495: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1021] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 3654 MB memory) -> physical GPU (device: 0, name: GeForce GTX 950M, pci bus id: 0000:0a:00.0, compute capability: 5.0)
+2018-02-17 17:13:20.292794: I tensorflow/core/kernels/cuda_solvers.cc:159] Creating CudaSolver handles for stream 0x55eaa51abab0
+[[[-0.3788082  -0.63152224]
+  [ 0.69478613 -0.15805985]]
+
+ [[-0.12801631 -1.0104226 ]
+  [ 1.         -0.25424612]]]
+ hzhangxyz@zhanghao  ~/Documents/test  LD_LIBRARY_PATH=/opt/cuda-9.0/lib64 python2 main.py -
+2018-02-17 17:13:26.235761: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:898] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2018-02-17 17:13:26.236224: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1331] Found device 0 with properties:
+name: GeForce GTX 950M major: 5 minor: 0 memoryClockRate(GHz): 1.124
+pciBusID: 0000:0a:00.0
+totalMemory: 3.95GiB freeMemory: 3.91GiB
+2018-02-17 17:13:26.236250: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1410] Adding visible gpu devices: 0
+2018-02-17 17:13:26.438962: I tensorflow/core/common_runtime/gpu/gpu_device.cc:911] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-02-17 17:13:26.439018: I tensorflow/core/common_runtime/gpu/gpu_device.cc:917]      0
+2018-02-17 17:13:26.439028: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 0:   N
+2018-02-17 17:13:26.439205: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1021] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 3654 MB memory) -> physical GPU (device: 0, name: GeForce GTX 950M, pci bus id: 0000:0a:00.0, compute capability: 5.0)
+2018-02-17 17:13:26.629210: I tensorflow/core/kernels/cuda_solvers.cc:159] Creating CudaSolver handles for stream 0x564cf97d4cf0
+[[[-0.95954746 -0.42915264]
+  [-0.46691963 -0.69855815]]
+
+ [[-0.7818373   0.17119625]
+  [ 1.          0.19870493]]]
+ hzhangxyz@zhanghao  ~/Documents/test  LD_LIBRARY_PATH=/opt/cuda-9.0/lib64 python2 main.py - -
+2018-02-17 17:13:30.150087: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:898] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2018-02-17 17:13:30.150570: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1331] Found device 0 with properties:
+name: GeForce GTX 950M major: 5 minor: 0 memoryClockRate(GHz): 1.124
+pciBusID: 0000:0a:00.0
+totalMemory: 3.95GiB freeMemory: 3.91GiB
+2018-02-17 17:13:30.150595: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1410] Adding visible gpu devices: 0
+2018-02-17 17:13:30.354220: I tensorflow/core/common_runtime/gpu/gpu_device.cc:911] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-02-17 17:13:30.354264: I tensorflow/core/common_runtime/gpu/gpu_device.cc:917]      0
+2018-02-17 17:13:30.354271: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 0:   N
+2018-02-17 17:13:30.354448: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1021] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 3654 MB memory) -> physical GPU (device: 0, name: GeForce GTX 950M, pci bus id: 0000:0a:00.0, compute capability: 5.0)
+2018-02-17 17:13:30.413176: I tensorflow/compiler/xla/service/service.cc:158] XLA service 0x7f05400021d0 executing computations on platform CUDA. Devices:
+2018-02-17 17:13:30.413215: I tensorflow/compiler/xla/service/service.cc:166]   StreamExecutor device (0): GeForce GTX 950M, Compute Capability 5.0
+2018-02-17 17:13:30.555655: W tensorflow/compiler/xla/service/gpu/gpu_compiler.cc:351] *** WARNING *** You are using ptxas 9.0.176, which is in range [9.0.0, 9.0.276) + [9.1.0, 9.1.121). These versions are known to miscompile XLA code, leading to incorrect results or invalid-address errors.
+2018-02-17 17:13:30.945780: I tensorflow/core/kernels/cuda_solvers.cc:159] Creating CudaSolver handles for stream 0x55a05a6aa980
+2018-02-17 17:13:31.100741: F tensorflow/compiler/xla/util.cc:187] Check failed: p1.size() == p2.size() (3 vs. 0)
+[1]    17796 abort (core dumped)  LD_LIBRARY_PATH=/opt/cuda-9.0/lib64 python2 main.py - -
+ ✘ hzhangxyz@zhanghao  ~/Documents/test  LD_LIBRARY_PATH=/opt/cuda-9.0/lib64 python2 main.py - - -
+2018-02-17 17:13:36.566031: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:898] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2018-02-17 17:13:36.566533: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1331] Found device 0 with properties:
+name: GeForce GTX 950M major: 5 minor: 0 memoryClockRate(GHz): 1.124
+pciBusID: 0000:0a:00.0
+totalMemory: 3.95GiB freeMemory: 3.91GiB
+2018-02-17 17:13:36.566560: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1410] Adding visible gpu devices: 0
+2018-02-17 17:13:36.780285: I tensorflow/core/common_runtime/gpu/gpu_device.cc:911] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-02-17 17:13:36.780327: I tensorflow/core/common_runtime/gpu/gpu_device.cc:917]      0
+2018-02-17 17:13:36.780334: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 0:   N
+2018-02-17 17:13:36.780575: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1021] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 3654 MB memory) -> physical GPU (device: 0, name: GeForce GTX 950M, pci bus id: 0000:0a:00.0, compute capability: 5.0)
+2018-02-17 17:13:36.838113: I tensorflow/compiler/xla/service/service.cc:158] XLA service 0x7f4490001fd0 executing computations on platform CUDA. Devices:
+2018-02-17 17:13:36.838151: I tensorflow/compiler/xla/service/service.cc:166]   StreamExecutor device (0): GeForce GTX 950M, Compute Capability 5.0
+2018-02-17 17:13:36.856927: W tensorflow/compiler/xla/service/gpu/gpu_compiler.cc:351] *** WARNING *** You are using ptxas 9.0.176, which is in range [9.0.0, 9.0.276) + [9.1.0, 9.1.121). These versions are known to miscompile XLA code, leading to incorrect results or invalid-address errors.
+2018-02-17 17:13:37.011879: I tensorflow/core/kernels/cuda_solvers.cc:159] Creating CudaSolver handles for stream 0x557af19c7660
+[[[-4.4751650e-01 -2.8206566e-01]
+  [ 8.2662034e-01 -5.5483520e-01]]
+
+ [[ 1.0000000e+00 -8.6649950e-04]
+  [ 2.1385331e-01  4.9290603e-01]]]
+
+system info
+output of tf_env_collect.sh
+
+== cat /etc/issue ===============================================
+Linux zhanghao 4.15.3-2-ARCH #1 SMP PREEMPT Thu Feb 15 00:13:49 UTC 2018 x86_64 GNU/Linux
+LSB_VERSION=1.4
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+c++ (GCC) 7.3.0
+Copyright (C) 2017 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+== uname -a =====================================================
+Linux zhanghao 4.15.3-2-ARCH #1 SMP PREEMPT Thu Feb 15 00:13:49 UTC 2018 x86_64 GNU/Linux
+
+== check pips ===================================================
+numpy (1.14.0)
+protobuf (3.5.1)
+tensorflow (1.5.0)
+tensorflow-tensorboard (1.5.0)
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.6.0-rc0
+tf.GIT_VERSION = v1.6.0-rc1-167-g56422034fe
+tf.COMPILER_VERSION = v1.6.0-rc1-167-g56422034fe
+Sanity check: array([1], dtype=int32)
+
+== env ==========================================================
+LD_LIBRARY_PATH /opt/cuda-9.0/lib64
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+Sat Feb 17 18:25:00 2018       
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 390.25                 Driver Version: 390.25                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 950M    Off  | 00000000:0A:00.0 Off |                  N/A |
+| N/A   50C    P0    N/A /  N/A |      0MiB /  4046MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID   Type   Process name                             Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+
+== cuda libs  ===================================================
+
+tf is compiled from source (5642203)
+with cuda, with xla, with opt, with mkl, without anything else
+OS is archlinux:
+Linux zhanghao 4.15.3-2-ARCH #1 SMP PREEMPT Thu Feb 15 00:13:49 UTC 2018 x86_64 GNU/Linux
+
+python
+Python 2.7.14 (default, Jan  5 2018, 10:41:29)
+[GCC 7.2.1 20171224] on linux2
+
+bazel
+..............................................................
+Build label: 0.10.0- (@non-git)
+Build target: bazel-out/k8-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Jun 18 09:24:24 +50064 (1517714702664)
+Build timestamp: 1517714702664
+Build timestamp as int: 1517714702664
+
+GPU
+cuda 9.0, cudnn 7.0.5
+GPU: GeForce GTX 950M
+Describe the problem
+core dump when use xla with gpu
+@jlebar @bixia1

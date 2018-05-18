@@ -1,0 +1,82 @@
+Error on compiling model using Keras
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+I don't know where to begin looking for this problem. It seems like an internal bug but I am not entirely sure if it is something I did wrong. I am fairly new to tensorflow, please help!
+Environment info
+Operating System: Ubuntu 16.04
+Installed version of CUDA and cuDNN:
+CUDA 8.0, cuDNN 5.1
+If installed from binary pip package, provide:
+
+A link to the pip package you installed: https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-0.12.0rc0-cp27-none-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.12.0-rc0
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+import numpy as np
+from keras.models import Sequential
+from keras.layers import Dense, Activation, Dropout
+from keras.layers.convolutional import Convolution1D
+from keras.layers.pooling import MaxPooling1D
+from keras.layers.core import Flatten
+from keras.engine.topology import Merge
+from keras import backend as K
+from keras.optimizers import SGD
+from keras.objectives import *
+from keras.utils.layer_utils import layer_from_config
+from keras.regularizers import l1, l2
+from keras.callbacks import *
+from keras.metrics import *
+
+sgd = SGD(lr=10 ** (-lr), momentum=0.9, decay=0, nesterov=True)
+
+# model1: ConvNet
+model = Sequential()
+model.add(Convolution1D(128, 6, border_mode='same', input_shape=(256,2)))
+model.add(MaxPooling1D())
+model.add(Convolution1D(64, 6, border_mode='same'))
+model.add(MaxPooling1D())
+model.add(Convolution1D(32, 6, border_mode='same'))
+model.add(MaxPooling1D())
+model.add(Convolution1D(16, 6, border_mode='same'))
+model.add(MaxPooling1D())
+model.add(Flatten())
+
+# merge model:
+model.add(Dense(128, name='d1'))
+model.add(Activation('relu'))
+model.add(Dense(128, name='d2'))
+model.add(Activation('relu'))
+model.add(Dense(128, name='d3'))
+model.add(Activation('tanh'))
+model.add(Dense(3))
+model.add(Activation('softmax'))
+
+# My y contains three columns, which can be understood as '-1', '0' and '+1'. I want to maximize the correct labeling of '+1' and '-1', don't care how many 0's that I label, and minimize the number of mis-labeling of '+1' or '-1'. 
+def func_loss(y_true, y_pred):
+	return -K.mean(K.prod(K.cast(K.argmax(y_pred, axis=1), K.floatx()) - 1.0), (K.cast(K.argmax(y_true, axis=1), K.floatx()) - 1.0))
+
+model.compile(loss=func_loss, optimizer='sgd', metrics=[categorical_accuracy])
+
+What other attempted solutions have you tried?
+I tried numerous tweaking on the loss function but they all end up with some problems.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+
+Traceback (most recent call last):
+File "", line 1, in 
+File "/usr/local/lib/python2.7/dist-packages/keras/models.py", line 547, in compile
+**kwargs)
+File "/usr/local/lib/python2.7/dist-packages/keras/engine/training.py", line 622, in compile
+sample_weight, mask)
+File "/usr/local/lib/python2.7/dist-packages/keras/engine/training.py", line 324, in weighted
+score_array = fn(y_true, y_pred)
+File "", line 2, in func_loss
+File "/usr/local/lib/python2.7/dist-packages/keras/backend/tensorflow_backend.py", line 490, in mean
+axis = _normalize_axis(axis, ndim(x))
+File "/usr/local/lib/python2.7/dist-packages/keras/backend/tensorflow_backend.py", line 435, in _normalize_axis
+if axis is not None and axis < 0:
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 547, in nonzero
+raise TypeError("Using a tf.Tensor as a Python bool is not allowed. "
+TypeError: Using a tf.Tensor as a Python bool is not allowed. Use if t is not None: instead of if t: to test if a tensor is defined, and use TensorFlow ops such as tf.cond to execute subgraphs conditioned on the value of a tensor.

@@ -1,0 +1,45 @@
+KeyError: u'SaveV2' when loading exported model
+
+I have a TensorFLow model trained on a GPU machine. Next, I need to export it and deploy on CPU only production machine.
+I have trained and exported a model from a GPU machine as described in MNIST export example. Saver object was initialized above.
+with graph.as_default():
+    saver = tf.train.Saver(tf.all_variables(), sharded=True)
+...
+
+export_path =  'resnet34_rmsprop_wd1e-1/saves/'
+print('Exporting trained model to %s' % export_path)
+init_op = tf.group(tf.initialize_all_tables(), name='init_op')
+model_exporter = exporter.Exporter(saver)
+model_exporter.init(sess.graph.as_graph_def(),
+                            init_op=init_op,
+                            default_graph_signature=exporter.classification_signature(input_tensor=inference_images,
+                                                                                      classes_tensor=inference_class,
+                                                                                      scores_tensor=inference_predictions),
+                            named_graph_signatures={'inputs': exporter.generic_signature({'images': inference_images}),
+                                                    'outputs': exporter.generic_signature({'class': inference_class, 'predictions': inference_predictions})})
+model_exporter.export(export_path, tf.constant(1), sess)
+print('Done exporting!')
+
+Next, I am trying to load saved model to CPU machine with:
+new_saver = tf.train.import_meta_graph('assets/saved_model/export.meta') new_saver.restore(sess, 'assets/saved_model/export')
+And what I am getting is:
+Traceback (most recent call last):
+File "script_test_classifier.py", line 4, in <module>
+...
+line 33, in __initialize_session__
+new_saver = tf.train.import_meta_graph('assets/saved_model/export.meta')
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 1711, in import_meta_graph
+read_meta_graph_file(meta_graph_or_file), clear_devices)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 1598, in _import_meta_graph_def
+input_graph_def, name="", producer_op_list=producer_op_list)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/importer.py", line 258, in import_graph_def
+op_def = op_dict[node.op]
+KeyError: u'SaveV2'
+
+What is the reason of the error and how it could be fixed?
+Production (CPU machine) environment info:
+AWS instance type: m4.xlarge
+Operating System: Ubuntu 14.04 x64
+Installed version of CUDA and cuDNN: None, I am using CPU version of TF for the production environment
+A link to the pip package you installed: https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-0.11.0-cp27-none-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.__version__)": 0.11.0

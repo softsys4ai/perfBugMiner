@@ -1,0 +1,76 @@
+Wide and Deep Learning tutorial example fails on Python 3.4
+
+When using the "deep" functionality in the Wide and Deep Learning tutorial on Python 3.4, I get the following error:
+ValueError: Duplicate feature column key found for column: education_embedding. This usually means that the column is almost identical to another column, and one must be discarded.
+
+Looks like a bug in tensorflow/contrib/layers/python/layers/feature_column.py in the _EmbeddingColumn class. The key(self) property is plagued by this bug: https://bugs.python.org/issue24931
+So instead of coming out with a nice unique key, we get the following key for all _EmbeddingColumn instances: '_EmbeddingColumn()'
+This causes the feature_column_ops.py's check_feature_columns() function to determine that the second _EmbeddingColumn instance is a duplicate since they keys of all of them are the same.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+I found this StackOverflow thread http://stackoverflow.com/questions/39249704/tensorflow-valueerror-duplicate-feature-column-key-found-for-column/ where someone had the same problem, with no answers.  So I did the debugging and answered the question.
+Environment info
+Operating System: Fedora Core 23
+Installed version of CUDA and cuDNN: 8 and 5.1
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+[jpangburn@localhost examples]$ ls /usr/local/cuda/lib64/libcud*
+/usr/local/cuda/lib64/libcudadevrt.a
+/usr/local/cuda/lib64/libcudart.so
+/usr/local/cuda/lib64/libcudart.so.8.0
+/usr/local/cuda/lib64/libcudart.so.8.0.27
+/usr/local/cuda/lib64/libcudart_static.a
+/usr/local/cuda/lib64/libcudnn.so
+/usr/local/cuda/lib64/libcudnn.so.5
+/usr/local/cuda/lib64/libcudnn.so.5.1.5
+/usr/local/cuda/lib64/libcudnn_static.a
+
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+
+[jpangburn@localhost examples]$ pwd
+/home/jpangburn/open_source/tensorflow/tensorflow/examples
+[jpangburn@localhost examples]$ git rev-parse HEAD
+17d0e46e6cc31af0bcf6e80ff4c5670d233b4940
+
+
+
+The output of bazel version
+
+[jpangburn@localhost examples]$ bazel version
+.
+Build label: 0.3.1
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Fri Jul 29 09:09:52 2016 (1469783392)
+Build timestamp: 1469783392
+Build timestamp as int: 1469783392
+
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Be in the "tensorflow/tensorflow/examples/learn" directory.  Patch the wide_n_deep_tutorial.py to work in Python 3 by replacing "urllib" instances with "urllib.request".  Then run it "python3 wide_n_deep_tutorial_py3.py --train_data=train_data --test_data=test_data --model_type=wide_n_deep", obviously replacing the train_data and test_data files with your own copies, or omitting those switches altogether to download the files fresh.
+What other attempted solutions have you tried?
+I worked around the problem by creating a subclass of _EmbeddedColumn and using that, but not sure my key(self) property implementation is working because the accuracy result with wide_n_deep is worse than with just "wide".  You can see this in my answer to the StackOverflow question at http://stackoverflow.com/questions/39249704/tensorflow-valueerror-duplicate-feature-column-key-found-for-column/39268045#39268045
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+Traceback (most recent call last):
+  File "wide_n_deep_tutorial_py3.py", line 220, in <module>
+    tf.app.run()
+  File "/usr/lib/python3.4/site-packages/tensorflow/python/platform/app.py", line 30, in run
+    sys.exit(main(sys.argv))
+  File "wide_n_deep_tutorial_py3.py", line 216, in main
+    train_and_eval()
+  File "wide_n_deep_tutorial_py3.py", line 204, in train_and_eval
+    m.fit(input_fn=lambda: input_fn(df_train), steps=FLAGS.train_steps)
+  File "/usr/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 219, in fit
+    max_steps=max_steps)
+  File "/usr/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 479, in _train_model
+    train_op, loss_op = self._get_train_ops(features, targets)
+  File "/usr/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/dnn_linear_combined.py", line 166, in _get_train_ops
+    logits = self._logits(features, is_training=True)
+  File "/usr/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/dnn_linear_combined.py", line 244, in _logits
+    dnn_feature_columns = self._get_dnn_feature_columns()
+  File "/usr/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/dnn_linear_combined.py", line 208, in _get_dnn_feature_columns
+    feature_column_ops.check_feature_columns(self._dnn_feature_columns)
+  File "/usr/lib/python3.4/site-packages/tensorflow/contrib/layers/python/layers/feature_column_ops.py", line 318, in check_feature_columns
+    f.name))
+ValueError: Duplicate feature column key found for column: education_embedding. This usually means that the column is almost identical to another column, and one must be discarded.

@@ -1,0 +1,52 @@
+why can't i recover cifar-100/cifar-10 image from binary files using tensorflow?
+
+my code likes following:
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+import tensorflow as tf
+from matplotlib import pyplot as plt
+def read_cifar_100_bin(batch_size):
+coarse_label_bytes = 1
+final_lable_bytes = 1
+image_bytes = 3072
+filenames = ["./cifar-100-binary/train.bin"]
+filename_queue = tf.train.string_input_producer(filenames, shuffle=False)
+reader = tf.FixedLengthRecordReader(record_bytes=3074)
+key,value = reader.read(filename_queue)
+record_bytes = tf.decode_raw(value, tf.uint8)
+coarse_label = tf.cast(tf.slice(record_bytes, [0], [coarse_label_bytes]), tf.uint8)   
+final_label = tf.cast(tf.slice(record_bytes, [1], [final_lable_bytes]), tf.uint8)  #final_label:0~99
+example = tf.reshape(tf.slice(record_bytes, [2], [image_bytes]),[3,32,32])
+example_tr = tf.transpose(example, [1, 2, 0])
+example_batch, coarse_label_batch,final_label_batch = tf.train.batch([example_tr, coarse_label,final_label],` batch_size=batch_size)
+
+# example_batch, coarse_label_batch,final_label_batch  = tf.train.shuffle_batch(
+#     [example, coarse_label,final_label],
+#     batch_size=batch_size,
+#     num_threads=4,
+#     capacity=50000,
+#     min_after_dequeue=10000)
+
+with tf.Session() as sess:
+    coord = tf.train.Coordinator()  
+    threads = tf.train.start_queue_runners(coord=coord)
+    #sess.run(tf.global_variables_initializer())
+
+    images_batch = example_batch.eval()
+    coarse_labels_batch = coarse_label_batch.eval()
+    final_labels_batch = final_label_batch.eval()
+    plt.imshow(images_batch[0])
+    plt.show()
+
+    coord.request_stop()
+    coord.join(threads)
+
+return images_batch,coarse_labels_batch,final_labels_batch
+
+images, coarse_labels,final_labels = read_cifar_100_bin(5)
+print(images[0])
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+my problem is: when i use plt to recover image from images_batch[0],it show like this:
+
+Anyone knows why? Thanks a lot
+Another question:
+I want to choose random mini-batch data from whole dataset so i use tf.train.shuffle_batch() function you can see above,i wonder if it's a good way to realize it w.r.t speed and efficiency.

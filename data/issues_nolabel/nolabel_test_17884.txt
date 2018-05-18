@@ -1,0 +1,63 @@
+"dangling" iterator after freeze model
+
+I've using tf.data.Iterator to feed in data (as suggested?)
+However, when I freeze my model using tf.graph_util.convert_variables_to_constants, all the prerequisite nodes which constructs the iterator are lost.
+Is this a feature or a bug?
+If it's a feature, how to utilize the iterator again or what's the point?
+The following code snippet shows the "problem"
+PS: I am using tf1.4-gpu installed installed on win7 using PIP
+import tensorflow as tf
+import numpy as np
+# build graph
+g = tf.Graph()
+with g.as_default():
+    with tf.variable_scope("data_set"):
+        # one x-y pair for single evaluation
+        x = tf.placeholder(
+            dtype=tf.float32, shape=(None, None, 1), name='inputs')
+        y = tf.placeholder(
+            dtype=tf.float32, shape=(None, None, 1), name='target')
+        eval_set = tf.data.Dataset()\
+            .from_tensors((x, y))
+        iterator = tf.data.Iterator.from_structure(eval_set.output_types,
+                                                   output_shapes=eval_set.output_shapes)
+        eval_init_op = iterator.make_initializer(eval_set)
+        # some other dataset for training
+        # train_set = tf.data.Dataset()......
+        ##training_init_op = iterator.make_initializer(train_set)
+        x_in, y_in = iterator.get_next()
+    with tf.variable_scope("network"):
+        var = tf.Variable(initial_value=5.0, dtype=tf.float32)
+        l0 = var * tf.reduce_sum(x_in)
+        l1 = tf.reduce_sum(y_in)
+        with tf.variable_scope("output"):
+            out = l1 - l0
+        variable_init_op = tf.initialize_all_variables()
+
+# some eval step
+'''
+with tf.Session(graph=g) as sess:
+    sess.run(variable_init_op)
+    sess.run(eval_init_op, feed_dict={x: np.ones(
+        (2, 2, 1), dtype=np.float32), y: np.ones((3, 3, 1), dtype=np.float32)})
+    result = sess.run(out)
+    print("result: {}".format(result))
+'''
+
+# freeze the graph
+with tf.Session(graph=g) as sess:
+    sess.run(variable_init_op)
+    names = [n.name for n in g.as_graph_def().node]
+    print("oroiginal graph has {} nodes".format(len(g.as_graph_def().node)))
+    print([n.name for n in g.as_graph_def().node])
+    '''
+    ['data_set/inputs', 'data_set/target', 'data_set/Iterator', 'data_set/TensorDataset', 'data_set/make_initializer', 'data_set/IteratorGetNext', 'network/Variable/initial_value', 'network/Variable', 'network/Variable/Assign', 'network/Variable/read', 'network/Const', 'network/Sum', 'network/mul', 'network/Const_1', 'network/Sum_1', 'network/output/sub', 'network/init']
+    '''
+    frozen_graph = tf.graph_util.convert_variables_to_constants(
+        sess, g.as_graph_def(), ['network/output/sub'])
+    print("new graph nodes: {}".format(len(frozen_graph.node)))
+    print([n.name for n in frozen_graph.node])
+    '''
+    ['data_set/Iterator', 'data_set/IteratorGetNext', 'network/Variable', 'network/Variable/read', 'network/Const', 'network/Sum', 'network/mul', 'network/Const_1', 'network/Sum_1', 'network/output/sub']
+    '''
+    ```

@@ -1,0 +1,86 @@
+tf.nn.softmax on GPU causes CUDA_ERROR_ILLEGAL_ADDRESS (okay on CPU)
+
+CentOS 7
+Tensorflow 0.10.0
+TITAN X (Pascal) 367.44
+I restore a model previously saved with tf.train.Saver() and try to compute probabilities of outputs for a given input batch. Whenever I try to execute tf.nn.softmax on GPU, I get an error:
+E tensorflow/stream_executor/cuda/cuda_driver.cc:1140] could not synchronize on CUDA context: CUDA_ERROR_ILLEGAL_ADDRESS :: No stack trace available
+F tensorflow/core/common_runtime/gpu/gpu_util.cc:370] GPU sync failed
+E tensorflow/stream_executor/cuda/cuda_event.cc:49] Error polling for event status: failed to query event: CUDA_ERROR_ILLEGAL_ADDRESS
+
+but same computations work just fine on CPU:
+print('run 1: logits')
+logits = s.run(model.other.logits_labl, tf_run_args)
+print(logits.shape) # (1001, 289)
+print(np.max(logits), np.min(logits)) # 1.80996 -0.752239
+
+print('run 2: probs in np')
+probs = s.run(tf.nn.softmax(logits))
+print(probs.shape) # (1001, 289)
+print(np.sum(probs, axis=1)) # [ 1.   ...  1.00000012  1.          1.00000012]
+
+print('run 3: probs on cpu')
+with tf.device('/cpu:0'):
+    t = tf.nn.softmax(model.other.logits_labl)
+print(s.run(t, tf_run_args)) # okay
+
+print('run 4: probs on gpu')
+with tf.device('/gpu:0'):
+    t2 = tf.nn.softmax(model.other.logits_labl)
+print(s.run(t2, tf_run_args)) # error
+
+produces
+run 1: logits
+(1001, 289)
+1.80996 -0.752239
+run 2: probs in np
+(1001, 289)
+[ 1.          0.99999994  1.         ...,  1.00000012  1.          1.00000012]
+run 3: probs on cpu
+[[ 0.00353091  0.0032969   0.00355321 ...,  0.00368173  0.00337926
+   0.00326502]
+ [ 0.00343715  0.00313538  0.00379693 ...,  0.00426536  0.0032676
+   0.0031463 ]
+ [ 0.00346572  0.00300998  0.00389543 ...,  0.00458091  0.0031747
+   0.0030867 ]
+ ...,
+ [ 0.0035709   0.00302548  0.00384262 ...,  0.0042819   0.00318443
+   0.00299288]
+ [ 0.00353101  0.00305104  0.00379521 ...,  0.00428836  0.0031993
+   0.0029559 ]
+ [ 0.00352879  0.00302152  0.00380528 ...,  0.0043787   0.00318416
+   0.00294856]]
+run 4: probs on gpu
+E tensorflow/stream_executor/cuda/cuda_driver.cc:1140] could not synchronize on CUDA context: CUDA_ERROR_ILLEGAL_ADDRESS :: No stack trace available
+F tensorflow/core/common_runtime/gpu/gpu_util.cc:370] GPU sync failed
+E tensorflow/stream_executor/cuda/cuda_event.cc:49] Error polling for event status: failed to query event: CUDA_ERROR_ILLEGAL_ADDRESS
+Aborted
+
+gdb does not give any additional details
+... same as above
+[New Thread 0x7fff41ffb700 (LWP 26404)]
+E tensorflow/stream_executor/cuda/cuda_driver.cc:1140] could not synchronize on CUDA context: CUDA_ERROR_ILLEGAL_ADDRESS :: No stack trace available
+E tensorflow/stream_executor/cuda/cuda_event.cc:49] Error polling for event status: failed to query event: CUDA_ERROR_ILLEGAL_ADDRESS
+F tensorflow/core/common_runtime/gpu/gpu_util.cc:370] GPU sync failed
+F tensorflow/core/common_runtime/gpu/gpu_event_mgr.cc:198] Unexpected Event status: 1
+
+Program received signal SIGABRT, Aborted.
+[Switching to Thread 0x7fff5effd700 (LWP 26391)]
+0x00007ffff6a315f7 in raise () from /lib64/libc.so.6
+Missing separate debuginfos, use: debuginfo-install libX11-1.6.3-2.el7.x86_64 libXau-1.0.8-2.1.el7.x86_64 libXdmcp-1.1.1-6.1.el7.x86_64 libuuid-2.23.2-26.el7_2.3.x86_64
+
+Surprisingly, this error occurred just recently. I have been working with this same codebase for months and before now nothing like this happened, but now it is 100% reproducible on my machine with this specific (code, driver version, etc), so it is not something that effects everyone, but rather pops up randomly. I might have changed operation device placement recently.
+code (unfortunately, large piece of code that required certain data; failed to produce a minimal reproducing code): [link]
+full gdb output (without prints): [link]
+environment:
+$ ls -l /usr/lib/libcu*
+lrwxrwxrwx. 1 root root      12 Oct  3 15:36 /usr/lib/libcuda.so -> libcuda.so.1
+lrwxrwxrwx. 1 root root      17 Oct  3 15:36 /usr/lib/libcuda.so.1 -> libcuda.so.367.44
+-rwxr-xr-x. 1 root root 7747600 Oct  3 15:36 /usr/lib/libcuda.so.367.44
+$ ls -l /usr/local/cuda/lib64/
+lrwxrwxrwx. 1 1000 users       13 Jul 27 01:55 libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx. 1 1000 users       17 Jul 27 01:55 libcudnn.so.5 -> libcudnn.so.5.1.5
+-rwxrwxr-x. 1 1000 users 79337624 Jul 27 01:53 libcudnn.so.5.1.5
+-rw-rw-r--. 1 1000 users 69756172 Jul 27 01:53 libcudnn_static.a
+
+Possibly related issues: #2117 #1450 #2810 #665 #1060 #4425

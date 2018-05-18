@@ -1,0 +1,95 @@
+Error when trying to use tf.contrib.distribute.MirroredStrategy in tf.estimator
+
+System information
+
+OS Platform and Distribution:  Linux Ubuntu 16.04.2
+TensorFlow installed from: source
+TensorFlow version: 1.7
+Python version: 3.5
+Bazel version: 0.11.1
+GCC/Compiler version: 5.4.0
+CUDA/cuDNN version: 9/7
+GPU model and memory: TITAN X (Pascal) 11170 MB memory
+
+I'm trying to add multi-gpu support to my tensorflow training code using tf.contrib.distribute.MirroredStrategy as a parameter to tf.estimator.RunConfig.
+I get the following error message:
+
+Traceback (most recent call last):
+  File "python3.5/site-packages/tensorflow/python/training/coordinator.py", line 297, in stop_on_exception
+    yield
+  File "python3.5/site-packages/tensorflow/contrib/distribute/python/mirrored_strategy.py", line 248, in _call_for_each_tower
+    self, *merge_args, **merge_kwargs)
+  File "python3.5/site-packages/tensorflow/python/training/optimizer.py", line 667, in _distributed_apply
+    reduced_grads = distribution.batch_reduce("sum", grads_and_vars)
+  File "python3.5/site-packages/tensorflow/python/training/distribute.py", line 801, in batch_reduce
+    return self._batch_reduce(method_string, value_destination_pairs)
+  File "python3.5/site-packages/tensorflow/contrib/distribute/python/mirrored_strategy.py", line 295, in _batch_reduce
+    value_destination_pairs)
+  File "python3.5/site-packages/tensorflow/contrib/distribute/python/cross_tower_ops.py", line 169, in batch_reduce
+    raise ValueError("`value_destination_pairs` must be a list or a tuple of "
+ValueError: `value_destination_pairs` must be a list or a tuple of tuples of PerDevice objects and destinations 
+
+The following code produces the error (I omitted the code for parsing the tfrecord to image tensor as I don't believe this code effects the error, but I can add it if necessary):
+
+import glob, os
+import tensorflow as tf
+slim = tf.contrib.slim
+
+# Initialization of args - arguments parser.
+def init():
+    pass
+
+
+def input_fn():
+
+    dataset = tf.data.TFRecordDataset(glob.glob(os.path.join(args.train_data_dir, 'train*')))
+    dataset = dataset.map(
+                lambda x: parse_and_preprocess_image(x, args.image_size),
+                num_parallel_calls=2,
+    )
+    dataset = dataset.repeat()
+    dataset = dataset.batch(batch_size=4)
+    dataset = dataset.prefetch(1)
+
+    return dataset
+
+
+def model_fn(features, labels=None, mode=tf.estimator.ModeKeys.TRAIN, params=None):
+
+    train_images_batch = features
+    res = slim.conv2d(inputs=train_images_batch, kernel_size=9, stride=1, num_outputs=3, scope='conv1')
+    loss = tf.reduce_mean((train_images_batch - res) ** 2)
+    optimizer = tf.train.AdamOptimizer(0.001)
+    train_op = slim.learning.create_train_op(loss, optimizer)
+    return tf.estimator.EstimatorSpec(
+        mode=tf.estimator.ModeKeys.TRAIN,
+        loss=loss, train_op=train_op)
+
+
+def train():
+
+    init()
+
+    distribution = tf.contrib.distribute.MirroredStrategy(num_gpus=args.num_gpus)
+
+    config = tf.estimator.RunConfig(
+        model_dir=args.log_dir,
+        train_distribute=distribution,
+    )
+
+    estimator = tf.estimator.Estimator(model_fn=model_fn, config=config)
+    estimator.train(
+            input_fn=input_fn,
+            max_steps=args.train_steps,
+        )
+
+
+def main():
+    train()
+
+
+if __name__ == '__main__':
+    main()
+
+Thank you!
+Adva

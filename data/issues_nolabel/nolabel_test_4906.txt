@@ -1,0 +1,33 @@
+The "cos" merge mode when using tf as backend cann't get the expect result
+
+I have two batch of sentences as inputs, like:
+a = np.array([[0, 1, 2, 3, 4], [0,1,0,0,0]], dtype='int32')
+b = np.array([[0, 1, 2, 3, 4], [0,0,2,0,0]], dtype='int32')
+vec = model.predict([a, b])
+
+In my model, I trying to get the cos score between two vector, so I use 'cos' model in merge
+cos_score = merge([vec_a, vec_b], mode='cos', dot_axes=1)
+When I use theano as backend, it works fine, but when I use tf as backend, the output_shape=[batch_size, batch_size]
+The result by 'tf' backend:
+[[ 0.99999994  0.97052568]
+ [ 1.0303694   0.80238068]]
+
+The result by 'theano' backend:
+[[ 1.        ]
+ [ 0.80238068]]
+
+This is caused by tf.batch_matmul,
+
+The input tensors x and y are 3-D or higher
+
+But I just input 2-D vectors. I think it have to be expanded when the input shape is 2-D
+BTW, My solution is:
+if (keras.backend.backend() == "theano"):
+    cos_score = merge([vec_a, vec_b], mode='cos', dot_axes=1)
+else:
+    vec_a = RepeatVector(1)(vec_a)
+    vec_b = RepeatVector(1)(vec_b)
+    cos_score = merge([vec_a, vec_b], mode='cos', dot_axes=2)
+    cos_score = Flatten()(cos_score)
+
+Sorry about my English 😃

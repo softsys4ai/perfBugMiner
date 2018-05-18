@@ -1,0 +1,63 @@
+Different output using CudnnGRU vs GRUCell
+
+Operating System: Arch Linux
+Installed version of CUDA and cuDNN:  libcudart.so.8.0.44, libcudnn.so.5.1.5
+
+The commit hash (git rev-parse HEAD): 57e40363eb40a692f7c5dfea3f53031a52024321
+The output of bazel version: 0.4.4
+
+I set x = 1, previous_h = 0, all weights and biases = 0, output should be 0. Traditional tensorflow GRU returns 0, but CudnnGRU returns 0.20482421
+NOTE: need to use GPU for CudnnGRU to work properly
+import tensorflow as tf
+from tensorflow.contrib.cudnn_rnn.python.ops import cudnn_rnn_ops
+
+# GRU with x=1, h_t_minus_1=0, all weights and biases = 0; output (h) should equal 0
+# u = sig(Wx + Rh + b)
+# r = sig(Wx + Rh + b)
+# c = tanh(Wx + r(Rh + b) + b)
+# h = (1-u)c + uh
+
+
+# u = sig(0*1 + 0*0 + 0)
+# u = .5
+# r = sig(0*1 + 0*0 + 0)
+# r = .5
+# c = tanh(0*1 + .5(0*0 + 0) + 0)
+# c = 0
+# h = (1-.5)*0 + .5*0
+# h = 0
+
+
+
+batch_size = 1
+n_time = 1
+x_depth = 1
+n_cell = 1
+
+x = tf.ones([batch_size, n_time, x_depth])
+
+y_tf, _ = tf.nn.dynamic_rnn(tf.contrib.rnn.GRUCell(n_cell), x, dtype=tf.float32)
+param_tf = [v.assign(tf.zeros(tf.shape(v))) for v in tf.trainable_variables()] # y_tf uses these zeroed out params
+
+n_layer = 1
+rnn_cudnn = cudnn_rnn_ops.CudnnGRU(n_layer, n_cell, x_depth, 'skip_input')
+param_cudnn = tf.Variable(tf.zeros([rnn_cudnn.params_size()]), validate_shape=False)
+y_cudnn, state_cudnn = rnn_cudnn(tf.transpose(x, [1,0,2]), tf.zeros([n_layer, batch_size, n_cell]), param_cudnn)
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    # NOTE: cudnn has more params because they use twice as many biases
+    print('y_tf: {}\ny_cudnn: {}\nparam_tf\n{}\n\nparam_cudnn\n{}\n\n'.format(*sess.run([y_tf, y_cudnn, param_tf, param_cudnn])))
+
+
+
+# Output:
+# y_tf: [[[ 0.]]]
+# y_cudnn: [[[ 0.20482421]]]
+# param_tf
+# [array([[ 0.,  0.],
+#        [ 0.,  0.]], dtype=float32), array([ 0.,  0.], dtype=float32), array([[ 0.],
+#        [ 0.]], dtype=float32), array([ 0.], dtype=float32)]
+
+# param_cudnn
+# [ 0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.  0.]

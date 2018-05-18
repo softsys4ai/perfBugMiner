@@ -1,0 +1,53 @@
+Reading data from GCS, processing hangs indefinitely
+
+System information
+
+Using the ml engine example here: https://github.com/GoogleCloudPlatform/cloudml-samples/tree/master/census/estimator/trainer
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Mac OSX 10.11.5
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.1.0
+Python version: 2.7.12
+
+Describe the problem
+This code runs fine if I point it to local data. It also runs fine if I point it to the public dataset gs://cloudml-public/census/data/adult.data.csv in the instructions. However, when I make a copy of that public dataset and store it in my own GCS bucket the code just hangs after listing these common warnings:
+2017-07-05 16:14:50.392729: W tensorflow/core/platform/cpu_feature_guard.cc:45] The 
+TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your 
+machine and could speed up CPU computations.
+2017-07-05 16:14:50.392761: W tensorflow/core/platform/cpu_feature_guard.cc:45] The 
+TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-05 16:14:50.392767: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-05 16:14:50.392772: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-05 16:14:50.392776: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+
+I am assuming the issue is permissions related or that the file can't be found but rather than failing or giving an error it just runs indefinitely. I'm not entirely sure if this is happening during the string_input_producer step, the read_up_to step or even as part of the shuffle_batch. It seems like a bug that nothing is causing the code to fail.
+files = tf.concat([
+  tf.train.match_filenames_once(filename)
+  for filename in filenames
+], axis=0)
+
+filename_queue = tf.train.string_input_producer(
+    files, num_epochs=num_epochs, shuffle=shuffle)
+reader = tf.TextLineReader(skip_header_lines=skip_header_lines)
+
+_, rows = reader.read_up_to(filename_queue, num_records=batch_size)
+# DNNLinearCombinedClassifier expects rank 2 tensors.
+row_columns = tf.expand_dims(rows, -1)
+columns = tf.decode_csv(row_columns, record_defaults=CSV_COLUMN_DEFAULTS)
+features = dict(zip(CSV_COLUMNS, columns))
+
+# Remove unused columns
+for col in UNUSED_COLUMNS:
+  features.pop(col)
+
+if shuffle:
+  # This operation maintains a buffer of Tensors so that inputs are
+  # well shuffled even between batches.
+  features = tf.train.shuffle_batch(
+      features,
+      batch_size,
+      capacity=batch_size * 10,
+      min_after_dequeue=batch_size*2 + 1,
+      num_threads=multiprocessing.cpu_count(),
+      enqueue_many=True,
+      allow_smaller_final_batch=True
+  )

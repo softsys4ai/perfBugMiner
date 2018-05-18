@@ -1,0 +1,70 @@
+cond with gradients of map_fn hangs
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04.1
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): ('v1.2.0-5-g435cdfc', '1.2.1')
+Python version: 2.7.12
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 8.0 / 5.1.5
+GPU model and memory: GeForce GTX 1080, 8113MiB
+Exact command to reproduce: python test.py (see below)
+
+Describe the problem
+Running a cond in which a lambda (even the one that isn't used) includes the gradients of a tensor made by map_fn makes TensorFlow hang. See test.py below for reproduction.
+Doing the gradients outside of the lambda makes it work. See test-workaround.py for example.
+Source code / logs
+test.py:
+import tensorflow as tf
+
+print 'start'
+numbers = tf.zeros([2], dtype=tf.float32)
+
+result = tf.map_fn(lambda image: image, numbers)
+
+def get_next_step():
+  objective = result[0]
+  grads, = tf.gradients(objective, numbers)
+  return numbers + grads
+
+def current_or_next(use_next):
+  return tf.cond(use_next,
+                 get_next_step,
+                 lambda: numbers)
+
+always_old = current_or_next(use_next=tf.constant(False))
+
+print 'creating session'
+sess = tf.Session()
+print 'before run'
+sess.run(always_old)
+print 'after run'
+test-workaround.py:
+import tensorflow as tf
+
+print 'start'
+numbers = tf.zeros([2], dtype=tf.float32)
+
+result = tf.map_fn(lambda image: image, numbers)
+
+def get_next_step():
+  objective = result[0]
+  grads, = tf.gradients(objective, numbers)
+  return numbers + grads
+next_step = get_next_step() # <--
+
+def current_or_next(use_next):
+  return tf.cond(use_next,
+                 lambda: next_step, # <--
+                 lambda: numbers)
+
+always_old = current_or_next(use_next=tf.constant(False))
+
+print 'creating session'
+sess = tf.Session()
+print 'before run'
+sess.run(always_old)
+print 'after run'
+I haven't been able to get a traceback after it hangs.

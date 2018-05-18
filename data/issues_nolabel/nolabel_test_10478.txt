@@ -1,0 +1,71 @@
+tfdbg error when stepping through a graph that uses tf.train.shuffle_batch
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 17.04
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): v1.2.0-rc1-24-gce1d6ec 1.2.0-rc2
+(I also got the same error with tf 1.1.0)
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: CUDA 8.0, cuDNN 5.1
+GPU model and memory: Nvidia GTX 1060
+Exact command to reproduce:
+The following code will start a tfdbg session. Inside this session, enter these commands to get the error:
+tfdbg> invoke_stepper
+tfdbg> s
+tfdbg> s
+tfdbg> s
+
+import tensorflow as tf
+from tensorflow.python import debug as tf_debug
+
+def read_records(filename_queue, enqueue_many_size=1024):
+    reader = tf.TFRecordReader()
+    _, queue_batch = reader.read_up_to(filename_queue, enqueue_many_size)
+    return queue_batch
+
+def input_batch(filenames, batch_size, num_epochs, min_after_dequeue=128, num_threads=8):
+    filename_queue = tf.train.string_input_producer(filenames, num_epochs=num_epochs)
+    queue_batch = read_records(filename_queue)
+
+    capacity = min_after_dequeue + (num_threads + 3) * batch_size
+    batch_serialized_example = tf.train.shuffle_batch(
+        [queue_batch],
+        batch_size=batch_size,
+        num_threads=num_threads,
+        capacity=capacity,
+        min_after_dequeue=min_after_dequeue,
+        enqueue_many=True)
+
+    return batch_serialized_example
+
+b = input_batch(['test_filename'], 32, 5)
+sess = tf_debug.LocalCLIDebugWrapperSession(tf.Session())
+sess.run(b)
+
+Describe the problem
+tfdbg seemingly cannot step through a graph that uses tf.train.shuffle_batch. I cannot work around it by "stepping over" the node using step -t either.
+Source code / logs
+Running the code provided above and stepping through the graph produces this stack trace. In a real graph, the error stops me from stepping any further. I worked out from looking at types_pb2.py that the value 20 is DT_RESOURCE. It seems like the error is triggered when tfdbg tries to convert this datatype to a numpy array.
+--- Node Stepper: run #1: 1 fetch (shuffle_batch:0); 0 feeds ------
+| <-- --> | s
+Error occurred during handling of command: step :
+<class 'KeyError'>: 20                                                                                                                                                                                    UP
+
+Traceback (most recent call last):
+  File "/home/ed/.pyenv/versions/neda/lib/python3.6/site-packages/tensorflow/python/debug/cli/debugger_cli_common.py", line 664, in dispatch_command
+    output = handler(argv, screen_info=screen_info)
+  File "/home/ed/.pyenv/versions/neda/lib/python3.6/site-packages/tensorflow/python/debug/cli/stepper_cli.py", line 487, in step
+    screen_output = self.cont([self._sorted_nodes[self._next]], screen_info)
+  File "/home/ed/.pyenv/versions/neda/lib/python3.6/site-packages/tensorflow/python/debug/cli/stepper_cli.py", line 397, in cont
+    restore_variable_values=parsed.restore_variable_values)
+  File "/home/ed/.pyenv/versions/neda/lib/python3.6/site-packages/tensorflow/python/debug/lib/stepper.py", line 679, in cont
+    options=run_options)
+  File "/home/ed/.pyenv/versions/neda/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 789, in run
+    run_metadata_ptr)
+  File "/home/ed/.pyenv/versions/neda/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 952, in _run
+    subfeed_dtype = subfeed_t.dtype.as_numpy_dtype
+  File "/home/ed/.pyenv/versions/neda/lib/python3.6/site-packages/tensorflow/python/framework/dtypes.py", line 122, in as_numpy_dtype
+    return _TF_TO_NP[self._type_enum]
+KeyError: 20

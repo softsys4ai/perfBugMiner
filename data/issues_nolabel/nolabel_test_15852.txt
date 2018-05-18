@@ -1,0 +1,125 @@
+Eager: crashed when using embedding_lookup in tfe.defun in tfe.GradientTape
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Win10
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below):1.5.0dev20171230
+Python version: 3.6
+Bazel version (if compiling from source):N/A
+GCC/Compiler version (if compiling from source):N/A
+CUDA/cuDNN version:9.0/7.0
+GPU model and memory:pascal
+Exact command to reproduce:N/A
+
+Describe the problem
+When I train a seq2seq model in eager, backward will raise a error:
+---------------------------------------------------------------------------
+InvalidArgumentError                      Traceback (most recent call last)
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\framework\ops.py in get_attr(self, name)
+   2162           with errors.raise_exception_on_not_ok_status() as status:
+-> 2163             c_api.TF_OperationGetAttrValueProto(self._c_op, name, buf, status)
+   2164           data = c_api.TF_GetBuffer(buf)
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\framework\errors_impl.py in __exit__(self, type_arg, value_arg, traceback_arg)
+    472             compat.as_text(c_api.TF_Message(self.status.status)),
+--> 473             c_api.TF_GetCode(self.status.status))
+    474     # Delete the underlying status object from memory otherwise it stays alive
+
+InvalidArgumentError: Operation 'embedding_lookup' has no attr named '_XlaCompile'.
+
+During handling of the above exception, another exception occurred:
+
+ValueError                                Traceback (most recent call last)
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\ops\gradients_impl.py in _MaybeCompile(scope, op, func, grad_fn)
+    369     try:
+--> 370       xla_compile = op.get_attr("_XlaCompile")
+    371       xla_separate_compiled_gradients = op.get_attr(
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\framework\ops.py in get_attr(self, name)
+   2166         # Convert to ValueError for backwards compatibility.
+-> 2167         raise ValueError(str(e))
+   2168       x = attr_value_pb2.AttrValue()
+
+ValueError: Operation 'embedding_lookup' has no attr named '_XlaCompile'.
+
+During handling of the above exception, another exception occurred:
+
+IndexError                                Traceback (most recent call last)
+<ipython-input-1-ed6ea9045e3f> in <module>()
+     12         embed = tfe.Variable(np.ones((10, 100)).astype(np.float32))
+     13         toy_data = np.ones((1, 10)).astype(np.int64)
+---> 14         embedding_crash(toy_data, embed)
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\eager\function.py in decorated(*args, **kwds)
+    639       arguments_to_functions[cache_key] = _defun_internal(
+    640           name, func, args, kwds)
+--> 641     return arguments_to_functions[cache_key](*args)
+    642 
+    643   return decorated
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\eager\function.py in __call__(self, *args)
+    461         self._extra_inputs):
+    462       if not self._has_backprop:
+--> 463         self._compute_backprop()
+    464       return self._backprop_call(tensor_inputs)
+    465 
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\eager\function.py in _compute_backprop(self)
+    359             filtered_outputs,
+    360             self._input_placeholders,
+--> 361             grad_ys=self._out_grad_placeholders)
+    362         shapes = tuple(x.shape for x in in_gradients if x is not None)
+    363     captures = list(sorted(c.captured_tensors, key=lambda x: x.name))
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\ops\gradients_impl.py in gradients(ys, xs, grad_ys, name, colocate_gradients_with_ops, gate_gradients, aggregation_method, stop_gradients)
+    607                 # functions.
+    608                 in_grads = _MaybeCompile(
+--> 609                     grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+    610               else:
+    611                 # For function call ops, we add a 'SymbolicGradient'
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\ops\gradients_impl.py in _MaybeCompile(scope, op, func, grad_fn)
+    373       xla_scope = op.get_attr("_XlaScope").decode()
+    374     except ValueError:
+--> 375       return grad_fn()  # Exit early
+    376 
+    377   if not xla_compile:
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\ops\gradients_impl.py in <lambda>()
+    607                 # functions.
+    608                 in_grads = _MaybeCompile(
+--> 609                     grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+    610               else:
+    611                 # For function call ops, we add a 'SymbolicGradient'
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\ops\resource_variable_ops.py in _GatherGrad(op, grad)
+    895     # TODO(apassos): implement this for EAGER mode.
+    896     while handle.op.type != "VarHandleOp":
+--> 897       handle = handle.op.inputs[0]
+    898   params_shape = gen_resource_variable_ops.variable_shape(handle)
+    899   size = array_ops.expand_dims(array_ops.size(indices), 0)
+
+c:\users\yanyan\anaconda3\lib\site-packages\tensorflow\python\framework\ops.py in __getitem__(self, i)
+   1992 
+   1993     def __getitem__(self, i):
+-> 1994       return self._inputs[i]
+   1995 
+   1996 # pylint: enable=protected-access
+
+IndexError: list index out of range
+No problem when remove @tfe.defun, but eager is very slow without defun so I need to compile model with tfe.defun.
+code to reproduce error:
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+import numpy as np
+tfe.enable_eager_execution()
+@tfe.defun
+def embedding_crash(x, embedding):
+    return tf.nn.embedding_lookup(embedding, x)
+with tf.device("gpu:0"):
+    with tfe.GradientTape() as g:
+        embed = tfe.Variable(np.ones((10, 100)).astype(np.float32))
+        toy_data = np.ones((1, 10)).astype(np.int64)
+        embedding_crash(toy_data, embed)

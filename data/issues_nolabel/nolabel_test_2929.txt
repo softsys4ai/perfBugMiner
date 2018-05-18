@@ -1,0 +1,86 @@
+IOS - No OpKernel was registered to support Op 'Conv2DBackpropInput' with these attrs
+
+Hi everyone,
+We are trying to load a very simple graph inside IOS that we generate and freeze with python.
+Right now, we have this following error:
+E Running model failed: Invalid argument: 
+No OpKernel was registered to support Op 'Conv2DBackpropInput' with these attrs
+     [[Node: convt = Conv2DBackpropInput[T=DT_FLOAT, data_format="NHWC", padding="SAME", strides=[1, 1, 1, 1], use_cudnn_on_gpu=true](Shape, W/read, x)]]
+
+Here is the python script generating the model:
+from tools import freeze_graph
+
+import tensorflow as tf
+
+print('Init session')
+sess = tf.InteractiveSession()
+
+print('Define vars and ops')
+x = tf.placeholder(tf.float32, shape=[None, 600, 600, 3], name="x")
+W = tf.Variable(tf.truncated_normal([3, 3, 3, 3], stddev=0.1), name="W")
+convt = tf.nn.conv2d_transpose(x, W, tf.shape(x), strides=[1, 1, 1, 1], padding='SAME', name="convt")
+
+print('Init vars')
+init = tf.initialize_all_variables()
+sess.run(init)
+
+input_graph_name = "input_graph.pb"
+
+saver = tf.train.Saver(var_list=None)
+saver.save(sess, 'data/conv', global_step=None)
+
+graph_def = sess.graph.as_graph_def()
+tf.train.write_graph(graph_def, "data", input_graph_name)
+
+input_graph_path = 'data/' + input_graph_name
+input_saver_def_path = ""
+input_binary = False
+input_checkpoint_path = 'data/conv'
+output_node_names = "convt"
+restore_op_name = "save/restore_all"
+filename_tensor_name = "save/Const:0"
+output_graph_path = "data/frozen_convt.pb"
+clear_devices = True
+
+freeze_graph.freeze_graph(input_graph_path, input_saver_def_path,
+                          input_binary, input_checkpoint_path,
+                          output_node_names, restore_op_name,
+                          filename_tensor_name, output_graph_path,
+                          clear_devices, "")
+Here is the Objective-C++ interesting part:
+ //  2. Load the network
+
+  NSString* network_path = FilePathForResourceName(@"frozen_conv", @"pb");
+  PortableReadFileToProto([network_path UTF8String], &tensorflow_graph);
+
+  LOG(INFO) << "Creating session.";
+  tensorflow::Status s = session->Create(tensorflow_graph);
+
+  if (!s.ok()) {
+    LOG(ERROR) << "Could not create Tensorflow Graph: " << s;
+  }
+
+
+  //  3. Run the network
+
+    std::string input_layer = "x:0";
+    std::string output_layer = "convt:0";
+
+    std::vector<tensorflow::Tensor> outputs;
+    tensorflow::Status run_status = session->Run({{input_layer, image_tensor}},
+                                                 {output_layer}, {}, &outputs);
+
+
+    if (!run_status.ok()) {
+      LOG(ERROR) << "Running model failed: " << run_status;
+    }
+We are using:
+
+Python 3.5.1 for the script
+The python tensorflow build is downloaded from https://storage.googleapis.com/tensorflow/mac/tensorflow-0.9.0rc0-py3-none-any.whl
+The compiled tensorflow for IOS is from the master branch 2 hour ago using the script build_all_ios.sh
+We have no problem running the IOS example
+We have no problem running a one standard convolutional graph frozen with custom python script
+We checked that the file tensorflow/core/ops/nn_ops.cc is in the generated txt files (and this is the file containing the registering of the op 'Conv2DBackpropInput')
+
+I would be gratefull if anyone has an idea on why IOS seems to not be able to find the Conv2DBackpropInput Op ?

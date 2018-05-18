@@ -1,0 +1,77 @@
+distributed Tensorflow assign device issue
+
+I recently found an interesting issue on device assignment when I ran the following simple code test.py:
+import argparse
+import tensorflow as tf
+
+CLUSTER_SPEC = {"ps": ["localhost:2222"],
+                "worker": ["localhost:1111", "localhost:1112"]}
+
+
+def parse_command_arguments():
+    """ Set up and parse the command line arguments. """
+    parser = argparse.ArgumentParser(
+        description="Parameters and Arguments for the Test.")
+    parser.add_argument(
+        "--job_name", type=str, default="", help="One of 'ps', 'worker'")
+    parser.add_argument(
+        "--task_index", type=int, default=0, help="Index of task")
+    return parser.parse_args()
+
+
+def start_server(job_name, task_index, tf_config):
+    """ Create a server based on a cluster spec. """
+    cluster = tf.train.ClusterSpec(CLUSTER_SPEC)
+    server = tf.train.Server(
+        cluster, config=tf_config, job_name=job_name, task_index=task_index)
+    return server, cluster
+
+
+def model(cluster=None, worker_device=None):
+    """ Build up a simple estimator model. """
+    with tf.device(tf.train.replica_device_setter(
+            worker_device=worker_device, cluster=cluster)):
+        W = tf.Variable([1.0], tf.float32)
+        b = tf.Variable([10.0], tf.float32)
+        x = tf.placeholder(tf.float32)
+        y = W * x + b
+    return W, b, x, y
+
+
+if __name__ == "__main__":
+    arguments = parse_command_arguments()
+    job_name = arguments.job_name
+    task_index = arguments.task_index
+    # Set up tensorflow configuration.
+    tf_config = tf.ConfigProto(
+        allow_soft_placement=True, device_count={'GPU': 1},
+        log_device_placement=True)
+    # Start a server.
+    server, cluster = start_server(job_name, task_index, tf_config)
+
+    if job_name == "ps":
+        server.join()
+    else:
+        worker_device = "/gpu:0"
+        W, b, x, y = model(cluster, worker_device=worker_device)
+        is_chief = (arguments.task_index == 0) and (
+            arguments.job_name == 'worker')
+        sess = tf.train.MonitoredTrainingSession(
+             master=server.target, is_chief=is_chief, config=tf_config)
+        # Run the model.
+        step = 0
+        x_train = [1, 2, 3, 4]
+        y_train = [0, -1, -2, -3]
+        while not sess.should_stop() and step < 1000:
+            sess.run([y], {x: x_train, y: y_train})
+            step += 1
+
+As the code uses tf.train.replica_device_setter() with worker_device="/gpu:0", I imagine all tensorflow Variable ops go to the parameter server, while all other type of ops stay in the worker.
+However, if we run the above code:
+$ python test.py --job_name ps --task_index 0
+$ python test.py --job_name worker --task_index 0
+$ python test.py --job_name worker --task_index 1
+I notice that all tensorflow ops go to parameter server, for example in the worker log:
+report_uninitialized_variables/boolean_mask/strided_slice/stack_2: (Const)/job:ps/replica:0/task:0/gpu:0.
+But if I change worker_device="/gpu:0" in the code to worker_device="/job:worker/task:0/gpu:0", then the result is correct (all non-Variable ops go to worker). So does it mean there is a bug for tf.train.replica_device_setter() to automatically assign devices?
+P.S The above code runs on single GPU (TITAN X (Pascal)/PCIe/SSE2) with Ubuntu 16.04, Python 3.5 and Tensorflow v1.2

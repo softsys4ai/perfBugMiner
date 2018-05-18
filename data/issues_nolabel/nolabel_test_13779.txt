@@ -1,0 +1,69 @@
+MonitoredSession.close() doesn't stop a thread when using SyncReplicasOptimizer hook
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.3
+Python version: 3.5.2
+
+Describe the problem
+If using SyncReplicasOptimizer, the MonitoredSession is not able to stop a thread when calling session.close(). It will wait the whole "stop_grace_period_secs" and then close, reporting that a thread could not be stopped:  INFO:tensorflow:Coordinator stopped with threads still running: Thread-5 (the thread number may vary).
+Here you can find the piece of code (reduced as much as possible) to reproduce it:
+Source code
+import tensorflow as tf
+import logging
+logging.getLogger().setLevel(logging.INFO) #To see the message "Coordinator stopped with threads still running"
+
+opt = tf.train.RMSPropOptimizer(1.0)
+opt = tf.train.SyncReplicasOptimizer(opt, replicas_to_aggregate=1, total_num_replicas=1)
+sync_hook = opt.make_session_run_hook(is_chief=True, num_tokens=0)
+
+global_step = tf.train.create_global_step() #global_step is necessary for SyncReplicasOptimizer
+var = tf.Variable(0.0) #dummy variable and gradient
+grad = tf.constant(1.0)
+
+opt.apply_gradients([(grad, var)], global_step = global_step)
+
+print("CREATING SESSION", flush=True)
+sess = tf.train.MonitoredSession(hooks = [sync_hook],
+                                 stop_grace_period_secs=10) #increasing this number will just make you wait more ;)
+
+print("CLOSING... here's the problem!", flush=True)
+sess.close()
+
+print("DONE", flush=True)
+
+Output
+It hangs at sess.close() for "stop_grace_period_secs" (showing the message "CLOSING...")
+INFO:tensorflow:SyncReplicasV2: replicas_to_aggregate=1; total_num_replicas=1
+CREATING SESSION
+CLOSING... here's the problem!
+INFO:tensorflow:Coordinator stopped with threads still running: Thread-1
+DONE
+
+Sometimes, I additionally get the following traceback (when calling it from ipython I always get it):
+Traceback (most recent call last):
+  File "/usr/lib/python3.5/threading.py", line 914, in _bootstrap_inner
+    self.run()
+  File "/usr/lib/python3.5/threading.py", line 862, in run
+    self._target(*self._args, **self._kwargs)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/queue_runner_impl.py", line 254, in _run
+    coord.request_stop(e)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/coordinator.py", line 211, in request_stop
+    six.reraise(*sys.exc_info())
+  File "/usr/local/lib/python3.5/dist-packages/six.py", line 693, in reraise
+    raise value
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/queue_runner_impl.py", line 238, in _run
+    enqueue_callable()
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1235, in _single_operation_run
+    target_list_as_strings, status, None)
+  File "/usr/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.CancelledError: TakeGrad operation was cancelled
+         [[Node: sync_replicas/AccumulatorTakeGradient = AccumulatorTakeGradient[_class=["loc:@sync_replicas/conditional_accumulator"], dtype=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"](sync_replicas/conditional_accumulator, sync_replicas/AccumulatorTakeGradient/num_required)]]
+
+After several runs of this same script I also got a segmentation fault, but only once.

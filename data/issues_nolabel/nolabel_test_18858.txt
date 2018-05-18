@@ -1,0 +1,98 @@
+How to show the loss curve of training set and validation set at the same time using the customed estimator?
+
+Hi, recently I used custom_estimator.py to build regression model.  In order to clear out the changes of loss value in the training set and validation set. I need to know that how to show the loss curve of training and validation set at the same time. I tried to use train_and_evaluate api of estimator and i got the following picture.
+
+As it show, the result of evaluation is a point, but i want a line like the loss curve of training set. Just like the picture as shown below.
+
+Here is my system information:
+
+
+Have i written custom code: N/A
+
+
+OS: Tested on windows 10 1709.
+
+
+Tensorflow installed from Anaconda 5.1.0 with python 3.6.4
+
+
+Tensorflow version-tested on tensorflow-gpu 1.7.0
+
+
+CUDA/cuDNN version: 9.0 for TF 1.7
+
+
+GPU mode: Nvidia Quadro  K2100M， 2G of memory
+
+
+Bazel version: N/A
+
+
+Exact command to reproduce: N/A
+Here is the customed estimator:
+
+
+def my_dnn_regression_fn(features, labels, mode, params):
+    top = tf.feature_column.input_layer(features, params['feature_columns'])
+
+    for units in params.get('hidden_units', [20]):
+        top = tf.layers.dense(inputs=top, units=units, activation=tf.nn.relu)
+
+    output_layer = tf.layers.dense(inputs=top, units=1)
+
+    output_layer = tf.cast(output_layer, tf.float64)
+   
+    predictions = tf.squeeze(output_layer, 1)
+
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        # In 'PREDICT' mode we only need to return predictions.
+        return tf.estimator.EstimatorSpec(
+            mode=mode, predictions={"predictions": predictions})
+
+    # calculate the loss using mean squared error
+    average_loss = tf.losses.mean_squared_error(labels, predictions)
+
+    # Pre-made estimators use the total_loss instead of the average,
+    # so report total_loss for compatibility.
+    batch_size = tf.shape(labels)[0]
+    total_loss = tf.to_float(batch_size) * average_loss
+
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        optimizer = params.get("optimizer", tf.train.AdamOptimizer)
+        optimizer = optimizer(params.get("learning_rate", None))
+        train_op = optimizer.minimize(
+            loss=average_loss, global_step=tf.train.get_global_step())
+        return tf.estimator.EstimatorSpec(
+            mode=mode, loss=total_loss, train_op=train_op)
+
+    # In the evaluation mode we will calculate evaluation metrics.
+    assert mode == tf.estimator.ModeKeys.EVAL
+
+    # Calculate root mean squared error
+    rmse = tf.metrics.root_mean_squared_error(labels, predictions)
+
+    # Add the rmse to collection of evaluation metrics.
+    eval_metrics = {"rmse": rmse}
+
+    return tf.estimator.EstimatorSpec(
+        mode=mode,
+        # Report sum of error for compatibility with pre-made estimators.
+        loss=total_loss,
+        eval_metric_ops=eval_metrics)
+
+And here I used train_and_evaluate api like this:
+    model = tf.estimator.Estimator(
+        model_fn=my_dnn_regression_fn,
+        model_dir=
+        "./models/temp",
+        params={
+            'feature_columns': feature_columns,
+            'learning_rate': 0.1,
+            'optimizer': tf.train.AdamOptimizer,
+            'hidden_units': [20, 20, 20, 20]
+        })
+    train_spec = tf.estimator.TrainSpec(input_fn=input_train,max_steps=10000)
+    eval_spec = tf.estimator.EvalSpec(input_fn=input_dev,steps=10000,throttle_secs=60,start_delay_secs=0)
+    tf.estimator.train_and_evaluate(model, train_spec, eval_spec)
+
+Did I set the parameter properly? Or, is there other solution for this?

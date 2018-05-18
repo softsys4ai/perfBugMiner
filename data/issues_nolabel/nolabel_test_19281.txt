@@ -1,0 +1,32 @@
+Tensorflow takes up all system memory in distributed training
+
+System Information:
+
+OS Platform: Redhat 6.6
+TensorFlow installed from binary
+TensorFlow version: 1.6.1
+CUDA version: 9.1
+cuDNN version: 9.1
+
+output for print(tf.GIT_VERSION, tf.VERSION):
+('v1.6.0-rc1-3-g690ce9c6cc', '1.6.0-rc0')
+Problem:
+I'm running distributed training with TensorFlow GPU build in a managed cluster. Each box has 4 GPUs and multi tenancy is enabled in this cluster. The problem is each TensorFlow job running inside a container inside the node would allocate ALL available system RAM to the process and ends in exhausting available virtual memory. For example, the box has 4 GPUs and 400 GB mem. When we allocate 4 jobs in the same node each asking for a single GPU, each container running the tf job would allocate a 400GB vm, in total 2TB mem and blow away the box :(
+Stack trace:
+INFO:root: Before calling tf.train.Server(cluster_spec, job_name, task_index): mem usage: 159284 kB, vmem 1228872 kB
+2018-05-15 01:38:39.088741: I tensorflow/core/platform/cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX2 FMA
+2018-05-15 01:38:44.083881: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1344] Found device 0 with properties: 
+name: Tesla K80 major: 3 minor: 7 memoryClockRate(GHz): 0.8235
+pciBusID: 0000:05:00.0
+totalMemory: 11.17GiB freeMemory: 11.10GiB
+2018-05-15 01:38:44.083950: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1423] Adding visible gpu devices: 0
+2018-05-15 01:38:44.386139: I tensorflow/core/common_runtime/gpu/gpu_device.cc:911] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-05-15 01:38:44.386178: I tensorflow/core/common_runtime/gpu/gpu_device.cc:917]      0 
+2018-05-15 01:38:44.386187: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 0:   N 
+2018-05-15 01:38:44.390272: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Created TensorFlow device (/job:worker/replica:0/task:1/device:GPU:0 with 10763 MB memory) -> physical GPU (device: 0, name: Tesla K80, pci bus id: 0000:05:00.0, compute capability: 3.7)
+2018-05-15 01:38:44.589474: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> ltx1-hcl4471.grid.linkedin.com:9521}
+2018-05-15 01:38:44.589514: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> ltx1-hcl4471.grid.linkedin.com:10011, 1 -> localhost:16944}
+2018-05-15 01:38:44.591463: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:333] Started server with target: grpc://localhost:16944
+INFO:root: After calling tf.train.Server(cluster_spec, job_name, task_index): mem usage: 838408 kB, vmem 292753900 kB
+
+This is killing the multi-tenancy for a managed cluster, please help!

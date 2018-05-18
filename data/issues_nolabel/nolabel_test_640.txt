@@ -1,0 +1,16 @@
+Attention modifications
+
+In the attention_decoder of seq2seq.py, attention is computed by the statements
+cell_output, new_state = cell(x, states[-1])
+attns = attention(new_state)
+with vs.variable_scope("AttnOutputProjection"):
+  output = rnn_cell.linear([cell_output] + attns, output_size, True)
+However, in Grammar as a Foreign Language, attention is computed using the last hidden vector of the multi-layer LSTM (e.g. cell_output). Computing attention with new_state involves using every layer's state, including their cell state (which should probably be only used inside the LSTM layer). To match GaaFL, the attention call should be
+attns = attention(cell_output)
+Of course, if the cell is wrapped by an OutputProjectionWrapper as done in embedding_attention_seq2seq, then this call is computationally expensive. To prevent this, embedding_attention_seq2seq can be modified as such:
+# Starting from line 606.
+output_size = None
+if output_projection is None:
+  output_size = num_decoder_symbols # Projection wrapper removed.
+Now, cell_output will be the last hidden vector of the multi-layered LSTM. The reason this works is because output is already being projected for the softmax, so cell_output does not need to be projected to a length of num_decoder_symbols. If as beforecell is wrapped by OutputProjectionWrapper, the cell_output will have size num_decoder_symbols. Computing the output will then involve a (num_decoder_symbols + num_heads * attn_size) x num_decoder_symbols matrix, which can be huge. However, if we make the change, then the matrix is only of size (cell.output_size + num_heads * attn_size) x num_decoder_symbols.
+Thoughts? Have I missed something important? If this sounds good, I can make a PR. Thanks!

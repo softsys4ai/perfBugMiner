@@ -1,0 +1,83 @@
+XLA leads to core dump
+
+System information
+output of tf_env_collect.sh
+Tensorflow
+Tensorflow compiled from the source v1.3.0(9e76bf3)
+with cuda, with xla, without mpi, without mkl
+OS
+CentOS 7
+out put of uname -a:
+Linux zhanghao 3.10.0-514.26.2.el7.x86_64 #1 SMP Tue Jul 4 15:04:05 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+python
+Python 2.7.13 |Intel Corporation| (default, Apr 27 2017, 15:33:46)
+[GCC 4.8.2 20140120 (Red Hat 4.8.2-15)] on linux2
+Bezel
+Build label: 0.5.2
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Tue Jun 27 13:27:03 2017 (1498570023)
+Build timestamp: 1498570023
+Build timestamp as int: 1498570023
+GPU
+CUDA 8.0 cuDNN 6.0.21
+GPU: GeForce GTX 950M
+Describe the problem
+core dump when use xla with gpu,
+BTW, if use cpu only, xla won't lead to core dump
+Source code
+This is code to reproduce the bug
+import tensorflow as tf
+import sys
+D = 2
+A = tf.random_normal(shape=[D, D, 2], dtype=tf.float32,name="A")
+B = tf.random_normal(shape=[D, D, 2], dtype=tf.float32, name="B")
+E = tf.ones(shape=[D], dtype=tf.float32, name="EBA")
+H = tf.reshape(tf.constant([[0.25,0,0,0],[0,-0.25,0.5,0],[0,0.5,-0.25,0],[0,0,0,0.25]],
+                           dtype=tf.float32),[2,2,2,2],name="Hamiltonian")
+EA = tf.multiply(A,tf.reshape(E,[D,1,1]))
+AB = tf.tensordot(EA,B,[[1],[0]],name="AB")
+S, U, V = tf.svd(tf.reshape(AB,[2*D,2*D]))
+UU = tf.transpose(tf.multiply(tf.reshape(U[:,:D],[D,2,D]),tf.reshape(E,[D,1,1])),[0,2,1],name="nA")
+data = UU / tf.reduce_max(UU)
+config = tf.ConfigProto()
+if len(sys.argv)>1:
+    config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
+sess = tf.Session(config=config)
+sess.run(tf.global_variables_initializer())
+print sess.run(data)
+
+save as MPS.py and run python MPS.py and get:
+2017-08-29 20:51:54.856662: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:893] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-08-29 20:51:54.857232: I tensorflow/core/common_runtime/gpu/gpu_device.cc:955] Found device 0 with properties:
+name: GeForce GTX 950M
+major: 5 minor: 0 memoryClockRate (GHz) 1.124
+pciBusID 0000:0a:00.0
+Total memory: 3.95GiB
+Free memory: 3.92GiB
+2017-08-29 20:51:54.857292: I tensorflow/core/common_runtime/gpu/gpu_device.cc:976] DMA: 0
+2017-08-29 20:51:54.857301: I tensorflow/core/common_runtime/gpu/gpu_device.cc:986] 0:   Y
+2017-08-29 20:51:54.857312: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1045] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 950M, pci bus id: 0000:0a:00.0)
+[[[ 0.64684284 -0.48666194]
+  [-0.56722689 -0.19181968]]
+
+ [[ 0.34154066  0.77098727]
+  [ 1.         -0.0881796 ]]]
+
+and then run python MPS.py -, and get:
+2017-08-29 20:52:18.127327: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:893] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-08-29 20:52:18.127719: I tensorflow/core/common_runtime/gpu/gpu_device.cc:955] Found device 0 with properties:
+name: GeForce GTX 950M
+major: 5 minor: 0 memoryClockRate (GHz) 1.124
+pciBusID 0000:0a:00.0
+Total memory: 3.95GiB
+Free memory: 3.92GiB
+2017-08-29 20:52:18.127780: I tensorflow/core/common_runtime/gpu/gpu_device.cc:976] DMA: 0
+2017-08-29 20:52:18.127789: I tensorflow/core/common_runtime/gpu/gpu_device.cc:986] 0:   Y
+2017-08-29 20:52:18.127799: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1045] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 950M, pci bus id: 0000:0a:00.0)
+2017-08-29 20:52:18.319392: I tensorflow/compiler/xla/service/platform_util.cc:58] platform CUDA present with 1 visible devices
+2017-08-29 20:52:18.319435: I tensorflow/compiler/xla/service/platform_util.cc:58] platform Executor present with 1 visible devices
+2017-08-29 20:52:18.319739: I tensorflow/compiler/xla/service/platform_util.cc:58] platform Host present with 8 visible devices
+2017-08-29 20:52:18.320615: I tensorflow/compiler/xla/service/service.cc:187] XLA service 0x7f59008c0350 executing computations on platform CUDA. Devices:
+2017-08-29 20:52:18.320640: I tensorflow/compiler/xla/service/service.cc:195]   StreamExecutor device (0): GeForce GTX 950M, Compute Capability 5.0
+2017-08-29 20:52:18.474432: F tensorflow/compiler/xla/util.cc:183] Check failed: p1.size() == p2.size() (3 vs. 0)
+[1]    14077 abort (core dumped)  python MPS.py -

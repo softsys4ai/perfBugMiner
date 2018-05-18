@@ -1,0 +1,39 @@
+Fixed _linear(.) to use *batch* matrix multiplication.
+
+In the _linear function (from the tensorflow.contrib.rnn.python.ops.core_rnn_cell_impl module), there's relatively subtle bug. The reason that this bug is subtle is that it only affects tensors used by _linear internally.
+For future reference, the signature and docstring of _linear are:
+def _linear(args, output_size, bias, bias_start=0.0):
+  """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
+
+  Args:
+    args: a 2D Tensor or a list of 2D, batch x n, Tensors.
+    output_size: int, second dimension of W[i].
+    bias: boolean, whether to add a bias term or not.
+    bias_start: starting value to initialize the bias; 0 by default.
+
+  Returns:
+    A 2D Tensor with shape [batch x output_size] equal to
+    sum_i(args[i] * W[i]), where W[i]s are newly created matrices.
+
+  Raises:
+    ValueError: if some of the arguments has unspecified or wrong shape.
+  """
+The Problem.
+From the docsting of _linear, the expected behavior of the function is that it should return an output y such that y = sum_i(args[i] * W[i]), indicating a batch-wise matmul (formerly known as batch_matmul). This wasn't actually how _linear was implemented, though. Instead, all args were concatenated and the weights were chosen to have rank 2, i.e.
+x = concat(args, axis=1)  # x.shape == (batch_size, total_arg_size)
+w = Variable(...)         # w.shape == (total_arg_size, output_size)
+y = matmul(x, w)          # y.shape == (batch_size, output_size)
+Now, the main problem here is that w is not block-diagonal, which means that it contains more entries than it should. There are two problems with this:
+
+The number of weights is too large by a factor of num_args.
+The extra "off-diagonal" weights yield spurious connections in the net architecture of e.g. LSTMCell.
+
+The Solution.
+The solution is to use batch-wise matmul instead. In order to do this, we need x and w to be rank-3 (rather than rank-2) tensors, e.g.
+x = stack(args, axis=0)                    # x.shape == (num_args, batch_size, input_size)
+w = Variable(...)                          # w.shape == (num_args, input_size, output_size / num_args)
+y = matmul(x, w)                           # y.shape == (num_args, batch_size, output_size / num_args)
+y = transpose(y, [1, 0, 2])                # y.shape == (batch_size, num_args, output_size / num_args)
+y = reshape(y, [batch_size, output_size])  # y.shape == (batch_size, output_size)
+Tests.
+I ran tensorflow/contrib/rnn/python/kernel_tests/core_rnn_cell_impl_test.py, but it was failing all over the place. I expected this, because the _linear is used in many of the rnn cell classes. The tests were failing in more places than just the place that covered _linear. Let me know if I need to update the unit tests too. Also, the change in the PR put somewhat more stringent constraints on the shapes of the input args, i.e. they must all be the same. In the previous implementation, only the axis-0 sizes (batch_size) needed to be the same. We could use padding and slicing if we need to be able to handle different axis-1 sizes (input_size).

@@ -1,0 +1,29 @@
+CTC: Add support for dense label matrix
+
+I'm working on integrating the new CTC operation into Keras and the SparseTensor used to pass the labels is causing a lot challenges due internal Keras requirements about the shape of the data going into the layers. What would be make integration trivial is an alternative dense label input format:
+def ctc_loss_dense(inputs, labels, sequence_length, label_length,
+             preprocess_collapse_repeated=False, ctc_merge_repeated=True):
+  """Computes the CTC (Connectionist Temporal Classification) Loss.
+  Requires:
+       max_label_length <= sequence_length
+  If ctc_merge_repeated is set False, then *during* CTC calculation
+  repeated non-blank labels will not be merged and are interpreted
+  as individual labels.  This is a simplified version of CTC.
+  Args:
+    inputs: 3-D `float` `Tensor` sized
+      `[max_time x batch_size x num_classes]`.  The logits.
+    labels: 2-D `int` `Tensor` sized
+       `[max_label_length x batch_size]
+    sequence_length: 1-D `int32` vector, size `[batch_size]`.
+      The sequence lengths.
+    label_length: 1-D `int32` vector, size `[batch_size]`.
+      The label lengths.
+    preprocess_collapse_repeated: Boolean.  Default: False.
+      If True, repeated labels are collapsed prior to the CTC calculation.
+    ctc_merge_repeated: Boolean.  Default: True.
+  Returns:
+    A 1-D `float` `Tensor`, size `[batch]`, containing logits.
+  Raises:
+    TypeError: if labels is not a `SparseTensor`.
+  """
+This dense input format would also be consistent with Baidu's Warp-CTC and various Theano CTC implementations, so projects using cross-library platforms like Keras would be a lot cleaner.  Also, for common CTC uses like OCR and speech processing, the sequence lengths are often a lot smaller than the input lengths, so I don't think the increased bandwidth from not having a spare tensor would be too noticeable.

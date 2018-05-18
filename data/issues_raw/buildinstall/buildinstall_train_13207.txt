@@ -1,0 +1,46 @@
+Failed to compile tensorflow offline with '--fetch=false' after all external dependencies fetched by bazel
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04.2
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.3.0 from master branch
+Python version: Python 2.7.12
+Bazel version (if compiling from source): 0.5.4
+CUDA/cuDNN version: null
+GPU model and memory: null
+Exact command to reproduce:
+
+
+Fetch all external dependencies by docker image with internet access.
+
+bazel fetch //tensorflow/tools/pip_package:build_pip_package
+
+
+Complie tensorflow offline without internet access with --fetch=false.
+
+bazel build --fetch=false --copt=-mavx2 --copt=-mfma --config=opt //tensorflow/tools/pip_package:build_pip_package
+
+Describe the problem
+I fetched all external dependencies successfully by docker image, and then committed and pushed it into our docker hub.
+#bazel fetch //tensorflow/tools/pip_package:build_pip_package
+INFO: All external dependencies fetched successfully.
+
+After that, I tried to compile tensorflow offline by using the image with bazel build --fetch=false since there is no internet access on my server, but it failed with the error "no such package '@xxx'", as follows:
+#bazel build --fetch=false --copt=-mavx2 --copt=-mfma --config=opt //tensorflow/tools/pip_package:build_pip_package
+WARNING: /home/admin/src/tensorflow/tensorflow/workspace.bzl:323:3: External repository 'six_archive' is not up-to-date and fetching is disabled. To update, run the build without the '--nofetch' command line option.
+WARNING: /home/admin/src/tensorflow/tensorflow/workspace.bzl:173:3: External repository 'eigen_archive' is not up-to-date and fetching is disabled. To update, run the build without the '--nofetch' command line option.
+ERROR: /home/admin/src/tensorflow/third_party/eigen3/BUILD:20:1: no such package '@eigen_archive//': BUILD file not found on package path and referenced by '//third_party/eigen3:eigen3'.
+ERROR: Analysis of target '//tensorflow/tools/pip_package:build_pip_package' failed; build aborted.
+INFO: Elapsed time: 0.349s
+
+In fact, be sure that the package eigen_archive was existing in the container, as below:
+#ls /root/.cache/bazel/_bazel_root/cb177c55a0e1ff115d6dbd74b4d4974a/external/ | grep eigen_archive
+eigen_archive
+
+And the ps stdout of bazel process was as follows:
+#ps aux | grep bazel
+root        664  0.8  0.8 20850492 570628 ?     Ssl  16:39   0:29 bazel(src) -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/root/.cache/bazel/_bazel_root/cb177c55a0e1ff115d6dbd74b4d4974a -Xverify:none -Djava.util.logging.config.file=/root/.cache/bazel/_bazel_root/cb177c55a0e1ff115d6dbd74b4d4974a/javalog.properties -Djava.library.path=/root/.cache/bazel/_bazel_root/install/2211725bdc2c34f807246fe9fb601a7f/_embedded_binaries/ -Dfile.encoding=ISO-8859-1 -jar /root/.cache/bazel/_bazel_root/install/2211725bdc2c34f807246fe9fb601a7f/_embedded_binaries/A-server.jar --max_idle_secs=10800 --connect_timeout_secs=10 --install_base=/root/.cache/bazel/_bazel_root/install/2211725bdc2c34f807246fe9fb601a7f --install_md5=2211725bdc2c34f807246fe9fb601a7f --output_base=/root/.cache/bazel/_bazel_root/cb177c55a0e1ff115d6dbd74b4d4974a --workspace_directory=/home/admin/src/tensorflow --deep_execroot --experimental_oom_more_eagerly_threshold=100 --nofatal_event_bus_exceptions --client_debug=false --product_name=Bazel --option_sources=
+
+So, please help for that and let me know if something wrong with my operation, thanks.

@@ -1,0 +1,81 @@
+Convolutional layers cannot be used multiple times
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): source (branch 1.4)
+TensorFlow version (use command below): 1.4.0-dev
+Python version: 3.5
+Bazel version (if compiling from source): 5.4.0
+CUDA/cuDNN version: 8.0/6.0
+GPU model and memory: nVidia 1080Ti 11G
+Exact command to reproduce: run the script below
+
+Describe the problem
+Keras convolutional layers cannot be used multiple times without creating a name conflict. This is especially bad when trying to copy layers from one model to another (See the second example below). This was working a few weeks ago. Here is a simple test case that used to work:
+#!/usr/bin/env python
+
+import tensorflow as tf
+
+from tensorflow.contrib.keras.api.keras.layers import Conv2D
+from tensorflow.contrib.keras.api.keras.layers import Input
+
+a = Input(shape=(None, 32, 3))
+c = Conv2D(32, (3, 3))
+c(a)
+c(a)
+I added some print statement to different versions of the code. It looks like the convolutional ops are created with the following names in the old code:
+
+conv2d/convolution/
+conv2d/convolution_1/
+
+In the new code they are:
+
+conv2d/convolution/
+conv2d/convolution/
+
+It looks like the name scope code was changed recently. I specifically notice that some of the scope handling was moved to init where it used to happen when the function was called.
+This is a slightly more complex version of the code that shows that copying convolutional layers doesn't work:
+#!/usr/bin/env python
+
+import tensorflow as tf
+
+from tensorflow.contrib.keras.api.keras.layers import Conv2D
+from tensorflow.contrib.keras.api.keras.layers import Input
+from tensorflow.contrib.keras.api.keras.models import Model
+
+a = Input(shape=(None, 32, 3))
+b = a
+b = Conv2D(32, (3, 3))(b)
+mod1 = Model(inputs=a, outputs=b)
+a = Input(shape=(None, 32, 3))
+b = a
+for layer in mod1.layers[1:]:
+    b = layer(b)
+mod2 = Model(inputs=a, outputs=b)
+This is an example of the traceback:
+Traceback (most recent call last):
+  File "/root/vish/test.py", line 16, in <module>
+    b = layer(b)
+  File "/opt/rh/rh-python35/root/usr/lib/python3.5/site-packages/tensorflow/python/keras/_impl/keras/engine/topology.py", line 252, in __call__
+    output = super(Layer, self).__call__(inputs, **kwargs)
+  File "/opt/rh/rh-python35/root/usr/lib/python3.5/site-packages/tensorflow/python/layers/base.py", line 577, in __call__
+    outputs = self.call(inputs, *args, **kwargs)
+  File "/opt/rh/rh-python35/root/usr/lib/python3.5/site-packages/tensorflow/python/layers/convolutional.py", line 172, in call
+    outputs = self._convolution_op(inputs, self.kernel)
+  File "/opt/rh/rh-python35/root/usr/lib/python3.5/site-packages/tensorflow/python/ops/nn_ops.py", line 841, in __call__
+    return self.conv_op(inp, filter)
+  File "/opt/rh/rh-python35/root/usr/lib/python3.5/site-packages/tensorflow/python/ops/nn_ops.py", line 503, in __call__
+    return self.call(inp, filter)
+  File "/opt/rh/rh-python35/root/usr/lib/python3.5/site-packages/tensorflow/python/ops/nn_ops.py", line 191, in __call__
+    name=self.name)
+  File "/opt/rh/rh-python35/root/usr/lib/python3.5/site-packages/tensorflow/python/ops/gen_nn_ops.py", line 631, in conv2d
+    data_format=data_format, name=name)
+  File "/opt/rh/rh-python35/root/usr/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/opt/rh/rh-python35/root/usr/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2959, in create_op
+    self._add_op(ret)
+  File "/opt/rh/rh-python35/root/usr/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2599, in _add_op
+    "is already used" % op.name)
+ValueError: cannot add op with name conv2d/convolution as that name is already used

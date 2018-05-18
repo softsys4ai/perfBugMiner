@@ -1,0 +1,52 @@
+build fail with cuda: identifier "__builtin_ia32_mwaitx" is undefined
+
+Using gcc 5 with cuda support results in a compilation error:
+INFO: From Compiling tensorflow/core/kernels/adjust_contrast_op_gpu.cu.cc:
+
+# Omitting warnings
+
+/usr/lib/gcc/x86_64-unknown-linux-gnu/5.3.0/include/mwaitxintrin.h(36): error: identifier "__builtin_ia32_monitorx" is undefined
+
+/usr/lib/gcc/x86_64-unknown-linux-gnu/5.3.0/include/mwaitxintrin.h(42): error: identifier "__builtin_ia32_mwaitx" is undefined
+
+2 errors detected in the compilation of "/tmp/tmpxft_00002a59_00000000-7_adjust_contrast_op_gpu.cu.cpp1.ii".
+
+Build process is as follows:
+  TF_UNOFFICIAL_SETTING=1 ./configure <<EOF
+/usr/bin/python
+y
+7.5
+/opt/cuda
+4.0.7
+/opt/cuda
+5.2
+EOF
+
+    bazel build --jobs 4 --config=cuda -c opt --verbose_failures \
+        //tensorflow/tools/pip_package:build_pip_package
+
+The environnement is:
+
+bazel 0.1.5-1
+cuda 7.5
+cudnn 4
+gcc 5.3.0
+boost 1.60 (is it even relevant?)
+python3.5 (/usr/bin/python is python3)
+
+This issue might be related to boost 1.60 or gcc 5 as mentioned here or there.
+One suggested fix is to restrict gcc to ansi c++, which can be achieved like so:
+diff --git a/third_party/gpus/crosstool/CROSSTOOL b/third_party/gpus/crosstool/CROSSTOOL
+index dfde7cd..547441f 100644
+--- a/third_party/gpus/crosstool/CROSSTOOL
++++ b/third_party/gpus/crosstool/CROSSTOOL
+@@ -46,6 +46,8 @@ toolchain {
+   # Use "-std=c++11" for nvcc. For consistency, force both the host compiler
+   # and the device compiler to use "-std=c++11".
+   cxx_flag: "-std=c++11"
++  cxx_flag: "-D_MWAITXINTRIN_H_INCLUDED"
++  cxx_flag: "-D__STRICT_ANSI__"
+   linker_flag: "-lstdc++"
+   linker_flag: "-B/usr/bin/"
+(btw. thank you @vrv for telling which file to change).
+Could anyone please kindly review this, and integrate it (or not)? Note that I am not quite sure wether both flags are actually required and what the side effects might be.

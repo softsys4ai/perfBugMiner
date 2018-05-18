@@ -1,0 +1,41 @@
+tf.gfile.GFile deadlocks on HDSF access after a fork()
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): N/A
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS 10.13
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.8.0-0-g93bc2e2072 1.8.0
+Python version: 3.6
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A
+
+Describe the problem
+Accessing HDFS via tf.gfile functions leads to a deadlock (?) if the HDFS has been initialized, i.e. there has been at least a single HDFS call from the parent process. Not sure if this is a libhdfs bug, or a TF one. If the former, then maybe #16919 could help.
+Source code / logs
+Case 1: HDFS is not initialized in the parent process
+>>> import tensorflow as tf
+>>> def f():
+...     print(tf.gfile.ListDirectory("hdfs://root/user/[...]"))
+...
+>>> from multiprocessing import Process
+>>> p = Process(target=f)
+>>> p.start()
+>>> p.join()
+SLF4J: Class path contains multiple SLF4J bindings.
+SLF4J: See http://www.slf4j.org/codes.html#multiple_bindings for an explanation.
+SLF4J: Actual binding is of type [org.slf4j.impl.Log4jLoggerFactory]
+
+['foo', 'bar', 'boo']
+Case 2: HDFS is initialized in the parent process
+>>> f()
+SLF4J: Class path contains multiple SLF4J bindings.
+SLF4J: See http://www.slf4j.org/codes.html#multiple_bindings for an explanation.
+SLF4J: Actual binding is of type [org.slf4j.impl.Log4jLoggerFactory]
+['foo', 'bar', 'boo']
+>>> p = Process(target=f)
+>>> p.start()
+>>> p.join()  # Never returns.

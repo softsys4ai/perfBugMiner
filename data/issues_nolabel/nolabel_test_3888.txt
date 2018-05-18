@@ -1,0 +1,466 @@
+Tensorflow loss not changing and also computed gradients and applied batch norm but still loss is not changing?
+
+Tensorflow loss is not changing. This is my code.
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import tensorflow as tf
+import numpy as np
+import math
+import os
+import nltk
+import random
+import tflearn
+batch_size = 100
+start = 0
+end = batch_size
+learning_rate = 0.01
+num_classes = 8
+path1 = "/home/indy/Downloads/aclImdb/train/pos"
+path2 = "/home/indy/Downloads/aclImdb/train/neg"
+path3 = "/home/indy/Downloads/aclImdb/test/pos"
+path4 = "/home/indy/Downloads/aclImdb/test/neg"
+time_steps = 300
+embedding = 50
+step = 1
+
+
+def get_embedding():
+    gfile_path = os.path.join("/home/indy/Downloads/glove.6B", "glove.6B.50d.txt")
+    f = open(gfile_path,'r')
+    embeddings = {}
+    for line in f:
+        sp_value = line.split()
+        word = sp_value[0]
+        embedding = [float(value) for value in sp_value[1:]]
+        assert len(embedding) == 50
+        embeddings[word] = embedding
+    return embeddings
+
+ebd = get_embedding()
+
+def get_y(file_path):
+    y_value = file_path.split('_')
+    y_value = y_value[1].split('.')
+    if y_value[0] == '1':
+       return 0
+    elif y_value[0] == '2':
+         return 1
+    elif y_value[0] == '3':
+          return 2
+    elif y_value[0] == '4':
+          return 3
+    elif y_value[0] == '7':
+          return 4
+    elif y_value[0] == '8':
+          return 5
+    elif y_value[0] == '9':
+          return 6
+    elif y_value[0] == '10':
+          return 7 
+
+def get_x(file_path):
+    x_value = open(file_path,'r')
+    for line in x_value:
+        x_value = line.replace("<br /><br />","") 
+        x_value = x_value.lower()
+    x_value = nltk.word_tokenize(x_value.decode('utf-8'))
+    padding = 300 - len(x_value)
+    if padding > 0:
+       p_value = ['pad' for i in range(padding)]
+       x_value = np.concatenate((x_value,p_value))
+    if padding < 0:
+       x_value = x_value[:300]
+    for i in x_value:
+        if ebd.get(i) == None:
+           ebd[i] = [float(np.random.normal(0.0,1.0)) for j in range(50)]
+    x_value = [ebd[value] for value in x_value]
+    assert len(x_value) == 300
+    return x_value
+
+
+def get_total_files(path1,path2,path3,path4):
+    directory1 = os.listdir(path1)
+    file_path1 = [os.path.join(path1,file) for file in directory1]
+    directory2 = os.listdir(path2)
+    file_path2 = [os.path.join(path2,file) for file in directory2]
+    directory3 = os.listdir(path3)
+    file_path3 = [os.path.join(path3,file) for file in directory3]
+    directory4 = os.listdir(path4)
+    file_path4 = [os.path.join(path4,file) for file in directory4]
+    total_files_train = np.concatenate((file_path1,file_path2))
+    total_files_test = np.concatenate((file_path3,file_path4))
+    random.shuffle(total_files_train)
+    random.shuffle(total_files_test)    
+    x1 = [get_x(file) for file in total_files_train]
+    y1 = [get_y(file) for file in total_files_train]
+    x2 = [get_x(file) for file in total_files_test]
+    y2 = [get_y(file) for file in total_files_test]
+    return x1 , y1 , x2 , y2
+
+total_files_train_x, total_files_train_y, total_files_test_x, total_files_test_y = get_total_files(path1,path2,path3,path4)
+
+
+train_set_x = total_files_train_x[:10000]
+validate_set_x = total_files_train_x[10000:15000]
+test_set_x = total_files_test_x[0:5000]
+train_set_y = total_files_train_y[:10000]
+validate_set_y = total_files_train_y[10000:15000]
+test_set_y = total_files_test_y[0:5000]
+
+
+X = tf.placeholder(tf.float32, [None,time_steps,embedding])
+Y = tf.placeholder(tf.int32, [None])
+
+def build_nlp_model(x, _units,num_classes,num_of_filters):
+    x = tf.expand_dims(x,3)
+    with tf.variable_scope("one"):      
+         filter_shape = [1, embedding, 1, num_of_filters]
+         conv_weights = tf.get_variable("conv_weights" , filter_shape, tf.float32, tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+         conv_biases = tf.Variable(tf.constant(0.1, shape=[num_of_filters]))
+         conv = tf.nn.conv2d(x, conv_weights, strides=[1,1,1,1], padding = "VALID")
+         normalize = conv + conv_biases
+         tf_normalize = tflearn.layers.normalization.batch_normalization(normalize)
+         relu = tf.nn.elu(tf_normalize)
+         pooling = tf.reduce_max(relu, reduction_indices = 3, keep_dims = True)
+         outputs_fed_lstm = pooling
+
+    with tf.variable_scope("two"):         
+         filter_shape = [1, 1, 1, 1000]
+         conv_weights = tf.get_variable("conv_weights" , filter_shape, tf.float32, tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+         conv_biases = tf.Variable(tf.constant(0.1, shape=[1000]))
+         conv = tf.nn.conv2d(outputs_fed_lstm, conv_weights, strides=[1,1,1,1], padding = "VALID")
+         normalize = conv + conv_biases
+         tf_normalize = tflearn.layers.normalization.batch_normalization(normalize)
+         relu = tf.nn.elu(tf_normalize)
+         pooling = tf.reduce_max(relu, reduction_indices = 3, keep_dims = True)
+         outputs_fed_lstm = pooling
+
+    with tf.variable_scope("three"):        
+         filter_shape = [1, 1, 1, 1000]
+         conv_weights = tf.get_variable("conv_weights" , filter_shape, tf.float32, tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+         conv_biases = tf.Variable(tf.constant(0.1, shape=[1000]))
+         conv = tf.nn.conv2d(outputs_fed_lstm, conv_weights, strides=[1,1,1,1], padding = "VALID")
+         normalize = conv + conv_biases
+         tf_normalize = tflearn.layers.normalization.batch_normalization(normalize)
+         relu = tf.nn.elu(tf_normalize)
+         pooling = tf.reduce_max(relu, reduction_indices = 3, keep_dims = True)
+         outputs_fed_lstm = pooling
+
+    with tf.variable_scope("four"):         
+         filter_shape = [1, 1, 1, num_of_filters]
+         conv_weights = tf.get_variable("conv_weights" , filter_shape, tf.float32, tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+         conv_biases = tf.Variable(tf.constant(0.1, shape=[num_of_filters]))
+         conv = tf.nn.conv2d(outputs_fed_lstm, conv_weights, strides=[1,1,1,1], padding = "VALID")
+         normalize = conv + conv_biases
+         tf_normalize = tflearn.layers.normalization.batch_normalization(normalize)
+         relu = tf.nn.elu(tf_normalize)
+         pooling = tf.reduce_max(relu, reduction_indices = 3, keep_dims = True)
+         outputs_fed_lstm = pooling
+
+    with tf.variable_scope("five"):         
+         filter_shape = [1, 1, 1, num_of_filters]
+         conv_weights = tf.get_variable("conv_weights" , filter_shape, tf.float32, tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+         conv_biases = tf.Variable(tf.constant(0.1, shape=[num_of_filters]))
+         conv = tf.nn.conv2d(outputs_fed_lstm, conv_weights, strides=[1,1,1,1], padding = "VALID")
+         normalize = conv + conv_biases
+         tf_normalize = tflearn.layers.normalization.batch_normalization(normalize)
+         relu = tf.nn.elu(tf_normalize)
+         pooling = tf.reduce_max(relu, reduction_indices = 3, keep_dims = True)
+         outputs_fed_lstm = pooling
+
+    x = tf.squeeze(outputs_fed_lstm, [2])     
+    x = tf.transpose(x, [1, 0, 2])
+    x = tf.reshape(x, [-1, 1])
+    x = tf.split(0, time_steps, x)
+
+    lstm = tf.nn.rnn_cell.LSTMCell(num_units = _units)
+
+     # multi_lstm = tf.nn.rnn_cell.MultiRNNCell([lstm] * lstm_layers, state_is_tuple = True)
+
+    outputs , state = tf.nn.rnn(lstm,x, dtype = tf.float32)     
+
+    weights = tf.Variable(tf.random_normal([_units,num_classes]))
+    biases  = tf.Variable(tf.random_normal([num_classes]))
+
+    logits = tf.matmul(outputs[-1], weights) + biases
+    return logits
+
+logits = build_nlp_model(X,500,num_classes,1000)
+c_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits,Y)
+loss = tf.reduce_mean(c_loss)
+
+
+global_step = tf.Variable(0, name="global_step", trainable=False)
+# decayed_learning_rate = tf.train.exponential_decay(learning_rate,0,10000,0.9)
+optimizer= tf.train.AdamOptimizer(learning_rate)
+minimize_loss = optimizer.minimize(loss, global_step=global_step)   
+with tf.variable_scope("four", reuse = True):
+     weights = tf.get_variable("conv_weights") 
+     grads_and_vars = optimizer.compute_gradients(loss,[weights]) 
+correct_predict = tf.nn.in_top_k(logits, Y, 1)
+accuracy = tf.reduce_mean(tf.cast(correct_predict, tf.float32))
+
+
+init = tf.initialize_all_variables()
+
+with tf.Session() as sess:
+     sess.run(init)
+     for i in range(10):
+         for j in range(100):
+             x = train_set_x[start:end]
+             y = train_set_y[start:end]
+             start = end
+             end += batch_size
+             if start >= 10000:
+                start = 0
+                end = batch_size  
+             sess.run(minimize_loss,feed_dict={X : x, Y : y})
+             step += 1  
+             gr_print = sess.run([grad for grad, _ in grads_and_vars], feed_dict={X : x, Y : y})
+             print (gr_print)
+         print ("One Epoch Finished")
+         cost = sess.run(loss,feed_dict = {X: x,Y: y})
+         accu = sess.run(accuracy,feed_dict = {X: x, Y: y})
+         print ("Loss after one Epoch(Training) = " + "{:.6f}".format(cost) + ", Training Accuracy= " + "{:.5f}".format(accu))
+         q = validate_set_x[:100]
+         w = validate_set_y[:100]
+         cost = sess.run(loss,feed_dict = {X: q,Y: w})
+         accu = sess.run(accuracy,feed_dict = {X: q, Y: w})
+
+My loss remains the same after many Epochs. So I think that I'm having vanishing gradient problem and so I applied batch normalization but I got no difference in results.I also tried overfitting the model, but I'm getting same results. I'm using optimizer.compute_gradients for computing gradients. Below are the results of gradients of loss with respect to different conv layers, and how they look like. Here is how my gradients look like with respect to first conv layers and with respect to 4th conv layer.
+Code for gradients with respect to first conv layer:
+with tf.variable_scope("one", reuse = True):
+     weights = tf.get_variable("conv_weights") 
+     grads_and_vars = optimizer.compute_gradients(loss,[weights])
+
+
+gr_print = sess.run([grad for grad, _ in grads_and_vars], feed_dict={X : x, Y : y})
+           print (gr_print)
+
+And this is what I get after one iteration:
+[array([[[[  2.38197345e-06,  -1.04135906e-04,   2.60035231e-05, ...,
+           -1.01550373e-04,   0.00000000e+00,   1.01060732e-06]],
+
+        [[ -1.98007251e-06,   8.13827137e-05,  -8.14055747e-05, ...,
+           -6.40711369e-05,   0.00000000e+00,   1.05516607e-04]],
+
+        [[  4.51127789e-06,   2.21654373e-05,  -4.99439229e-05, ...,
+            9.87191743e-05,   0.00000000e+00,   1.70595697e-04]],
+
+        ..., 
+        [[ -4.70160239e-06,  -8.67914496e-05,   2.50699850e-05, ...,
+            1.18909593e-04,   0.00000000e+00,   2.43308150e-05]],
+
+        [[ -1.18101923e-06,  -7.71943451e-05,  -3.41630148e-05, ...,
+           -3.28040805e-05,   0.00000000e+00,  -6.01144784e-05]],
+
+        [[ -1.98778321e-06,  -3.23160748e-05,  -5.44797731e-05, ...,
+            2.23019324e-05,   0.00000000e+00,  -3.29296927e-05]]]], dtype=float32)]
+
+Code for gradients with respect to 4th conv layer:
+with tf.variable_scope("four", reuse = True):
+     weights = tf.get_variable("conv_weights") 
+     grads_and_vars = optimizer.compute_gradients(loss,[weights])
+gr_print = sess.run([grad for grad, _ in grads_and_vars], feed_dict={X : x, Y : y})
+           print (gr_print)
+
+And this what I get after one iteration:
+[array([[[[ 0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        , -6.21198082,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.                ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.              ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+           0.        ,  0.        ,  0.        ,  0.        ,  0.        ]]]], dtype=float32)]
+
+After first layer, gradients with respect to 2nd,3rd,4th,5th conv layers all look like above. But there's one thing common among all the gradients with respect to conv layers which are after first conv layer, they all have one number in the entire gradient array,that is not zero as shown above in the output. And I also applied batch norm and I'm still getting the above results.
+I'm totally confused, I don't know where the problem is?

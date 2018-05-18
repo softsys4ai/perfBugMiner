@@ -1,0 +1,75 @@
+data dependent variable initialization in tf 1.3.0
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): ArchLinux
+TensorFlow installed from (source or binary): pip install tensorflow-gpu
+TensorFlow version (use command below): v1.3.0-rc2-20-g0787eee 1.3.0
+Python version: Python 3.6.2
+Bazel version (if compiling from source):
+CUDA/cuDNN version: cuda 8.0.61/cudnn6 6.0.21
+GPU model and memory: GeForce GTX 980M 8GB
+Exact command to reproduce:
+
+Describe the problem
+After updating to tf 1.3 my usual routines for data dependent initialization of variables are broken. They take massive amounts of time and memory. I have written a minimal example to reproduce the problem (see below). In fact, the example suggests that the time increases exponentially with the number of layers, i.e. it takes takes roughly 6, 12 and 24 seconds to initialize 10, 11 and 12 layers, respectively. On a different machine running on tf 1.2.1 the same code initializes 100 layers in less than a second yet it produces the same, correct values. Similiarly, the (host) memory usage explodes. I should also mention that the issue appears when defining the graph, i.e. before any session is opened, and not during execution of the initialization operation.
+I would be glad if someone can point out a better way of doing the kind of data dependent initialization shown in the example (using two passes is somewhat annoying) but the issue is that the update made this method completely unusable. Traceback from keyboard interrupt suggest that the recently introduced _build_initializer_expr might be involved.
+Source code / logs
+import time
+import tensorflow as tf
+
+def layer(x, name, init):
+    with tf.variable_scope(name, reuse = not init):
+        initializer = x
+        b = tf.get_variable('b', dtype=tf.float32, initializer = initializer)
+        # without next if we get error
+        # 'Attempting to use uninitialized variable.'
+        # for layer 1
+        if init:
+            return x + b.initialized_value()
+        else:
+            return x + b
+
+
+if __name__ == "__main__":
+    n_layers = 10
+
+    print("tensorflow {} {}".format(tf.GIT_VERSION, tf.VERSION))
+    print("n_layers {}".format(n_layers))
+
+    def _pass(x, init):
+        h = x
+        for i in range(n_layers):
+            h = layer(h, "layer_{}".format(i), init)
+        return h
+    
+    # first pass for initialization
+    x = tf.constant([1.0])
+    t = time.time()
+    h = _pass(x, True)
+    print("init pass {:.4}".format(time.time() - t))
+
+    # second pass as usual
+    t = time.time()
+    h = _pass(x, False)
+    print("next pass {:.4}".format(time.time() - t))
+
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        print("final value {}".format(h.eval()))
+
+This is basically the data dependent initialization method as described in OpenAI's weight norm code stripped down to the bare minimum where the problem occurs. This weight normalization code as well as the PixelCNN++ code are also affected by this.
+Output on 1.3.0:
+tensorflow v1.3.0-rc2-20-g0787eee 1.3.0
+n_layers 10
+init pass 5.934
+next pass 0.003919
+final value [ 1024.]
+
+Output on 1.2.1 (different machine):
+tensorflow 1.2.1
+n_layers 10
+init pass 0.1085
+next pass 0.00644
+final value [ 1024.]

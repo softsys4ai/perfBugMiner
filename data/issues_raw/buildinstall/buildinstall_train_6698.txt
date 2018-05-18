@@ -1,0 +1,96 @@
+Crash: Could not create cuDNN handle when convnets are used
+
+Tensorflow (GPU) was imported successfully, but when running a session that involves a convolutional neural network (CNN), Python crashes with the following message:
+E tensorflow/stream_executor/cuda/cuda_dnn.cc:385] could not create cudnn handle: CUDNN_STATUS_INTERNAL_ERROR
+E tensorflow/stream_executor/cuda/cuda_dnn.cc:352] could not destroy cudnn handle: CUDNN_STATUS_BAD_PARAM
+F tensorflow/core/kernels/conv_ops.cc:605] Check failed: stream->parent()->GetConvolveAlgorithms(&algorithms) 
+
+The problem persists on any combination of CUDA toolkit 7.5/8.0 and Tensorflow installed from pip/source. Test sessions that do not use CNNs are run successfully.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+The issue is similar to #6586, where I first commented. But since I experience the problem on a Mac, I was suggested to open a separate issue.
+Environment info
+Operating System: macOS Sierra 10.12.2
+Xcode version 8.2 (8C38) (When I later tried CUDA 7.5, I installed Command Line Tools version 7.3.1 because CUDA 7.5 lacked support of the more recent compilers.)
+Python 3.5.2 (anaconda)
+Installed version of CUDA: tried both 8.0 (initially) and 7.5 (reported here, toolkit only -- the driver is still 8.0)
+Installed version of cuDNN: 5.1 (different installations according to CUDA versions)
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+lrwxr-xr-x  1 root   wheel        33  5 Jan 20:33 /usr/local/cuda/lib/libcuda.1.dylib -> /usr/local/cuda/lib/libcuda.dylib
+-rwxr-xr-x@ 1 root   wheel      8280 13 Apr  2016 /usr/local/cuda/lib/libcuda.dylib
+lrwxr-xr-x@ 1 root   wheel        45 13 Apr  2016 /usr/local/cuda/lib/libcudadevrt.a -> /Developer/NVIDIA/CUDA-7.5/lib/libcudadevrt.a
+lrwxr-xr-x@ 1 root   wheel        50 13 Apr  2016 /usr/local/cuda/lib/libcudart.7.5.dylib -> /Developer/NVIDIA/CUDA-7.5/lib/libcudart.7.5.dylib
+lrwxr-xr-x@ 1 root   wheel        46 13 Apr  2016 /usr/local/cuda/lib/libcudart.dylib -> /Developer/NVIDIA/CUDA-7.5/lib/libcudart.dylib
+lrwxr-xr-x@ 1 root   wheel        49 13 Apr  2016 /usr/local/cuda/lib/libcudart_static.a -> /Developer/NVIDIA/CUDA-7.5/lib/libcudart_static.a
+lrwxr-xr-x  1 root   wheel        16  5 Jan 17:14 /usr/local/cuda/lib/libcudnn.5 -> libcudnn.5.dylib
+-rwxr-xr-x@ 1 ymfa   staff  58975112 10 Jun  2016 /usr/local/cuda/lib/libcudnn.5.dylib
+lrwxr-xr-x@ 1 ymfa   staff        16 10 Jun  2016 /usr/local/cuda/lib/libcudnn.dylib -> libcudnn.5.dylib
+lrwxr-xr-x  1 root   wheel        16  5 Jan 17:14 /usr/local/cuda/lib/libcudnn5.dylib -> libcudnn.5.dylib
+-rw-r--r--@ 1 ymfa   staff  56392320 10 Jun  2016 /usr/local/cuda/lib/libcudnn_static.a
+
+I tried both installing from pip and source. I first installed from binary pip package:
+
+A link to the pip package you installed:
+tensorflow-gpu
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.12.head
+
+Later I installed from source (the pip package was uninstalled):
+
+
+The commit hash (git rev-parse HEAD)
+d67c09d98a576e1fbf2f3609ddb842e53890f31c
+
+
+The output of bazel version
+Build label: 0.4.3-homebrew
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Dec 22 15:20:15 2016 (1482420015)
+Build timestamp: 1482420015
+Build timestamp as int: 1482420015
+
+
+If possible, provide a minimal reproducible example
+I made a minimal example by simplifying the network and reducing the training data to only twenty images and two classes for classification. issue.zip contains the Python code and the data. I wrote two convolutional layers because I found the network with only one convolutional layer runs without problem.
+Complete log using CUDA 7.5 and Tensorflow compiled from source
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcublas.7.5.dylib locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcudnn.5.dylib locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcufft.7.5.dylib locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcuda.1.dylib locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcurand.7.5.dylib locally
+W tensorflow/core/platform/cpu_feature_guard.cc:95] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:95] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:95] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:874] OS X does not support NUMA - returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties: 
+name: GeForce GT 650M
+major: 3 minor: 0 memoryClockRate (GHz) 0.9
+pciBusID 0000:01:00.0
+Total memory: 1023.69MiB
+Free memory: 740.18MiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GT 650M, pci bus id: 0000:01:00.0)
+E tensorflow/stream_executor/cuda/cuda_dnn.cc:385] could not create cudnn handle: CUDNN_STATUS_INTERNAL_ERROR
+E tensorflow/stream_executor/cuda/cuda_dnn.cc:352] could not destroy cudnn handle: CUDNN_STATUS_BAD_PARAM
+F tensorflow/core/kernels/conv_ops.cc:605] Check failed: stream->parent()->GetConvolveAlgorithms(&algorithms) 
+
+Complete log using CUDA 8.0 and Tensorflow installed from pip
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.dylib locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.dylib locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.dylib locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.1.dylib locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.dylib locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:901] OS X does not support NUMA - returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:885] Found device 0 with properties: 
+name: GeForce GT 650M
+major: 3 minor: 0 memoryClockRate (GHz) 0.9
+pciBusID 0000:01:00.0
+Total memory: 1023.69MiB
+Free memory: 590.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:906] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:916] 0: Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GT 650M, pci bus id: 0000:01:00.0)
+E tensorflow/stream_executor/cuda/cuda_dnn.cc:385] could not create cudnn handle: CUDNN_STATUS_NOT_INITIALIZED
+E tensorflow/stream_executor/cuda/cuda_dnn.cc:392] error retrieving driver version: Invalid argument: expected %d.%d or %d.%d.%d form for driver version; got ""
+E tensorflow/stream_executor/cuda/cuda_dnn.cc:352] could not destroy cudnn handle: CUDNN_STATUS_BAD_PARAM
+F tensorflow/core/kernels/conv_ops.cc:532] Check failed: stream->parent()->GetConvolveAlgorithms(&algorithms)

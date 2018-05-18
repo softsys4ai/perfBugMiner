@@ -1,0 +1,15 @@
+BatchNorm not working in a _FuncGraph
+
+I am working on macOS 10.12.6 with TensorFlow 1.3.0, Python version: 3.6.2. CPU only.
+I found that if tf.contrib.layers.batch_norm is called inside a Defun, a TypeError will be thrown. To clarify, the function here is a map_func that will be used in Dataset.map invoke, instead of a normal python function.
+To regenerate the scenario, try this piece of code:
+Dataset.range(27).batch(27) \
+  .map(lambda x: tf.cast(tf.reshape(x, (3, 3, 3)), tf.float32) / 32.0) \
+  .map(lambda img: tf.contrib.layers.batch_norm(img)) \
+  .make_one_shot_iterator().get_next().eval()
+
+You will get an error like this:
+TypeError: In op 'BatchNorm/AssignMovingAvg', input types ([tf.float32, tf.float32]) are not compatible with expected types ([tf.float32_ref, tf.float32])
+
+I did some investigation. One thing that I found is that inside the batch_norm, we will assign a new value to the mean variable by calling assign_sub, which accept a variable with ref type and a value with a basic type. But the variable has been created some where in the _FuncGraph with a basic type, instead of a ref type, which make the compatibility check failed.
+I will keep digging into this issue, but I think this seems a bug.

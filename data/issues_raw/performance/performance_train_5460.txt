@@ -1,0 +1,177 @@
+reduce_sum extremely slow on gpu for complex dtypes
+
+Description
+tf.reduce_sum takes an order of magnitude longer to compute when the tensor is a complex dtype and the computation takes place on a gpu. I've tried to investigate the source of the problem and it's not clear to me whether this is a Tensorflow issue or an Eigen issue, but I thought I'd raise it here first.
+Environment
+Ubuntu 16.04 LTS
+Tensorflow: 1fcd6d1
+GPU: Titan X
+Python 2.7.11
+Diagnostics/Reproducibility:
+I produced a tensorflow timeline trace. The trace shows that reductions for a real and complex tensor on the cpu, and for a real tensor on the gpu, takes no longer than 1.3 ms. The reduction of a complex tensor of the same size takes about 196 ms on the gpu.  In particular this time is spent in a dedicated GPU stream, where the input arguments are marked as undefined in the trace.
+More specifically, here's a table summarizing the relevant parts of the trace:
+CPU, Complex Reduction
+
+
+
+Start
+Wall Duration (ms)
+Self time (ms)
+Arg: input0
+Arg: input1
+Arg: name
+Arg: op
+
+
+
+
+0.076 ms
+1.174 ms
+1.174 ms
+"cplx_var/read"
+"cplx_reduction/range"
+"cplx_reduction/Sum"
+"Sum"
+
+GPU, Real Reduction
+
+
+
+Start
+Wall Duration (ms)
+Self time (ms)
+Arg: input0
+Arg: input1
+Arg: name
+Arg: op
+
+
+
+
+0.087 ms
+1.267 ms
+1.267 ms
+"real_var/read"
+"real_reduction_1/range"
+"real_reduction_1/Sum"
+"Sum"
+
+
+1.355 ms
+0.043 ms
+0.043 ms
+undefined
+undefined
+"real_reduction_1/Sum"
+"Sum"
+
+CPU, Real Reduction
+
+
+
+Start
+Wall Duration (ms)
+Self time (ms)
+Arg: input0
+Arg: input1
+Arg: name
+Arg: op
+
+
+
+
+4.010 ms
+0.465 ms
+0.465 ms
+"real_var/read/_7"
+"real_reduction/range"
+"real_reduction/Sum"
+"Sum"
+
+GPU, Complex Reduction (Slow)
+
+
+
+Start
+Wall Duration (ms)
+Self time (ms)
+Arg: input0
+Arg: input1
+Arg: name
+Arg: op
+
+
+
+
+4.019 ms
+0.070 ms
+0.070 ms
+"cplx_var/read/_5"
+"cplx_reduction_1/range"
+"cplx_reduction_1/Sum"
+"Sum"
+
+
+4.078 ms
+195.994 ms
+195.994 ms
+undefined
+undefined
+"cplx_reduction_1/Sum"
+"Sum"
+
+The trace and a screenshot are attached as a text file and pdf file, respectively. The code that generated the trace is provided below:
+import tensorflow as tf
+import numpy as np
+from tensorflow.python.client import timeline
+
+def reduction_tester(real_var, cplx_var):
+    with tf.name_scope('real_reduction'):
+        reduced_real = tf.reduce_sum(real_var)
+    with tf.name_scope('cplx_reduction'):
+        reduced_cplx = tf.reduce_sum(cplx_var)
+    return reduced_real, reduced_cplx
+
+def main():
+    R_DTYPE = np.float32
+    C_DTYPE = np.complex64
+    r = np.random.randn(1000, 2000).astype(R_DTYPE)
+    i = np.random.randn(1000, 2000).astype(R_DTYPE)
+    real_var = tf.get_variable('real_var', initializer=r,
+                               dtype=tf.as_dtype(R_DTYPE))
+    cplx_var = tf.get_variable('cplx_var', initializer=r+1j*i,
+                               dtype=tf.as_dtype(C_DTYPE))
+
+    with tf.device('/cpu'):
+        real_reduc_cpu, cplx_reduc_cpu = reduction_tester(real_var, cplx_var)
+
+    with tf.device('/gpu'):
+        real_reduc_gpu, cplx_reduc_gpu = reduction_tester(real_var, cplx_var)
+
+    sess = tf.Session(config=tf.ConfigProto(log_device_placement=True,
+                                            allow_soft_placement=False))
+    init = tf.initialize_all_variables()
+    sess.run(init)
+
+    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+    ops = [real_reduc_cpu, cplx_reduc_cpu, real_reduc_gpu, cplx_reduc_gpu]
+    ret = sess.run(ops, options=run_options, run_metadata=run_metadata)
+
+    real_np_sum = np.sum(r.astype(R_DTYPE))
+    cplx_np_sum = np.sum((r+1j*i).astype(C_DTYPE))
+    assert np.allclose(ret[0], real_np_sum, rtol=1e-4)
+    assert np.allclose(ret[1], cplx_np_sum, rtol=1e-4)
+    assert np.allclose(ret[2], real_np_sum, rtol=1e-4)
+    assert np.allclose(ret[3], cplx_np_sum, rtol=1e-4)
+
+    tl = timeline.Timeline(run_metadata.step_stats)
+    with open('/home/sarroff/tmp/timeline.trace', 'w') as f:
+        f.write(tl.generate_chrome_trace_format(show_memory=True))
+
+if __name__ == '__main__':
+    main()
+Partial Workaround
+It's easy to avoid placing explicit calls to tf.reduce_sum by flattening the tensor into a row and performing a matrix multiply with a tensor column of 1s. The performance on complex tensors using the gpu is reasonable using this approach. However Tensorflow uses reductions internally for many gradient computations and these are harder to avoid.
+timeline.trace.txt
+chrome_tracing.pdf

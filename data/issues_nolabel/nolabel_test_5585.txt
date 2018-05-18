@@ -1,0 +1,116 @@
+Reshape Op not the same as tensorflow.reshape
+
+I am getting the error Invalid argument: NodeDef mentions attr 'Tshape' not in Op<name=Reshape; signature=tensor:T, shape:int32 -> output:T; attr=T:type>; NodeDef: Y_GroundTruth = Reshape[T=DT_FLOAT, Tshape=DT_INT32](LOut_Add, Y_GroundTruth/shape) when attempting to load the file on Android using tensorflow::Status s = session->Create(graph_def);.
+People with similar problems have mentioned that upgrading to Tensorflow 0.9.0rc0 fixed their problems. However, I am already using the most current Tensorflow build in my jni-build.
+Could this be a problem with the variables declared when generating the protobuf file?
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+#3002
+#1528
+Environment info
+Operating System:
+Mac OS 10.12
+Android Cyanogenmod 12
+Tensorflow 0.10.0 on Jupyter
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Snippet
+    def reg_perceptron(t, weights, biases):
+        t = tf.nn.relu(tf.add(tf.matmul(t, weights['h1']), biases['b1']), name = "layer_1")
+        t = tf.nn.sigmoid(tf.add(tf.matmul(t, weights['h2']), biases['b2']), name = "layer_2")
+        t = tf.add(tf.matmul(t, weights['hOut'], name="LOut_MatMul"), biases['bOut'], name="LOut_Add")
+
+        return tf.reshape(t, [-1], name="Y_GroundTruth")
+
+    g = tf.Graph()
+    with g.as_default():
+       ...
+       rg_weights = {
+        'h1': vs.get_variable("weights0", [n_input, n_hidden_1], initializer=tf.contrib.layers.xavier_initializer()),
+        'h2': vs.get_variable("weights1", [n_hidden_1, n_hidden_2], initializer=tf.contrib.layers.xavier_initializer()),
+        'hOut': vs.get_variable("weightsOut", [n_hidden_2, 1], initializer=tf.contrib.layers.xavier_initializer())
+        }
+
+
+        rg_biases = {
+        'b1': vs.get_variable("bias0", [n_hidden_1], initializer=init_ops.constant_initializer(bias_start)),
+        'b2': vs.get_variable("bias1", [n_hidden_2], initializer=init_ops.constant_initializer(bias_start)),
+        'bOut': vs.get_variable("biasOut", [1], initializer=init_ops.constant_initializer(bias_start))
+        }
+        
+        #output node
+        pred = reg_perceptron(_x, rg_weights, rg_biases)
+        ...
+    ...
+
+    g_2 = tf.Graph()
+    with g_2.as_default():
+        ...
+        rg_weights_2 = {
+        'h1': vs.get_variable("weights0", [n_input, n_hidden_1], initializer=tf.contrib.layers.xavier_initializer()),
+        'h2': vs.get_variable("weights1", [n_hidden_1, n_hidden_2], initializer=tf.contrib.layers.xavier_initializer()),
+        'hOut': vs.get_variable("weightsOut", [n_hidden_2, 1], initializer=tf.contrib.layers.xavier_initializer())
+        }
+
+        rg_biases_2 = {
+        'b1': vs.get_variable("bias0", [n_hidden_1], initializer=init_ops.constant_initializer(bias_start)),
+        'b2': vs.get_variable("bias1", [n_hidden_2], initializer=init_ops.constant_initializer(bias_start)),
+        'bOut': vs.get_variable("biasOut", [1], initializer=init_ops.constant_initializer(bias_start))
+        }
+    
+        pred_2 = reg_perceptron(_x_2, rg_weights_2, rg_biases_2)
+        ...
+
+What other attempted solutions have you tried?
+I will double check the Tensorflow version tomorrow and make sure that it is the same as the version I am using in the jni-build.
+I also attempted to strip the graph using
+#!/bin/bash
+bazel-bin/tensorflow/python/tools/strip_unused --input_graph=/Users/leslie/Downloads/trained_model6.pb --output_graph=/Users/leslie/Downloads/stripped_graph.pb --input_node_names=X_Input --output_node_names=Y_GroundTruth --input_binary=true
+
+but the output is simply
+6
+
+Y_GroundTruth��Placeholder*�
+�dtype��0�*�
+�shape��:
+
+and attempting to freeze the graph with
+#!/bin/bash
+bazel-bin/tensorflow/python/tools/freeze_graph \
+--input_graph=/Users/leslie/Downloads/trained_model6.pb \
+--input_checkpoint=/Users/leslie/Downloads/Y6_1476978999 \
+--output_graph=/Users/leslie/Downloads/frozen_graph.pb --output_node_names=Y_GroundTruth
+
+gives the error
+File "/Users/leslie/tensorflow-master/bazel-bin/tensorflow/python/tools/strip_unused.runfiles/org_tensorflow/tensorflow/python/tools/strip_unused.py", line 77, in <module>
+    tf.app.run()
+  File "/Users/leslie/tensorflow-master/bazel-bin/tensorflow/python/tools/strip_unused.runfiles/org_tensorflow/tensorflow/python/platform/app.py", line 43, in run
+    sys.exit(main(sys.argv[:1] + flags_passthrough))
+  File "/Users/leslie/tensorflow-master/bazel-bin/tensorflow/python/tools/strip_unused.runfiles/org_tensorflow/tensorflow/python/tools/strip_unused.py", line 74, in main
+    FLAGS.placeholder_type_enum)
+  File "/Users/leslie/tensorflow-master/bazel-bin/tensorflow/python/tools/strip_unused.runfiles/org_tensorflow/tensorflow/python/tools/strip_unused_lib.py", line 89, in strip_unused_from_files
+    placeholder_type_enum)
+  File "/Users/leslie/tensorflow-master/bazel-bin/tensorflow/python/tools/strip_unused.runfiles/org_tensorflow/tensorflow/python/tools/strip_unused_lib.py", line 62, in strip_unused
+    output_node_names)
+  File "/Users/leslie/tensorflow-master/bazel-bin/tensorflow/python/tools/strip_unused.runfiles/org_tensorflow/tensorflow/python/framework/graph_util.py", line 158, in extract_sub_graph
+    assert d in name_to_node_map, "%s is not in graph" % d
+AssertionError: Y_GroundTruth is not in graph
+leslie@MacBook-Pro tensorflow-master $ ./stripunused.sh
+1 ops in the final graph.
+leslie@MacBook-Pro tensorflow-master $ ./freezegraph.sh
+Traceback (most recent call last):
+  File "/Users/leslie/tensorflow-master/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/tools/freeze_graph.py", line 135, in <module>
+    tf.app.run()
+  File "/Users/leslie/tensorflow-master/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/platform/app.py", line 43, in run
+    sys.exit(main(sys.argv[:1] + flags_passthrough))
+  File "/Users/leslie/tensorflow-master/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/tools/freeze_graph.py", line 132, in main
+    FLAGS.output_graph, FLAGS.clear_devices, FLAGS.initializer_nodes)
+  File "/Users/leslie/tensorflow-master/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/tools/freeze_graph.py", line 98, in freeze_graph
+    text_format.Merge(f.read().decode("utf-8"), input_graph_def)
+  File "/Library/Frameworks/Python.framework/Versions/2.7/lib/python2.7/encodings/utf_8.py", line 16, in decode
+    return codecs.utf_8_decode(input, errors, True)
+UnicodeDecodeError: 'utf8' codec can't decode byte 0x80 in position 278: invalid start byte
+
+Logs or other output that would be helpful
+To stop the post from being too cluttered, I have uploaded my code to generate the .PB-file and my model to create the model on Pastebin.
+Surprisingly enough, the code used to test the model with the graph used to generate the .PB-file  (lines 154 and 155) does not return any errors (still in the process of checking the outputs).
+PBFileGeneration
+Model

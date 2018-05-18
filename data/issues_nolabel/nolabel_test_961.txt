@@ -1,0 +1,52 @@
+Failed to build pip package for Python 3: `PyString_FromStringAndSize` not declared
+
+I was building pip package for Python 3.5. bazel reported an error during
+bazel build -c opt --config=cuda //tensorflow/tools/pip_package:build_pip_package --verbose_failures
+
+The failing command was:
+cd /home/z/.cache/bazel/_bazel_z/4c5a3f7b23103a2fe3f8cd834eaf9376/tensorflow && \
+exec env - \
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games \
+third_party/gpus/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc \
+(lots of flags here)
+-c bazel-out/local_linux-py3-opt/bin/tensorflow/python/pywrap_tensorflow.cc \
+-o bazel-out/local_linux-py3-opt/bin/tensorflow/python/_objs/_pywrap_tensorflow.so/tensorflow/python/pywrap_tensorflow.pic.o
+
+The error was:
+bazel-out/local_linux-py3-opt/bin/tensorflow/python/pywrap_tensorflow.cc: In function 'PyObject* _wrap_TF_PRunSetup(PyObject*, PyObject*)':
+bazel-out/local_linux-py3-opt/bin/tensorflow/python/pywrap_tensorflow.cc:4974:66: error: 'PyString_FromStringAndSize' was not declared in this scope
+       resultobj = PyString_FromStringAndSize(*arg6, strlen(*arg6));
+                                                                  ^
+
+It seemed to be a Python 2/3 compatibility issue, since PyString_FromStringAndSize is no longer provided by Python 3 headers.
+pywrap_tensorflow.cc reads like:
+  resultobj = SWIG_Py_Void();
+  {
+    if (!arg5->ok()) {
+      RaiseStatusNotOK(*arg5, SWIGTYPE_p_tensorflow__Status);
+      SWIG_fail;
+    } else {
+      resultobj = PyString_FromStringAndSize(*arg6, strlen(*arg6));
+      delete *arg6;
+    }
+  }
+  return resultobj;
+
+I'm not sure whether it was caused by tensorflow or my configuration, but I did find some suspicious code in tensorflow/python/client/tf_session.i, that closely resembles the problematic code:
+
+  
+    
+      tensorflow/tensorflow/python/client/tf_session.i
+    
+    
+         Line 211
+      in
+      97f585d
+    
+    
+    
+    
+
+        
+          
+           $result = PyString_FromStringAndSize(*$2, strlen(*$2));

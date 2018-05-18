@@ -1,0 +1,109 @@
+IllegalArgumentException: Retval[0] does not have value
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): iMac (27-inch, Late 2013) OS: 10.13.3 (17D47)
+
+
+TensorFlow installed from (source or binary): Source
+
+
+TensorFlow version (use command below):  Using TensorFlow backend.
+1.5.0-rc1
+
+
+Python version: Python 3.6.4
+
+
+Bazel version (if compiling from source):
+Build label: 0.9.0-homebrew
+Build target: bazel-out/darwin-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Sun Jul 12 12:24:01 +49936 (1513677414241)
+Build timestamp: 1513677414241
+Build timestamp as int: 1513677414241
+
+
+GCC/Compiler version (if compiling from source): Xcode 9.2
+Build version 9C40b
+
+
+CUDA/cuDNN version: No (CPU only)
+
+
+GPU model and memory: No
+
+
+Exact command to reproduce:
+
+
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+if I add GRU or LSTM to my code and try to export this model to Android I have got the exception:
+Successfully loaded model from 'file:///android_asset/frozen_opt.pb'
+01-30 07:45:35.424 25635-25635/ru.rimidalv.tensorflow I/TensorFlowImageClassif: Read 24 labels, output layer size is 32
+01-30 07:45:35.424 25635-25635/ru.rimidalv.tensorflow I/tensorflow: ClassifierActivity: Camera orientation relative to screen canvas: 90
+01-30 07:45:35.424 25635-25635/ru.rimidalv.tensorflow I/tensorflow: ClassifierActivity: Initializing at size 640x480
+01-30 07:45:35.424 25635-25635/ru.rimidalv.tensorflow E/art: No implementation found for void ru.rimidalv.tensorflow.env.ImageUtils.convertYUV420SPToARGB8888(byte[], int[], int, int, boolean) (tried Java_ru_rimidalv_tensorflow_env_ImageUtils_convertYUV420SPToARGB8888 and Java_ru_rimidalv_tensorflow_env_ImageUtils_convertYUV420SPToARGB8888___3B_3IIIZ)
+01-30 07:45:35.424 25635-25635/ru.rimidalv.tensorflow W/tensorflow: ImageUtils: Native YUV420SP -> RGB implementation not found, falling back to Java implementation
+01-30 07:45:35.714 25635-25666/ru.rimidalv.tensorflow E/TensorFlowInferenceInterface: Failed to run TensorFlow inference with inputs:[the_input], outputs:[softmax/truediv]
+01-30 07:45:35.714 25635-25666/ru.rimidalv.tensorflow E/AndroidRuntime: FATAL EXCEPTION: inference
+                                                                        Process: ru.rimidalv.tensorflow, PID: 25635
+                                                                        java.lang.IllegalArgumentException: Retval[0] does not have value
+                                                                            at org.tensorflow.Session.run(Native Method)
+                                                                            at org.tensorflow.Session.access$100(Session.java:48)
+                                                                            at org.tensorflow.Session$Runner.runHelper(Session.java:298)
+                                                                            at org.tensorflow.Session$Runner.run(Session.java:248)
+                                                                            at org.tensorflow.contrib.android.TensorFlowInferenceInterface.run(TensorFlowInferenceInterface.java:230)
+                                                                            at org.tensorflow.contrib.android.TensorFlowInferenceInterface.run(TensorFlowInferenceInterface.java:197)
+                                                                            at ru.rimidalv.tensorflow.TensorFlowImageClassifier.recognizeImage(TensorFlowImageClassifier.java:171)
+                                                                            at ru.rimidalv.tensorflow.ClassifierActivity$2.run(ClassifierActivity.java:175)
+                                                                            at android.os.Handler.handleCallback(Handler.java:739)
+                                                                            at android.os.Handler.dispatchMessage(Handler.java:95)
+                                                                            at android.os.Looper.loop(Looper.java:158)
+                                                                            at android.os.HandlerThread.run(HandlerThread.java:61)
+
+code to export my model:
+bazel build tensorflow/python/tools:freeze_graph
+bazel-bin/tensorflow/python/tools/freeze_graph \
+--input_graph=$PB_MAIN/protobuf_path.pbtxt \
+--input_checkpoint=$PB_MAIN/checkpoint_path.ckpt \
+--output_graph=$PB_MAIN/frozen_graph.pb \
+--output_node_names=softmax/truediv \
+
+and than
+!bazel build tensorflow/tools/graph_transforms:transform_graph
+!bazel-bin/tensorflow/tools/graph_transforms/transform_graph \
+--in_graph=$PB_MAIN/frozen_graph.pb \
+--out_graph=$PB_MAIN/frozen_opt.pb \
+--inputs='the_input:0' \
+--outputs='softmax/truediv:0' \
+--transforms='add_default_attributes strip_unused_nodes(type=float, shape="-1,128,64,1") remove_nodes(op=Identity, op=CheckNumerics) fold_constants(ignore_errors=true) fold_batch_norms fold_old_batch_norms quantize_nodes round_weights strip_unused_nodes sort_by_execution_order'
+
+Source code / logs
+My model:
+    input_shape = (128, 64, 1)
+    latent_dim = 128
+    decoder_inputs = Input(shape=(input_shape), name='the_input')
+    conv_to_rnn_dims = (32, 128*2 )
+    inner = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(decoder_inputs)
+    inner = GRU(latent_dim, return_sequences=True, kernel_initializer='he_normal')(inner)
+    decoder_dense = Dense(10, activation='softmax', name="softmax")(inner)
+    model = Model(inputs=[decoder_inputs], outputs=decoder_dense)
+    model.compile(loss={'softmax': lambda y_true, y_pred: y_pred}, optimizer="adam")
+Save the model:
+    K.set_learning_phase(0)
+    model = load_model(os.path.join('model_data', 'model.h5'), compile=False)
+    model.load_weights(os.path.join('model_data', 'weights00.h5'))
+    sess = K.get_session()
+   
+    protobuf_path = os.path.join('tf-exports', 'protobuf_path.pbtxt')
+    checkpoint_path = os.path.join('tf-exports', 'checkpoint_path.ckpt')
+
+    tf.train.write_graph(sess.graph_def, '.', protobuf_path)
+
+    saver = tf.train.Saver()
+    saver.save(sess, save_path = checkpoint_path)

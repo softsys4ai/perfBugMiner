@@ -1,0 +1,65 @@
+Momentum, Adam, and other optimizers don't work for variable input/output sizes
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug or a feature request.
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):  Linux Ubuntu 16.04.2
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.2.1, 1.3.0-rc0
+Python version: 2.7.12
+Bazel version (if compiling from source): 0.5.0
+CUDA/cuDNN version: 8.0/5.1.10
+GPU model and memory: GeForce GTX Titan X, 12GB
+Exact command to reproduce: N/A
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+None of the optimizers other than GradientDescentOptimizer seem to work when the network is working with inputs and outputs of variable sizes (in FCN, input size === output size, defined by [BATCH_SIZE, None, None, CHANNELS]). Below are the error I get when using various optimizers:
+Momentum Optimizer: AttributeError: 'Tensor' object has no attribute 'is_fully_defined'
+RMSPropOptimizer: ValueError: Shape of a new variable (expanding/step4/deconv/bias/RMSProp/) must be fully defined, but instead was <unknown>.
+AdamOptimizer: AttributeError: 'Tensor' object has no attribute 'is_fully_defined'
+GradientDescentOptimizer: Works!
+Note that these optimizers had worked for the same code when I was using TF 1.0.1
+Source code / logs
+This is the stack trace for MomentumOptimizer
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.pyc in minimize(self, loss, global_step, var_list, gate_gradients, aggregation_method, colocate_gradients_with_ops, name, grad_loss)
+323
+324     return self.apply_gradients(grads_and_vars, global_step=global_step,
+--> 325                                 name=name)
+326
+327   def compute_gradients(self, loss, var_list=None,/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.pyc in apply_gradients(self, grads_and_vars, global_step, name)
+444                        ([str(v) for _, _, v in converted_grads_and_vars],))
+445     with ops.control_dependencies(None):
+--> 446       self._create_slots([_get_variable_for(v) for v in var_list])
+447     update_ops = []
+448     with ops.name_scope(name, self._name) as name:/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/momentum.pyc in _create_slots(self, var_list)
+64   def _create_slots(self, var_list):
+65     for v in var_list:
+---> 66       self._zeros_slot(v, "momentum", self._name)
+67
+68   def _prepare(self):
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.pyc in _zeros_slot(self, var, slot_name, op_name)
+764     named_slots = self._slot_dict(slot_name)
+765     if _var_key(var) not in named_slots:
+--> 766       named_slots[_var_key(var)] = slot_creator.create_zeros_slot(var, op_name)
+767     return named_slots[_var_key(var)]
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/slot_creator.pyc in create_zeros_slot(primary, name, dtype, colocate_with_primary)
+168   slot_shape = (slot_shape if slot_shape.is_fully_defined()
+169                 else array_ops.shape(primary.initialized_value()))
+--> 170   if slot_shape.is_fully_defined():
+171     initializer = init_ops.zeros_initializer(dtype)
+172     return create_slot_with_initializer(AttributeError: 'Tensor' object has no attribute 'is_fully_defined'

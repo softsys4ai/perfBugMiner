@@ -1,0 +1,53 @@
+AlexNet with FC layers: backward is very slow?
+
+(I know PRs are not the way to contribute to TensorFlow -- I'm just posting this for discussion, though I'm happy to submit this patch via the official means if desired.)
+I modified alexnet_benchmark.py to compute activations for the fully-connected layers (fc6-fc8) where the original only computes through pool5.  Using a Titan X with the original code that only goes through pool5, I see roughly the expected result:
+2015-11-10 16:29:54.760793: step 10, duration = 0.098
+2015-11-10 16:29:55.746638: step 20, duration = 0.099
+2015-11-10 16:29:56.734163: step 30, duration = 0.099
+2015-11-10 16:29:57.720769: step 40, duration = 0.098
+2015-11-10 16:29:58.708402: step 50, duration = 0.099
+2015-11-10 16:29:59.697522: step 60, duration = 0.100
+2015-11-10 16:30:00.687530: step 70, duration = 0.099
+2015-11-10 16:30:01.677052: step 80, duration = 0.099
+2015-11-10 16:30:02.669677: step 90, duration = 0.099
+2015-11-10 16:30:03.563315: Forward across 100 steps, 0.098 +/- 0.010 sec / batch
+2015-11-10 16:30:10.385117: step 10, duration = 0.321
+2015-11-10 16:30:13.613230: step 20, duration = 0.322
+2015-11-10 16:30:16.840772: step 30, duration = 0.322
+2015-11-10 16:30:20.068794: step 40, duration = 0.322
+2015-11-10 16:30:23.308556: step 50, duration = 0.326
+2015-11-10 16:30:26.558616: step 60, duration = 0.323
+2015-11-10 16:30:30.260454: step 70, duration = 0.325
+2015-11-10 16:30:33.939707: step 80, duration = 0.324
+2015-11-10 16:30:37.797578: step 90, duration = 0.326
+2015-11-10 16:30:41.159575: Forward-backward across 100 steps, 0.340 +/- 0.052 sec / batch
+
+With this modified version, I get expected computation speed for the forward-only version (only epsilon longer than the pool5 version), but very slow speeds doing forward-backward (stopped after 60 iterations due to slowness):
+2015-11-10 15:54:39.231156: step 10, duration = 0.101
+2015-11-10 15:54:40.235104: step 20, duration = 0.100
+2015-11-10 15:54:41.238807: step 30, duration = 0.100
+2015-11-10 15:54:42.241662: step 40, duration = 0.100
+2015-11-10 15:54:43.245950: step 50, duration = 0.100
+2015-11-10 15:54:44.251555: step 60, duration = 0.100
+2015-11-10 15:54:45.255560: step 70, duration = 0.100
+2015-11-10 15:54:46.260286: step 80, duration = 0.101
+2015-11-10 15:54:47.268687: step 90, duration = 0.101
+2015-11-10 15:54:48.172288: Forward across 100 steps, 0.099 +/- 0.010 sec / batch
+2015-11-10 15:55:30.047371: step 10, duration = 13.337
+2015-11-10 15:58:34.855597: step 20, duration = 11.968
+2015-11-10 16:01:40.070674: step 30, duration = 19.707
+2015-11-10 16:04:30.698742: step 40, duration = 13.459
+2015-11-10 16:07:15.900770: step 50, duration = 20.028
+2015-11-10 16:10:11.997452: step 60, duration = 12.357
+^C^C^CTraceback (most recent call last):
+
+During the forward-backward part of the benchmark, looking at GPU utilization using nvidia-smi while running this shows 0% utilization most of the time.
+For reference, I ran more or less the equivalent timing on the same GPU using out-of-the-box Caffe (no CuDNN) using this prototxt, and see Forward-Backward times of ~413 ms.  (And for the record the comparison is still a little unfair to Caffe as caffe time, unlike caffe train, computes all gradients, including w.r.t. the input image.)
+$ caffe time -model alexnet_dummydata_nolrn.prototxt -gpu 0
+[...]
+I1110 16:37:19.770344  6275 caffe.cpp:366] Average Forward pass: 176.546 ms.
+I1110 16:37:19.770350  6275 caffe.cpp:368] Average Backward pass: 237.147 ms.
+I1110 16:37:19.770356  6275 caffe.cpp:370] Average Forward-Backward: 413.773 ms.
+
+Please let me know if anyone has any idea what might be going on, or if something is wrong with my implementation (which I wouldn't doubt!).  Thanks!

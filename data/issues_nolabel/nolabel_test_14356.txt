@@ -1,0 +1,194 @@
+Keras application - Tensor is not an element of this graph on eval after train
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS 10.13.1
+TensorFlow installed from (source or binary): pip
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version: 3.6.3
+CUDA/cuDNN version: N/A CPU only
+Exact command to reproduce:
+
+Describe the problem
+Using the estimator API and using tf.keras.applications.VGG16 and it's output for transfer learning, I get an exception raised of TypeError: Cannot interpret feed_dict key as Tensor: Tensor Tensor("vgg_base/Placeholder:0", shape=(3, 3, 3, 64), dtype=float32) is not an element of this graph. when the model is run a second time.
+This is raised when it runs the eval step after train from tf.estimator.train_and_evaluate. See source code for model and estimator output. This also occurs if I re-run the train_and_evaluate a second time. I am running in a Jupyter notebook and my assumption about memory is that if I do a Kernel ➝ Restart it will run a training run again without the error, but cannot be run in two executions without this.
+See https://github.com/damienpontifex/fastai-course/blob/master/deeplearning1/lesson1%2B3/DogsVsCats.ipynb for full notebook, but main parts for estimator model and output are below:
+Source code / logs
+Estimator Model
+def vgg16_model_fn(features, mode, params):
+    
+    is_training = mode == tf.estimator.ModeKeys.TRAIN
+    
+    with tf.variable_scope('vgg_base'):
+        # Use a pre-trained VGG16 model and drop off the top layers as we will retrain 
+        # with our own dense output for our custom classes
+        vgg16_base = tf.keras.applications.VGG16(
+            include_top=False,
+            input_shape=(224, 224, 3),
+            input_tensor=features['image'],
+            pooling='avg')
+
+        # Disable training for all layers to increase speed for transfer learning
+        # If new classes significantely different from ImageNet, this may be worth leaving as trainable = True
+        for layer in vgg16_base.layers:
+            layer.trainable = False
+
+        x = vgg16_base.output
+    
+    with tf.variable_scope("fc"):
+        x = tf.layers.flatten(x)
+        x = tf.layers.dense(x, units=4096, activation=tf.nn.relu, trainable=is_training, name='fc1')
+        x = tf.layers.dense(x, units=4096, activation=tf.nn.relu, trainable=is_training, name='fc2')
+        x = tf.layers.dropout(x, rate=0.5, training=is_training)
+        
+    # Finally add a 2 dense layer for class predictions
+    with tf.variable_scope("Prediction"):
+        x = tf.layers.dense(x, units=NUM_CLASSES, trainable=is_training)
+        return x
+Estimator setup
+dog_cat_estimator = tf.estimator.Estimator(
+    model_fn=model_fn,
+    config=run_config,
+    params=params
+)
+train_spec = tf.estimator.TrainSpec(
+    input_fn=data_input_fn(train_record_filenames, num_epochs=None, batch_size=10, shuffle=True), 
+    max_steps=10)
+eval_spec = tf.estimator.EvalSpec(
+    input_fn=data_input_fn(validation_record_filenames)
+)
+tf.estimator.train_and_evaluate(dog_cat_estimator, train_spec, eval_spec)
+train_and_evaluate output
+INFO:tensorflow:Running training and evaluation locally (non-distributed).
+INFO:tensorflow:Start train and evaluate loop. The evaluate will happen after 600 secs (eval_spec.throttle_secs) or training is finished.
+INFO:tensorflow:Create CheckpointSaverHook.
+INFO:tensorflow:Restoring parameters from /tmp/DogsVsCats/model.ckpt-1
+INFO:tensorflow:Saving checkpoints for 2 into /tmp/DogsVsCats/model.ckpt.
+INFO:tensorflow:loss = 0.0, step = 2
+INFO:tensorflow:Saving checkpoints for 10 into /tmp/DogsVsCats/model.ckpt.
+INFO:tensorflow:Loss for final step: 0.0.
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+   1063             subfeed_t = self.graph.as_graph_element(subfeed, allow_tensor=True,
+-> 1064                                                     allow_operation=False)
+   1065           except Exception as e:
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in as_graph_element(self, obj, allow_tensor, allow_operation)
+   3034     with self._lock:
+-> 3035       return self._as_graph_element_locked(obj, allow_tensor, allow_operation)
+   3036 
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in _as_graph_element_locked(self, obj, allow_tensor, allow_operation)
+   3113       if obj.graph is not self:
+-> 3114         raise ValueError("Tensor %s is not an element of this graph." % obj)
+   3115       return obj
+
+ValueError: Tensor Tensor("vgg_base/Placeholder:0", shape=(3, 3, 3, 64), dtype=float32) is not an element of this graph.
+
+During handling of the above exception, another exception occurred:
+
+TypeError                                 Traceback (most recent call last)
+<ipython-input-12-67c818ea66c5> in <module>()
+----> 1 tf.estimator.train_and_evaluate(dog_cat_estimator, train_spec, eval_spec)
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/estimator/training.py in train_and_evaluate(estimator, train_spec, eval_spec)
+    428       config.task_type != run_config_lib.TaskType.EVALUATOR):
+    429     logging.info('Running training and evaluation locally (non-distributed).')
+--> 430     executor.run_local()
+    431     return
+    432 
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/estimator/training.py in run_local(self)
+    614       # condition is satisfied (both checks use the same global_step value,
+    615       # i.e., no race condition)
+--> 616       metrics = evaluator.evaluate_and_export()
+    617 
+    618       if not metrics:
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/estimator/training.py in evaluate_and_export(self)
+    749           name=self._eval_spec.name,
+    750           checkpoint_path=latest_ckpt_path,
+--> 751           hooks=self._eval_spec.hooks)
+    752 
+    753       if not eval_result:
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/estimator/estimator.py in evaluate(self, input_fn, steps, hooks, checkpoint_path, name)
+    353         hooks=hooks,
+    354         checkpoint_path=checkpoint_path,
+--> 355         name=name)
+    356 
+    357   def _convert_eval_steps_to_hooks(self, steps):
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/estimator/estimator.py in _evaluate_model(self, input_fn, hooks, checkpoint_path, name)
+    808           input_fn, model_fn_lib.ModeKeys.EVAL)
+    809       estimator_spec = self._call_model_fn(
+--> 810           features, labels, model_fn_lib.ModeKeys.EVAL, self.config)
+    811 
+    812       if model_fn_lib.LOSS_METRIC_KEY in estimator_spec.eval_metric_ops:
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/estimator/estimator.py in _call_model_fn(self, features, labels, mode, config)
+    692     if 'config' in model_fn_args:
+    693       kwargs['config'] = config
+--> 694     model_fn_results = self._model_fn(features=features, **kwargs)
+    695 
+    696     if not isinstance(model_fn_results, model_fn_lib.EstimatorSpec):
+
+<ipython-input-8-e251e8b8fccf> in model_fn(features, labels, mode, params)
+      3     tf.summary.image('images', features['image'], max_outputs=6)
+      4 
+----> 5     logits = vgg16_model_fn(features, mode, params)
+      6 
+      7     # Dictionary with label as outcome with greatest probability
+
+<ipython-input-7-93330b8a5aa6> in vgg16_model_fn(features, mode, params)
+     10             input_shape=(224, 224, 3),
+     11             input_tensor=features['image'],
+---> 12             pooling='avg')
+     13 
+     14         # Disable training for all layers to increase speed for transfer learning
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/applications/vgg16.py in VGG16(include_top, weights, input_tensor, input_shape, pooling, classes)
+    199           WEIGHTS_PATH_NO_TOP,
+    200           cache_subdir='models')
+--> 201     model.load_weights(weights_path)
+    202     if K.backend() == 'theano':
+    203       layer_utils.convert_all_kernels_in_model(model)
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/engine/topology.py in load_weights(self, filepath, by_name)
+   1097       load_weights_from_hdf5_group_by_name(f, self.layers)
+   1098     else:
+-> 1099       load_weights_from_hdf5_group(f, self.layers)
+   1100 
+   1101     if hasattr(f, 'close'):
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/engine/topology.py in load_weights_from_hdf5_group(f, layers)
+   1484                        str(len(weight_values)) + ' elements.')
+   1485     weight_value_tuples += zip(symbolic_weights, weight_values)
+-> 1486   K.batch_set_value(weight_value_tuples)
+   1487 
+   1488 
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/backend.py in batch_set_value(tuples)
+   2404       assign_ops.append(assign_op)
+   2405       feed_dict[assign_placeholder] = value
+-> 2406     get_session().run(assign_ops, feed_dict=feed_dict)
+   2407 
+   2408 
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+    887     try:
+    888       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 889                          run_metadata_ptr)
+    890       if run_metadata:
+    891         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+   1065           except Exception as e:
+   1066             raise TypeError('Cannot interpret feed_dict key as Tensor: '
+-> 1067                             + e.args[0])
+   1068 
+   1069           if isinstance(subfeed_val, ops.Tensor):
+
+TypeError: Cannot interpret feed_dict key as Tensor: Tensor Tensor("vgg_base/Placeholder:0", shape=(3, 3, 3, 64), dtype=float32) is not an element of this graph.

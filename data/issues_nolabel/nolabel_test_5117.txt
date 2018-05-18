@@ -1,0 +1,258 @@
+"Cannot assign a device to node..." bug in TensorArrayScatter_grad when using pre_scanned tensor in double loop of scan/while/map
+
+Environment info
+tensorflow branch : 0.11.0rc0
+CUDA version : 7.0
+cuDNN version : 6.5.48
+OS version : Ubuntu 14.04.5 LTS
+GPU : GPU0 titan x(maxwell), GPU1 Tesla K20c(not using in this code)
+(Also using anaconda2 environment and Jupyter with tf.InteractiveSession())
+The bug (or is this intended error?)
+I was using tf.scan() and tf.map() to code seq-2-seq encoder decoder structure with attention mechanism.
+When i tried to put scanned tensor in map_fn() inside another scan(), the graph is drawn as normally and i even can evaluate the value of output tensor.
+However when i try to optimize, or get gradient of that tensor, the bug pops up saying InvalidArgumentError: Cannot assign a device to node 'gradients/scan_1/while/map/TensorArrayPack/TensorArrayScatter_grad/TensorArrayGather/f_acc': Could not satisfy explicit device specification '' because the node was colocated with a group of nodes that required incompatible device '/job:localhost/replica:0/task:0/GPU:0.
+I tried config.allow_soft_placement = True, but it only changed the error log and didn't work.
+It was really awkward that the error log complains about AttrValue must not be the value of DT_STRING_REF when i set config.allow_soft_placement = True
+My code is like ,in simplified version ,following : (i wrote a bug-reproducing example code at the bottom)
+encoder_states = tf.scan(_encoder_step, encoder_inputs, initializer=encoder_initial_states)
+decoder_states = tf.scan(_decoder_step, decoder_inputs, initializer=encoder_states[-1]
+, and in def _decoder_step(prev_h, inputs): i used tf.map_fn() to get aligned context of encoder states as attention mechanism in https://arxiv.org/abs/1409.0473.
+It looks like following :
+in _decoder_step(prev_h, inputs):
+    def alignment_model(inputs):
+        # prev_h has the shape of [num_layer, num_batch, num_hidden]; prev_h[0] is the value of the first layer in decoder.
+        alignment_state = tf.nn.tanh(_linear([inputs, prev_h[0], output_dim=num_slot, bias=False))
+        return _linear([alignment_state], output_dim=1, bias=False)
+    alignment = tf.map_fn(alignment_model, encoder_states) # and here the bug comes.
+
+error message
+with config.allow_soft_placement = False :
+InvalidArgumentError: Cannot assign a device to node 'gradients/Decoder/scan/while/Attention/map/TensorArrayPack/TensorArrayScatter_grad/TensorArrayGather/f_acc': Could not satisfy explicit device specification '' because the node was colocated with a group of nodes that required incompatible device '/job:localhost/replica:0/task:0/GPU:0'
+Colocation Debug Info:
+Colocation group had the following types and devices: 
+TensorArrayWrite: GPU CPU 
+TensorArray: GPU CPU 
+StackPush: GPU CPU 
+TensorArrayRead: GPU CPU 
+Range: GPU CPU 
+Stack: GPU CPU 
+StackPop: GPU CPU 
+Const: GPU CPU 
+TensorArrayScatter: GPU CPU 
+RefEnter: GPU CPU 
+Enter: GPU CPU 
+TensorArrayGather: GPU CPU 
+StridedSlice: GPU CPU 
+TensorArrayGrad: GPU CPU 
+Identity: GPU CPU 
+Shape: GPU CPU 
+     [[Node: gradients/Decoder/scan/while/Attention/map/TensorArrayPack/TensorArrayScatter_grad/TensorArrayGather/f_acc = Stack[_class=["loc:@Decoder/scan/while/Attention/map/TensorArray"], elem_type=DT_INT32, stack_name=""]()]]
+
+Caused by op u'gradients/Decoder/scan/while/Attention/map/TensorArrayPack/TensorArrayScatter_grad/TensorArrayGather/f_acc', defined at:
+  File "/home/youaredeadl/anaconda2/lib/python2.7/runpy.py", line 162, in _run_module_as_main
+    "__main__", fname, loader, pkg_name)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/runpy.py", line 72, in _run_code
+    exec code in run_globals
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/ipykernel/__main__.py", line 3, in <module>
+    app.launch_new_instance()
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/traitlets/config/application.py", line 596, in launch_instance
+    app.start()
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/ipykernel/kernelapp.py", line 442, in start
+    ioloop.IOLoop.instance().start()
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/zmq/eventloop/ioloop.py", line 162, in start
+    super(ZMQIOLoop, self).start()
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tornado/ioloop.py", line 883, in start
+    handler_func(fd_obj, events)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tornado/stack_context.py", line 275, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/zmq/eventloop/zmqstream.py", line 440, in _handle_events
+    self._handle_recv()
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/zmq/eventloop/zmqstream.py", line 472, in _handle_recv
+    self._run_callback(callback, msg)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/zmq/eventloop/zmqstream.py", line 414, in _run_callback
+    callback(*args, **kwargs)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tornado/stack_context.py", line 275, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/ipykernel/kernelbase.py", line 276, in dispatcher
+    return self.dispatch_shell(stream, msg)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/ipykernel/kernelbase.py", line 228, in dispatch_shell
+    handler(stream, idents, msg)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/ipykernel/kernelbase.py", line 391, in execute_request
+    user_expressions, allow_stdin)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/ipykernel/ipkernel.py", line 199, in do_execute
+    shell.run_cell(code, store_history=store_history, silent=silent)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2723, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2825, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2885, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-16-940fe231159a>", line 3, in <module>
+    grads, _ = tf.clip_by_global_norm(tf.gradients(model.loss, tvars, aggregation_method=tf.AggregationMethod.ADD_N), 1)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/gradients.py", line 469, in gradients
+    in_grads = _AsList(grad_fn(op, *out_grads))
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/tensor_array_grad.py", line 213, in _TensorArrayScatterGrad
+    grad = g.gather(indices)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 301, in gather
+    element_shape=element_shape)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 1302, in _tensor_array_gather
+    element_shape=element_shape, name=name)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 749, in apply_op
+    op_def=op_def)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2380, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1302, in __init__
+    self._control_flow_context.AddOp(self)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1941, in AddOp
+    self._AddOpInternal(op)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1965, in _AddOpInternal
+    self.AddValue(x)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1900, in AddValue
+    real_val = grad_ctxt.grad_state.GetRealValue(val)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 987, in GetRealValue
+    history_value = cur_grad_state.AddForwardAccumulator(cur_value)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 861, in AddForwardAccumulator
+    acc = gen_data_flow_ops._stack(value.dtype.base_dtype, name="f_acc")
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 1104, in _stack
+    stack_name=stack_name, name=name)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 749, in apply_op
+    op_def=op_def)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2380, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1298, in __init__
+    self._traceback = _extract_stack()
+
+...which was originally created as op u'Decoder/scan/while/Attention/map/TensorArrayPack/TensorArrayScatter', defined at:
+  File "/home/youaredeadl/anaconda2/lib/python2.7/runpy.py", line 162, in _run_module_as_main
+    "__main__", fname, loader, pkg_name)
+[elided 17 identical lines from previous traceback]
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/IPython/core/interactiveshell.py", line 2885, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-15-153e1e7c7c3b>", line 6, in <module>
+    num_slot=_num_slot)
+  File "<ipython-input-13-1ccd26e81475>", line 34, in __init__
+    initializer=self.decoder_initial_states) # shape of [time, num_layer, batch, num_hidden]
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/functional_ops.py", line 563, in scan
+    back_prop=back_prop, swap_memory=swap_memory)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2518, in while_loop
+    result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2356, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2306, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/functional_ops.py", line 553, in compute
+    a_out = fn(packed_a, packed_elems)
+  File "<ipython-input-13-1ccd26e81475>", line 98, in _decoder_step
+    context = self._get_context(encoder_last_states, states[0])
+  File "<ipython-input-13-1ccd26e81475>", line 81, in _get_context
+    alignment = tf.map_fn(alignment_hidden_layer, encoder_states) # shape of [time, batch, 1]
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/functional_ops.py", line 333, in map_fn
+    elem_ta.unpack(elem) for elem_ta, elem in zip(elems_ta, elems_flat)]
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 391, in unpack
+    indices=math_ops.range(0, num_elements), value=value, name=name)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 412, in scatter
+    name=name)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 1447, in _tensor_array_scatter
+    name=name)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 749, in apply_op
+    op_def=op_def)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2380, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/youaredeadl/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1298, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Cannot assign a device to node 'gradients/Decoder/scan/while/Attention/map/TensorArrayPack/TensorArrayScatter_grad/TensorArrayGather/f_acc': Could not satisfy explicit device specification '' because the node was colocated with a group of nodes that required incompatible device '/job:localhost/replica:0/task:0/GPU:0'
+Colocation Debug Info:
+Colocation group had the following types and devices: 
+TensorArrayWrite: GPU CPU 
+TensorArray: GPU CPU 
+StackPush: GPU CPU 
+TensorArrayRead: GPU CPU 
+Range: GPU CPU 
+Stack: GPU CPU 
+StackPop: GPU CPU 
+Const: GPU CPU 
+TensorArrayScatter: GPU CPU 
+RefEnter: GPU CPU 
+Enter: GPU CPU 
+TensorArrayGather: GPU CPU 
+StridedSlice: GPU CPU 
+TensorArrayGrad: GPU CPU 
+Identity: GPU CPU 
+Shape: GPU CPU 
+     [[Node: gradients/Decoder/scan/while/Attention/map/TensorArrayPack/TensorArrayScatter_grad/TensorArrayGather/f_acc = Stack[_class=["loc:@Decoder/scan/while/Attention/map/TensorArray"], elem_type=DT_INT32, stack_name=""]()]]
+
+with config.allow_soft_placement = True:
+InvalidArgumentError: AttrValue must not have reference type value of string_ref
+     for attr 'tensor_type'
+    ; NodeDef: scan_1/while/map/TensorArray/_211 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_666_scan_1/while/map/TensorArray", tensor_type=DT_STRING_REF, _device="/job:localhost/replica:0/task:0/cpu:0"](^_cloopscan_1/while/map/TensorArrayPack_1/range/delta/_37); Op<name=_Recv; signature= -> tensor:tensor_type; attr=tensor_type:type; attr=tensor_name:string; attr=send_device:string; attr=send_device_incarnation:int; attr=recv_device:string; attr=client_terminated:bool,default=false; is_stateful=true>
+     [[Node: scan_1/while/map/TensorArray/_211 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_666_scan_1/while/map/TensorArray", tensor_type=DT_STRING_REF, _device="/job:localhost/replica:0/task:0/cpu:0"](^_cloopscan_1/while/map/TensorArrayPack_1/range/delta/_37)]]
+
+reproducible example code
+import tensorflow as tf
+import numpy as np
+
+in_data_for_pre_scan = np.ones(shape=[2, 8, 5], dtype=np.float64)
+in_data_for_post_scan = np.ones(shape=[2, 8, 5], dtype=np.float64)
+initial_state_data_for_pre_scan = np.zeros(shape=[8, 5], dtype=np.float64)
+initials_state_data_for_post_scan = np.zeros(shape=[8, 5], dtype=np.float64)
+
+inputs_for_pre_scan = tf.placeholder(shape=[None, None, 5], dtype=tf.float64)
+inputs_for_post_scan = tf.placeholder(shape=[None, None, 5], dtype=tf.float64)
+initial_state_for_pre_scan = tf.placeholder(shape=[None, 5], dtype=tf.float64)
+initial_state_for_post_scan = tf.placeholder(shape=[None, 5], dtype=tf.float64)
+
+weight = tf.get_variable('W', [5, 5], dtype=tf.float64)
+
+def pre_scan(states, inputs):    
+    return states + tf.matmul(inputs, weight)
+
+def post_scan(states, inputs):
+    def inner_map(inputs):
+        return inputs
+    loop_output = tf.map_fn(inner_map, pre_scanned[0]) 
+
+    return states + loop_output + inputs
+
+pre_scanned = tf.scan(pre_scan, inputs_for_pre_scan, initializer=initial_state_for_pre_scan)
+res = tf.scan(post_scan, inputs_for_post_scan, initializer=initial_state_for_post_scan)
+
+opt_func = tf.train.AdamOptimizer()
+tvars = tf.trainable_variables()
+grads, _ = tf.clip_by_global_norm(tf.gradients(tf.reduce_mean(tf.square(res)), tvars, aggregation_method=tf.AggregationMethod.ADD_N), 1)
+optimizer = opt_func.apply_gradients(zip(grads, tvars))
+
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+#config.allow_soft_placement = True
+sess = tf.InteractiveSession(config=config)
+sess.run(tf.initialize_all_variables())
+
+sess.run(res, feed_dict={inputs_for_pre_scan:in_data_for_pre_scan, 
+                         initial_state_for_pre_scan:initial_state_data_for_pre_scan, 
+                         inputs_for_post_scan:in_data_for_post_scan, 
+                         initial_state_for_post_scan:initials_state_data_for_post_scan}) # this runs as just fine.
+
+sess.run(optimizer, feed_dict={inputs_for_pre_scan:in_data_for_pre_scan, 
+                               initial_state_for_pre_scan:initial_state_data_for_pre_scan, 
+                               inputs_for_post_scan:in_data_for_post_scan, 
+                               initial_state_for_post_scan:initials_state_data_for_post_scan}) # this doesn't work.
+
+The log says about 'scatter()' in 'ops/tensor_array_ops.py' and _tensor_array_scatter' inops/gen_data_flow_ops.py`, which is written in this branch.
+@ebrevdo would anybody get me some hints about this?
+
+edited :
+if i only run the optimizer part without running res, such as,
+'''
+sess.run(res, feed_dict={inputs_for_pre_scan:in_data_for_pre_scan, 
+                         initial_state_for_pre_scan:initial_state_data_for_pre_scan, 
+                         inputs_for_post_scan:in_data_for_post_scan, 
+                         initial_state_for_post_scan:initials_state_data_for_post_scan}) # this runs as just fine.
+'''
+sess.run(optimizer, feed_dict={inputs_for_pre_scan:in_data_for_pre_scan, 
+                               initial_state_for_pre_scan:initial_state_data_for_pre_scan, 
+                               inputs_for_post_scan:in_data_for_post_scan, 
+                               initial_state_for_post_scan:initials_state_data_for_post_scan}) # this doesn't work.
+
+then it works fine.
+but still if i run both of them, sess.run(optimizer) raises InvalidArgumentError. could it be problem in my GPU config? actually when i execute nvidia-smi, it says that GPU0 is Tesla k20c and GPU1 is Geforce gtx titan x, but tensorflow says in the reverse order.

@@ -1,0 +1,63 @@
+Might be a bug for contrib.legacy_seq2seq
+
+Hi,
+I am using the embedding_attention_seq2seq with output_projection. The document from https://www.tensorflow.org/api_docs/python/tf/contrib/legacy_seq2seq/embedding_rnn_decoder says,
+
+outputs: A list of the same length as decoder_inputs of 2D Tensors with shape [batch_size x num_decoder_symbols] containing the generated outputs.
+
+But the output seems to be the output before projection when I used it. So I go through the source code from https://github.com/tensorflow/tensorflow/blob/master/tensorflow/contrib/legacy_seq2seq/python/ops/seq2seq.py ,
+embedding_attention_seq2seq is base on the embedding_attention_decoder and attention_decoder. It has to give output_size to attention_decoder, but output_size is set to None when output_projection is not None.
+def embedding_attention_seq2seq(encoder_inputs,
+                                decoder_inputs,
+                                cell,
+                                num_encoder_symbols,
+                                num_decoder_symbols,
+                                embedding_size,
+                                num_heads=1,
+                                output_projection=None,
+                                feed_previous=False,
+                                dtype=None,
+                                scope=None,
+                                initial_state_attention=False):
+    ... # skip
+    output_size = None
+    if output_projection is None:
+      cell = core_rnn_cell.OutputProjectionWrapper(cell, num_decoder_symbols)
+      output_size = num_decoder_symbols
+
+    if isinstance(feed_previous, bool):
+      return embedding_attention_decoder(
+          decoder_inputs,
+          encoder_state,
+          attention_states,
+          cell,
+          num_decoder_symbols,
+          embedding_size,
+          num_heads=num_heads,
+          output_size=output_size,
+          output_projection=output_projection,
+          feed_previous=feed_previous,
+          initial_state_attention=initial_state_attention)
+When output_size is None, the output_size is simply the cell's output_size. And so the shape of output for embedding_attention_seq2seq will be [batch_size x cell's output_size]  rather than [batch_size x num_decoder_symbols]
+def attention_decoder(decoder_inputs,
+                      initial_state,
+                      attention_states,
+                      cell,
+                      output_size=None,
+                      num_heads=1,
+                      loop_function=None,
+                      dtype=None,
+                      scope=None,
+                      initial_state_attention=False):
+  ... # skip
+  if output_size is None:
+    output_size = cell.output_size
+  ... # skip
+      with variable_scope.variable_scope("AttnOutputProjection"):
+        output = linear([cell_output] + attns, output_size, True)
+      if loop_function is not None:
+        prev = output
+      outputs.append(output)
+
+  return outputs, state
+Thanks.

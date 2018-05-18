@@ -1,0 +1,109 @@
+Image retraining script memory problem and issue
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.6-gpu/nightly-gpu
+Python version: 3.5.2
+Bazel version (if compiling from source):0.9.0
+GCC/Compiler version (if compiling from source): 5.4.0
+CUDA/cuDNN version: 9.0/7.04
+GPU model and memory: Tesla K80 / 11441MiB
+Exact command to reproduce:
+python retrain_quantize.py w/ certain parameters.
+
+Describe the problem
+I was trying the new retrain script on my own model. (In order to fully convert quantized model to tflite)
+
+Different memory usage in different version.
+I opened allow_growth parameter in order to trace memory usage during training.
+In tf-gpu-1.6.0 :
+
++-----------------------------------------------------------------------------+
+| Processes:                                                                                      GPU Memory |
+|  GPU       PID   Type   Process name                                                    Usage      |
+|======================================================== |
+|    0      1673      G   /usr/lib/xorg/Xorg                                                        15MiB |
+|    0     15440      C   python                                                                     302MiB |
++-----------------------------------------------------------------------------+
+But in tf-nightly-gpu:
++-----------------------------------------------------------------------------+
+| Processes:                                                                                      GPU Memory |
+|  GPU       PID   Type   Process name                                                    Usage      |
+|======================================================== |
+|    0      1673      G   /usr/lib/xorg/Xorg                                                        15MiB |
+|    0     15747      C   python                                                                    4152MiB |
++-----------------------------------------------------------------------------+
+I was wondering what causes the tremendous difference in these two versions?
+
+Per the traceback below, my retraining process could not be done in the last step.
+Due to the feed_dict issue. I saw my process restart a session after 100 steps, could the restart
+cause the loss of DecodeJPGInput tensor?
+
+After last-1 steps, system shows:
+2018-03-02 04:49:23.569386: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1423] Adding visible gpu devices: 0
+2018-03-02 04:49:23.569450: I tensorflow/core/common_runtime/gpu/gpu_device.cc:911] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-03-02 04:49:23.569460: I tensorflow/core/common_runtime/gpu/gpu_device.cc:917]      0
+2018-03-02 04:49:23.569464: I tensorflow/core/common_runtime/gpu/gpu_device.cc:930] 0:   N
+2018-03-02 04:49:23.569688: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 10750 MB memory) -> physical GPU (device: 0, name: Tesla K80, pci bus id: 0000:00:04.0, compute capability: 3.7)
+
+
+Thanks in advance!
+Source code / logs
+Traceback (most recent call last):
+  File "/home/cheyu.lin/tf-night/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1080, in _run
+    subfeed, allow_tensor=True, allow_operation=False)
+  File "/home/cheyu.lin/tf-night/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 3458, in as_graph_element
+    return self._as_graph_element_locked(obj, allow_tensor, allow_operation)
+  File "/home/cheyu.lin/tf-night/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 3537, in _as_graph_element_locked
+    raise ValueError("Tensor %s is not an element of this graph." % obj)
+ValueError: Tensor Tensor("DecodeJPGInput:0", dtype=string) is not an element of this graph.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "retrain_quantize.py", line 355, in create_bottleneck_file
+    resized_input_tensor, bottleneck_tensor)
+  File "retrain_quantize.py", line 290, in run_bottleneck_on_image
+    {image_data_tensor: image_data})
+  File "/home/cheyu.lin/tf-night/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 905, in run
+    run_metadata_ptr)
+  File "/home/cheyu.lin/tf-night/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1083, in _run
+    'Cannot interpret feed_dict key as Tensor: ' + e.args[0])
+TypeError: Cannot interpret feed_dict key as Tensor: Tensor Tensor("DecodeJPGInput:0", dtype=string) is not an element of this graph.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "retrain_quantize.py", line 1411, in <module>
+    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+  File "/home/cheyu.lin/tf-night/lib/python3.5/site-packages/tensorflow/python/platform/app.py", line 126, in run
+    _sys.exit(main(argv))
+  File "retrain_quantize.py", line 1219, in main
+    export_model(model_info, class_count, FLAGS.saved_model_dir)
+  File "/home/cheyu.lin/tf-night/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1558, in __exit__
+    self._default_graph_context_manager.__exit__(exec_type, exec_value, exec_tb)
+  File "/usr/lib/python3.5/contextlib.py", line 77, in __exit__
+    self.gen.throw(type, value, traceback)
+  File "/home/cheyu.lin/tf-night/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 5059, in get_controller
+    yield g
+  File "/usr/lib/python3.5/contextlib.py", line 77, in __exit__
+    self.gen.throw(type, value, traceback)
+  File "/home/cheyu.lin/tf-night/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 4869, in get_controller
+    yield default
+  File "/home/cheyu.lin/tf-night/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 5059, in get_controller
+    yield g
+  File "retrain_quantize.py", line 1211, in main
+    bottleneck_tensor)
+  File "retrain_quantize.py", line 813, in run_final_eval
+    bottleneck_tensor, FLAGS.architecture))
+  File "retrain_quantize.py", line 505, in get_random_cached_bottlenecks
+    resized_input_tensor, bottleneck_tensor, architecture)
+  File "retrain_quantize.py", line 400, in get_or_create_bottleneck
+    bottleneck_tensor)
+  File "retrain_quantize.py", line 358, in create_bottleneck_file
+    str(e)))
+RuntimeError: Error during processing file /home/cheyu.lin/master_dataset/dog/source_dog_wash_011682.jpg (Cannot interpret feed_dict key as Tensor: Tensor Tensor("DecodeJPGInput:0", dtype=string) is not an element of this graph.)

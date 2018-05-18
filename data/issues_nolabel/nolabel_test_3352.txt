@@ -1,0 +1,47 @@
+iOS Example with fine-tuned inception network memory error & quantization attempt
+
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+Environment info
+Operating System: iOS
+Steps to reproduce
+
+
+Follow the contrib/makefile/README to install the tensorflow iOS core lib
+
+
+Create my own model using flower's example and shards (https://github.com/tensorflow/models/tree/master/inception)
+
+
+Create inference graph by removing shard preprocessing ops and replacing them with:
+input_ = tf.placeholder(tf.float32, shape=(1, FLAGS.image_size, FLAGS.image_size, 3),
+name='input')
+logits, _ = inception_model.inference(input_, FLAGS.num_classes + 1)
+softmax = tf.nn.softmax(logits, name='softmax')
+And loading a saved checkpoint, restoring it, then writing out a graph def.
+
+
+Apply tensorflow/python/tools/freeze_graph on  graph def
+
+
+Apply tensorflow/python/tools/strip_unused on graph def
+
+
+Copy graph def and labels file into camera example
+
+
+Change objective-C image preprocessing to 299x299, with std & image_mean of 128.
+
+
+What have you tried?
+
+Running the 'simple' example on the grace hopper image. This works fine
+Running the 'camera' example. This crashes after 3 seconds of the app being open with the output below:
+
+Logs or other output that would be helpful
+/tensorflow/tensorflow/contrib/ios_examples/skinscan/tensorflow_utils.mm:130] Session created.
+/tensorflow/tensorflow/contrib/ios_examples/skinscan/tensorflow_utils.mm:133] Graph created.
+tensorflow/tensorflow/contrib/ios_examples/skinscan/CameraExampleViewController.mm:306] Running model failed:Invalid argument: Session was not created with a graph before Run()!
+2016-07-17 15:47:44.317 CameraExample[1109:39568] Received memory warning.
+It appears that this issue is similar to #2927 . I tried quantizing the graph (tensorflow/contrib/quantization/tools/quantize_graph with --mode=weights), but then ran into a 'quantize ops dont exist' type of error on iOS. It seems those ops need to be built by modifying tensorflow/contrib/makefile/tf_cc_files.txt and tensorflow/contrib/makefile/proto_text_pb_h_files.txt. I have attempting including into both every non-test file and header located in tensorflow/contrib/quantization/kernels, but am running into build-rule errors from the makefile. Unfortunately, I have little knowledge of adjusting makefiles for this type of application.

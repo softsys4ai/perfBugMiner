@@ -1,0 +1,35 @@
+slice_input_producer bug (slows down exponentially for larger datasets)
+
+My input pipeline involves sampling a filename and label with slice_input_producer, then data augmentation, then batching with tf.train.shuffle_batch. For smaller datasets (<1M), this works fine. For larger datasets, slice_input_producer slows down, even though all it's doing is sampling from two lists. It's bad enough that it's several orders of magnitude slower than all the rest of my input pipeline and training combined. I wrote a quick test to measure the time per call to slice_input_producer for different lengths of input lists:
+import time
+
+import tensorflow as tf
+
+rept = 1000
+for datasize in [1e3,1e6,1e7,1e8]:
+    sym_x = tf.train.slice_input_producer(
+        [list(range(int(datasize)))], shuffle=True,
+        capacity=10)
+    with tf.Session() as sess:
+        sess.run(tf.local_variables_initializer())
+        sess.run(tf.global_variables_initializer())
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+        start_time = time.time()
+        for r in range(rept):
+            x = sess.run(sym_x)
+        print('Datalength: %i  ---  time = %.3f ms/sample'
+              % (datasize,(time.time()-start_time)/rept*1000))
+        coord.request_stop()
+        coord.join(threads)
+        sess.close()
+
+Which gives:
+
+Datalength: 1000  ---  time = 0.172 ms/sample
+Datalength: 1000000  ---  time = 0.207 ms/sample
+Datalength: 10000000  ---  time = 0.537 ms/sample
+Datalength: 100000000  ---  time = 13.991 ms/sample
+
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+('v1.2.0-0-g12f033d', '1.2.0')

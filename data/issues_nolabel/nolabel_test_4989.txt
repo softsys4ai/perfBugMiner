@@ -1,0 +1,89 @@
+Fail to load user op compiled by bazel with gcc 6
+
+User op built by bazel with gcc >=5 could not be loaded in python. Hope there is a solution to pass g++ config to bazel.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+#2455 Adding a New Op Error: can not load the customed file
+Custom new operation in Tensorflow results in exception 'pointer being freed was not allocated'
+Environment info
+Operating System: macOS 10.12
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+
+73b0156
+
+The output of bazel version
+
+Build label: 0.3.1-homebrew
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Aug 4 09:58:27 2016 (1470304707)
+Build timestamp: 1470304707
+Build timestamp as int: 1470304707
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+zero_out.cc:
+#include "tensorflow/core/framework/op.h"
+#include "tensorflow/core/framework/op_kernel.h"
+
+using namespace tensorflow;
+
+REGISTER_OP("ZeroOut")
+    .Input("to_zero: int32")
+    .Output("zeroed: int32");
+
+class ZeroOutOp : public OpKernel {
+ public:
+  explicit ZeroOutOp(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    // Grab the input tensor
+    const Tensor& input_tensor = context->input(0);
+    auto input = input_tensor.flat<int32>();
+
+    // Create an output tensor
+    Tensor* output_tensor = NULL;
+    OP_REQUIRES_OK(context, context->allocate_output(0, input_tensor.shape(),
+                                                     &output_tensor));
+    auto output = output_tensor->flat<int32>();
+
+    // Set all but the first element of the output tensor to 0.
+    const int N = input.size();
+    for (int i = 1; i < N; i++) {
+      output(i) = 0;
+    }
+
+    // Preserve the first input value if possible.
+    if (N > 0) output(0) = input(0);
+  }
+};
+
+REGISTER_KERNEL_BUILDER(Name("ZeroOut").Device(DEVICE_CPU), ZeroOutOp);
+
+BUILD
+load("//tensorflow:tensorflow.bzl", "tf_custom_op_library")
+
+tf_custom_op_library(
+    name = "zero_out.so",
+    srcs = ["zero_out.cc"]
+)
+
+run:
+bazel build -c opt //tensorflow/core/user_ops:zero_out.so
+
+then load the lib from python:
+>>> import tensorflow as tf
+>>> tf.load_op_library('zero_out.so')
+python(61257,0x7fffb7e123c0) malloc: *** error for object 0x7fa5fcb46028: pointer being freed was not allocated
+*** set a breakpoint in malloc_error_break to debug
+
+What other attempted solutions have you tried?
+Firstly, I tried to rebuild it with g++, with the option of -D_GLIBCXX_USE_CXX11_ABI=0 mentioned in the tutorial:
+g++ -v -std=c++11 -shared zero_out.cc -o zero_out.so -fPIC -I $TF_INC -O2 -undefined dynamic_lookup -D_GLIBCXX_USE_CXX11_ABI=0
+
+it works.
+Then, I tried to add this option to bazel:
+bazel build --copt="-D_GLIBCXX_USE_CXX11_ABI=0" -c opt //tensorflow/core/user_ops:zero_out.so
+
+the problem is still there.
+Logs or other output that would be helpful
+bazel log

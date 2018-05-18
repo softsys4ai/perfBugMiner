@@ -1,0 +1,102 @@
+undefined symbol error when loading zero_out custom op
+
+System information
+
+Implement zero_out custom op as defined in tensorflow tutorial: no custom code at all
+OS Platform and Distribution: Ubuntu 16.04.2 LTS (Xenial Xerus) / 4.4.0-75-generic #96-Ubuntu SMP Thu Apr 20 09:56:33 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.1.0-rc2 / v1.1.0-rc2-817-geb11d6b
+Bazel version (if compiling from source): 0.4.5
+CUDA/cuDNN version: None
+GPU model and memory: None
+
+The problem
+Undefined symbol error when using zero_out custom op. It appears after I follow the tensorflow tutorial:
+$ bazel build --config opt //tensorflow/core/user_ops:zero_out.so is OK
+
+____Loading complete.  Analyzing...
+____Found 1 target...
+____Building...
+____[0 / 1] BazelWorkspaceStatusAction stable-status.txt
+Target //tensorflow/core/user_ops:zero_out.so up-to-date:
+bazel-bin/tensorflow/core/user_ops/zero_out.so
+____Elapsed time: 0.464s, Critical Path: 0.01s
+
+$ python zero_output_op_test.py**:
+
+======================================================================
+ERROR: testZeroOut (main.ZeroOutTest)
+Traceback (most recent call last):
+File "zero_out_op_test.py", line 5, in testZeroOut
+zero_out_module = tf.load_op_library('/srv/workspace/tensorflow/bazel-bin/tensorflow/core/user_ops/zero_out.so')
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/load_library.py", line 64, in load_op_library
+None, None, error_msg, error_code)
+NotFoundError: /srv/workspace/tensorflow/bazel-bin/tensorflow/core/user_ops/zero_out.so: undefined symbol: _ZN10tensorflow8internal21CheckOpMessageBuilder9NewStringB5cxx11Ev
+Ran 2 tests in 0.040s
+FAILED (errors=1)
+
+Source code / logs
+
+zero_out.cc:
+
+#include "tensorflow/core/framework/op.h"
+#include "tensorflow/core/framework/shape_inference.h"
+#include "tensorflow/core/framework/op_kernel.h"
+
+using namespace tensorflow;
+
+class ZeroOutOp : public OpKernel {
+ public:
+  explicit ZeroOutOp(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    // Grab the input tensor
+    const Tensor& input_tensor = context->input(0);
+    auto input = input_tensor.flat<int32>();
+
+    // Create an output tensor
+    Tensor* output_tensor = NULL;
+    OP_REQUIRES_OK(context, context->allocate_output(0, input_tensor.shape(),
+                                                     &output_tensor));
+    auto output = output_tensor->flat<int32>();
+
+    // Set all but the first element of the output tensor to 0.
+    const int N = input.size();
+    for (int i = 1; i < N; i++) {
+      output(i) = 0;
+    }
+
+    // Preserve the first input value if possible.
+    if (N > 0) output(0) = input(0);
+  }
+};
+
+REGISTER_OP("ZeroOut")
+    .Input("to_zero: int32")
+    .Output("zeroed: int32")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    });
+
+REGISTER_KERNEL_BUILDER(Name("ZeroOut").Device(DEVICE_CPU), ZeroOutOp);
+
+-BUILD:
+load("//tensorflow:tensorflow.bzl", "tf_custom_op_library")
+
+tf_custom_op_library(
+    name = "zero_out.so",
+    srcs = ["zero_out.cc"],
+)
+
+-zero_out_op_test.py:
+
+class ZeroOutTest(tf.test.TestCase):
+  def testZeroOut(self):
+    zero_out_module = tf.load_op_library('zero_out.so')
+    with self.test_session():
+      result = zero_out_module.zero_out([5, 4, 3, 2, 1])
+      self.assertAllEqual(result.eval(), [5, 0, 0, 0, 0])
+
+if __name__ == "__main__":
+  tf.test.main()

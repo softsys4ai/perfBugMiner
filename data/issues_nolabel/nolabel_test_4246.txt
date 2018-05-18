@@ -1,0 +1,39 @@
+tf.train.Coordinator not closing threads
+
+I am using a number of threads to feed training examples to a tf.RandomShuffleQueue, however gracefully closing the threads seems not to be working nicely. This is related to #2130 and this question on StackOverflow however I am wondering whether there is going to be a better way of closing the threads.
+The problem is that there are pending enqueue operations when you request the threads to stop. You can force these to be cancelled using queue.close(cancel_pending_enqueues=True), but then the threads raise an tf.errors.CancelledError. As a work around you need to surround the enqueue operation with a try/except block, however the whole process is not very elegant. I am wondering whether there are any plans to improve the process of closing the threads using the Coordinator.
+The code below illustrates a working example, however as you can see it is not a very nice solution.
+q = tf.RandomShuffleQueue( ... )
+enqueue_op = q.enqueue_many([self.queue_inputs, self.queue_targets])
+
+def load_and_enqueue( ... ):
+
+    while not coord.should_stop():
+        # ...
+        feed_dict = {
+            queue_inputs:  inputs,
+            queue_targets: targets
+         }
+
+         # Catch the exception that arises when you ask to close pending enqueue operations
+         try:
+             sess.run(enqueue_op, feed_dict=feed_dict)
+         except tf.errors.CancelledError:
+             return
+
+# Coordinator for threads
+coord = tf.train.Coordinator()
+
+# Start a thread to enqueue data asynchronously, and hide I/O latency.
+threads = [threading.Thread(target=load_and_enqueue, args=(...,)) for i in range(4)]
+
+for t in threads: t.start()
+
+# ... training loop
+
+# Ask the threads to stop and wait until they do it
+sess.run(q.close(cancel_pending_enqueues=True))
+coord.request_stop()
+coord.join(threads, stop_grace_period_secs=5)
+
+sess.close()

@@ -1,0 +1,72 @@
+tf.nn.leaky_relu does not work with float64
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes, see below
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Fedora 26
+TensorFlow installed from (source or binary): binary, pip3 install tensorflow
+TensorFlow version (use command below): v1.4.0-19-ga52c8d9 1.4.1
+Python version: Python 3.6.3
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: None
+GPU model and memory: Doesn't apply
+Exact command to reproduce: See below
+
+Describe the problem
+tf.nn.leaky_relu does not work with float64. It only seems to work with float32. I can't think of a reason why it should not work with float64, so I consider this a bug, your mileage might vary. I'm also not familiar enough with tf code to fix it myself without any help. :-)
+It seems at least ops.py#L926 should be in a try block just as ops.py#L912
+Also the unit tests only test float32.
+Source code / logs
+In [1]: import tensorflow as tf
+/usr/lib64/python3.6/importlib/_bootstrap.py:219: RuntimeWarning: compiletime version 3.5 of module 'tensorflow.python.framework.fast_tensor_util' does not match runtime version 3.6
+  return f(*args, **kwds)
+
+In [2]: c = tf.constant(5.0, dtype=tf.float32)
+
+In [3]: lr = tf.nn.leaky_relu(c)
+
+In [4]: c = tf.constant(5.0, dtype=tf.float64)
+
+In [5]: lr = tf.nn.leaky_relu(c)
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-5-71e83d060e7b> in <module>()
+----> 1 lr = tf.nn.leaky_relu(c)
+
+~/.emacs.d/.python-environments/jedi/lib/python3.6/site-packages/tensorflow/python/ops/nn_ops.py in leaky_relu(features, alpha, name)
+   1541     features = ops.convert_to_tensor(features, name="features")
+   1542     alpha = ops.convert_to_tensor(alpha, name="alpha")
+-> 1543     return math_ops.maximum(alpha * features, features)
+   1544 
+   1545 
+
+~/.emacs.d/.python-environments/jedi/lib/python3.6/site-packages/tensorflow/python/ops/math_ops.py in binary_op_wrapper(x, y)
+    883       if not isinstance(y, sparse_tensor.SparseTensor):
+    884         try:
+--> 885           y = ops.convert_to_tensor(y, dtype=x.dtype.base_dtype, name="y")
+    886         except TypeError:
+    887           # If the RHS is not a tensor, it might be a tensor aware object
+
+~/.emacs.d/.python-environments/jedi/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in convert_to_tensor(value, dtype, name, preferred_dtype)
+    834       name=name,
+    835       preferred_dtype=preferred_dtype,
+--> 836       as_ref=False)
+    837 
+    838 
+
+~/.emacs.d/.python-environments/jedi/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in internal_convert_to_tensor(value, dtype, name, as_ref, preferred_dtype, ctx)
+    924 
+    925     if ret is None:
+--> 926       ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+    927 
+    928     if ret is NotImplemented:
+
+~/.emacs.d/.python-environments/jedi/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in _TensorTensorConversionFunction(t, dtype, name, as_ref)
+    772     raise ValueError(
+    773         "Tensor conversion requested dtype %s for Tensor with dtype %s: %r" %
+--> 774         (dtype.name, t.dtype.name, str(t)))
+    775   return t
+    776 
+
+ValueError: Tensor conversion requested dtype float32 for Tensor with dtype float64: 'Tensor("Const_1:0", shape=(), dtype=float64)'

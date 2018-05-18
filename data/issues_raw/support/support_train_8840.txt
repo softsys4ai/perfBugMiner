@@ -1,0 +1,48 @@
+BasicDecoder error
+
+Hi,
+I am trying to use BasicDecoder for a sequence-to-sequence translation model and I get error:
+InvalidArgumentError (see above for traceback): assertion failed: [Expected shape for Tensor sequence_length:0 is ] [1] [ but saw shape: ] [64] [[Node: rnn/Assert/Assert = Assert[T=[DT_STRING, DT_INT32, DT_STRING, DT_INT32], summarize=3, _device="/job:localhost/replica:0/task:0/cpu:0"](rnn/All/_2029, rnn/Assert/Assert/data_0, rnn/stack/_2031, rnn/Assert/Assert/data_2, rnn/Shape_1/_2033)]] [[Node: rnn/while/Identity_12/_2727 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:5", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_4293_rnn/while/Identity_12", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:5"](^_clooprnn/while/multi_rnn_cell/cell_5/lstm_cell/zeros/_208)]]
+I can't figure it out, sequence_length tensor should be batch-sized and it is and error messege suggests that it should be [1]. This would be a case when a list of Tensors would be used instead of one fat tensor [time, batch_size, 1]
+My target_vocab_size is 500K
+size of RNN = 64, for testing
+dec_inp : <tf.Tensor 'embedded_inputs_1:0' shape=(100, ?, 64) dtype=float32>
+decoder seq len is batch-sized (64) <tf.Tensor 'decoder_seq_len:0' shape=(?,) dtype=int32>
+
+
+
+tf.version
+'1.1.0-rc0'
+
+
+
+
+W_target_emb = tf.Variable(tf.random_uniform([target_vocab_size, size], -1.0, 1.0), name="W_target_emb")
+
+half = tf.constant(0.5)
+dec_inp = tf.cast(tf.stack(self.decoder_inputs), tf.float32)
+dec_inp = tf.reshape(dec_inp,[encoder_max_size, -1, size], name = "embedded_inputs")
+if not forward_only:
+	#helper = seq2seq.TrainingHelper(inputs = target_embedded_chars, sequence_length = self.decoder_seq_len, time_major=True)
+	helper = seq2seq.ScheduledEmbeddingTrainingHelper(inputs = dec_inp,
+													  sequence_length = self.decoder_seq_len,
+													 embedding = W_target_emb,
+													 sampling_probability = half,
+													 time_major=True)
+	
+else:
+	helper = seq2seq.GreedyEmbeddingHelper(dec_inp, 
+										   start_tokens=self.decoder_inputs[0],
+										   end_token=data_utils.EOS_ID)
+	
+decoder_cell = LSTMBlockCell(num_units=size)
+decoder_cell = MultiRNNCell([DeviceWrapper(ResidualWrapper(decoder_cell),device="/gpu:%d" % i) for i in range(8) ])
+
+my_decoder = seq2seq.BasicDecoder(
+		cell=decoder_cell,
+		helper=helper,
+		initial_state=encoder_final_state)
+
+
+decoder_outputs, decoder_state = seq2seq.dynamic_decode(my_decoder, output_time_major=False, parallel_iterations=32,
+			   swap_memory = True)

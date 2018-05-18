@@ -1,0 +1,95 @@
+Tensorboard not showing embeddings
+
+I am trying to create embeddings visualization from a pretrained network called FaceNet although nothing shows up when I open it in Tensorboard. Here is my source code
+import tensorflow as tf
+import os
+from tensorflow.contrib.tensorboard.plugins import projector
+
+MODEL_DIR = "20170216-091149"
+meta_file, ckpt_file = facenet.get_model_filenames(MODEL_DIR)
+with tf.Graph().as_default():
+    with tf.Session().as_default() as sess: 
+        # Importing the graph
+        model_dir_exp = os.path.expanduser(MODEL_DIR)
+        print(model_dir_exp)
+        saver = tf.train.import_meta_graph(os.path.join(model_dir_exp, meta_file))
+        
+        # Restoring and retrieving needed layers
+        saver.restore(tf.get_default_session(), os.path.join(model_dir_exp, ckpt_file))
+        images_placeholder = tf.get_default_graph().get_tensor_by_name("input:0")
+        embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
+        phase_train_placeholder = tf.get_default_graph().get_tensor_by_name("phase_train:0") 
+        
+        # Create variables needed for Tensorboard
+        embedding = tf.Variable(tf.zeros([33, 128]), name = "embedding") 
+        assignment = embedding.assign(embeddings)
+        
+        # Create writer class
+        writer = tf.summary.FileWriter(os.path.join(MODEL_DIR, "model"))
+        writer.add_graph(sess.graph)
+        
+        # Setup the embeddings
+        config = projector.ProjectorConfig()
+        embedding_config = config.embeddings.add()
+        embedding_config.tensor_name = embedding.name
+        embedding_config.metadata_path = os.path.join(os.getcwd(), MODEL_DIR, 'labels.tsv')
+        embedding_config.sprite.image_path = os.path.join(os.getcwd(), MODEL_DIR,'sprite.png')
+        embedding_config.sprite.single_image_dim.extend([160, 160])
+        projector.visualize_embeddings(writer, config)
+        
+        # Create the embeddings
+        sess.run(assignment, feed_dict = {images_placeholder : face_images, phase_train_placeholder : False})
+
+I have read the FAQs and this is what I got when I ran tensorboard --logdir 20170216-091149/ --debug
+INFO:tensorflow:TensorBoard is in debug mode.
+INFO:tensorflow:Starting TensorBoard in directory /Users/kevinlu/Documents/Facial-Recognition/facial_recognition
+INFO:tensorflow:TensorBoard path_to_run is: {'/Users/kevinlu/Documents/Facial-Recognition/facial_recognition/20170216-091149': None}
+INFO:tensorflow:Event Multiplexer initializing.
+INFO:tensorflow:Event Multiplexer done initializing
+INFO:tensorflow:TensorBoard reload process beginning
+INFO:tensorflow:Starting AddRunsFromDirectory: /Users/kevinlu/Documents/Facial-Recognition/facial_recognition/20170216-091149
+INFO:tensorflow:Adding events from directory /Users/kevinlu/Documents/Facial-Recognition/facial_recognition/20170216-091149/model
+INFO:tensorflow:Constructing EventAccumulator for /Users/kevinlu/Documents/Facial-Recognition/facial_recognition/20170216-091149/model
+INFO:tensorflow:Done with AddRunsFromDirectory: /Users/kevinlu/Documents/Facial-Recognition/facial_recognition/20170216-091149
+INFO:tensorflow:TensorBoard reload process: Reload the whole Multiplexer
+INFO:tensorflow:Beginning EventMultiplexer.Reload()
+DEBUG:tensorflow:Opening a record reader pointing at /Users/kevinlu/Documents/Facial-Recognition/facial_recognition/20170216-091149/model/
+
+The TensorBoard path_to_run seems correct as that is where I am storing my checkpoint files, the metadata file and sprite image.
+Then I ranfind 20170216-091149/ | grep tfevents and I got
+20170216-091149/model/events.out.tfevents.1491408129.Kevins-MacBook-Pro.local
+Note the model folder contains the tfevents file and the projector_config.pbtxt file
+So my data also exists. The last thing I did as per the troubleshooting was:
+tensorboard --inspect --logdir=20170216-091149/ and I got this as the output
+======================================================================
+Processing event files... (this can take a few minutes)
+======================================================================
+
+Found event files in:
+20170216-091149/model
+
+These tags are in 20170216-091149/model:
+audio -
+histograms -
+images -
+scalars -
+======================================================================
+
+Event statistics for 20170216-091149/model:
+audio -
+graph
+   first_step           0
+   last_step            0
+   max_step             0
+   min_step             0
+   num_steps            1
+   outoforder_steps     []
+histograms -
+images -
+scalars -
+sessionlog:checkpoint -
+sessionlog:start -
+sessionlog:stop -
+======================================================================
+
+The code I used is exactly the same as the Hands On Tensorboard video code, and when I ran the debug commands as recommended by the FAQ the output of the MNIST tutorial is the same as above.

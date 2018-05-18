@@ -1,0 +1,68 @@
+XLA with frozen protobuf: Tuples do not have a rank error
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes, model inference script.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): 16.04.3 LTS (Xenial Xerus)
+TensorFlow installed from (source or binary): Source with XLA support
+TensorFlow version (use command below): 1.4.1
+Python version: 3.6
+Bazel version (if compiling from source): 0.5.4
+GCC/Compiler version (if compiling from source): c++ (Ubuntu 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609
+CUDA/cuDNN version: cuda-8.0/cuDNN-6.0.21
+GPU model and memory: Tesla K80, 12 Gb
+Exact command to reproduce: CUDA_VISIBLE_DEVICES='0' TF_XLA_FLAGS=--xla_generate_hlo_graph=.* python name_of_script.py
+
+Describe the problem
+I am trying to run model (SSD with MobileNetV1 from tf-models) with XLA optimization. I am trained this model on my own data set and generated frozen protobuf file with provide script export_inference_graph.py.
+Note: Script that run inference works fine without XLA. Models from keras.application works fine with XLA, so I think there are some problems with support of frozen protobufs.
+Source code / logs
+Source code:
+All test completed with next session config:
+gpu_options = tf.GPUOptions(
+            allocator_type='BFC',
+            allow_growth=True,
+            per_process_gpu_memory_fraction=True
+        )
+
+config = tf.ConfigProto(
+            allow_soft_placement=True,
+            gpu_options=gpu_options
+       )
+
+config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
+
+Log:
+(tf-models-env) alexkirnas@host:~/scrips/tfDetector$ CUDA_VISIBLE_DEVICES='0'  TF_XLA_FLAGS=--xla_generate_hlo_graph=.* python ssd_model_inference_time_test_random.py              
+/tf-models-env/lib/python3.6/site-packages/h5py/__init__.py:36: FutureWarning: Conversion of the second argument of issubdtype from `float` to `n
+p.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+2018-02-05 10:55:01.159354: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:892] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning
+ NUMA node zero
+2018-02-05 10:55:01.160137: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Found device 0 with properties:
+name: Tesla K80 major: 3 minor: 7 memoryClockRate(GHz): 0.8235
+pciBusID: 0000:00:1e.0
+totalMemory: 11.17GiB freeMemory: 11.11GiB
+2018-02-05 10:55:01.160163: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:00:1e.0, compute capability
+: 3.7)
+2018-02-05 10:55:03.544862: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:00:1e.0, compute capability
+: 3.7)
+2018-02-05 10:55:06.752946: I tensorflow/compiler/xla/service/service.cc:162] XLA service 0x7f6454024500 executing computations on platform CUDA. Devices:
+2018-02-05 10:55:06.752997: I tensorflow/compiler/xla/service/service.cc:170]   StreamExecutor device (0): Tesla K80, Compute Capability 3.7
+2018-02-05 10:55:06.757697: I tensorflow/compiler/xla/service/hlo_graph_dumper.cc:1254] computation cluster_22[_XlaCompiledKernel=true,_XlaNumConstantArgs=1,_XlaNumResourceArgs=0].v9 [optimization: pipeli
+ne start, before CallInliner]: /tmp/hlo_graph_0.GS9qJI.dot
+2018-02-05 10:55:06.757963: I tensorflow/compiler/xla/service/hlo_graph_dumper.cc:1254] computation cluster_22[_XlaCompiledKernel=true,_XlaNumConstantArgs=1,_XlaNumResourceArgs=0].v9 [optimization: after
+CallInliner, before simplification]: /tmp/hlo_graph_1.KFEf5N.dot
+
+....
+Lot of such lines as above
+.... 
+
+2018-02-05 10:55:45.106105: I tensorflow/compiler/xla/service/hlo_graph_dumper.cc:1254] computation cluster_9[_XlaCompiledKernel=true,_XlaNumConstantArgs=1,_XlaNumResourceArgs=0].v163 [optimization: after
+ cse, before dce]: /tmp/hlo_graph_401.V0lBLH.dot
+2018-02-05 10:55:45.112071: I tensorflow/compiler/xla/service/hlo_graph_dumper.cc:1254] computation cluster_9[_XlaCompiledKernel=true,_XlaNumConstantArgs=1,_XlaNumResourceArgs=0].v163 [optimization: after
+ dce, pipeline end]: /tmp/hlo_graph_402.I2Gnpl.dot
+2018-02-05 10:55:45.117834: I tensorflow/compiler/xla/service/hlo_graph_dumper.cc:1254] computation cluster_9[_XlaCompiledKernel=true,_XlaNumConstantArgs=1,_XlaNumResourceArgs=0].v163 [fusion: pipeline st
+art, before fusion]: /tmp/hlo_graph_403.Jmq33Y.dot
+2018-02-05 10:55:45.122108: F tensorflow/compiler/xla/shape_util.cc:118] Check failed: !ShapeUtil::IsTuple(shape) Tuples do not have a rank
+Aborted (core dumped)

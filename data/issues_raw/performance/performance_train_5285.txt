@@ -1,0 +1,42 @@
+(0.11) parse_single_example doesn't play well with read_file
+
+minimal reproduction:
+import tensorflow as tf
+
+tf.logging.set_verbosity(tf.logging.DEBUG)
+index = ['a', 'b', 'c']
+
+with tf.python_io.TFRecordWriter('test.pb2') as writer:
+    writer.write(tf.train.Example(features=tf.train.Features(
+        feature={'index': tf.train.Feature(bytes_list=tf.train.BytesList(
+            value=index))})).SerializeToString())
+
+index_example = tf.read_file('test.pb2')
+index = tf.parse_single_example(
+    index_example,
+    {'index': tf.FixedLenFeature([3], tf.string)}
+)['index']
+
+with tf.Session() as sess:
+    tf.logging.debug(index_example.eval())
+    tf.logging.debug(index.eval())
+
+You'll notice that read_file works just fine, and outputs bytes as expected, but then the process will completely lock up, and does not respond to SIGINT, responding only to SIGKILL or SIGTERM. Not sure what's going on here, although I suspect that read_file is reading some leading/trailing bytes that TFRecordReader strips off.
+Still it seems like TFRecords should be a valid I/O format without requiring a filename queue, (e.g. for reading in initial vocabulary files), and I thought that read_file + parse_single_example would be the expected way to do this. Instead I guess I need to use make_tensor_proto or something? Not sure why this is a separate serialization strategy... and completely missing from the docs.
+At the very least, parse_single_example should fail and not livelock when it gets these strings.
+EDIT: For people wondering what the correct pattern is it appears to be something like:
+import tensorflow as tf
+from tensorflow.contrib.util import make_tensor_proto
+
+tf.logging.set_verbosity(tf.logging.DEBUG)
+index = ['a', 'b', 'c']
+
+with open('test.pb2', 'wb') as writer:
+    writer.write(make_tensor_proto(index, dtype=tf.string, shape=[3]).SerializeToString())
+
+index_example = tf.read_file('test.pb2')
+index = tf.parse_tensor(index_example, tf.string)
+
+with tf.Session() as sess:
+    tf.logging.debug(index_example.eval())
+    tf.logging.debug(index.eval())

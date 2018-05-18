@@ -1,0 +1,231 @@
+Variable initialization under estimator + dynamic_rnn + MirroredStrategy (DistributionStrategy)
+
+System information
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04 and Windows 10
+TensorFlow installed from (source or binary): Binary (pip)
+TensorFlow version (use command below): 1.8.0
+Python version: 3.6
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: GTX 1080 8 GiB (Windows) or two 8 GiB Tesla M60 (Ubuntu 16.04)
+Exact command to reproduce: See python code (below)
+Describe the problem
+I am trying to transition my TensorFlow sequence2sequence codebase (RNN) into using the Estimator API, using the new tf.contrib.distribute.DistributionStrategy API. My provided runnable code snippet (below) works for a tf.contrib.distribute.OneDeviceStrategy, but not for a tf.contrib.distribute.MirroredStrategy.
+The problem lies with initialization of the variables associated with RNN layers and the way these variables are handled/initialized using dynamic_rnn.
+The first tower seems to work fine, as it correctly uses the default callable initializer. The problem seems to be that the following towers are initialized directly with the tensors resulting from the initializers called on the first tower, which the dynamic_rnn (tf.nn.bidirectional_dynamic_rnn) API does not like.
+I have found three possible issues:
+
+(Possibly major?) Unable to initialize RNN parameters/variables, beyond the first tower, using tf.nn.bidirectional_dynamic_rnn and tf.contrib.rnn.LSTMCell together with a tf.contrib.distribute.MirroredStrategy.
+(Minor) Optimizer API, such as tf.train.AdamOptimizer, seems to return a tensor containing the updated global_step tensor instead of a no_op, as it normally does, when running under a distribution strategy. (Seems this is an easy fix, e.g. by using tf.group (see below))
+(Minor) Error message: Would it not be more meaningful if the below error message "... use a lambda as the initializer" said something along the lines of: "... use a callable, e.g. an Initializer (tf.keras.initializers.Initializer) or a lambda, as the initializer" ?
+
+Is there something i might have missed?
+Source code / logs
+import tensorflow as tf
+
+class RNNModel(object):
+
+  def __init__(self, hparams):
+    return
+
+  def __call__(self, features, labels, mode, params):
+
+    inputs = features[0]
+
+    print(inputs)
+
+    cell_fw = tf.contrib.rnn.LSTMCell(  # tf.contrib.rnn.BasicLSTMCell
+      300)
+    cell_bw = tf.contrib.rnn.LSTMCell(  # tf.contrib.rnn.BasicLSTMCell
+      300)
+
+    (outputs, output_states) = tf.nn.bidirectional_dynamic_rnn(
+      cell_fw,
+      cell_bw,
+      inputs,
+      sequence_length=tf.convert_to_tensor([2, 2]),
+      initial_state_fw=None,
+      initial_state_bw=None,
+      dtype=tf.float32,
+      parallel_iterations=None,
+      swap_memory=False,
+      time_major=False,
+      scope=None
+    )
+
+    model_output = tf.concat(outputs, axis=-1)
+    mock_loss = 10 - tf.reduce_sum(model_output)
+
+    train_op = tf.train.AdamOptimizer(learning_rate=0.001).minimize(mock_loss,
+                                                                         global_step=tf.train.get_or_create_global_step())
+    train_op = tf.group(train_op)
+
+    if mode == tf.estimator.ModeKeys.TRAIN:
+      return tf.estimator.EstimatorSpec(mode, loss=mock_loss, train_op=train_op)
+    elif mode == tf.estimator.ModeKeys.EVAL:
+      return tf.estimator.EstimatorSpec(mode, loss=mock_loss, eval_metric_ops=None)
+    elif mode == tf.estimator.ModeKeys.PREDICT:
+      predictions = {
+        'mock': 1,
+      }
+      return tf.estimator.EstimatorSpec(mode, predictions=predictions)
+
+
+def train(hparams):
+  model = RNNModel(hparams)
+
+  distribution_strategy = tf.contrib.distribute.MirroredStrategy(num_gpus=2)
+  #distribution_strategy = tf.contrib.distribute.OneDeviceStrategy(tf.DeviceSpec(device_type="GPU", device_index=0))
+
+  checkpointing_config = tf.estimator.RunConfig(
+    save_checkpoints_secs=20 * 60,  # Save checkpoints every 20 minutes.
+    keep_checkpoint_max=10,  # Retain the 10 most recent checkpoints.
+    train_distribute=distribution_strategy
+  )
+
+  estimator = tf.estimator.Estimator(
+    model_fn=model,
+    model_dir="out/",
+    params=hparams,
+    config=checkpointing_config,
+  )
+
+  def create_mock_dataset():
+    mock_data = tf.convert_to_tensor([[[0.0, 1.0, 2.0, 3.0, 4.0], [0.0, 1.0, 2.0, 3.0, 4.0]],
+                                      [[0.0, 1.0, 2.0, 3.0, 4.0], [0.0, 1.0, 2.0, 3.0, 4.0]]])
+
+    mock_data_set = tf.data.Dataset.from_tensors(mock_data)
+    mock_data_set = mock_data_set.map(lambda mock_data: (((mock_data,)), ()) )
+
+    return mock_data_set
+
+  num_train_steps = 100
+  estimator.train(create_mock_dataset, hooks=None,
+                  steps=num_train_steps)
+
+if __name__ == '__main__':
+  train({"mock": "mock"})
+
+The code produces the following  output:
+Traceback (most recent call last):
+File "C:\Python36\lib\runpy.py", line 193, in _run_module_as_main
+"main", mod_spec)
+File "C:\Python36\lib\runpy.py", line 85, in _run_code
+exec(code, run_globals)
+File "C:\Users\marhl\nmt\tfDeepNLP\models\seq2seq\run_seq2seq.py", line 105, in 
+tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+File "C:\Python36\lib\site-packages\tensorflow\python\platform\app.py", line 126, in run
+_sys.exit(main(argv))
+File "C:\Users\marhl\nmt\tfDeepNLP\models\seq2seq\run_seq2seq.py", line 96, in main
+run_main(FLAGS, default_hparams, train_fn, inference_fn, hparams_creator)
+File "C:\Users\marhl\nmt\tfDeepNLP\models\seq2seq\run_seq2seq.py", line 88, in run_main
+train_fn(hparams)
+File "C:\Users\marhl\nmt\tfDeepNLP\models\seq2seq\train_estimator.py", line 470, in s2s_train
+estimator.train(input_fn=train_input_fn, hooks=train_hooks,steps=num_train_steps)
+File "C:\Python36\lib\site-packages\tensorflow\python\estimator\estimator.py", line 363, in train
+loss = self._train_model(input_fn, hooks, saving_listeners)
+File "C:\Python36\lib\site-packages\tensorflow\python\estimator\estimator.py", line 841, in _train_model
+return self._train_model_distributed(input_fn, hooks, saving_listeners)
+File "C:\Python36\lib\site-packages\tensorflow\python\estimator\estimator.py", line 884, in _train_model_distributed
+self.config)
+File "C:\Python36\lib\site-packages\tensorflow\python\training\distribute.py", line 756, in call_for_each_tower
+return self._call_for_each_tower(fn, *args, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\contrib\distribute\python\mirrored_strategy.py", line 254, in _call_for_each_tower
+coord.join(threads)
+File "C:\Python36\lib\site-packages\tensorflow\python\training\coordinator.py", line 389, in join
+six.reraise(*self._exc_info_to_raise)
+File "C:\Python36\lib\site-packages\six.py", line 693, in reraise
+raise value
+File "C:\Python36\lib\site-packages\tensorflow\python\training\coordinator.py", line 297, in stop_on_exception
+yield
+File "C:\Python36\lib\site-packages\tensorflow\contrib\distribute\python\mirrored_strategy.py", line 465, in run
+self.main_result = self.main_fn(*self.main_args, **self.main_kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\estimator\estimator.py", line 831, in _call_model_fn
+model_fn_results = self._model_fn(features=features, **kwargs)
+File "C:\Users\marhl\nmt\tfDeepNLP\models\seq2seq\s2s_base_model.py", line 157, in call
+res = self.build_graph(hparams, features, labels)
+File "C:\Users\marhl\nmt\tfDeepNLP\models\seq2seq\hierarchical_model.py", line 83, in build_graph
+encoded_outputs, encoded_state = self._build_encoder(hparams, features)
+File "C:\Users\marhl\nmt\tfDeepNLP\models\seq2seq\hierarchical_model.py", line 202, in _build_encoder
+return self._build_flat_encoder(hparams, features)
+File "C:\Users\marhl\nmt\tfDeepNLP\models\seq2seq\hierarchical_model.py", line 250, in _build_flat_encoder
+num_bi_residual_layers=num_bi_residual_layers))
+File "C:\Users\marhl\nmt\tfDeepNLP\models\seq2seq\hierarchical_model.py", line 768, in _build_bidirectional_rnn
+time_major=self.time_major)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn.py", line 412, in bidirectional_dynamic_rnn
+time_major=time_major, scope=fw_scope)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn.py", line 627, in dynamic_rnn
+dtype=dtype)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn.py", line 824, in _dynamic_rnn_loop
+swap_memory=swap_memory)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\control_flow_ops.py", line 3224, in while_loop
+result = loop_context.BuildLoop(cond, body, loop_vars, shape_invariants)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\control_flow_ops.py", line 2956, in BuildLoop
+pred, body, original_loop_vars, loop_vars, shape_invariants)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\control_flow_ops.py", line 2893, in _BuildLoop
+body_result = body(*packed_vars_for_body)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\control_flow_ops.py", line 3194, in 
+body = lambda i, lv: (i + 1, orig_body(*lv))
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn.py", line 793, in _time_step
+skip_conditionals=True)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn.py", line 248, in _rnn_step
+new_output, new_state = call_cell()
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn.py", line 781, in 
+call_cell = lambda: cell(input_t, state)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 232, in call
+return super(RNNCell, self).call(inputs, state)
+File "C:\Python36\lib\site-packages\tensorflow\python\layers\base.py", line 717, in call
+outputs = self.call(inputs, *args, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 1292, in call
+cur_inp, new_state = cell(cur_inp, cur_state)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 1099, in call
+output, new_state = self._cell(inputs, state, scope=scope)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 339, in call
+*args, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\layers\base.py", line 699, in call
+self.build(input_shapes)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 767, in build
+partitioner=maybe_partitioner)
+File "C:\Python36\lib\site-packages\tensorflow\python\layers\base.py", line 546, in add_variable
+partitioner=partitioner)
+File "C:\Python36\lib\site-packages\tensorflow\python\training\checkpointable.py", line 436, in _add_variable_with_custom_getter
+**kwargs_for_getter)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 1317, in get_variable
+constraint=constraint)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 1079, in get_variable
+constraint=constraint)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 417, in get_variable
+return custom_getter(**custom_getter_kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 1720, in wrapped_custom_getter
+*args, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py", line 235, in _rnn_get_variable
+variable = getter(*args, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\training\distribute.py", line 575, in disable_partitioned_variables
+return getter(*args, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 394, in _true_getter
+use_resource=use_resource, constraint=constraint)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 786, in _get_single_variable
+use_resource=use_resource)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 2220, in variable
+use_resource=use_resource)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 2198, in 
+return lambda **kwargs: captured_getter(captured_previous, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\contrib\distribute\python\shared_variable_creator.py", line 69, in create_new_variable
+v = next_creator(*args, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 2198, in 
+return lambda **kwargs: captured_getter(captured_previous, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\training\distribute.py", line 568, in creator_with_resource_vars
+return self._create_variable(*args, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\contrib\distribute\python\mirrored_strategy.py", line 118, in _create_variable
+v = next_creator(*args, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 2210, in 
+previous_getter = lambda **kwargs: default_variable_creator(None, **kwargs)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\variable_scope.py", line 2182, in default_variable_creator
+constraint=constraint)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\resource_variable_ops.py", line 282, in init
+constraint=constraint)
+File "C:\Python36\lib\site-packages\tensorflow\python\ops\resource_variable_ops.py", line 421, in _init_from_args
+"initializer." % name)
+ValueError: Initializer for variable encoder/bidirectional_rnn/fw/multi_rnn_cell/cell_0/lstm_cell/kernel/replica_1/ is from inside a control-flow construct, such as a loop or conditional. When creating a variable inside a loop or conditional, use a lambda as the initializer.

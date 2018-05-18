@@ -1,0 +1,37 @@
+Nullptr check failed, when using TensorArray in combination with while_loop and swap_memory
+
+Environment: TensorFlow-gpu r1.1 build from source on Windows 10
+I am using the python API of TensorFlow to train a variant of an LSTM.
+For that purpose I use the tf.while_loop function to iterate over the time steps
+With swap_memory=True and not limiting devices to cpu I get the following failure:
+...tensorflow/tensorflow/core/framework/tensor.cc:885] Check failed: nullptr != b.buf_ (nullptr vs. 00...)
+With swap_memory=False or limiting devices to cpu this does not happen.
+The part of my code, that causes this failure (when commenting it out, it works) is in the body of the while loop:
+...
+h_gathered = h_ta.gather(tf.range(time))
+h_gathered = tf.transpose(h_gathered, [1, 0, 2])
+syn_t = self.syntactic_weights_ta.read(time)[:, :time]
+syn_t = tf.expand_dims(syn_t, 1)
+syn_state_t = tf.squeeze(tf.tanh(tf.matmul(syn_t, h_gathered)), 1)
+...
+
+where time is zero based and incremented after each step, h_ta is a TensorArray
+h_ta = tf.TensorArray(
+        dtype=dtype,
+        size=max_seq_len,
+        clear_after_read=False,
+        element_shape=[batch_size, num_hidden],
+        tensor_array_name="fw_output")
+
+and self.syntactic_weights_ta is also a TensorArray
+self.syntactic_weights_ta = tf.TensorArray(
+        dtype=dtype,
+        size=max_seq_len,
+        tensor_array_name="fw_syntactic_weights")
+self.syntactic_weights_ta = self.syntactic_weights_ta.unstack(syntactic_weights)
+
+What I am trying to achieve in the code snippet is basically a weighted sum over the past outputs, stored in h_ta.
+In the end I train the network with tf.train.AdamOptimizer.
+The forward propagation seems to work, as inserting tf.Print commands in the sensitive part of the code works.
+But I guess the backward propagation
+Unfortunately I could not find out which tensor's buffer points to nullptr.

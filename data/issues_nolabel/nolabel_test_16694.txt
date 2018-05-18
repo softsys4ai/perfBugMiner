@@ -1,0 +1,51 @@
+Tensorflow 1.5.0 doesn't compile from source, linking issue with tf.contrib.lite.toco
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+N/A
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):
+source
+TensorFlow version (use command below):
+1.5.0
+Python version:
+3.5.2
+Bazel version (if compiling from source):
+0.9.0
+GCC/Compiler version (if compiling from source):
+gcc 5.4.0 20160609
+CUDA/cuDNN version:
+Tried 9.0 and 9.1 with cuDNN 7.0.5
+GPU model and memory:
+GeForce GTX 1080Ti
+Exact command to reproduce:
+
+git clone https://github.com/tensorflow/tensorflow
+cd tensorflow
+git checkout v1.5.0
+./configure  # selected yes for CUDA, no for other optional things
+bazel build --config=opt --config=cuda //tensorflow/tools/pip_package:build_pip_package
+
+Describe the problem
+As described in #14573, this is the error I get from Bazel. It is quite long, but it starts with:
+ERROR: ~/tensorflow/tensorflow/contrib/lite/toco/BUILD:326:1: Linking of rule '//tensorflow/contrib/lite/toco:toco' failed (Exit 1)
+/usr/bin/ld: warning: libcublas.so.9.1, needed by bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so, not found (try using -rpath or -rpath-link)
+/usr/bin/ld: warning: libcudnn.so.7, needed by bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so, not found (try using -rpath or -rpath-link)
+/usr/bin/ld: warning: libcufft.so.9.1, needed by bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so, not found (try using -rpath or -rpath-link)
+/usr/bin/ld: warning: libcurand.so.9.1, needed by bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so, not found (try using -rpath or -rpath-link)
+bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so: undefined reference to `cublasZsyr2k_v2@libcublas.so.9.1'
+bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so: undefined reference to `cublasCgerc_v2@libcublas.so.9.1'
+bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so: undefined reference to `cublasChemv_v2@libcublas.so.9.1'
+bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so: undefined reference to `cublasZhemm_v2@libcublas.so.9.1'
+bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so: undefined reference to `cufftCreate@libcufft.so.9.1'
+bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so: undefined reference to `cudnnCreate@libcudnn.so.7'
+bazel-out/k8-py3-opt/bin/_solib_local/_U_S_Stensorflow_Scontrib_Slite_Stoco_Ctoco___Utensorflow/libtensorflow_framework.so: undefined reference to `cudnnCreatePoolingDescriptor@libcudnn.so.7'
+(and so on for other symbols)
+
+As suggested in #14573, adding the following option to Bazel fixes the issue:
+--action_env=LD_LIBRARY_PATH=/path/to/cuda/lib64/stubs:${LD_LIBRARY_PATH}
+
+Note that CUDA is properly installed and all necessary environment variables are set (CUDA_HOME, LD_LIBRARY_PATH). Installing e.g. Tensorflow 1.4.1 (and earlier versions) with exactly the same set up is no problem. Tried with both CUDA 9.0 and CUDA 9.1, both show the same issue.
+CC: @kmhofmann @gunan

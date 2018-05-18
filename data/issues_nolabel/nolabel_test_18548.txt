@@ -1,0 +1,39 @@
+[r1.7][TensorRT] The passing parameter "max_batch_size" within function "trt.create_inference_graph()" is fixed to 1
+
+What do I intended to do:
+I've already trained a model by TensorFlow, and then try to use the integrated TensorRT to import the frozen model and optimize it, then output the optimized graph_def and session run it by TensorFlow.
+Script:
+      with tf.Graph().as_default():
+         with tf.device("/device:GPU:0"):                                                                                 
+            output_graph_def = tf.GraphDef()
+            with open("./"+frozen_model_name, "rb") as f:
+               output_graph_def.ParseFromString(f.read())
+               print (len(output_graph_def.node))
+               _ = tf.import_graph_def(output_graph_def, name="")
+                                                                                   
+        f32_graph = trt.create_inference_graph(
+            input_graph_def=output_graph_def,                                                                                       
+            outputs=['InceptionV3/Logits/SpatialSqueeze'],
+            max_batch_size = 16,  #<<<<<<<<<<<<<<<HERE
+            max_workspace_size_bytes=1 << 20,
+            precision_mode="FP32",  # TRT Engine precision "FP32","FP16" or "INT8"                                        
+            minimum_segment_size=2  # minimum number of nodes in an engine                                                
+        )
+
+Log:
+host/replica:0/task:0/device:GPU:0 with 4757 MB memory) -> physical GPU (device: 0, name: Tesla P4, pci bus id: 0000:00:08.0, compute capability: 6.1)
+Traceback (most recent call last):
+  File "extract_model_tf_trt_frozen.py", line 118, in <module>
+    _main()
+  File "extract_model_tf_trt_frozen.py", line 91, in _main
+    val = sess.run(out, {inp: batch_input})
+  File "/home/web_server/dlpy72/dlpy/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 905, in run
+    run_metadata_ptr)
+  File "/home/web_server/dlpy72/dlpy/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1116, in _run
+    str(subfeed_t.get_shape())))
+ValueError: Cannot feed value of shape (16, 299, 299, 3) for Tensor u'import/Placeholder:0', which has shape '(1, 299, 299, 3)'
+
+Observation:
+Seems like even though I set the passing parameter "max_batch_size" to 16, the generated new graph still only has batch_size == 1. I can't locate the source file of trt_convert(), which is relevant actually, probably it's a binary .o file so I can only post a new issue here for help.
+Has anyone encountered the same issue?
+Any idea will be welcome.

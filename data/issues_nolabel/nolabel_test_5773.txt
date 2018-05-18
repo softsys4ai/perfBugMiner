@@ -1,0 +1,39 @@
+extract_image_patches zeros out data for large images
+
+I'm reading a large image (7128x5097 pixels) and generating patches with extract_image_patches. Depending on the patch size, some or all of the resulting image is zeroed out. Is there a limit on tensor size that it hits?
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+nothing relevant
+Environment info
+Operating System: macOS Sierra 10.12.1
+Installed version of CUDA and cuDNN: none
+A link to the pip package you installed:
+https://storage.googleapis.com/tensorflow/mac/cpu/tensorflow-0.11.0-py2-none-any.whl
+The output from python -c "import tensorflow; print(tensorflow.version)".
+0.11.0
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+The following code generates a random image, scales it up by a factor of 5, pulls a single pixel out of each patch, and writes an image with the result.
+Expected behavior: an image of random pixels.
+Observed behavior: for small images it works. But for the 5097x7129 image, N=3 works, N=5 gives a completely blank image, and N=7 is blank after the first 998 rows. (It's kind of strange that 7 works better than 5.)
+from __future__ import absolute_import
+from __future__ import print_function
+import tensorflow as tf
+N = 5 # Can try other numbers
+def main(_):
+  img = tf.random_uniform([1, 5097, 7129, 3], minval=0, maxval=255, dtype=tf.int32)
+  img = tf.cast(img, tf.uint8)
+  patches = tf.extract_image_patches(img, [1, N, N, 1], [1, N, N, 1],
+    [1, 1, 1, 1], "SAME")
+  data = patches[0, :, :, 0:3]
+
+  f = open('/tmp/img.png', 'w')
+  init_op = tf.initialize_all_variables()
+  with tf.Session() as sess:
+    sess.run(init_op)
+    f.write(tf.image.encode_png(data).eval())
+  f.close()
+
+if __name__ == "__main__":
+  tf.app.run()
+
+What other attempted solutions have you tried?
+This is a simplified version of a larger image learning system, and I've cut it down to the problematic code. I've checked the values to make sure the problem is in extract_image_patches and not image_encode_png. The problem seems to happen if the tensor is big, so there's probably some size limit somewhere.

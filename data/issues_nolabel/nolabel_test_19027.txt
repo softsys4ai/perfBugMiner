@@ -1,0 +1,38 @@
+Speed regression on tensorflow version > 1.4.1
+
+We have observed some massive slowdowns in some Keras/tensorflow models with tensorflow versions newer than 1.4.1.
+Not sure if the issue is with tensorflow or with the way keras creates the tensorflow models, so I am cross-posting these issue to both repos (apologies for that!).
+Here is a script reproducing the issue:
+Setup
+from pandas import get_dummies
+from sklearn.datasets import make_classification
+
+from keras.models import Sequential
+from keras.layers import Dense, Dropout
+from keras.callbacks import EarlyStopping
+
+X, y = make_classification(n_samples=10000, n_features=10, n_informative=8,
+                           n_classes=5, n_clusters_per_class=1, random_state=0)
+
+model = Sequential()
+model.add(Dense(10, input_dim=10, activation='relu'))
+model.add(Dropout(0.2))
+model.add(Dense(5, activation='sigmoid'))
+model.add(Dropout(0.1))
+model.add(Dense(5, activation='softmax'))
+model.compile(loss='categorical_crossentropy', optimizer='rmsprop', metrics=['acc'])
+
+yk = get_dummies(y)
+Fitting
+model.fit(X, yk, epochs=10, batch_size=50, 
+               callbacks=[EarlyStopping(monitor='loss', patience=2)])   
+Here are some timings for the fit method:
+
+Tensorflow 1.4.1:  2.91 s ± 452 ms per loop  (obtained using ipython's %%timeit magic, 7 loops)
+Tensorflow 1.5.0:  CPU times: user 2min 19s, sys: 5min 22s, total: 7min 41s Wall time: 1min 2s
+Tensorflow 1.6.0: CPU times: user 5min 5s, sys: 12min 31s, total: 17min 36s Wall time: 2min 37s
+Tensorflow 1.7.0: CPU times: user 5min 5s, sys: 12min 39s, total: 17min 45s Wall time: 2min 39s
+
+So, it seems there was a massive slowdown in version 1,5, and then a further one in 1.6 (which similar speed in 1.7). All the tests are run on a conda environment with python 3.6.5 and keras 2.1.5, with the corresponding tensorflow versions all coming from the anaconda defaults channel.
+The GPU accelerated version of keras/tensorflow (keras-gpu conda package) does not present the issue.
+Thanks in advance!

@@ -1,0 +1,161 @@
+how to use the trained model(build in OOP schema) to predict new samples?
+
+Hi, there
+I write a OOP schema cnn model, but there is some error when predict. I know that if define Variable and write the code like c style in one file, it is easy to restore the value, but in OOP schema, it is something wrong. Here is my class:
+class TextCNN(object):
+    """
+    A CNN for text classification.
+    Uses an embedding layer, followed by a convolutional, max-pooling and softmax layer.
+    """
+
+    def __init__(self,
+                 is_training,
+                 sequence_length,
+                 num_classes,
+                 vocab_size,
+                 embedding_size,
+                 filter_sizes,
+                 num_filters,
+                 l2_reg_lambda=0.0,
+                 drop_out=1.0):
+        self.is_training = is_training
+        self.sequence_length = sequence_length
+        self.num_classes = num_classes
+        self.vocab_size = vocab_size
+        self.embedding_size = embedding_size
+        self.filter_sizes = filter_sizes
+        self.num_filters = num_filters
+        self.l2_reg_lambda = l2_reg_lambda
+        self.input_x_test = tf.placeholder(tf.int32, [None, self.sequence_length], name='input_x_text')
+        self.input_y_test = tf.placeholder(tf.int32, [None, self.num_classes], name='input_y_text')
+        if self.is_training:
+            self.dropout_keep_prob = drop_out
+        else:
+            self.dropout_keep_prob = 1.0
+
+        # Embedding layer
+        with tf.device('/cpu:0'), tf.name_scope("embedding"):
+            self.W = tf.Variable(
+                tf.random_uniform([vocab_size, embedding_size], -1.0, 1.0),
+                name="W")
+        self.l2_loss = tf.constant(0.0)
+
+    def inference(self, input_x):
+        if not self.is_training:
+            input_x = self.input_x_test
+        embedded_chars = tf.nn.embedding_lookup(self.W, input_x)
+        embedded_chars_expanded = tf.expand_dims(embedded_chars, -1)
+
+        # Create a convolution + maxpool layer for each filter size
+        pooled_outputs = []
+        for i, filter_size in enumerate(self.filter_sizes):
+            with tf.name_scope("conv-maxpool-%s" % filter_size):
+                # Convolution Layer
+                filter_shape = [filter_size, self.embedding_size, 1, self.num_filters]
+                W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), name="W")
+                b = tf.Variable(tf.constant(0.1, shape=[self.num_filters]), name="b")
+                conv = tf.nn.conv2d(
+                    embedded_chars_expanded,
+                    W,
+                    strides=[1, 1, 1, 1],
+                    padding="VALID",
+                    name="conv")
+                # Apply nonlinearity
+                h = tf.nn.relu(tf.nn.bias_add(conv, b), name="relu")
+                # Maxpooling over the outputs
+                pooled = tf.nn.max_pool(
+                    h,
+                    ksize=[1, self.sequence_length - filter_size + 1, 1, 1],
+                    strides=[1, 1, 1, 1],
+                    padding='VALID',
+                    name="pool")
+                pooled_outputs.append(pooled)
+
+        # Combine all the pooled features
+        num_filters_total = self.num_filters * len(self.filter_sizes)
+        h_pool = tf.concat(pooled_outputs, 3)
+        h_pool_flat = tf.reshape(h_pool, [-1, num_filters_total])
+
+        # Add dropout
+        with tf.name_scope("dropout"):
+            h_drop = tf.nn.dropout(h_pool_flat, self.dropout_keep_prob)
+
+        # Final (unnormalized) scores and predictions
+        with tf.name_scope("output"):
+            W = tf.get_variable(
+                "W",
+                shape=[num_filters_total, self.num_classes],
+                initializer=tf.contrib.layers.xavier_initializer())
+            b = tf.Variable(tf.constant(0.1, shape=[self.num_classes]), name="b")
+            self.l2_loss += tf.nn.l2_loss(W)
+            self.l2_loss += tf.nn.l2_loss(b)
+            logits = tf.nn.xw_plus_b(h_drop, W, b, name="scores")
+            return logits
+
+    def loss(self, logits, input_y):
+        # CalculateMean cross-entropy loss
+        with tf.name_scope("loss"):
+            if not self.is_training:
+                input_y = self.input_y_test
+            losses = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=input_y)
+            loss = tf.reduce_mean(losses) + self.l2_reg_lambda * self.l2_loss
+            return loss
+
+    def training(self, loss, learning_rate):
+        tf.summary.scalar('loss', loss)
+        optimizer = tf.train.AdamOptimizer(learning_rate)
+        global_step = tf.Variable(0, name='global_step', trainable=False)
+        train_op = optimizer.minimize(loss, global_step=global_step)
+        return train_op
+
+    def evaluation(self, logits, input_y):
+        if not self.is_training:
+            input_y = self.input_y_test
+        predictions = tf.argmax(logits, 1, name="predictions")
+        correct_predictions = tf.equal(predictions, tf.argmax(input_y, 1))
+        accuracy = tf.reduce_mean(tf.cast(correct_predictions, "float"), name="accuracy")
+        acc_summary = tf.summary.scalar("accuracy", accuracy)
+        return accuracy
+and this is my train file:
+cnn = TextCNN(...)
+logits = cnn.inference(x_batch)
+loss = cnn.loss(logits, y_batch)
+train_op = cnn.training(loss, FLAGS.learning_rate)
+eval_correct = cnn.evaluation(logits, y_batch)
+_, loss_value, accuracy = sess.run([train_op, loss, eval_correct])
+if step % FLAGS.checkpoint_every == 0 and step != 0:
+    path = saver.save(sess, checkpoint_prefix, global_step=step)
+and this is my predict file:
+with graph.as_default():
+    session_conf = tf.ConfigProto(
+        allow_soft_placement=FLAGS.allow_soft_placement,
+        log_device_placement=FLAGS.log_device_placement)
+    sess = tf.Session(config=session_conf)
+
+    data_set_test = DataSet(...)
+
+    with sess.as_default():
+        cnn = TextCNN(
+            is_training=False,
+            sequence_length=data_set_test.max_seq_len,
+            num_classes=len(data_set_test.label_dict),
+            vocab_size=len(data_set_test.vocab),
+            embedding_size=FLAGS.embedding_dim,
+            filter_sizes=list(map(int, FLAGS.filter_sizes.split(","))),
+            num_filters=FLAGS.num_filters,
+            l2_reg_lambda=FLAGS.l2_reg_lambda,
+            drop_out=FLAGS.dropout_keep_prob
+        )
+
+        saver = tf.train.Saver()
+        saver.restore(sess, checkpoint_file)
+        x_batch, y_batch = data_set_test.next_batch(-1, True, True)
+        logits = cnn.inference(x_batch)
+        results = sess.run(logits, feed_dict={cnn.input_x_test: x_batch})
+        pass
+error is:
+tensorflow.python.framework.errors_impl.FailedPreconditionError: Attempting to use uninitialized value output/b_1
+	 [[Node: output/b_1/read = Identity[T=DT_FLOAT, _class=["loc:@output/b_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](output/b_1)]]
+
+Do you know how to load the Variable like OOP schema, is there a demo projects?
+Thanks!

@@ -1,0 +1,19 @@
+Provide sugar for insuring gradient computation of an op is put on the desired device
+
+Currently, it is somewhat involved to insure that a set of ops are put on the desired device for both the forward and backward (gradient) computations. For example if I have a function that defines its own scope like:
+def my_op(inputs, name=None):
+    with tf.op_scope([inputs], name, 'my_op') as scope:
+        ...
+
+Simply using the following code would not place its gradient calculations on the specified device:
+with tf.device('/gpu:0'):
+    my_op(...)
+
+Instead, the only way I got the above to really work is to define a device function that not only checks the name of the op but also all incoming nodes (because TF adds a lot of additional operations that are not explicitly named under the scope), like this:
+def _device_function(op):
+    if ('my_op' in op.name) or any('my_op' in node.name for node in op.inputs):
+        return "/gpu:0"
+    else:
+        return None
+
+This is unnecessarily involved and may very well be error-prone. Something like a boolean grad option for tf.device so that the user can simply specify tf.device(..., grad=True) would be far cleaner.

@@ -1,0 +1,105 @@
+BeamSearchDecoder Bug on beam_width
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 14.04
+TensorFlow installed from (source or binary): Pip Binary
+TensorFlow version (use command below): 1.2.1
+Python version: 3.4
+
+My coustom code
+class Model():
+'''
+A seq2seq model
+placeholder: 
+    encoder_input, a int32 tensor shaped [None, max_encoder_len]
+    encoder_length, a int32 tensor shaped [None]
+    decoder_input, a int32 tensor shaped [None, max_decoder_len]
+cell:
+    LSTMCell. cell.output_size = 128
+'''
+
+    # some irrespective code
+
+    @property
+    def _prediction(self):
+        with self._graph.as_default():
+            GO_SYMBOL = [500]
+            END_SYMBOL = 501
+
+            initial_state = self.encoder['final_state']
+
+            decoder = tf.contrib.seq2seq.BeamSearchDecoder(
+                cell=self.cell,
+                embedding=lambda tokens:tf.nn.embedding_lookup(self._decoder_embedding, tokens),
+                start_tokens=GO_SYMBOL,
+                end_token=END_SYMBOL,
+                initial_state=initial_state,
+                beam_width=self._beam_size, # self._beam_size = 1 is ok 
+                                            # but self._beam_size = 2 runs wrong
+                output_layer=self._output_projection_layer
+            )
+
+            outputs, _, _ = tf.contrib.seq2seq.dynamic_decode(
+                decoder=decoder,
+                maximum_iterations=self._max_decoder_len
+            )
+
+            return outputs.predicted_ids[:, :, 0]
+
+    # some irrespective code
+
+    def predict(self, word_list):
+        '''
+        Args:
+            word_list: [word0, word1...]. 1-dimentional array
+        return:
+            outputs: [o0, o1...]. 1-dimentional array
+                     where oi is word_index
+        '''
+        length = len(word_list)
+        word_index_list = preprocess.words_to_indices(word_list) # turn words to numbers
+        if len(word_index_list) < self._max_encoder_len:
+            word_index_list.extend([0] * (self._max_encoder_len - len(word_index_list)))
+
+        feed_dict = {
+            self.input_length['encoder_input']: [word_index_list],
+            self.input_length['encoder_length']: [length]
+        }
+
+        (
+            output
+        ) = self._session.run([
+            self._prediction
+        ],
+            feed_dict = feed_dict
+        )
+
+        return output
+Error Desciption
+It is ok to build tfGraph. But I get into trouble when calling Model.predict().
+If the beam_width is set as 1, the program can normally run. And it raise the following error when the beam_width is set as 2.
+  File "/home/runke/lxtest/algorithm/algorithm/estimation/get_earnings.py", line 347, in _prediction
+    output_layer=self._output_projection_layer
+  File "/home/runke/lxtest/env3/lib/python3.4/site-packages/tensorflow/contrib/seq2seq/python/ops/beam_search_decoder.py", line 193, in __init__
+    initial_state, self._cell.state_size)
+  File "/home/runke/lxtest/env3/lib/python3.4/site-packages/tensorflow/python/util/nest.py", line 325, in map_structure
+    structure[0], [func(*x) for x in entries])
+  File "/home/runke/lxtest/env3/lib/python3.4/site-packages/tensorflow/python/util/nest.py", line 325, in <listcomp>
+    structure[0], [func(*x) for x in entries])
+  File "/home/runke/lxtest/env3/lib/python3.4/site-packages/tensorflow/contrib/seq2seq/python/ops/beam_search_decoder.py", line 374, in _maybe_split_batch_beams
+    return self._split_batch_beams(t, s)
+  File "/home/runke/lxtest/env3/lib/python3.4/site-packages/tensorflow/contrib/seq2seq/python/ops/beam_search_decoder.py", line 339, in _split_batch_beams
+    ([self._batch_size, self._beam_width], t_shape[1:]), 0))
+  File "/home/runke/lxtest/env3/lib/python3.4/site-packages/tensorflow/python/ops/gen_array_ops.py", line 2451, in reshape
+    name=name)
+  File "/home/runke/lxtest/env3/lib/python3.4/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "/home/runke/lxtest/env3/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 2506, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/runke/lxtest/env3/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 1269, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Input to reshape is a tensor with 128 values, but the requested shape has 256
+         [[Node: Reshape = Reshape[T=DT_FLOAT, Tshape=DT_INT32, _device="/job:localhost/replica:0/task:0/cpu:0"](encoder/rnn/while/Exit_2, concat)]]

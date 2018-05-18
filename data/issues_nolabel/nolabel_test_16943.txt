@@ -1,0 +1,36 @@
+tensorflow serving, add_meta_graph_and_variables() legacy_init_op doesn't surpport a tf.group of multi ops.
+
+the new nmt model in tutorial https://github.com/tensorflow/nmt using index_table_from_file and the datasets API make_initializable_iterator. So when I want to deploy the model as serving,  in builder.add_meta_graph_and_variables(), I assigned legacy_init_op with an tf.group(tf.tables_initializer(), infer_model.iterator.initializer) or use tf.control_dependencies, when I export the model and run it, I met a error: Failed precondition: Table not initialized.
+    builder = tf.saved_model.builder.SavedModelBuilder(export_path)
+    tensor_info_src = tf.saved_model.utils.build_tensor_info(
+        infer_model.src_placeholder)
+    tensor_info_sample_words = tf.saved_model.utils.build_tensor_info(
+        loaded_infer_model.sample_words)
+
+    prediction_signature = (
+        tf.saved_model.signature_def_utils.build_signature_def(
+            inputs={'src': tensor_info_src},
+            outputs={'sample_words': tensor_info_sample_words},
+            method_name=tf.saved_model.signature_constants.PREDICT_METHOD_NAME))
+
+    with tf.control_dependencies([tf.tables_initializer()]):
+         op1 = tf.no_op()
+    with tf.control_dependencies([op1, infer_model.iterator.initializer]):
+         op2 = tf.no_op(name='legacy_init_op')
+
+    legacy_init_op = tf.group(tf.tables_initializer(), infer_model.iterator.initializer,
+                              name='legacy_init_op')
+    print(legacy_init_op)
+
+    table_init_op = tf.group(tf.tables_initializer(),
+                             name='legacy_init_op')
+    print(table_init_op)
+
+    builder.add_meta_graph_and_variables(
+        session, [tf.saved_model.tag_constants.SERVING],
+        signature_def_map={
+            'predict_chat': prediction_signature
+        },
+        legacy_init_op=op2)
+    builder.save()
+    print('Done exporting.')```

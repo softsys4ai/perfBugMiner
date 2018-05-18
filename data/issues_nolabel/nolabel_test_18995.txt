@@ -1,0 +1,176 @@
+compiling c++ code with TFLite library gives error with cstring
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): N/A (using only source files)
+TensorFlow version (use command below): N/A
+Python version: 2.7.12
+Bazel version (if compiling from source): 0.13.0
+GCC/Compiler version (if compiling from source): g++ 5.4.0
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:
+
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+I'm trying to compile custom c++ code with command
+g++ -std=c++11 -Itensorflow/contrib/lite -I. -Lbazel-bin/tensorflow/contrib/lite -tflite test.cpp -o test
+and it gives some error that some functions in cstring cannot be found.
+When I delete line #include <cstring> from flatbuffers/base.h, errors from cstring disappear but others remain. Including cstring in flatbuffers.h also gives same errors.
+I'm using flatbuffers cloned from git google flatbuffers repository. Is this can be a problem?
+I've made c++ tensorflow lite library with command
+bagel build //tensorflow/contrib/lite:framework
+with lite/BUILD including
+cc_binary( name = "libtflite.so", deps = [ ":framework", "//tensorflow/contrib/lite/kernels:builtin_ops"], ] )
+Thanks.
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+C++ Code
+  1 #include <stdio.h>
+  2 
+  3 #include "tensorflow/contrib/lite/kernels/register.h"
+  4 #include "tensorflow/contrib/lite/model.h"
+  5 #include "tensorflow/contrib/lite/string_util.h"
+  6 #include "tensorflow/contrib/lite/tools/mutable_op_resolver.h"
+  7 
+  8 
+  9 
+ 10 int main(){
+ 11     const char* graph_path = "xorGate.lite";
+ 12     const int num_threads = 1;
+ 13     std::string input_layer_type = "float";
+ 14     float x,y;
+ 15 
+ 16     std::unique_ptr<tflite::FlatBufferModel> model(
+ 17         tflite::FlatBufferModel::BuildFromFile(graph_path));
+ 18 
+ 19     if(!model){
+ 20         printf("Failed to mmap model\n");
+ 21         exit(0);
+ 22     }
+ 23 
+ 24     tflite::ops::builtin::BuiltinOpResolver resolver;
+ 25     std::unique_ptr<tflite::Interpreter> interpreter;
+ 26     tflite::InterpreterBuilder(*model, resolver)(&interpreter);
+ 27 
+ 28     if(!interpreter){
+ 29         printf("Failed to construct interpreter\n");
+ 30         exit(0);
+ 31     }
+ 32 
+ 33     if(num_threads != 1){
+ 34         interpreter->SetNumThreads(num_threads);
+ 35     }
+ 36 
+ 37     float* input = interpreter->typed_input_tensor<float>(0);
+ 38 
+ 39     if(interpreter->AllocateTensors() != kTfLiteOk){
+ 40         printf("Failed to allocate tensors\n");
+ 41         exit(0);
+ 42     }
+ 43 
+ 44     //read two numbers
+ 45     std::printf("Type two float numbers : ");
+ 46     std::scanf("%f %f", &x, &y);
+ 47     input[0] = x;
+ 48     input[1] = y;
+ 49 
+ 50     if(interpreter->Invoke() != kTfLiteOk){
+ 51         std::printf("Failed to invoke!\n");
+ 52         exit(0);
+ 53     }
+ 54     float* output = interpreter->typed_output_tensor<float>(0);
+ 55     printf("output = %f\n", output[0]);
+ 56     return 0;
+ 57 }
+
+Log
+In file included from ./flatbuffers/base.h:2:0,
+                 from ./flatbuffers/flatbuffers.h:18,
+                 from ./tensorflow/contrib/lite/schema/schema_generated.h:21,
+                 from ./tensorflow/contrib/lite/model.h:40,
+                 from tensorflow/contrib/lite/kernels/register.h:20,
+                 from test.cpp:1:
+/usr/include/c++/5/cstring:75:11: error: ‘::memchr’ has not been declared
+   using ::memchr;
+/usr/include/c++/5/cstring:76:11: error: ‘::memcmp’ has not been declared
+   using ::memcmp;
+/usr/include/c++/5/cstring:77:11: error: ‘::memcpy’ has not been declared
+   using ::memcpy;
+/usr/include/c++/5/cstring:78:11: error: ‘::memmove’ has not been declared
+   using ::memmove;
+/usr/include/c++/5/cstring:79:11: error: ‘::memset’ has not been declared
+   using ::memset;
+/usr/include/c++/5/cstring:80:11: error: ‘::strcat’ has not been declared
+   using ::strcat;
+
+...
+same error from different functions
+...
+   
+In file included from ./tensorflow/contrib/lite/schema/schema_generated.h:21:0,
+                 from ./tensorflow/contrib/lite/model.h:40,
+                 from tensorflow/contrib/lite/kernels/register.h:20,
+                 from test.cpp:1:
+./flatbuffers/flatbuffers.h: In member function ‘bool flatbuffers::String::operator<(const flatbuffers::String&) const’:
+./flatbuffers/flatbuffers.h:346:12: error: ‘strcmp’ is not a member of ‘std’
+     return std::strcmp(c_str(), o.c_str()) < 0;
+            ^
+./flatbuffers/flatbuffers.h: In member function ‘void flatbuffers::Allocator::memcpy_downward(uint8_t*, size_t, uint8_t*, size_t, size_t, size_t)’:
+./flatbuffers/flatbuffers.h:387:23: error: ‘memcpy’ was not declared in this scope
+            in_use_back);
+                       ^
+./flatbuffers/flatbuffers.h: In member function ‘void flatbuffers::vector_downward::push(const uint8_t*, size_t)’:
+./flatbuffers/flatbuffers.h:628:39: error: ‘memcpy’ was not declared in this scope
+     memcpy(make_space(num), bytes, num);
+                                       ^
+./flatbuffers/flatbuffers.h: In member function ‘void flatbuffers::vector_downward::fill_big(size_t)’:
+./flatbuffers/flatbuffers.h:652:57: error: ‘memset’ was not declared in this scope
+     memset(make_space(zero_pad_bytes), 0, zero_pad_bytes);
+                                                         ^
+./flatbuffers/flatbuffers.h: In member function ‘flatbuffers::uoffset_t flatbuffers::FlatBufferBuilder::EndTable(flatbuffers::uoffset_t)’:
+./flatbuffers/flatbuffers.h:982:62: error: ‘memcmp’ was not declared in this scope
+         if (vt1_size != vt2_size || memcmp(vt2, vt1, vt1_size)) continue;
+                                                              ^
+./flatbuffers/flatbuffers.h: In member function ‘flatbuffers::Offset<flatbuffers::String> flatbuffers::FlatBufferBuilder::CreateString(const char*)’:
+./flatbuffers/flatbuffers.h:1061:40: error: ‘strlen’ was not declared in this scope
+     return CreateString(str, strlen(str));
+                                        ^
+./flatbuffers/flatbuffers.h: In member function ‘flatbuffers::Offset<flatbuffers::String> flatbuffers::FlatBufferBuilder::CreateString(char*)’:
+./flatbuffers/flatbuffers.h:1068:40: error: ‘strlen’ was not declared in this scope
+     return CreateString(str, strlen(str));
+                                        ^
+./flatbuffers/flatbuffers.h: In member function ‘flatbuffers::Offset<flatbuffers::String> flatbuffers::FlatBufferBuilder::CreateSharedString(const char*)’:
+./flatbuffers/flatbuffers.h:1124:46: error: ‘strlen’ was not declared in this scope
+     return CreateSharedString(str, strlen(str));
+                                              ^
+In file included from ./flatbuffers/base.h:12:0,
+                 from ./flatbuffers/flatbuffers.h:18,
+                 from ./tensorflow/contrib/lite/schema/schema_generated.h:21,
+                 from ./tensorflow/contrib/lite/model.h:40,
+                 from tensorflow/contrib/lite/kernels/register.h:20,
+                 from test.cpp:1:
+./flatbuffers/flatbuffers.h: In member function ‘void flatbuffers::FlatBufferBuilder::Finish(flatbuffers::uoffset_t, const char*, bool)’:
+./flatbuffers/flatbuffers.h:1563:48: error: ‘strlen’ was not declared in this scope
+       FLATBUFFERS_ASSERT(strlen(file_identifier) == kFileIdentifierLength);
+                                                ^
+./flatbuffers/flatbuffers.h:1563:7: note: in expansion of macro ‘FLATBUFFERS_ASSERT’
+       FLATBUFFERS_ASSERT(strlen(file_identifier) == kFileIdentifierLength);
+       ^
+In file included from ./tensorflow/contrib/lite/schema/schema_generated.h:21:0,
+                 from ./tensorflow/contrib/lite/model.h:40,
+                 from tensorflow/contrib/lite/kernels/register.h:20,
+                 from test.cpp:1:
+./flatbuffers/flatbuffers.h: In member function ‘bool flatbuffers::FlatBufferBuilder::StringOffsetCompare::operator()(const flatbuffers::Offset<flatbuffers::String>&, const flatbuffers::Offset<flatbuffers::String>&) const’:
+./flatbuffers/flatbuffers.h:1604:64: error: ‘strncmp’ was not declared in this scope
+                      (std::min)(stra->size(), strb->size()) + 1) < 0;
+                                                                ^
+./flatbuffers/flatbuffers.h: In function ‘bool flatbuffers::BufferHasIdentifier(const void*, const char*, bool)’:
+./flatbuffers/flatbuffers.h:1676:58: error: ‘strncmp’ was not declared in this scope
+                  FlatBufferBuilder::kFileIdentifierLength) == 0;
+                                                          ^
+./flatbuffers/flatbuffers.h: In function ‘int flatbuffers::LookupEnum(const char**, const char*)’:
+./flatbuffers/flatbuffers.h:2119:10: error: ‘strcmp’ is not a member of ‘std’
+     if (!std::strcmp(*p, name)) return static_cast<int>(p - names);

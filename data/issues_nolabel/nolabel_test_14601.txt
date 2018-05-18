@@ -1,0 +1,44 @@
+Conv2D operator with SAME padding when Stride > kernel size showing unexpected results
+
+System information
+
+Have I written custom code -- YES, only to demonstrate the problem (source code is below):
+OS Platform and Distribution (Linux Ubuntu 16.04):
+TensorFlow installed from (binary (PIP)):
+TensorFlow version (1.4.0):
+Python version (2.7.12):
+Bazel version (N/A):
+GCC/Compiler version (N/A):
+CUDA/cuDNN version (N/A):
+GPU model and memory (N/A -- CPU only):
+Exact command to reproduce (See Source Code Below):
+
+Describe the problem
+There is an inconsistency between the convolution documentation on padding with 'SAME' located here and the behavior of the tf.nn.conv2d operator. In the example below I create a 3x1 input with values [[1.0][1.1][1.2]] and a 1x1 filter of value [1.0]. I specify the stride to be 1x3x1x1 which should result in only a single element be output and the padding to be 'SAME'. From the padding calculation in the above link:
+pad_along_height:
+in_height ( = 3) % strides[1]( = 3) == 0 so
+pad_along_height = max(filter_height ( = 1) - strides[1] ( = 3), 0)
+pad_along_height = max(-2, 0) = 0
+
+pad along_width:
+in_width ( = 1) % strides[2] ( = 1) == 0 so
+pad_along_width = max(filter_width( = 1) - strides[2] ( = 1), 0
+pad_along_width = max(0,0) = 0
+
+My hypothesis is that pad_along_* is not using the max(x,0) and as a result, pad_along_height = -2. Therefore pad_top = -1 and pad_bottom = -1. If that was the case, then our input is reduced to only the middle element [1.1] which explains why the TF result of the code below is 1.1 rather than the expected 1.0 (value of first input).
+If I change the padding to be VALID (no padding) then this code below gives the result of 1.0 or if i instead change the stride to 1,2,1,1 i get the expected value of 1.0 (although in this case my hypothesis proposes that pad_bottom is still -1).
+Source code / logs
+import tensorflow as tf
+import numpy as np
+
+i = tf.constant((np.ones(3) + np.arange(3) * 0.1).reshape(1,3,1,1), dtype=tf.float32, name='input')
+f = tf.constant(np.ones(1).reshape(1,1,1,1), dtype=tf.float32, name='filter')
+
+conv = tf.nn.conv2d(input=i, filter=f, strides=(1,3,1,1), padding='SAME')
+
+with tf.Session() as sess:
+    out = sess.run(conv)
+    print out
+
+Output:
+[[[[ 1.10000002]]]]

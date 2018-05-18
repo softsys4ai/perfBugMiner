@@ -1,0 +1,54 @@
+Different behavior of tf.extract_image_patches and tf.nn.conv2d for certain padding/stride/filter size combinations
+
+Hi!
+I am trying to implement something using tf.extract_image_patches and ran into some troubles that made clear tf.extract_image_patches handles some combinations of padding, filter size and stride differently than tf.nn.conv2d. Since tf.extract_image_patches is conceptually a "part" of a convolution operation, I think this might be unintended behavior.
+Specifically, I implemented a "manual" version of a convolution operation using tf.extract_image_patches
+def manual_conv(input, filter, strides, padding):
+  h_f, w_f, c_in, c_out = filter.get_shape().as_list()
+  input_patches = tf.extract_image_patches(input, ksizes=[1, h_f, w_f, 1 ], strides=strides, rates=[1, 1, 1, 1], padding=padding)
+  filters_flat = tf.reshape(filter, shape=[h_f*w_f*c_in, c_out])
+  return tf.einsum("ijkl,lm->ijkm", input_patches, filters_flat)
+and tested it like this
+import unittest
+import tensorflow as tf
+
+class TestManualConvToyData(unittest.TestCase):
+
+  def runTest(self):
+    m = 32
+    c_in = 3
+    c_out = 16
+
+    image_sizes = [127, 64]
+    filter_sizes = [1, 2, 3, 5, 11]
+    strides = [1, 3, 4, 30]
+    paddings = ["VALID", "SAME"]
+
+    for fs in filter_sizes:
+      for stri in strides:
+        for imsize in image_sizes: 
+          for pad in paddings:
+            h = w = imsize
+            h_f = w_f = fs
+            print "Testing for", imsize, fs, stri, pad
+
+            tf.reset_default_graph()
+            X = tf.constant(1.0+np.random.rand(m, h, w, c_in), tf.float32)
+            W = tf.truncated_normal([h_f, w_f, c_in, c_out])
+
+            Z = tf.nn.conv2d(X, W, strides=[1, stri, stri, 1], padding=pad)
+            Z_manual = manual_conv(X, W, strides=[1, stri, stri, 1], padding=pad)
+
+            sess = tf.Session()
+            sess.run(tf.global_variables_initializer())
+            Z_, Z_manual_ = sess.run([Z, Z_manual])
+            self.assertEqual(Z_.shape, Z_manual_.shape)
+            self.assertTrue(np.allclose(Z_, Z_manual_, rtol=1e-05))
+            sess.close()
+This test fails for some combinations of padding, filter size and stride. I think it has to do with the fact that tf.extract_image_patches tries to center patches if possible, as discussed in this stackoverflow question.
+
+System information
+
+Ubuntu 16.04.
+Python 2.7.12
+tensorflow version 1.2.1 installed via pip (CPU only)

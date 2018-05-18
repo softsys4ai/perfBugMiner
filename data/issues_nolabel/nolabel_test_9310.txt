@@ -1,0 +1,51 @@
+Is tf.train.import_meta_graph() contextual with tf.global[local]_variables_initializer() ?
+
+I can use these pieces of codes to continue my training with pre-trained model:
+ tf.reset_default_graph() 
+ new_saver = tf.train.import_meta_graph("xxx.meta")
+ new_saver.restore(sess, "xxx.ckpt-yyy")
+
+Here the 'tf.reset_default_graph() is necessary'  to solve the 'redefine of ops' issues.But,when I  launched  forward pass(in another .py file) like :
+ tf.reset_default_graph() 
+ new_saver = tf.train.import_meta_graph("xxx.meta")
+ new_saver.restore(sess, "xxx.ckpt-yyy")
+ images_placeholder = tf.get_default_graph().get_tensor_by_name("image_batch:0")
+ embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
+
+with 'tf.reset_default_graph()' I got :
+"Cannot interpret feed_dict key as Tensor: The name 'save/Const:0' refers to a Tensor which does not exist. The operation, 'save/Const', does not exist in the graph"
+without 'tf.reset_default_graph()'  and with 'tf.global[local]_variables_initializer()' before or without it like:
+sess.run(tf.global_variables_initializer())
+sess.run(tf.local_variables_initializer())
+ new_saver = tf.train.import_meta_graph("xxx.meta")
+ new_saver.restore(sess, "xxx.ckpt-yyy")
+ images_placeholder = tf.get_default_graph().get_tensor_by_name("image_batch:0")
+ embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
+
+#Without initializer
+#sess.run(tf.global_variables_initializer())
+#sess.run(tf.local_variables_initializer())
+new_saver = tf.train.import_meta_graph("xxx.meta")
+new_saver.restore(sess, "xxx.ckpt-yyy")
+images_placeholder = tf.get_default_graph().get_tensor_by_name("image_batch:0")
+embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
+I got : "FailedPreconditionError: Attempting to use uninitialized value...".But like:
+new_saver = tf.train.import_meta_graph("xxx.meta")
+new_saver.restore(sess, "xxx.ckpt-yyy")
+sess.run(tf.global_variables_initializer())
+sess.run(tf.local_variables_initializer())
+images_placeholder = tf.get_default_graph().get_tensor_by_name("image_batch:0")
+embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
+I got neither warnings nor errors info,but the result is all features of embeddings is 0.Maybe 'tf.global[local]variables_initializer()' has cleared the loaded weights ?
+After that I used the  frozen graph which was produced by pre-trained model to launch forward,like:
+with tf.Graph().as_default():
+graph_def = graph_pb2.GraphDef()
+print('Model directory: %s' % os.path.expanduser(args.modelpb_file))
+with open(os.path.expanduser(args.modelpb_file),'rb') as f:
+graph_def_.ParseFromString(f.read())
+_ = importer.import_graph_def(graph_def_,name="")
+with tf.Session() as sess:
+images_placeholder = tf.get_default_graph().get_tensor_by_name("image_batch:0")
+embeddings = tf.get_default_graph().get_tensor_by_name("embeddings:0")
+I still got the "FailedPreconditionError: Attempting to use uninitialized value..." issues.
+Really confusing,who can help ?

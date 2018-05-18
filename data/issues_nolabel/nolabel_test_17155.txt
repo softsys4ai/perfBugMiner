@@ -1,0 +1,95 @@
+Memory leak in tf.unique on GPU
+
+System 1 information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 14.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4.0
+Python version: 3.5.2
+Bazel version (if compiling from source): n/a
+CUDA/cuDNN version: 8.0/6.0
+GPU model and memory: GeForce GTX TITAN, 6Gb
+Exact command to reproduce: n/a
+
+System 2 information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.7.0-dev20180219
+Python version: 3.6.1
+Bazel version (if compiling from source): n/a
+CUDA/cuDNN version: 9.0/7.0
+GPU model and memory: TITAN X (Pascal), 12Gb
+Exact command to reproduce: n/a
+
+Describe the problem
+The tf.unique op leaks memory when it is placed on GPU.
+I wrote a simple script (below) that runs a couple of tf.unique ops. I track the memory usage with psutil.Process(getpid()).memory_info().rss command. I ran the script on System 1 twice: once on CPU and GPU (specified by tf.device), for num_steps=2000. Here is the plot of the memory usage:
+
+So, the memory usage of CPU unique is pretty flat, but the GPU unique is inconclusive. Here is the memory usage on System 1 with num_steps=10000:
+
+Relatively recent version of tensorflow (System 2) also has the problem:
+
+Source code / logs
+import tensorflow as tf
+import numpy as np
+import psutil
+from os import getpid
+
+val_num = 8*256*256
+val_dim = 5
+max_val = 200
+num_steps = 10000
+
+
+def main():
+
+    with tf.device("/gpu:0"):
+        x = tf.placeholder(tf.int32, [val_num, val_dim])
+    
+        def tf_unique_row_idxs(inp, max_dim=None, name=''):
+            with tf.variable_scope('tf_unique_row_idxs_'+name) as scope:
+                if not max_dim:
+                    max_dim = inp.get_shape().as_list()[1]
+                new_vals = inp[:,0]
+                new_vals = tf.cast(new_vals, dtype=tf.int32)
+                _, idx = tf.unique(new_vals, out_idx=tf.int32)
+                for j in range(1, max_dim):
+                    new_vals = inp[:,j]
+                    new_vals = tf.cast(new_vals, dtype=tf.int32)
+                    val_min = tf.reduce_min(new_vals)
+                    val_max = tf.reduce_max(new_vals)
+                    idx_shift = val_max - val_min + 1
+                    vals = idx*idx_shift + new_vals - val_min
+                    uvals, idx = tf.unique(vals, out_idx=tf.int32)
+                max_pos = tf.shape(uvals, out_type=tf.int32)[0] + 0
+                return idx, max_pos
+    
+        idxs, max_pos = tf_unique_row_idxs(x)
+    
+    
+    process = psutil.Process(getpid())
+
+    cur_config=tf.ConfigProto(allow_soft_placement=False,log_device_placement=False)
+    sess = tf.Session(config=cur_config)
+    sess.run(tf.global_variables_initializer())
+    
+
+    mem_usage = np.zeros([num_steps], dtype=np.float32)
+
+    np.random.seed(0)
+    for i in range(num_steps):
+        cur_x = np.random.randint(0, max_val, [val_num, val_dim], dtype=np.int32)
+        cur_feed_dict = {x: cur_x}
+        cur_max_pos, cur_idxs = sess.run([max_pos, idxs], feed_dict=cur_feed_dict)
+        mem_usage[i] = process.memory_info().rss/2**30
+        if i%100==0:
+            print(i/num_steps)
+    
+
+    np.savetxt('unique_memlog.txt', mem_usage)
+
+if __name__ == "__main__":
+    main()

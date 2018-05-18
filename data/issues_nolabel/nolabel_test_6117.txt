@@ -1,0 +1,102 @@
+distributed tensorflow failed to save variable larger than 2G
+
+when use distributed tensorflow saver to save larger variables(more than 2G),  it get stuck and won't save successfully.
+tensorflow version: rc0.11
+bazel version: 0.3.
+minimal reproducible example:
+file1: test_saver.py
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import os
+import time
+from datetime import datetime
+
+import numpy
+import tensorflow as tf
+
+import sys
+
+flags = tf.app.flags
+FLAGS = flags.FLAGS
+tf.app.flags.DEFINE_string('job_name', '', 'One of "ps", "worker"')
+
+def run_training(target, cluster_spec):
+  with tf.device(tf.train.replica_device_setter(
+        worker_device="/job:worker/task:%d/%s" % (0, 'cpu:0'),
+        cluster=cluster_spec)):
+    with tf.name_scope('test'):
+        test_weight1 = tf.get_variable("test_weight1", [24500000, 22],  # bigger then 2G
+                    initializer=tf.random_normal_initializer())
+        test_weight2 = tf.get_variable("test_weight2", [24500, 22], # smaller then 2G
+                    initializer=tf.random_normal_initializer())
+
+    saver1 = tf.train.Saver([test_weight1 ], write_version=tf.train.SaverDef.V2)
+#    saver2 = tf.train.Saver([test_weight2], write_version=tf.train.SaverDef.V2)
+
+    # The op for initializing the variables.
+    init_op = tf.group(tf.initialize_all_variables(),
+                       tf.initialize_local_variables())
+    sv = tf.train.Supervisor(is_chief=True,
+                             logdir="log",
+                             init_op=init_op,
+                             summary_op=None,
+                             saver=saver1,
+#                             saver=saver2,
+                             )
+    # Get a session.
+    sess = sv.prepare_or_wait_for_session(target)
+
+    # Start the queue runners.
+    queue_runners = tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS)
+    sv.start_queue_runners(sess, queue_runners)
+
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+    step = 1
+    print('start to train.')
+    sys.stdout.flush()
+    while not coord.should_stop():
+      w1 = sess.run([test_weight2])
+      print('start to save checkpoint, time=%s'%datetime.now())
+      sys.stdout.flush()
+      checkpoint_path = 'model.ckpt'
+      saver1.save(sess, checkpoint_path, global_step=1)    # saver1 get stuck with high cpu, please refer to line 29 and 39
+      #saver2.save(sess, checkpoint_path, global_step=1)   # saver2 can save smoothly, please refer to line 30 and 40
+      print('after save checkpoint, time=%s'%datetime.now())
+      sys.stdout.flush()
+      step += 1
+    sess.close()
+
+def main(_):
+  assert FLAGS.job_name in ['ps', 'worker'], 'job_name must be ps or worker'
+
+  ps_hosts = ['127.0.0.1:3721',]
+  worker_hosts = ['127.0.0.1:3722',]
+  cluster_spec = tf.train.ClusterSpec({'ps': ps_hosts, 'worker': worker_hosts})
+  server = tf.train.Server(
+      {'ps': ps_hosts,
+       'worker': worker_hosts},
+      job_name=FLAGS.job_name,
+      task_index=0)   # test for one ps and one worker
+
+  if FLAGS.job_name == 'ps':
+    # `ps` jobs wait for incoming connections from the workers.
+    server.join()
+  else:
+    run_training(server.target, cluster_spec)
+
+if __name__ == '__main__':
+  tf.app.run()
+
+
+file2: run_test_saver.sh
+#!/bin/bash
+
+CUDA_VISIBLE_DEVICES='' nohup python test_saver.py --job_name=ps > ps.out&
+
+CUDA_VISIBLE_DEVICES='' nohup python test_saver.py --job_name=worker > worker.out &
+
+
+PS:  both saver1 and saver2 can work correctly when use standalone tensorflow(i.e  without parameter server)

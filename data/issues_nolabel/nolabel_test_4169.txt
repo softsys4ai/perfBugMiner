@@ -1,0 +1,105 @@
+My project worked well before r0.8, but got NAN after updating to r0.10
+
+I can not figure out what has been changed in r0.10.
+After updating to r0.10, I modify some of the import to fit r0.10. But when after run "sess.run([train_op, loss])" for one iteration, the loss is NAN. However, all these code work well before r0.8.
+And the trained model also produced different result (random precision).
+Any suggestions?
+The code for building all ops is:
+    print("Preparing GPU %d ......"%(FLAGS.gpu))
+    with tf.device('/gpu:%d' % FLAGS.gpu):
+        with tf.name_scope('%s' % (FLAGS.TOWER_NAME)):
+            # Calculate the loss for one tower of the model. This function
+            # constructs the entire model but shares the variables across
+            # all towers.
+            temp_istates = []
+            for i in xrange(FLAGS.num_lstm):
+                initial_state = tf.placeholder(tf.float32, shape=(batch_size_per_gpu/FLAGS.n_steps, 1*num_lstm_units[i]),
+                                                name='train_lstm_%d_istate'%i)
+                train_initial_states[initial_state] = []
+                temp_istates.append(initial_state)
+            train_net = model.net_class({'data':train_data}, trainable=True, TOWER_NAME=FLAGS.TOWER_NAME,
+                    NUM_CLASSES=FLAGS.NUM_CLASSES, n_steps=FLAGS.n_steps,
+                    initial_state=temp_istates, lstm_num_units=num_lstm_units)
+            logits = train_net.get_output()
+            train_net.slim_loss(logits, train_label, FLAGS.NUM_CLASSES)
+
+            # Reuse variables for the next tower.
+            tf.get_variable_scope().reuse_variables()
+            losses = tf.get_collection(slim.losses.LOSSES_COLLECTION)
+
+            # Calculate the total loss for the current tower.
+            regularization_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+            total_loss = tf.add_n(losses + regularization_losses, name='total_loss')
+
+            # Compute the moving average of all individual losses and the total loss.
+            loss_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
+            loss_averages_op = loss_averages.apply(losses + [total_loss])
+
+            # Attach a scalar summary to all individual losses and the total loss; do the
+            # same for the averaged version of the losses.
+            for l in losses + [total_loss]:
+                # Name each loss as '(raw)' and name the moving average version of the loss
+                # as the original loss name.
+                tf.scalar_summary(l.op.name +' (raw)', l)
+                tf.scalar_summary(l.op.name, loss_averages.average(l))
+
+            with tf.control_dependencies([loss_averages_op]):
+                loss = tf.identity(total_loss)
+
+            # Retain the Batch Normalization updates operations only from the
+            # final tower. Ideally, we should grab the updates from all towers
+            # but these stats accumulate extremely fast so we can ignore the
+            # other stats from the other towers without significant detriment.
+            batchnorm_updates = tf.get_collection(slim.ops.UPDATE_OPS_COLLECTION)
+
+            with tf.control_dependencies([loss_averages_op]):
+                # Create an optimizer that performs gradient descent.
+                if FLAGS.optimizer == 'SGD':
+                    opt = tf.train.GradientDescentOptimizer(lr)
+                elif FLAGS.optimizer == 'Momentum':
+                    opt = tf.train.MomentumOptimizer(lr, momentum=FLAGS.momentum)
+                elif FLAGS.optimizer == 'Adagrad':
+                    opt = tf.train.AdagradOptimizer(lr)
+                elif FLAGS.optimizer == 'Adam':
+                    opt = tf.train.AdamOptimizer(lr)
+                elif FLAGS.optimizer == 'Ftrl':
+                    opt = tf.train.FtrlOptimizer(lr)
+                elif FLAGS.optimizer == 'RMSProp':
+                    opt = tf.train.RMSPropOptimizer(lr, FLAGS.RMSPROP_DECAY,
+                                                    momentum=FLAGS.RMSPROP_MOMENTUM,
+                                                    epsilon=FLAGS.RMSPROP_EPSILON)
+                else:
+                    raise NotImplementedError('Optimizer %s not implemented.'%FLAGS.optimizer)
+                # We must calculate the mean of each gradient. Note that this is the
+                # synchronization point across all towers.
+                grads = opt.compute_gradients(loss, colocate_gradients_with_ops=True)
+
+            grads = decay_grads(grads)
+            # Apply the gradients to adjust the shared variables.
+            apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
+
+            # Add histograms for gradients.
+            for grad, var in grads:
+                if grad is not None:
+                    tf.histogram_summary(var.op.name + '/gradients', grad)
+
+            # Add histograms for trainable variables.
+            for var in tf.trainable_variables():
+                tf.histogram_summary(var.op.name, var)
+
+            # Track the moving averages of all trainable variables.
+            variable_averages = tf.train.ExponentialMovingAverage(
+                FLAGS.MOVING_AVERAGE_DECAY, global_step)
+
+            # Another possiblility is to use tf.slim.get_variables().
+            variables_to_average = (tf.trainable_variables() +
+                                    tf.moving_average_variables())
+            variables_averages_op = variable_averages.apply(variables_to_average)
+
+            # Group all updates to into a single train op.
+            batchnorm_updates_op = tf.group(*batchnorm_updates)
+            train_op = tf.group(apply_gradient_op, variables_averages_op,
+                                batchnorm_updates_op)
+
+            # Build the summary operation from the last tower summaries.
+            summary_op = tf.merge_all_summaries()

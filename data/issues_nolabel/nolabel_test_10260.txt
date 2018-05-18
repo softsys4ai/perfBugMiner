@@ -1,0 +1,49 @@
+Image and label decode from TFRecord are synchronized.
+
+The data I read from TFRecords has a problem, the image and label are synchronized. In other words, what we want is [a---1, b---2, c---3, d---4, e---5], but what I got is [a---2, b---3, c---4, d---5, e---1]. The version of TensorFlow I used is 1.1.0. Can someone help me? thanks a lot. Here is my code:
+import tensorflow as tf
+
+images = ['a', 'b', 'c', 'd', 'e']
+labels = [1, 2, 3, 4, 5]
+
+
+def convert_to_tfrecords(_images, _labels):
+    path = 'test.tfrecords'
+    writer = tf.python_io.TFRecordWriter(path)
+    for [i, l] in zip(_images, _labels):
+        example = tf.train.Example(features=tf.train.Features(feature={
+            'image': tf.train.Feature(bytes_list=tf.train.BytesList(value=[tf.compat.as_bytes(i)])),
+            'label': tf.train.Feature(int64_list=tf.train.Int64List(value=[l]))
+        }))
+        writer.write(example.SerializeToString())
+    writer.close()
+
+
+def read_and_decode(filename_queue):
+    reader = tf.TFRecordReader()
+    _, serialized_example = reader.read(filename_queue)
+    features = tf.parse_single_example(serialized_example, features={
+        'image': tf.FixedLenFeature([], tf.string),
+        'label': tf.FixedLenFeature([], tf.int64)
+    })
+    _image = tf.cast(features['image'], tf.string)
+    _label = tf.cast(features['label'], tf.int64)
+    return _image, _label
+
+
+def main():
+    convert_to_tfrecords(images, labels)
+    filename = 'test.tfrecords'
+    filename_queue = tf.train.string_input_producer([filename])
+    img, lab = read_and_decode(filename_queue)
+    with tf.Session() as sess:
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+        for _ in range(5):
+            print(sess.run(img), '---', sess.run(lab))
+        coord.request_stop()
+        coord.join(threads)
+
+
+if __name__ == '__main__':
+    main()

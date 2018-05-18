@@ -1,0 +1,124 @@
+Saver.save inconsistently throws InvalidArgumentError with Batch Normalization
+
+Hi,
+First off - thanks for releasing TensorFlow. It is immensely helpful in many ways (e.g. getting it working on my GPU was a breeze). However, because of its novelty I'm running into a problem I cannot just Google.
+After adding batch normalization to the code for a variational autoencoder found here:
+https://github.com/tensorflow/tensorflow/issues/new
+saver.save() starts crashing inconsistently (sometimes it will save, sometimes it will crash). The error is unhelpful, so I'm not sure what is wrong (see error logs below).
+I call the saver as follows:
+    saver = tf.train.Saver()
+        with tf.Session(graph=vae.graph) as sess:
+
+            tf.train.SummaryWriter("/tmp/vae_logs", sess.graph)
+            init = tf.initialize_all_variables()
+
+Environment info
+Operating System:
+Ubuntu 15.10
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+-rw-r--r-- 1 root root   322936 aug 15  2015 /usr/local/cuda-7.5/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 aug 15  2015 /usr/local/cuda-7.5/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root       19 aug 15  2015 /usr/local/cuda-7.5/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root   383336 aug 15  2015 /usr/local/cuda-7.5/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root   720192 aug 15  2015 /usr/local/cuda-7.5/lib64/libcudart_static.a
+-rwxr-xr-x 1 root root 61453024 apr  3 10:09 /usr/local/cuda-7.5/lib64/libcudnn.so
+-rwxr-xr-x 1 root root 61453024 apr  3 10:09 /usr/local/cuda-7.5/lib64/libcudnn.so.4
+-rwxr-xr-x 1 root root 61453024 apr  3 10:09 /usr/local/cuda-7.5/lib64/libcudnn.so.4.0.7
+-rw-r--r-- 1 root root 62025862 apr  3 10:09 /usr/local/cuda-7.5/lib64/libcudnn_static.a
+
+
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+
+pip freeze 
+tensorflow==0.8.0
+
+
+The output from python -c "import tensorflow; print(tensorflow.version)".
+
+ print(tensorflow.__version__)
+0.8.0
+
+If installed from sources, provide the commit hash:
+Steps to reproduce
+
+Adapted the code from https://github.com/arahuja/generative-tf/tree/master/generative-tf for a Variational Autoencoder for Gaussian decoders
+(this works fine)
+Added batch normalization:
+Added the following to variational_autoencoder.py in def init:
+
+if self.batch_normalized:
+                self.scale_decoder = tf.Variable(tf.ones([hidden_dim], name="decoder_scale"))
+                self.beta_decoder  = tf.Variable(tf.zeros([hidden_dim], name="decoder_beta"))
+
+                self.scale_encoder = tf.Variable(tf.ones([hidden_dim], name="encoder_scale"))
+                self.beta_encoder  = tf.Variable(tf.zeros([hidden_dim], name="encoder_beta" ))
+
+
+Added the following to the _generate and _encode functions (changing the different variables of course):
+
+if self.batch_normalized:
+                layer_output = tf.matmul(z, self._decoder_W) + self._decoder_bias
+                batch_mean, batch_var = tf.nn.moments(layer_output, axes=[0])
+                epsilon = 1e-4
+                batch_normalized = tf.nn.batch_normalization(layer_output, batch_mean, batch_var, self.beta_decoder, self.scale_decoder, epsilon, name="normalization_decoder")
+                h = self.activation_func(batch_normalized)
+
+
+
+Now sometimes the saver throws a very cryptic 'InvalidArgumentError', but it is unclear to me why.
+
+What have you tried?
+
+Changed the names that I store the models in (does not help)
+Turned off Batch normalization (helps)
+Went through source code trying to track the error; but got stuck (not sure what protobuf does).
+Tried using less or more epochs (does not help)
+
+Is this a known bug?
+Best regards
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+
+Traceback (most recent call last):
+  File "train_mnist_vae.py", line 374, in <module>
+    batch_normalized=args.bn
+  File "train_mnist_vae.py", line 212, in train_test_mnist_vae
+    save_path = saver.save(sess, os.path.join("saved_models/", model_path + ".ckpt"))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 1039, in save
+    {self.saver_def.filename_tensor_name: checkpoint_file})
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 340, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 564, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 637, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 659, in _do_call
+    e.code)
+tensorflow.python.framework.errors.InvalidArgumentError: saved_models/bern=False_bn=True_bs=100_ds=frey_epochs=40000_ff=True_hd=300_iw=False_ld=2_lr=1e-05_mm=0_0_nt=2000_opt=rmsprop_wd=0_1.ckpt.tempstate10425989302811289116
+     [[Node: save/save = SaveSlices[T=[DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_FLOAT], _device="/job:localhost/replica:0/task:0/cpu:0"](_recv_save/Const_0, save/save/tensor_names, save/save/shapes_and_slices, Variable/_48233, Variable/RMSProp/_48235, Variable/RMSProp_1/_48237, Variable_1/_48239, Variable_1/RMSProp/_48241, Variable_1/RMSProp_1/_48243, Variable_2/_48245, Variable_2/RMSProp/_48247, Variable_2/RMSProp_1/_48249, Variable_3/_48251, Variable_3/RMSProp/_48253, Variable_3/RMSProp_1/_48255, decoderB/_48257, decoderB/RMSProp/_48259, decoderB/RMSProp_1/_48261, decoderW/_48263, decoderW/RMSProp/_48265, decoderW/RMSProp_1/_48267, encoderB/_48269, encoderB/RMSProp/_48271, encoderB/RMSProp_1/_48273, encoderW/_48275, encoderW/RMSProp/_48277, encoderW/RMSProp_1/_48279, log_var_decoder/_48281, log_var_decoder/RMSProp/_48283, log_var_decoder/RMSProp_1/_48285, log_var_decoder_b/_48287, log_var_decoder_b/RMSProp/_48289, log_var_decoder_b/RMSProp_1/_48291, log_var_encoder/_48293, log_var_encoder/RMSProp/_48295, log_var_encoder/RMSProp_1/_48297, log_var_encoder_b/_48299, log_var_encoder_b/RMSProp/_48301, log_var_encoder_b/RMSProp_1/_48303, mean_decoder/_48305, mean_decoder/RMSProp/_48307, mean_decoder/RMSProp_1/_48309, mean_decoderB/_48311, mean_decoderB/RMSProp/_48313, mean_decoderB/RMSProp_1/_48315, mean_encoder/_48317, mean_encoder/RMSProp/_48319, mean_encoder/RMSProp_1/_48321, mean_encoderB/_48323, mean_encoderB/RMSProp/_48325, mean_encoderB/RMSProp_1/_48327)]]
+Caused by op u'save/save', defined at:
+  File "train_mnist_vae.py", line 374, in <module>
+    batch_normalized=args.bn
+  File "train_mnist_vae.py", line 81, in train_test_mnist_vae
+    saver = tf.train.Saver()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 833, in __init__
+    restore_sequentially=restore_sequentially)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 501, in build
+    save_tensor = self._AddSaveOps(filename_tensor, vars_to_save)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 197, in _AddSaveOps
+    save = self.save_op(filename_tensor, vars_to_save)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 149, in save_op
+    tensor_slices=[vs.slice_spec for vs in vars_to_save])
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/io_ops.py", line 172, in _save
+    tensors, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_io_ops.py", line 341, in _save_slices
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 661, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2154, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1154, in __init__
+    self._traceback = _extract_stack()

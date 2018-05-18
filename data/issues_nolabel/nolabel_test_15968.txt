@@ -1,0 +1,34 @@
+Imperfect implementation of tf.losses.mean_pairwise_squared_error
+
+System information
+
+TensorFlow version: 1.4.0, 1.4.1, and 1.5.0-rc0 (checked)
+Have I written custom code: N/A
+OS Platform and Distribution: N/A
+TensorFlow installed from: N/A
+Bazel version: N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A
+
+Describe the problem
+The implementation of tf.losses.mean_pairwise_squared_error looks imperfect.
+For example, as explained in the API reference of the function
+
+For example, if labels=[a, b, c] and predictions=[x, y, z], there are three pairs of differences are summed to compute the loss: loss = [ ((a-b) - (x-y)).^2 + ((a-c) - (x-z)).^2 + ((b-c) - (y-z)).^2 ] / 3
+
+let me put the following data as labels and predictions:
+labels = tf.constant([[0., 0.5, 1.]])
+predictions = tf.constant([[1., 1., 1.]])
+tf.losses.mean_pairwise_squared_error(labels, predictions)
+
+In this case, the result should be [(0-0.5)^2+(0-1)^2+(0.5-1)^2]/3=0.5, but tensorflow returns different value 0.3333333134651184.
+Suggestion to fix the source code
+tensorflow/python/ops/losses/losses_impl.py
+If the loss function mean_pairwise_squared_error measures the differences between pairs of corresponding elements of predictions and labels as explained in the API reference of the function, here is a simple patch:
+
+(lines 520-521 need to be changed as)
+term1 = 2.0 * _safe_div(sum_squares_diff_per_batch, num_present_per_batch-1)
+and
+(lines 525-526 need to be changed as)
+term2 = 2.0 * _safe_div(math_ops.square(sum_diff), math_ops.multiply(num_present_per_batch, num_present_per_batch-1))

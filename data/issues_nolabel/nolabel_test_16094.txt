@@ -1,0 +1,33 @@
+Shape must be rank 1 but is rank 0 for 'CTCLoss' (op: 'CTCLoss')
+
+Have I written custom code: yes
+OS: Windows 8.1
+Tensorflow installed from: conda
+Tensorflow version: 1.4
+I've successfully converted a Tensor into a SparseTensor with this code:
+def dense_to_sparse(dense_tensor, out_type):
+    indices = tf.where(tf.not_equal(dense_tensor, tf.constant(0, dense_tensor.dtype)
+    values = tf.gather_nd(dense_tensor, indices)
+    shape = tf.shape(dense_tensor, out_type=out_type)
+    return tf.SparseTensor(indices, values, shape)
+
+I want to try out using a SparseTensor converted from a dense one:
+input_layer = tf.placeholder(tf.float32, [None, 1596, 48])
+dense_labels = tf.placeholder(tf.int32)
+sparse_from_dense = dense_to_sparse(dense_lables, out_type=tf.int64)
+cell_fw = grid_rnn.Grid2LSTMCell(num_units=128)
+cell_bw = grid_rnn.Grid2LSTMCell(num_units=128)
+bidirectional_grid_rnn = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, input_layer, dtype=tf.float32)
+outputs = tf.reshape(bidirectional_grid_rnn[0], [-1, 256])
+
+W = tf.Variable(tf.truncated_normal([256, 80], stddev=0.1, dtype=tf.float32), name='W')
+b = tf.Variable(tf.constant(0., dtype=tf.float32, shape=[80], name='b'))
+
+logits = tf.matmul(outputs, W) + b
+logits = tf.reshape(logits, [tf.shape(input_layer)[0], -1, 80])
+logits = tf.transpose(logits, (1, 0, 2))
+
+loss = tf.nn.ctc_loss(inputs=logits, labels=sparse, sequence_length=320)
+
+Unfortunately, when I do this, I encounter this error:
+Shape must be rank 1 but is rank 0 for 'CTCLoss' (op: 'CTCLoss') with input shapes: [?,?,80], [?,1], [?], [].

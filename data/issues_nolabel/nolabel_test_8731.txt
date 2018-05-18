@@ -1,0 +1,87 @@
+Error from 'bazel build' after r1.1.0: TensorFlow is not configured to build with GPU support
+
+Environment info
+Operating System: Ubuntu Desktop 16.04
+Installed version of CUDA and cuDNN:  8.0, 5
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+lrwxrwxrwx 1 root root       19 Sep 14  2016 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rw-r--r-- 1 root root   415432 Sep 14  2016 /usr/local/cuda/lib64/libcudart.so.8.0.44
+-rwxr-xr-x 1 root root 79337624 Jan 20 18:48 /usr/local/cuda/lib64/libcudnn.so.5
+-rwxr-xr-x 1 root root 79337624 Jan 20 18:48 /usr/local/cuda/lib64/libcudnn.so.5.1.5
+-rw-r--r-- 1 root root   558720 Sep 14  2016 /usr/local/cuda/lib64/libcudadevrt.a
+-rw-r--r-- 1 root root   775162 Sep 14  2016 /usr/local/cuda/lib64/libcudart_static.a
+-rw-r--r-- 1 root root 69756172 Jan 20 18:48 /usr/local/cuda/lib64/libcudnn_static.a
+lrwxrwxrwx 1 root root       16 Sep 14  2016 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+-rwxr-xr-x 1 root root 79337624 Jan 20 18:48 /usr/local/cuda/lib64/libcudnn.so
+
+If installed from source, provide
+
+
+The commit hash (git rev-parse HEAD):
+bbe056e (master branch)
+
+
+The output of bazel version:
+
+
+Build label: 0.4.5
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Mar 16 12:19:38 2017 (1489666778)
+Build timestamp: 1489666778
+Build timestamp as int: 1489666778
+
+
+If possible, provide a minimal reproducible example.
+
+Summary: bazel build says TensorFlow is not configured with GPU support even though ./configure confirmed CUDA support will be enabled. Main error output seems to be (full error shown further down):
+
+ERROR: Building with --config=cuda but TensorFlow is not configured to build with GPU support. 
+
+Please note that I've done this many times so (hopefully) I don't think I'm overlooking some common mistake on my end. Details below.
+
+./configure info: Here are the non-default (i.e. not just hitting enter) configuration flags I give to ./configure and its corresponding outputs:
+
+./configure 
+Please specify the location of python. [Default is /usr/bin/python]: /usr/bin/python3
+Do you wish to use jemalloc as the malloc implementation? [Y/n] 
+jemalloc enabled
+Do you wish to build TensorFlow with the XLA just-in-time compiler (experimental)? [y/N] y
+XLA JIT support will be enabled for TensorFlow
+Found possible Python library paths:
+  /usr/local/lib/python3.5/dist-packages
+  /usr/lib/python3/dist-packages
+  /home/brandon/bin/caffe/python
+  /usr/local/boost_1_63_0
+Using python library path: /usr/local/lib/python3.5/dist-packages
+Do you wish to build TensorFlow with CUDA support? [y/N] y
+CUDA support will be enabled for TensorFlow
+Please specify the CUDA SDK version you want to use, e.g. 7.0. [Leave empty to use system default]: 8.0
+Please specify the cuDNN version you want to use. [Leave empty to use system default]: 5
+Please specify a list of comma-separated Cuda compute capabilities you want to build with: 6.1 
+
+
+Error from bazel build: Then I run bazel build as follows with the error message below.
+
+ bazel build --config=opt --config=cuda --local_resources 8192,4.0,1.0 //tensorflow/tools/pip_package:build_pip_package
+ERROR: /home/brandon/.cache/bazel/_bazel_brandon/9d57692c8667febd112ef76b5ba08968/external/local_config_cuda/crosstool/BUILD:4:1: Traceback (most recent call last):
+	File "/home/brandon/.cache/bazel/_bazel_brandon/9d57692c8667febd112ef76b5ba08968/external/local_config_cuda/crosstool/BUILD", line 4
+		error_gpu_disabled()
+	File "/home/brandon/.cache/bazel/_bazel_brandon/9d57692c8667febd112ef76b5ba08968/external/local_config_cuda/crosstool/error_gpu_disabled.bzl", line 3, in error_gpu_disabled
+		fail("ERROR: Building with --config=c...")
+ERROR: Building with --config=cuda but TensorFlow is not configured to build with GPU support. Please re-run ./configure and enter 'Y' at the prompt to build with GPU support.
+ERROR: no such target '@local_config_cuda//crosstool:toolchain': target 'toolchain' not declared in package 'crosstool' defined by /home/brandon/.cache/bazel/_bazel_brandon/9d57692c8667febd112ef76b5ba08968/external/local_config_cuda/crosstool/BUILD.
+INFO: Elapsed time: 0.199s
+
+
+I'm running a GTX 1080. If it's useful as a sanity-check, I've included a portion of nvidia-smi below:
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 375.39                 Driver Version: 375.39                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 1080    Off  | 0000:01:00.0      On |                  N/A |
+|  0%   45C    P8    17W / 240W |    347MiB /  8110MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+
+Any idea why bazel thinks TF configured without GPU support? Also, I should note that ./configure did not run initially, but then I ran ``sudo apt-get upgrade bazel``` and that fixed the issue.  My best guess is this is related to ./configure not playing nice with the new bazel upgrade or something similar. This was the first time I've had to upgrade bazel in awhile just to run ./configure. Thanks for any help/suggestions.

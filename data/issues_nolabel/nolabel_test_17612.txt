@@ -1,0 +1,106 @@
+Changing parallel_iterations of dynamic_rnn doesn't affect GPU memory consumption
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary (through pip)
+TensorFlow version (use command below): tensorflow-gpu 1.6
+Python version: 2.7
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: 9.0
+GPU model and memory: Tesla P100
+Exact command to reproduce: Download mnist dataset to dir "input_data/" and run the source code provided as below
+
+Describe the problem
+I'm using dynamic_rnn to train an RNN on mnist dataset. I run a simple test (code as below) to find the best parallel_iterations number. However, checking with nvidia-smi, it seems that the GPU memory consumption remains the same, which infers dynamic_rnn doesn't run in parallel.
+Looking forward to your reply!
+Source code / logs
+Test Code:
+import tensorflow as tf
+from tensorflow.contrib.layers import fully_connected
+from tensorflow.examples.tutorials.mnist import input_data
+from tensorflow.contrib import rnn
+import sys
+import numpy as np
+
+
+def train(batch_size, parallel_iterations, mnist):
+	lr = 1e-3
+	batch_size_holder = tf.placeholder(tf.int32) 
+	input_size = 28
+	timestep_size = 28
+	hidden_size = 28
+	layer_num = 50
+	class_num = 10
+
+	_X = tf.placeholder(tf.float32, [None, 784])
+	y = tf.placeholder(tf.float32, [None, class_num])
+	keep_prob = tf.placeholder(tf.float32)
+	X = tf.reshape(_X, [-1, 28, 28])
+
+	rnn_cell = rnn.BasicRNNCell(num_units=hidden_size)
+	rnn_cell = rnn.DropoutWrapper(cell=rnn_cell, input_keep_prob=1.0, output_keep_prob=keep_prob)
+	mrnn_cell = rnn.MultiRNNCell([rnn_cell] * layer_num, state_is_tuple=True)
+	outputs, state = tf.nn.dynamic_rnn(mrnn_cell, inputs=X, dtype=tf.float32, time_major=False, parallel_iterations=parallel_iterations)
+	h_state = outputs[:, -1, :]
+
+	W = tf.Variable(tf.truncated_normal([hidden_size, class_num], stddev=0.1), dtype=tf.float32)
+	bias = tf.Variable(tf.constant(0.1,shape=[class_num]), dtype=tf.float32)
+	y_pre = tf.nn.softmax(tf.matmul(h_state, W) + bias)
+	cross_entropy = -tf.reduce_mean(y * tf.log(y_pre))
+	train_op = tf.train.AdamOptimizer(lr).minimize(cross_entropy)
+
+	correct_prediction = tf.equal(tf.argmax(y_pre,1), tf.argmax(y,1))
+	accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+
+	session_config = tf.ConfigProto()
+	session_config.gpu_options.allow_growth = True
+
+	with tf.Session(config=session_config) as sess:
+		sess.run(tf.global_variables_initializer())
+		for i in range(50):
+			batch = mnist.train.next_batch(batch_size)
+			onehot_labels = np.eye(class_num)[batch[1]]
+			sess.run(train_op, feed_dict={_X: batch[0], y: onehot_labels, keep_prob: 0.5, batch_size_holder: batch_size}, options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE), run_metadata=run_metadata)
+
+	tf.reset_default_graph()
+
+
+
+def main(_):
+	mnist = input_data.read_data_sets("input_data/")
+
+	for num in range(1,10):
+		train(128, num*10, mnist)
+	for num in range(10,-1,-1):
+		if (num >0):
+			train(128, num*10, mnist)
+
+if __name__ == '__main__':
+	tf.app.run(main=main, argv=[sys.argv[0]])
+
+
+
+nvidia-smi result:
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 384.81                 Driver Version: 384.81                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  Tesla P100-PCIE...  Off  | 00000000:03:00.0 Off |                    0 |
+| N/A   25C    P0    37W / 250W |    517MiB / 16276MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   1  Tesla P100-PCIE...  Off  | 00000000:82:00.0 Off |                    0 |
+| N/A   23C    P0    37W / 250W |    359MiB / 16276MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID   Type   Process name                             Usage      |
+|=============================================================================|
+|    0      2893      C   python                                       507MiB |
+|    1      2893      C   python                                       349MiB |
++-----------------------------------------------------------------------------+

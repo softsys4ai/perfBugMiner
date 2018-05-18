@@ -1,0 +1,106 @@
+minimize raises "ValueError: None values not supported." error when tf.while_loop used inside fn() of tf.cond()
+
+On TF 0.9.0, The following code with tf.while_loop inside tf.cond raises ValueError when minimized.
+import tensorflow as tf
+from tensorflow.python.ops import tensor_array_ops
+
+with tf.Session() as sess:
+    a = tf.constant([[1., 2.], [3.,4.]])
+    w = tf.get_variable('w', [2, 1], tf.float32)
+    c = tf.Variable(1)
+
+    def loss_a(a, w):
+        a_ta = tensor_array_ops.TensorArray(dtype=tf.float32, size=2,
+                                            tensor_array_name="a_ta")
+        a_ta = a_ta.unpack(a)
+
+        b_ta = tensor_array_ops.TensorArray(dtype=tf.float32, size=2,
+                                            tensor_array_name="b_ta")
+
+
+        time = tf.constant(0, dtype=tf.int32, name="time")
+
+        def _time_step(time, a_ta_t, b_ta_t):
+          a = a_ta_t.read(time)
+          b_ta_t = b_ta_t.write(time, a * w)
+          return (time+1, a_ta_t, b_ta_t)
+
+        (_, _, final_b) = tf.while_loop(
+            cond=lambda time, _1, _2: time < 2,
+            body=_time_step,
+            loop_vars=(time, a_ta, b_ta),
+            parallel_iterations=32,
+            swap_memory=True)
+        b = tf.reduce_sum(final_b.pack(), 0)
+        return b
+
+    def loss_b(a, w):
+        return 2 * a * w
+
+    loss = tf.cond(tf.equal(c, 0), lambda: loss_a(a, w), lambda: loss_b(a,w))
+    train_op = tf.train.AdamOptimizer(1e-4).minimize(loss)
+
+    sess.run(tf.initialize_all_variables())
+
+    sess.run(train_op)
+
+
+Traceback (most recent call last):
+File "test.py", line 39, in 
+train_op = tf.train.AdamOptimizer(1e-4).minimize(loss)
+File "/.../tensorflow/python/training/optimizer.py", line 193, in minimize
+grad_loss=grad_loss)
+File "/.../tensorflow/python/training/optimizer.py", line 250, in compute_gradients
+colocate_gradients_with_ops=colocate_gradients_with_ops)
+File "/.../tensorflow/python/ops/gradients.py", line 481, in gradients
+in_grads = _AsList(grad_fn(op, *out_grads))
+File "/.../tensorflow/python/ops/tensor_array_grad.py", line 115, in _TensorArrayWriteGrad
+grad = g.read(index)
+File "/.../tensorflow/python/ops/tensor_array_ops.py", line 191, in read
+dtype=self._dtype, name=name)
+File "/.../tensorflow/python/ops/gen_data_flow_ops.py", line 905, in _tensor_array_read
+flow_in=flow_in, dtype=dtype, name=name)
+File "/.../tensorflow/python/ops/op_def_library.py", line 704, in apply_op
+op_def=op_def)
+File "/.../tensorflow/python/framework/ops.py", line 2260, in create_op
+original_op=self._default_original_op, op_def=op_def)
+File "/.../tensorflow/python/framework/ops.py", line 1234, in init
+self._control_flow_context.AddOp(self)
+File "/.../tensorflow/python/ops/control_flow_ops.py", line 1479, in AddOp
+self._AddOpInternal(op)
+File "/.../tensorflow/python/ops/control_flow_ops.py", line 1499, in _AddOpInternal
+self.AddValue(x)
+File "/.../tensorflow/python/ops/control_flow_ops.py", line 1438, in AddValue
+real_val = grad_ctxt.grad_state.GetRealValue(val)
+File "/.../tensorflow/python/ops/control_flow_ops.py", line 781, in GetRealValue
+real_value = self.AddBackPropAccumulatedValue(h_value, value)
+File "/.../tensorflow/python/ops/control_flow_ops.py", line 731, in AddBackPropAccumulatedValue
+history_value = _SwitchRefOrTensor(history_value, pred)[branch]
+File "/.../tensorflow/python/ops/control_flow_ops.py", line 324, in _SwitchRefOrTensor
+return ref_switch(data, pred, name=name)
+File "/.../tensorflow/python/ops/gen_control_flow_ops.py", line 341, in ref_switch
+result = _op_def_lib.apply_op("RefSwitch", data=data, pred=pred, name=name)
+File "/.../tensorflow/python/ops/op_def_library.py", line 459, in apply_op
+as_ref=input_arg.is_ref).dtype.name
+File "/.../tensorflow/python/framework/ops.py", line 620, in convert_to_tensor
+ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+File "/.../tensorflow/python/ops/constant_op.py", line 179, in _constant_tensor_conversion_function
+return constant(v, dtype=dtype, name=name)
+File "/.../tensorflow/python/ops/constant_op.py", line 162, in constant
+tensor_util.make_tensor_proto(value, dtype=dtype, shape=shape))
+File "/.../tensorflow/python/framework/tensor_util.py", line 346, in make_tensor_proto
+raise ValueError("None values not supported.")
+ValueError: None values not supported.
+
+It works fine if I add la, lb as follows, although this would force execution of loss_a and loss_b regardless of the pred in tf.cond().
+    la = loss_a(a, w)
+    lb = loss_b(a, w)
+
+    loss = tf.cond(tf.equal(c, 0), lambda: la, lambda: lb)
+    train_op = tf.train.AdamOptimizer(1e-4).minimize(loss)
+
+    sess.run(tf.initialize_all_variables())
+
+    sess.run(train_op)
+
+Is this a known issue or did I miss something in how to use tf.while_loop within tf.cond?

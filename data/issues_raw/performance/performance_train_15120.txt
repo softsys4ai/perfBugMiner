@@ -1,0 +1,172 @@
+[Feature Request] Please make Estimator.export_savedmodel support input types other than tf.Example
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 10
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+1.4.1
+Python version:
+3.5.3
+CUDA/cuDNN version:
+None
+GPU model and memory:
+None
+Exact command to reproduce:
+
+Describe the problem
+I have a model,  I want to export it into SavedModel format by using tf.estimator API, because I'm using this API for training. Unfortunately,tf.estimator.export.build_raw_serving_input_receiver_fn and tf.saved_model.signature_def_utils.classification_signature_def require the input features must be encoded in tf.Example format.
+In order to use the "export_savedmodel" function for exporting, when writing a custom model_fn for Estimator, I must populate the export_outputs element of the tf.estimator.EstimatorSpec return value.  Each output value must be an ExportOutput object such as tf.estimator.export.ClassificationOutput, tf.estimator.export.RegressionOutput, or tf.estimator.export.PredictOutput. Those three output types only support tf.Example as the input.
+    if (classes is not None
+        and not (isinstance(classes, ops.Tensor)
+                 and dtypes.as_dtype(classes.dtype) == dtypes.string)):
+      raise ValueError('Classification classes must be a string Tensor; '
+                       'got {}'.format(classes))
+Because they will use signature_def_utils.classification_signature_def(or predict_signature_def,...) to build the signature.
+Though I may build a new output type by myself, it doesn't.
+As the comment in tensorflow\python\estimator\export\export.py:build_all_signature_defs stated:
+"the call to is_valid_signature here should not remove anything else."
+If you really want to remove it, please show me a warning.
+Source code / logs
+"""Convolutional Neural Network Estimator for MNIST, built with tf.layers."""
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import argparse
+import os
+import sys
+
+import tensorflow as tf
+
+parser = argparse.ArgumentParser()
+
+# Basic model parameters.
+parser.add_argument('--batch_size', type=int, default=100,
+                    help='Number of images to process in a batch')
+
+parser.add_argument('--model_dir', type=str, default='/tmp/mnist_model',
+                    help='The directory where the model will be stored.')
+
+
+parser.add_argument('--data_format', type=str, default=None,
+    choices=['channels_first', 'channels_last'],
+    help='A flag to override the data format used in the model. channels_first '
+         'provides a performance boost on GPU but is not always compatible '
+         'with CPU. If left unspecified, the data format will be chosen '
+         'automatically based on whether TensorFlow was built for CPU or GPU.')
+
+_NUM_IMAGES = {
+    'train': 50000,
+    'validation': 10000,
+}
+
+def mnist_model(inputs, mode, data_format):
+  """Takes the MNIST inputs and mode and outputs a tensor of logits."""
+  # Input Layer
+  # Reshape X to 4-D tensor: [batch_size, width, height, channels]
+  # MNIST images are 28x28 pixels, and have one color channel
+  inputs = tf.reshape(inputs, [-1, 28, 28, 1])
+
+  if data_format is None:
+    data_format = ('channels_first' if tf.test.is_built_with_cuda() else
+                   'channels_last')
+
+  if data_format == 'channels_first':
+    inputs = tf.transpose(inputs, [0, 3, 1, 2])
+
+  conv1 = tf.layers.conv2d(inputs=inputs,
+      filters=32,
+      kernel_size=[5, 5],
+      padding='same',
+      activation=tf.nn.relu,
+      data_format=data_format)
+
+
+  pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2,
+                                  data_format=data_format)
+
+
+  conv2 = tf.layers.conv2d(inputs=pool1,
+      filters=64,
+      kernel_size=[5, 5],
+      padding='same',
+      activation=tf.nn.relu,
+      data_format=data_format)
+
+  pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2,
+                                  data_format=data_format)
+
+
+  pool2_flat = tf.reshape(pool2, [-1, 7 * 7 * 64])
+
+  # Dense Layer
+  # Densely connected layer with 1024 neurons
+  # Input Tensor Shape: [batch_size, 7 * 7 * 64]
+  # Output Tensor Shape: [batch_size, 1024]
+  dense = tf.layers.dense(inputs=pool2_flat, units=1024,
+                          activation=tf.nn.relu)
+
+  # Add dropout operation; 0.6 probability that element will be kept
+  dropout = tf.layers.dropout(inputs=dense, rate=0.4, training=(mode == tf.estimator.ModeKeys.TRAIN))
+
+  # Logits layer
+  # Input Tensor Shape: [batch_size, 1024]
+  # Output Tensor Shape: [batch_size, 10]
+  logits = tf.layers.dense(inputs=dropout, units=10)
+  return logits
+
+
+def mnist_model_fn(features, labels, mode, params):
+  if isinstance(features,dict):
+    features = features['image_raw']
+  """Model function for MNIST."""
+  logits = mnist_model(features, mode, params['data_format'])
+
+  predictions = {
+      'classes': tf.argmax(input=logits, axis=1),
+      'probabilities': tf.nn.softmax(logits, name='softmax_tensor')
+  }
+
+  if mode == tf.estimator.ModeKeys.PREDICT:
+    return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions,
+                                      export_outputs={'class': tf.estimator.export.ClassificationOutput(classes=tf.as_string(predictions['classes']))})  
+
+  loss = tf.losses.softmax_cross_entropy(onehot_labels=labels, logits=logits)
+
+  # Configure the training op
+  if mode == tf.estimator.ModeKeys.TRAIN:
+    optimizer = tf.train.AdamOptimizer(learning_rate=1e-4)
+    train_op = optimizer.minimize(loss, tf.train.get_or_create_global_step())
+  else:
+    train_op = None
+
+  accuracy = tf.metrics.accuracy(tf.argmax(labels, axis=1), predictions['classes'])
+  metrics = {'accuracy': accuracy}
+
+  # Create a tensor named train_accuracy for logging purposes
+  tf.identity(accuracy[1], name='train_accuracy')
+  tf.summary.scalar('train_accuracy', accuracy[1])
+
+  return tf.estimator.EstimatorSpec(mode=mode,
+      predictions=predictions,
+      loss=loss,
+      train_op=train_op,
+      eval_metric_ops=metrics)
+
+def main(unused_argv):
+  # Create the Estimator
+  mnist_classifier = tf.estimator.Estimator(model_fn=mnist_model_fn, model_dir=FLAGS.model_dir,
+      params={'data_format': FLAGS.data_format})
+  image = tf.placeholder(tf.float32,[None])
+  mnist_classifier.export_savedmodel("bb", tf.estimator.export.build_raw_serving_input_receiver_fn({"image_raw":image}))  
+
+if __name__ == '__main__':
+  tf.logging.set_verbosity(tf.logging.INFO)
+  FLAGS, unparsed = parser.parse_known_args()
+  tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)

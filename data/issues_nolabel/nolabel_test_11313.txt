@@ -1,0 +1,55 @@
+tf.nn.embedding_lookup_sparse behaves not as expected
+
+Simple repeated code:
+import tensorflow as tf
+import numpy as np
+
+
+a = tf.constant([[2,3], [3,0]])
+b = tf.constant([0, 3])
+
+s = tf.SparseTensor(tf.cast(a, tf.int64), b, dense_shape=(4,5))
+
+n = np.random.rand(5,3)
+nn = tf.Variable(n, name='aha')
+
+r = tf.nn.embedding_lookup_sparse(nn, s, None,combiner='sum')
+
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+
+print sess.run(r)
+expected results: 2*3
+[[ 0.45522392  0.67905994  0.79126569]
+ [ 0.62346977  0.42459864  0.03796264]]
+but actual results: 4*3
+[[ 0.          0.          0.        ]
+ [ 0.          0.          0.        ]
+ [ 0.45522392  0.67905994  0.79126569]
+ [ 0.62346977  0.42459864  0.03796264]]
+I do not get it. Can anyone help to clarify the result?
+Tensorflow version: 1.2.1, installed with pip.
+OS: mac os 10.12.5
+tf.nn.embedding_lookup_sparse
+Another problem: I am using a partitioned variable to lookup. Pseudo code:
+a = tf.getVariable(...) # it is a partitioned variable, pass partitioner to it
+b = list(a)
+
+result = []
+for p in b:
+    result.append( tf.nn.embedding_lookup_sparse(p, sparseTensor, None, combiner='sum'))
+
+final_result = tf.concat(result, 0)
+
+sess.run(final_result)
+if I remove the tf.concat, and replace it with:
+for ff in final_result:
+    sess.run(ff)
+The part of code behaves as expected. But when I do concat, it crashes and the error message is:
+InvalidArgumentError (see above for traceback): segment ids are not increasing
+	 [[Node: embedding_lookup_sparse = SparseSegmentSum[T=DT_DOUBLE, Tidx=DT_INT32, _device="/job:localhost/replica:0/task:0/cpu:0"](embedding_lookup_sparse/embedding_lookup, embedding_lookup_sparse/Unique:1, embedding_lookup_sparse/Cast)]]
+After a serious investigation, I understand segment ids are not increasing. It means that:
+sparse_ids = [[1,0],[0,1]] # invalid
+sparse_ids = [[0,1],[1,0]] # valid
+This is documented in the previous link I provided. But I have printed all the sparse indices and values using tf.Print. Everything seems fine.
+So my question is : does tf.concat apply any special rules？

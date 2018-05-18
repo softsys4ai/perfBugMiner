@@ -1,0 +1,63 @@
+Inference with TensorFlow does not work properly
+
+I have a strange problem with my neural network: while CV accuracy is good, inference accuracy is at the random guess level.
+Inference is done in a standard ImageNet style way: five 224x224 squares, corners of the image plus center crop.
+The CV and inference code goes together as follows:
+`    inference_images = tf.placeholder(tf.float32, shape=(5, image_size_rows, image_size_cols, num_channels), name='input_images')
+...    
+
+# Calculate CV loss and accuracy
+
+cv_images_batch, cv_labels_batch, cv_filenames = cv_runner.get_inputs()
+
+cv_predictions, cv_logits = network(cv_images_batch, num_labels)
+cv_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(cv_logits, cv_labels_batch))
+
+cv_correct_prediction = tf.equal(tf.argmax(cv_predictions, 1), tf.argmax(cv_labels_batch, 1))
+cv_accuracy = tf.reduce_mean(tf.cast(cv_correct_prediction, 'float'))
+
+# Calculate inference
+
+inference_predictions, _ = network(inference_images, num_labels)
+predicted_classes = tf.argmax(inference_predictions, 1, name='predicted_classes')
+predicted_class = tf.argmax(tf.reduce_sum(inference_predictions, 0), 0, name='predicted_class')`
+
+Training and CV accuracy quickly grow to >50% but inference accuracy remains at the random guess level of 10%.
+I used for inference the same images I use for cross-validation and training. In both cases the inference accuracy remains low while I would expect it to be at the CV and train accuracy respectively.
+Preprocessing code is the same for training, CV and inference. Restoring images from CV and inference matrices works fine for both types. So, the problem apparently is not in different preprocessing for train/CV and inference.
+To isolate this effect, I have extracted train images out of a queue used for training and used them to make inference. Here are the results:
+`Step 35140: train loss: 0.170477, cv loss: 2.183839, train accuracy: 0.955357, cv accuracy: 0.535714, inference accuracy: 0.400000
+Step 35160: train loss: 0.233728, cv loss: 2.114637, train accuracy: 0.937500, cv accuracy: 0.517857, inference accuracy: 0.200000
+Step 35180: train loss: 0.362239, cv loss: 1.962119, train accuracy: 0.906250, cv accuracy: 0.544643, inference accuracy: 0.400000
+Step 35200: train loss: 0.190649, cv loss: 2.122064, train accuracy: 0.946429, cv accuracy: 0.540179, inference accuracy: 0.800000
+Step 35220: train loss: 0.161332, cv loss: 2.006443, train accuracy: 0.968750, cv accuracy: 0.513393, inference accuracy: 1.000000
+Step 35240: train loss: 0.185687, cv loss: 1.981431, train accuracy: 0.950893, cv accuracy: 0.535714, inference accuracy: 0.600000
+Step 35260: train loss: 0.123562, cv loss: 2.030116, train accuracy: 0.977679, cv accuracy: 0.562500, inference accuracy: 0.800000
+Step 35280: train loss: 0.216172, cv loss: 1.883790, train accuracy: 0.941964, cv accuracy: 0.549107, inference accuracy: 0.600000
+Step 35300: train loss: 0.256623, cv loss: 2.012454, train accuracy: 0.897321, cv accuracy: 0.549107, inference accuracy: 0.200000`
+Each inference batch is 5 images. As you can see, mean inference accuracy is way below train accuracy of 90%+.
+I have tried to add tf.get_variable_scope().reuse_variables() before the inference with no effect.
+Stackoverflow community did not help:
+http://stackoverflow.com/questions/40820250/inference-with-tensorflow-does-not-work
+What am I doing wrong with inference here?
+Environment info
+Operating System:
+Ubuntu 14.04
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+-rw-r--r-- 1 root root   322936 Aug 15  2015 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root       19 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root   383336 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root   720192 Aug 15  2015 /usr/local/cuda/lib64/libcudart_static.a
+-rwxr-xr-x 1 root root 61453024 Nov 14 14:08 /usr/local/cuda/lib64/libcudnn.so
+-rwxr-xr-x 1 root root 61453024 Nov 14 14:08 /usr/local/cuda/lib64/libcudnn.so.4
+-rwxr-xr-x 1 root root 61453024 Nov 14 14:08 /usr/local/cuda/lib64/libcudnn.so.4.0.7
+-rw-r--r-- 1 root root 62025862 Nov 14 14:08 /usr/local/cuda/lib64/libcudnn_static.a
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so.7.5 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so.4 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so.7.5 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so.7.5 locally
+0.11.0rc2

@@ -1,0 +1,131 @@
+gradient check
+
+Hi I have some problem to write new tensorflow op.
+I use tf.test.compute_gradient_error to write the test case. 
+And get the error 
+The error message 
+
+FAIL: test_grad (main.ZeroOut2Test) Traceback (most recent call
+last):   File "test_case.py", line 42, in test_grad
+self.assertLess(err, 1e-4) AssertionError: 0.0072760284 not less than 0.0001
+
+I already differential on f(data,truthdata).
+How to write correct gradient calculate?
+The op have two inputs and two output.
+Input1 data
+Input2 truthdata
+output1 loss
+output2 delta(gradient)
+
+Here is the op code
+#include "tensorflow/core/framework/op.h"
+
+REGISTER_OP("DetectionOut")
+    .Attr("T: {float}")
+    .Input("detect: T")
+    .Input("truthdata: T")
+    .Output("loss: T")
+    .Output("delta: T");
+
+
+#include "tensorflow/core/framework/op_kernel.h"
+
+using namespace tensorflow;
+
+typedef Eigen::ThreadPoolDevice CPUDevice;
+typedef Eigen::GpuDevice GPUDevice;
+
+template <typename Device, typename T>
+class DetectionOutOp : public OpKernel {
+ public:
+  explicit DetectionOutOp(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    // Grab the input tensor
+    const Tensor& input_tensor = context->input(0);
+    auto PreDetection = input_tensor.flat<T>();
+
+    const Tensor& input_tensor1 = context->input(1);
+    auto TruthData = input_tensor1.flat<T>();
+
+    // Create an output tensor
+    Tensor* output_tensor = NULL;
+    OP_REQUIRES_OK(context, context->allocate_output(0, TensorShape({input_tensor.dim_size(0)}),
+                                                     &output_tensor));
+    auto loss = output_tensor->template flat<T>().setZero();
+
+    Tensor* output_tensor1 = NULL;
+    OP_REQUIRES_OK(context, context->allocate_output(1, input_tensor.shape(),
+                                                     &output_tensor1));
+    auto back_detl = output_tensor1->template flat<T>().setZero();
+
+    const int N = PreDetection.size();
+
+    const int64 batch_size_ =  input_tensor.dim_size(0);
+    const int64 bottom_count_ = input_tensor.dim_size(1);
+    int b,i;
+    for (b = 0; b < batch_size_ ; ++b){
+        int index = b * bottom_count_;
+        for (i = 0; i < bottom_count_; ++i) {
+            loss(b) +=  pow(PreDetection(index+i)-TruthData(index+i), 2);
+            back_detl(index+i) = 2 *(PreDetection(index+i) - TruthData(index+i));
+        }
+    }
+  }
+};
+
+#define REGISTER_KERNEL(T)                                      \
+  REGISTER_KERNEL_BUILDER(                                      \
+      Name("DetectionOut").Device(DEVICE_CPU).TypeConstraint<T>("T"), \
+      DetectionOutOp<CPUDevice, T>);
+
+REGISTER_KERNEL(float);
+#undef REGISTER_KERNEL
+
+Here is TestCase.py
+import tensorflow as tf
+import numpy as np
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import sparse_ops
+
+D2Test = np.zeros((2,7*7*(15)),float) 
+D2Truth = np.zeros((2,7*7*(15)),float) 
+
+items = 1
+coord = 4
+num = 2
+class_num = 5
+localsize = 49
+
+object_index = (class_num) * localsize + items
+tobject_index = (class_num) * localsize + items
+
+D2Truth[0,tobject_index] = 1.0
+D2Test[0,object_index] = 0.5
+
+
+@ops.RegisterGradient("DetectionOut")
+def _detection_out_grad(op, grad, grad1):
+  mat = op.outputs[1]
+  vec = array_ops.expand_dims(grad, -1)
+  vec = vec * mat
+  return [vec, None]
+
+detection_module = tf.load_op_library('detection.so')
+
+class ZeroOut2Test(tf.test.TestCase):
+  def test_grad(self):
+    with self.test_session():
+      shape=(2,7*7*(15))
+      shape1=(2,)
+      x = tf.constant(D2Test, dtype=tf.float32)
+      y = tf.constant(D2Truth, dtype=tf.float32)
+      result = detection_module.detection_out(x,y)
+      err = tf.test.compute_gradient_error(x, shape, result[0], shape1)
+      self.assertLess(err, 1e-4)
+
+if __name__ == '__main__':
+  tf.test.main()
+
+Thanks for help to correct my errors

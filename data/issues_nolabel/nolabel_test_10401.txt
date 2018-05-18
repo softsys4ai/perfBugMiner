@@ -1,0 +1,22 @@
+Fix unbatch for Datasets with multiple elements
+
+The current implementation of Dataset.unbatch gives an error for datasets with multiple data elements, e.g.
+data = [tf.range(10) for _ in range(3)]
+data = tf.contrib.data.Dataset.from_tensor_slices(data)
+data = data.batch(2)
+data = data.unbatch()
+the data.unbatch() call gives error
+TypeError: from_tensor_slices() takes 1 positional argument but 3 were given
+
+This is because unbatch tries to call map with Dataset.from_tensor_slices as the function.  The map function is expected to take multiple arguments as input, where each argument is one part of the data structure.  However, Dataset.from_tensor_slices expects the whole data structure to be passed as the first argument.
+This fix changes unbatch so that Datset.from_tensor_slices is called correctly.
+However, this does have one undesirable consequence, which is that datasets without structure are converted to lists of length one, e.g.
+data = tf.range(10)
+data0 = tf.contrib.data.Dataset.from_tensor_slices(data)
+print(data0.output_shapes)
+data1 = data0.batch(2)
+data2 = data1.unbatch()
+print(data2.output_shapes)
+Ideally we'd expect data0 to be equivalent to data2.  But data0 will produce scalars, and data2 will produce elements with shape (1,).
+I don't think there's any way around this, because there is no way within the map function to tell if the function was called with a single element as input, or a list with length one.  Both will just appear as a single argument to the map function.
+So a more thorough fix might require changing how Dataset.map works, but in the meantime this behaviour seemed the best option.  @mrry might be able to comment on whether that larger change would be worthwhile (or if he sees a better fix for this issue).

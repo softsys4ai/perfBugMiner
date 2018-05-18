@@ -1,0 +1,140 @@
+Bug - Restoring a graph created by tensorflow.python.tools.optimize_for_inference has errors with RNN models
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes, below
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04.1
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): tensorflow-gpu (1.1.0)
+Python version: 2.7.12
+Bazel version (if compiling from source): NA
+CUDA/cuDNN version:
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart_static.a
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart.so.8.0.61
+GPU model and memory: Tesla K80 24GB
+Exact command to reproduce: see below
+
+Describe the problem
+I believe I've found a bug. The freeze and optimize scripts appear to have bugs related to the proper function of RNNs. Creating a simple RNN, running the freeze script and the optimize script, and then attempting to restore and use the optimized graph creates a puzzling series of errors.
+
+
+After running freeze and optimize, the placeholder for sequence lengths has datatype float32, instead of tf.int32, even though the placeholder specifies that it is tf.int32. This breaks evaluating an instance of GRUCell, which expects length to be of type tf.int32.
+
+
+If I add a tf.to_int32() to coerce the sequence length placeholder to type tf.int32, then we obtain a different error, which appears to pertain to the internal operation of the tf.nn.dynamic_rnn() function.
+
+
+Source code / logs
+The code is divided into 2 user-created scripts (and 2 TF-provided scripts are employed along the way). The first of my scripts defines a model and saves it, and is called "optimize_graph_minimal.py". Then the freeze and optimize scripts are run. The second of my scripts attempts to restore the model to a new Python session, and this appears to be buggy.
+This is the code I used to create and save the graph.
+import numpy as np
+import tensorflow as tf
+import tensorflow.contrib.rnn as rnn
+
+class tf_rnn_model(object):
+    def __init__(self, seq_length=10, num_units=2):
+        self.seq_length = seq_length
+        self.num_units = num_units
+        self.graph_context = tf.Graph()
+        self.graph_specification()
+
+    def graph_specification(self):
+        with self.graph_context.as_default():
+            self.X = tf.placeholder(dtype=tf.float32, shape=[None, self.seq_length, 2], name="X")
+            self.X_length = tf.placeholder(dtype=tf.int32, shape=[None], name="X_length")
+
+            cell = rnn.GRUCell(self.num_units)
+            Y, rnn_state = tf.nn.dynamic_rnn(cell=cell,
+                                             inputs=self.X,
+                                             sequence_length=self.X_length,
+                                             dtype=tf.float32,
+                                             swap_memory=False)
+
+            self.Y = tf.identity(Y, name="Y")
+            self.saver = tf.train.Saver()
+
+        return None
+
+    def restore_optimized_graph(self, graph_def_optimized):
+        with tf.gfile.GFile(graph_def_optimized, 'rb') as f:
+            graph_def_optimized = tf.GraphDef()
+            graph_def_optimized.ParseFromString(f.read())
+
+        self.Y, = tf.import_graph_def(graph_def_optimized, return_elements=["Y:0"])
+        self.X = self.graph_context.get_tensor_by_name("import/X:0")
+        self.X_length = self.graph_context.get_tensor_by_name("import/X_length:0")
+        tf.global_variables_initializer().run()
+
+        return None
+
+model = tf_rnn_model()
+with tf.Session(graph=model.graph_context) as sess:
+    sess.run(tf.global_variables_initializer())
+    inputs = np.arange(20).reshape([1, 10, 2])
+    out = sess.run(fetches=[model.Y], feed_dict={model.X: inputs, model.X_length: [10]})
+    print(out)
+
+    tf.train.write_graph(sess.graph_def, ".", "toy_graph.pb")
+    model.saver.save(sess, save_path="toy_saved")
+
+    print("These are some helpful things to know for the script.")
+    print("saver.as_saver_def()= %s" % model.saver.as_saver_def())
+
+Freeze and optimize scripts are executed here.
+python -m tensorflow.python.tools.freeze_graph \
+--input_graph toy_graph.pb \
+--input_checkpoint toy_saved \
+--output_graph graph_frozen.pb \
+--output_node_names=Y \
+--filename_tensor_name=save/Const:0 \
+--restore_op_name=save/restore_all
+
+python -m tensorflow.python.tools.optimize_for_inference \
+--input graph_frozen.pb \
+--output graph_optimized.pb \
+--input_names=X,X_length \
+--output_names=Y
+
+Attempt to restore and run using this script in a new Python session.
+# This line just imports the model class from the previous Python script because this is a new Python session.
+from optimize_graph_minimal import tf_rnn_model
+import numpy as np
+import tensorflow as tf
+
+model = tf_rnn_model()
+
+with tf.Session(graph=model.graph_context) as sess:
+    model.restore_optimized_graph("graph_optimized.pb")
+    inputs = np.arange(20).reshape([1, 10, 2])
+    out = sess.run(fetches=[model.Y], feed_dict={model.X: inputs, model.X_length: [10]})
+    print(out)
+
+The following errors are produced.
+
+Without explicitly coercing the sequence length placeholder using tf.to_int32(), we get an error indicating that the sequence length tensor is of type float32 but must be type int32.
+
+Traceback (most recent call last):
+  File "tf_minimal/optimize_restore_graph.py", line 14, in <module>
+    model.restore_optimized_graph("graph_optimized.pb")
+  File "optimize_graph_minimal.py", line 44, in restore_optimized_graph
+    self.Y = tf.import_graph_def(graph_def_optimized, return_elements=["Y:0"])
+  File "python2.7/site-packages/tensorflow/python/framework/importer.py", line 388, in import_graph_def
+    node, 'Input tensor %r %s' % (input_name, te)))
+ValueError: graph_def is invalid at node u'rnn/Shape_1': Input tensor 'X_length:0' Cannot convert a tensor of type float32 to an input of type int32.
+
+
+If we change the graph specification to use an explicit coercion to int32 type
+self.X_length = tf.to_int32(tf.placeholder(dtype=tf.int32, shape=[None], name="X_length"))
+then we get this error instead.
+
+2017-08-09 19:19:10.910686: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:00:1e.0)
+Traceback (most recent call last):
+  File "optimize_restore_graph.py", line 14, in <module>
+    model.restore_optimized_graph("graph_optimized.pb")
+  File "optimize_graph_minimal.py", line 44, in restore_optimized_graph
+    self.Y = tf.import_graph_def(graph_def_optimized, return_elements=["Y:0"])
+  File "python2.7/site-packages/tensorflow/python/framework/importer.py", line 362, in import_graph_def
+    % (input_name,)))
+ValueError: graph_def is invalid at node u'rnn/while/gru_cell/gates/gates/concat/axis': More inputs specified ('rnn/while/Switch:1') than the op expects..

@@ -1,0 +1,41 @@
+The weights argument in Keras's Embedding does not work
+
+I am using Tensorflow 1.4.0.
+According to this blog post, we can use the weights argument in the call to Embedding to specify some matrix that represents a pre-trained word embeddings (see the section titled Preparing the Embedding Layer).
+However, this code does not work:
+import tensorflow as tf
+import numpy as np
+
+from tensorflow.python.estimator.model_fn import EstimatorSpec
+from tensorflow.contrib.keras.api.keras.layers import Embedding, Dense
+from tensorflow.contrib.keras.api.keras.initializers import Constant
+
+
+def model_fn(features, labels, mode):
+    x = tf.constant([[1]])
+    labels = tf.constant([[10.]])
+    
+    # Let m be our pre-trained word embeddings
+    m = np.array([[1, 2], [3, 4]], np.float32)
+    with tf.name_scope('Embedding_Layer'):
+        # Create an embedding layer and load m into it
+        n = Embedding(2, 2, weights=[m], input_length=1, name='embedding_matrix_1', trainable=False)
+
+    lookup = n(x)
+    lookup = tf.Print(lookup, [lookup])
+
+    preds = Dense(1)(lookup)
+    loss = tf.reduce_mean(labels - preds)
+    train_op = tf.train.GradientDescentOptimizer(0.01).minimize(loss, tf.train.get_global_step())
+
+    eval_metric_ops = {'accuracy': tf.metrics.accuracy(labels, preds)}
+    return EstimatorSpec(mode=mode, loss=loss, train_op=train_op, eval_metric_ops=eval_metric_ops)
+
+
+model = tf.estimator.Estimator(model_fn)
+model.train(input_fn=lambda: None, steps=1)
+
+lookup should print [[3 4]] but instead random numbers are printed.
+The solution is to define n as follows:
+n = Embedding(2, 2, embeddings_initializer=Constant(m), input_length=1, name='embedding_matrix_1',
+                      trainable=False)

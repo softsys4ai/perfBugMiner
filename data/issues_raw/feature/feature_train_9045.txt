@@ -1,0 +1,59 @@
+[FeatureRequest ] Add sparse_column_with_cat_prob to tensorflow.contrib.layers.python.layers.feature_column_ops.py
+
+Hi there,
+working on deep learning for recommender systems I came across the Google Wide and Deep model (see [1] and [2]).
+Problem
+In my application context there are users and items as well as the interactions between those entities. Furthermore there are item and user features, that are both, continuous and categorical. Here, we have item_features = user_features (user_features derived from user interactions).
+A big problem is the representation of categorical user features as a result from their interaction with different items with respectively different item features. (Some intuition to be found below)
+
+tf.contrib.layers.python.layers.sparse_column_with_keys
+tf.contrib.layers.python.layers.sparse_column_with_hash_bucket
+
+allow to define or induce keys for categorical features that are then one-hot encoded behind the scenes - as far as I understood
+This works for items that can just have one feature value, but users can have a multivalent preference that should be reflected by a categorcial probability distribution (cpd).
+To capture this result we need TF to capture this cpd and compare it with the one-hot-encoded movie features. The latter is provided internally, but for realizing user profiles I couldn't find proper means meaning that within tensorflow.contrib.layers.python.layers there are no sparse columns providing this possibility which in fact is petty relevant.
+Proposed Solution
+Add following method feature column:
+sparse_column_with_cat_prob(column_name, value_prob_dict, counterpart)
+
+column_name: see sparse_column_with_keys for example
+value_prob_dict: dictionary containing feature values (value) and associated probabilities (prob)
+counterpart:  eventually, name of the one-hot-encoded sparse column this one is refering to
+
+This would allow for building user features for categorcial user interaction data, especially within recommendation contexts.
+Intuition
+To give some intuition see the following example from a movie recommendation context:
+user 1 interacts with movies A, B, C, D, and E
+movie_features: genre {Romance, Action},
+   movie_id movie_genre  movie_length
+0         0     Romance           120
+1         1      Action            95
+2         2      Action           130
+3         3     Romance           150
+4         4     Romance           110
+
+   user_id user_genre user_length
+0        0    unknown      unknown
+1        1    unknown      unknown
+
+Observed interactions:
+   user_id  movie_id
+0        0         0
+1        0         1
+2        1         1
+3        1         2
+4        1         3
+5        1         4
+
+Merge, group by size and calculation the shares produces:
+user_id  movie_genre
+0        Action         0.333333
+         Romance        0.666667
+1        Action         0.500000
+         Romance        0.500000
+
+So, as we can observe user 0 rather prefers Romance movies whereas user 1 is indifferent between genres. As a learning outcome user 0 should be recommended more Romance than Action movies, analogously for user 1.
+These should be handed over to sparse_column_with_cat_prob to solve this problem.
+Resources
+[1] https://arxiv.org/abs/1606.07792
+[2] https://www.tensorflow.org/tutorials/wide_and_deep

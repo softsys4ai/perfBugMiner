@@ -1,0 +1,33 @@
+Is there a way to do partial_run with queues?
+
+I'm reading a bunch of image files using the FIFO queue provided by string_input_producer. Some of these files have bad format and cannot be decoded properly. Therefore I would want to print the names of these files when the related functions from tf.image throw tf.errors.InvalidArgumentError exceptions.
+My graph definition looks like this:
+...
+filename_queue = tf.train.string_input_producer(files, num_epochs=1, shuffle=True)
+image_reader = tf.WholeFileReader()
+key, image_file = image_reader.read(filename_queue)
+is_png = tf.py_func(has_png_ext, [key], [tf.bool])
+image = tf.cond(pred=is_png[0],
+                fn1=lambda: tf.image.decode_png(image_file),
+                fn2=lambda: tf.image.decode_jpeg(image_file))
+...
+
+And then I'm fetching the output like this:
+...
+with tf.Session() as sess:
+    sess.run(init_op)
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
+    try:
+        while not coord.should_stop():
+            try:
+                nodes = sess.run([key, image])
+                nodes_results.append(nodes)
+                num_files += 1
+            except tf.errors.InvalidArgumentError:
+                num_failed += 1
+                num_failed_dir += 1
+...
+
+Initially I've tried to print the value of key in the except block but this won't work. Then I've tried a bunch of ideas and none of them seems to be working. I've been trying to see if partial_run could help but it takes a feed_dict input instead of a native queue input.
+So in short, my question is, is there a way to make partial_run work while using native queue inputs? Or is there a better way to solve my problem - output the file names when tf.image.decode_* throw exceptions?

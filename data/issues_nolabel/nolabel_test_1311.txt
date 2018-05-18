@@ -1,0 +1,141 @@
+dynamic_rnn incompatible with BasicRNNCell, GRUCell, and BasicLSTMCell
+
+Description
+I've been playing around with rnn.dynamic_rnn and have thus far only had success with it when using rnn_cell.BasicLSTMCell instances. When using any other cell, a TypeError is raised. Looking at the traceback, the culprit appears to be the calls to rnn_cell.linear at each time step, which fail when rnn_cell.linear attempts to get the shape of its input slice. This, in turn, fails because the input slices are produced from a TensorArray and have shape <unknown>.
+Environment info
+Operating System: Ubuntu 14.04 LTS
+Installed from source at:  b889710
+Steps to reproduce
+The following will attempt to call dynamic_rnn with three different cells, catch the TypeError that is raised, then print the exception + traceback to stdout.
+import sys
+import traceback
+import tensorflow as tf
+from tensorflow.python.ops.rnn import dynamic_rnn
+
+inputs = tf.placeholder('float32', [None, None, 32])
+mbsz = tf.shape(inputs)[0]
+max_seq_len = tf.shape(inputs)[1]
+sequence_length = tf.fill(tf.expand_dims(mbsz, 0), max_seq_len)
+
+n_units = 32
+cells = [tf.nn.rnn_cell.BasicRNNCell(n_units),
+    tf.nn.rnn_cell.GRUCell(n_units),
+    tf.nn.rnn_cell.BasicLSTMCell(n_units)]
+for cell in cells:
+    print('='*40)
+    print('Attempting with: %s' % cell.__class__.__name__)
+    print('='*40)
+    try:
+        rnn_out, _ = dynamic_rnn(cell, inputs, sequence_length, dtype='float32')
+    except TypeError as e:
+        tb = sys.exc_traceback
+        traceback.print_exception(TypeError, e, tb)
+        print('\n'*3)
+
+Output of above snippet
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so.7.0 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so.4.0.4 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so.7.0 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so.7.0 locally
+========================================
+Attempting with: BasicRNNCell
+========================================
+Traceback (most recent call last):
+  File "<ipython-input-1-aa87c2141668>", line 20, in <module>
+    rnn_out, _ = dynamic_rnn(cell, inputs, sequence_length, dtype='float32')
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 432, in dynamic_rnn
+    parallel_iterations=parallel_iterations)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 501, in _dynamic_rnn_loop
+    parallel_iterations=parallel_iterations)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1590, in While
+    result = context.BuildLoop(cond, body, loop_vars)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1507, in BuildLoop
+    body_result = body(*vars_for_body_with_tensor_arrays)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 491, in _time_step
+    zero_output, state, lambda: cell(input_t, state))
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 218, in _rnn_step
+    time < max_sequence_length, call_cell, empty_update)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1210, in cond
+    res_t = context_t.BuildCondBranch(fn1)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1133, in BuildCondBranch
+    r = fn()
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 491, in <lambda>
+    zero_output, state, lambda: cell(input_t, state))
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 122, in __call__
+    output = tanh(linear([inputs, state], self._num_units, True))
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 692, in linear
+    shapes = [a.get_shape().as_list() for a in args]
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/framework/tensor_shape.py", line 738, in as_list
+    return [dim.value for dim in self._dims]
+TypeError: 'NoneType' object is not iterable
+
+
+
+
+========================================
+Attempting with: GRUCell
+========================================
+Traceback (most recent call last):
+  File "<ipython-input-1-aa87c2141668>", line 20, in <module>
+    rnn_out, _ = dynamic_rnn(cell, inputs, sequence_length, dtype='float32')
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 432, in dynamic_rnn
+    parallel_iterations=parallel_iterations)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 501, in _dynamic_rnn_loop
+    parallel_iterations=parallel_iterations)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1590, in While
+    result = context.BuildLoop(cond, body, loop_vars)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1507, in BuildLoop
+    body_result = body(*vars_for_body_with_tensor_arrays)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 491, in _time_step
+    zero_output, state, lambda: cell(input_t, state))
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 218, in _rnn_step
+    time < max_sequence_length, call_cell, empty_update)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1210, in cond
+    res_t = context_t.BuildCondBranch(fn1)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1133, in BuildCondBranch
+    r = fn()
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 491, in <lambda>
+    zero_output, state, lambda: cell(input_t, state))
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 151, in __call__
+    2 * self._num_units, True, 1.0))
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 692, in linear
+    shapes = [a.get_shape().as_list() for a in args]
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/framework/tensor_shape.py", line 738, in as_list
+    return [dim.value for dim in self._dims]
+TypeError: 'NoneType' object is not iterable
+
+
+
+
+========================================
+Attempting with: BasicLSTMCell
+========================================
+Traceback (most recent call last):
+  File "<ipython-input-1-aa87c2141668>", line 20, in <module>
+    rnn_out, _ = dynamic_rnn(cell, inputs, sequence_length, dtype='float32')
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 432, in dynamic_rnn
+    parallel_iterations=parallel_iterations)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 501, in _dynamic_rnn_loop
+    parallel_iterations=parallel_iterations)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1590, in While
+    result = context.BuildLoop(cond, body, loop_vars)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1507, in BuildLoop
+    body_result = body(*vars_for_body_with_tensor_arrays)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 491, in _time_step
+    zero_output, state, lambda: cell(input_t, state))
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 218, in _rnn_step
+    time < max_sequence_length, call_cell, empty_update)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1210, in cond
+    res_t = context_t.BuildCondBranch(fn1)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1133, in BuildCondBranch
+    r = fn()
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 491, in <lambda>
+    zero_output, state, lambda: cell(input_t, state))
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 203, in __call__
+    concat = linear([inputs, h], 4 * self._num_units, True)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 692, in linear
+    shapes = [a.get_shape().as_list() for a in args]
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/framework/tensor_shape.py", line 738, in as_list
+    return [dim.value for dim in self._dims]
+TypeError: 'NoneType' object is not iterable

@@ -1,0 +1,118 @@
+//tensorflow/python/kernel_tests:denormal_test test failure on ppc64le (error : Arrays are not equal)
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04 (ppc64le)
+TensorFlow installed from (source or binary):
+Installed from source
+TensorFlow version (use command below):
+('v1.2.1-0-gb4957ff', '1.2.1')
+Python version:
+Python 2.7.5
+Bazel version (if compiling from source):
+0.4.5-2017-07-13 (@037b9b9)
+CUDA/cuDNN version:
+NA
+GPU model and memory:
+NA
+Exact command to reproduce:
+bazel test --test_output=errors //tensorflow/python/kernel_tests:denormal_test
+
+Describe the problem
+Following code returning incorrect results -
+https://github.com/tensorflow/tensorflow/blob/v1.2.1/tensorflow/python/kernel_tests/denormal_test.py#L36-L44
+def _flushDenormalsTest(self, use_gpu, dtypes):
+    with self.test_session(use_gpu=use_gpu):
+      array_ops.identity(7).eval()
+      for dtype in dtypes:
+        tiny = np.finfo(dtype).tiny
+        # Small shape to test main thread, large shape to test thread pool
+        for shape in (), (1 << 20,):
+          flush = 0.1 * constant_op.constant(tiny, shape=shape)
+          self.assertAllEqual(flush.eval(), np.zeros(shape))
+
+I have printed the values of flush.eval()and np.zeros(shape) , see below :
+flush.eval() o/p =  1.17549463108e-39
+np.zeros(shape) o/p = 0.0
+Getting failure 1.17549463108e-39 vs expected 0.0.  I am not able to understand why we are getting flush.eval() o/p 1.17549463108e-39  and not  0.0.  But I tried changing the  comparison function from assertAllEqual to assertAllClose and test is passing successfully. Is it OK to merge this changes or ? I would like to hear comment on this.Thanks!
+This test passing successfully in TF1.0.1 without any changes, see relevant code :
+https://github.com/tensorflow/tensorflow/blob/v1.0.1/tensorflow/python/kernel_tests/denormal_test.py#L31-L48
+ def testPythonHasDenormals(self):
+    """Non-tf numpy code should treat denormals correctly."""
+    for dtype in np.float32, np.float64:
+      tiny = np.finfo(dtype).tiny
+      self.assertEqual(tiny, tiny / 16 * 16)
+
+  def _flushDenormalsTest(self, use_gpu, dtypes):
+    if control_imports.USE_OSS:
+      # TODO(irving): Fix denormal flushing for open source.
+      return
+    with self.test_session(use_gpu=use_gpu):
+      array_ops.identity(7).eval()
+      for dtype in dtypes:
+        tiny = np.finfo(dtype).tiny
+        # Small shape to test main thread, large shape to test thread pool
+        for shape in (), (1 << 20,):
+          flush = 0.1 * constant_op.constant(tiny, shape=shape)
+          self.assertAllEqual(flush.eval(), np.zeros(shape))
+
+Looks like this test is disabled in TF1.0.1
+Source code / logs
+$ bazel test --test_output=errors //tensorflow/python/kernel_tests:denormal_test
+
+==================== Test output for //tensorflow/python/kernel_tests:denormal_test:
+2017-07-31 08:45:48.796363: I tensorflow/compiler/xla/service/platform_util.cc:58] platform Host present with 8 visible devices
+2017-07-31 08:45:48.798909: I tensorflow/compiler/xla/service/service.cc:198] XLA service 0x100386c7120 executing computations on platform Host. Devices:
+2017-07-31 08:45:48.798936: I tensorflow/compiler/xla/service/service.cc:206]   StreamExecutor device (0): <undefined>, <undefined>
+FF..
+======================================================================
+FAIL: testFlushDenormalsCPU (__main__.DenormalTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.cache/bazel/_bazel_root/725e77151072daec43bc353cb6fcb26c/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/kernel_tests/denormal_test.runfiles/org_tensorflow/tensorflow/python/kernel_tests/denormal_test.py", line 50, in testFlushDenormalsCPU
+    self._flushDenormalsTest(use_gpu=False, dtypes=(np.float32, np.float64))
+  File "/root/.cache/bazel/_bazel_root/725e77151072daec43bc353cb6fcb26c/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/kernel_tests/denormal_test.runfiles/org_tensorflow/tensorflow/python/kernel_tests/denormal_test.py", line 44, in _flushDenormalsTest
+    self.assertAllEqual(flush.eval(), np.zeros(shape))
+  File "/root/.cache/bazel/_bazel_root/725e77151072daec43bc353cb6fcb26c/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/kernel_tests/denormal_test.runfiles/org_tensorflow/tensorflow/python/framework/test_util.py", line 699, in assertAllEqual
+    np.testing.assert_array_equal(a, b)
+  File "/usr/lib64/python2.7/site-packages/numpy/testing/utils.py", line 871, in assert_array_equal
+    verbose=verbose, header='Arrays are not equal')
+  File "/usr/lib64/python2.7/site-packages/numpy/testing/utils.py", line 796, in assert_array_compare
+    raise AssertionError(msg)
+AssertionError:
+Arrays are not equal
+
+(mismatch 100.0%)
+ x: array(1.1754946310819804e-39, dtype=float32)
+ y: array(0.0)
+
+======================================================================
+FAIL: testFlushDenormalsGPU (__main__.DenormalTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/.cache/bazel/_bazel_root/725e77151072daec43bc353cb6fcb26c/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/kernel_tests/denormal_test.runfiles/org_tensorflow/tensorflow/python/kernel_tests/denormal_test.py", line 54, in testFlushDenormalsGPU
+    self._flushDenormalsTest(use_gpu=True, dtypes=(np.float32,))
+  File "/root/.cache/bazel/_bazel_root/725e77151072daec43bc353cb6fcb26c/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/kernel_tests/denormal_test.runfiles/org_tensorflow/tensorflow/python/kernel_tests/denormal_test.py", line 44, in _flushDenormalsTest
+    self.assertAllEqual(flush.eval(), np.zeros(shape))
+  File "/root/.cache/bazel/_bazel_root/725e77151072daec43bc353cb6fcb26c/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/kernel_tests/denormal_test.runfiles/org_tensorflow/tensorflow/python/framework/test_util.py", line 699, in assertAllEqual
+    np.testing.assert_array_equal(a, b)
+  File "/usr/lib64/python2.7/site-packages/numpy/testing/utils.py", line 871, in assert_array_equal
+    verbose=verbose, header='Arrays are not equal')
+  File "/usr/lib64/python2.7/site-packages/numpy/testing/utils.py", line 796, in assert_array_compare
+    raise AssertionError(msg)
+AssertionError:
+Arrays are not equal
+
+(mismatch 100.0%)
+ x: array(1.1754946310819804e-39, dtype=float32)
+ y: array(0.0)
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.071s
+
+FAILED (failures=2)
+not equal lhs =  1.17549463108e-39
+not equal rhs =  0.0
+not equal lhs =  1.17549463108e-39
+not equal rhs =  0.0

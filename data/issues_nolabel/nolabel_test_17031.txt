@@ -1,0 +1,35 @@
+program crashes on tf1.5 when creating a tensor object with CAPI
+
+The following function is used to create a tensor object feeded into session's run function for inference at evaluation.    The evaluation test is wrapped in a loop for maximum 500 iterations, it crashes at iteration of 200-300 each time with log "Process finished with exit code 139 (interrupted by signal 11: SIGSEGV".   It works well in previous versions.  Thanks for any correction.
+static void Deallocator(void *data, size_t, void *arg) {
+  tensorflow::cpu_allocator()->DeallocateRaw(data);
+  *reinterpret_cast<bool *>(arg) = true;
+}
+
+TF_Tensor *DlTensorUtil<float>::Feature2TF_Tensor(float feature[], int64_t dims[], int nDims, TF_DataType type) {
+  size_t len = 1;
+  for (int i = 0; i < nDims; i++)
+    len *= dims[i];
+  len *= sizeof(float);
+  bool deallocator_called = false;
+  TF_Tensor *ts = TF_NewTensor(type, dims, nDims, feature, len, &Deallocator, &deallocator_called);
+  return ts;
+}
+
+void DlTensorUtil<float>::Feature2Tensor(float feature[], int64_t dims[], int nDims, TF_DataType type, Tensor &out_tensor) {
+  TF_Tensor *tftensor = Feature2TF_Tensor(feature, dims, nDims, type);
+  out_tensor = tensorflow::TensorCApi::MakeTensor(tftensor->dtype, tftensor->shape, tftensor->buffer);
+}
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):  No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): 16.04.3
+TensorFlow installed from (source or binary): From Source
+TensorFlow version (use command below):  1.5
+Python version:  Not used
+Bazel version (if compiling from source):  0.7.0
+GCC/Compiler version (if compiling from source): 5.4.0
+CUDA/cuDNN version: 8.0/6.1
+GPU model and memory: gtx1080/8g
+Exact command to reproduce:

@@ -1,0 +1,45 @@
+Different corrupted record Issue with TFRecordReader
+
+Hi, I am trying to convert some 11 mn features and labels into TFRecords; I convert my examples into scipy csr/coo and the features are simple 1Dim features. I am trying to make a batch of features of 1000 in a csr and I am able to write it into TFRecordWriter. The files are generated.
+The problem is when I try to read it using parse_example, I am trying to create a tensor equivalent to compressed sparse matrix of scipy and I am running into issues. I am ONLY trying to test my tensor values using sess.run() and I am getting this corrupted error. I tried to change different reading formats , FixedFeature, VarLenFeature, but no breakthrough.
+corrupted record at 0
+[[Node: ReaderReadV2 = ReaderReadV2[_device="/job:localhost/replica:0/task:0/cpu:0"](TFRecordReaderV2, input_producer)]]
+Here is how I am trying to parse the TFRecord
+features={
+'feature_data' : tf.FixedLenFeature([],tf.string),
+'feature_row' : tf.FixedLenFeature([],tf.string),
+'feature_col' : tf.FixedLenFeature([], tf.string),
+'feature_shape' : tf.FixedLenFeature([], tf.string)}
+'feature_dim2' : tf.FixedLenFeature([1], tf.int64)}
+    print 'Reader initialized'
+    tfrecord_features = tf.parse_single_example(serialized_example, features)
+    fea_data = tf.decode_raw(tfrecord_features['feature_data'], tf.int32)
+    fea_row = tf.decode_raw(tfrecord_features['feature_row'], tf.int32)
+    fea_col = tf.decode_raw(tfrecord_features['feature_col'], tf.int32)
+    fea_shape = tf.decode_raw(tfrecord_features['feature_shape'], tf.int32)
+    print 'Parsed example'
+    print type(fea_data)
+    print type(fea_row)
+    ade_features = tf.sparse_to_dense(sparse_indices=[fea_row, fea_col], 
+                                sparse_values=fea_data, 
+                                output_shape=fea_shape)
+   ............
+   sess.run(ade_features)
+
+Here is how I am trying to write the feature.
+writer = tf.python_io.TFRecordWriter(filename)
+#for index in range(features_vectors.shape[0]):
+for iteration, (start, end) in enumerate(batches):
+#print('Writing label index: ' + str(index))
+feature_batch = features_vectors[start:end] # again a csr
+feature_batch = feature_batch.tocoo()
+label_vec = labels[start:end] # csr
+label_vec = label_vec.tocoo()
+example = tf.train.Example(features=tf.train.Features(feature={
+'feature_data' : self.bytes_feature(feature_batch.data.tobytes()),
+'feature_row' : self.bytes_feature(feature_batch.row.tobytes()),
+'feature_col' : self.bytes_feature(feature_batch.col.tobytes()),
+'feature_shape' : self.bytes_feature(np.array(feature_batch.shape, np.int32).tobytes())
+writer.write(example.SerializeToString())
+writer.close()
+I am using tensorflow 1.2.1

@@ -1,0 +1,82 @@
+ValueError: Cannot feed value of shape (1, 40, 3) for Tensor u'cls1_fc_pose_xyz_target:0', which has shape '(?, ?)
+
+I have installed keras using conda with tensorflow backend. I am experimenting with the keras version of posenet architecture. I have introduced a few LSTM layers into the original architecture and now my input should be of 5 dim(n_batch,n_frame,row,col,channel) and my model compiles correctly but when I call the fit function, it throws following error:
+Train on 129 samples, validate on 129 samples
+
+Epoch 1/800
+
+Traceback (most recent call last):
+
+File "train.py", line 72, in <module>
+
+callbacks=[checkpointer])
+
+File "/u/some_user/conda-envs/my_root2/lib/python2.7/site-packages/keras/engine/training.py", line 1485, in fit
+
+initial_epoch=initial_epoch)
+
+File "/u/some_user/conda-envs/my_root2/lib/python2.7/site-packages/keras/engine/training.py", line 1140, in _fit_loop
+
+outs = f(ins_batch)
+
+File "/u/some_user/conda-envs/my_root2/lib/python2.7/site-packages/keras/backend/tensorflow_backend.py", line 2073, in __call__
+
+feed_dict=feed_dict)
+
+File "/u/some_user/conda-envs/my_root2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 767, in run
+
+run_metadata_ptr)
+
+File "/u/some_user/conda-envs/my_root2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 944, in _run
+
+% (np_val.shape, subfeed_t.name, str(subfeed_t.get_shape())))
+
+ValueError: Cannot feed value of shape (1, 40, 3) for Tensor u'cls1_fc_pose_xyz_target:0', which has shape '(?, ?)'
+
+`
+and here the piece of code that I am using in training:
+X_train=np.squeeze(np.array(dataset_train.images,dtype=float))
+
+X_test=np.squeeze(np.array(dataset_test.images,dtype=float))
+
+y_train=np.squeeze(np.array(dataset_train.poses,dtype=float))
+
+print("X_train shape:"+str(X_train.shape))#X_train shape:(129, 40, 224, 224, 3)
+
+print("y_train shape:"+str(y_train.shape))#y_train shape:(129, 40, 7)
+
+y_train_x = y_train[:,:,0:3]
+
+y_train_q = y_train[:,:,3:7]
+
+y_test = np.squeeze(np.array(dataset_test.poses))
+
+print("X_test shape:"+str(X_test.shape))#X_test shape:(129, 40, 224, 224, 3)
+
+print("y_test shape:"+str(y_test.shape))#y_test shape:(129, 40, 7)
+
+y_test_x = y_test[:,:,0:3]
+
+y_test_q = y_test[:,:,3:7]
+
+#Setup checkpointing
+checkpointer = ModelCheckpoint(filepath="checkpoint_weights.h5", verbose=1, save_best_only=True, save_weights_only=True)
+
+model.fit(X_train, [y_train_x, y_train_q, y_train_x, y_train_q, y_train_x, y_train_q],
+  batch_size=batch_size,
+  nb_epoch=800,
+  verbose=1,
+  validation_data=(X_test, [y_test_x, y_test_q, y_test_x, y_test_q, y_test_x, y_test_q]),
+  callbacks=[checkpointer])
+
+and here is the input of my model:
+input = Input(shape=(helper.frames_per_sequence,224, 224, 3))
+
+and here is the lines causing error:
+cls1_fc1_flat = Flatten()(cls1_reduction_pose)
+
+cls1_fc1_pose = Dense(1024,activation='relu',name='cls1_fc1_pose')(cls1_fc1_flat)
+
+cls1_fc_pose_xyz = Dense(3,name='cls1_fc_pose_xyz')(cls1_fc1_pose)
+
+cls1_fc_pose_wpqr = Dense(4,name='cls1_fc_pose_wpqr')(cls1_fc1_pose)

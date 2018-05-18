@@ -1,0 +1,70 @@
+Element-wise tf.cond (like theano switch)
+
+When I try the following code:
+import tensorflow as tf
+x = tf.placeholder('float32', shape=(None, None))
+tf.cond(x >= 0.9, lambda: 1., lambda: x)
+
+I get this error:
+/Users/stas/.pyenv/versions/anaconda-2.4.0/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.pyc in cond(pred, fn1, fn2, name)
+   1314     if isinstance(pred, bool):
+   1315       raise TypeError("pred must not be a Python bool")
+-> 1316     p_2, p_1 = switch(pred, pred)
+   1317     pivot_1 = array_ops.identity(p_1, name="switch_t")
+   1318     pivot_2 = array_ops.identity(p_2, name="switch_f")
+
+/Users/stas/.pyenv/versions/anaconda-2.4.0/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.pyc in switch(data, pred, dtype, name)
+    258     pred = ops.convert_to_tensor(pred, name="pred")
+    259     if isinstance(data, ops.Tensor):
+--> 260       return gen_control_flow_ops._switch(data, pred, name=name)
+    261     else:
+    262       if not isinstance(data, (ops.IndexedSlices, ops.SparseTensor)):
+
+/Users/stas/.pyenv/versions/anaconda-2.4.0/lib/python2.7/site-packages/tensorflow/python/ops/gen_control_flow_ops.pyc in _switch(data, pred, name)
+    368     output_true: A `Tensor`. Has the same type as `data`. If `pred` is true, data will be forwarded to this output.
+    369   """
+--> 370   result = _op_def_lib.apply_op("Switch", data=data, pred=pred, name=name)
+    371   return _SwitchOutput._make(result)
+    372
+
+/Users/stas/.pyenv/versions/anaconda-2.4.0/lib/python2.7/site-packages/tensorflow/python/ops/op_def_library.pyc in apply_op(self, op_type_name, name, **keywords)
+    702           op = g.create_op(op_type_name, inputs, output_types, name=scope,
+    703                            input_types=input_types, attrs=attr_protos,
+--> 704                            op_def=op_def)
+    705           outputs = op.outputs
+    706           return _Restructure(ops.convert_n_to_tensor(outputs),
+
+/Users/stas/.pyenv/versions/anaconda-2.4.0/lib/python2.7/site-packages/tensorflow/python/framework/ops.pyc in create_op(self, op_type, inputs, dtypes, input_types, name, attrs, op_def, compute_shapes, compute_device)
+   2260                     original_op=self._default_original_op, op_def=op_def)
+   2261     if compute_shapes:
+-> 2262       set_shapes_for_outputs(ret)
+   2263     self._add_op(ret)
+   2264     self._record_op_seen_by_control_dependencies(ret)
+
+/Users/stas/.pyenv/versions/anaconda-2.4.0/lib/python2.7/site-packages/tensorflow/python/framework/ops.pyc in set_shapes_for_outputs(op)
+   1700       raise RuntimeError("No shape function registered for standard op: %s"
+   1701                          % op.type)
+-> 1702   shapes = shape_func(op)
+   1703   if shapes is None:
+   1704     raise RuntimeError(
+
+/Users/stas/.pyenv/versions/anaconda-2.4.0/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.pyc in _SwitchShape(op)
+   2345 def _SwitchShape(op):
+   2346   input_shape = op.inputs[0].get_shape()
+-> 2347   unused_pred_shape = op.inputs[1].get_shape().merge_with(tensor_shape.scalar())
+   2348   return [input_shape] * 2
+
+/Users/stas/.pyenv/versions/anaconda-2.4.0/lib/python2.7/site-packages/tensorflow/python/framework/tensor_shape.pyc in merge_with(self, other)
+    568       except ValueError:
+    569         raise ValueError("Shapes %s and %s are not compatible" %
+--> 570                          (self, other))
+    571
+    572   def concatenate(self, other):
+
+ValueError: Shapes (?, ?) and () are not compatible
+
+As I understand pred argument should be scalar, but what I need is element-wise condition.
+Though theano switch is working as expected:
+import theano.tensor as T
+x = T.matrix()
+T.switch(x >= 0.9, 1, x).eval({x: np.zeros((2,2), 'float32')})

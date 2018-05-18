@@ -1,0 +1,24 @@
+enqueue inside while loop does not work as expected
+
+VERSION 1.5.0-rc0
+GIT_VERSION v1.3.0-rc1-7323-g8d5741f
+Compiled from source
+with tf.device('cpu:0'):
+    x = tf.contrib.framework.local_variable(1024)
+    q = tf.FIFOQueue(-1, tf.int32, shapes=[[]])
+
+    def cond(_):
+        remaining = tf.assign_sub(x, 1, use_locking=True)
+        with tf.control_dependencies([q.enqueue(remaining)]):
+            return remaining > 0
+
+    def body(_):
+        return _
+
+    op = tf.while_loop(cond, body, [tf.constant([])], parallel_iterations=1, back_prop=False).op
+
+x.initializer.run()
+op.run()
+q.dequeue_many(q.size()).eval()
+# array([0, 0, 0, ..., 0, 0, 0], dtype=int32)
+# expected: array([1023, 1022, 1021, ..., 2, 1, 0], dtype=int32)

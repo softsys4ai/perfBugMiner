@@ -1,0 +1,66 @@
+tf.data.Dataset.padded_batch() doesn't work with nested elements
+
+System information
+TF 1.4 (pip install)
+Python version 3.5.2 (Anaconda)
+Problem description
+tf.data.Dataset.padded_batch() fails if a dataset element has some nested structure instead of being a tensor. Dataset API is supposed to work with Estimator's input_fn functionality which should return
+features and labels as separate python objects and it is very inconvenient to merge everything into a single tensor, make a batch and then split.
+Source
+import tensorflow as tf
+print(tf.__version__)    
+
+dataset = tf.data.Dataset.range(100)
+dataset = dataset.map(lambda x: {'x': tf.fill([tf.cast(x, tf.int32)], x),
+                                                       'y': tf.fill([tf.cast(x, tf.int32)], x)})
+dataset = dataset.padded_batch(4, padded_shapes=[None])
+
+iterator = dataset.make_one_shot_iterator()
+next_element = iterator.get_next()
+
+with tf.train.MonitoredSession() as sess:
+    print(sess.run(next_element))
+    print(sess.run(next_element))
+
+Actual
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+<ipython-input-38-bb9f335976ed> in <module>()
+      2 dataset = dataset.map(lambda x: {'x': tf.fill([tf.cast(x, tf.int32)], x),
+      3                                  'y': tf.fill([tf.cast(x, tf.int32)], x)})
+----> 4 dataset = dataset.padded_batch(4, padded_shapes=[None])
+      5 
+      6 iterator = dataset.make_one_shot_iterator()
+
+~/anaconda3/lib/python3.5/site-packages/tensorflow/python/data/ops/dataset_ops.py in padded_batch(self, batch_size, padded_shapes, padding_values)
+    693       A `Dataset`.
+    694     """
+--> 695     return PaddedBatchDataset(self, batch_size, padded_shapes, padding_values)
+    696 
+    697   def map(self, map_func, num_parallel_calls=None):
+
+~/anaconda3/lib/python3.5/site-packages/tensorflow/python/data/ops/dataset_ops.py in __init__(self, input_dataset, batch_size, padded_shapes, padding_values)
+   1290                       self._default_padding(input_dataset))
+   1291     self._padded_shapes = nest.map_structure_up_to(
+-> 1292         input_dataset.output_shapes, _partial_shape_to_tensor, padded_shapes)
+   1293     self._padding_values = nest.map_structure_up_to(
+   1294         input_dataset.output_shapes, _padding_value_to_tensor, padding_values,
+
+~/anaconda3/lib/python3.5/site-packages/tensorflow/python/data/util/nest.py in map_structure_up_to(shallow_tree, func, *inputs)
+    510     raise ValueError("Cannot map over no sequences")
+    511   for input_tree in inputs:
+--> 512     assert_shallow_structure(shallow_tree, input_tree)
+    513 
+    514   # Flatten each input separately, apply the function to corresponding elements,
+
+~/anaconda3/lib/python3.5/site-packages/tensorflow/python/data/util/nest.py in assert_shallow_structure(shallow_tree, input_tree, check_types)
+    354       raise TypeError(
+    355           "If shallow structure is a sequence, input must also be a sequence. "
+--> 356           "Input has type: %s." % type(input_tree))
+    357 
+    358     if check_types and not isinstance(input_tree, type(shallow_tree)):
+
+TypeError: If shallow structure is a sequence, input must also be a sequence. Input has type: <class 'list'>.
+
+Expected
+It should produce dictionary, where x and y values are batch tensors with proper paddings.

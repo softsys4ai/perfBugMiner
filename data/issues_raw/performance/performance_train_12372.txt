@@ -1,0 +1,52 @@
+tf.contrib.data.Dataset does not correctly handle nested dictionaries
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 14.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.3.0-rc2-20-g0787eee
+Python version: 2.7
+Bazel version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+tf.contrib.data.Dataset objects do not correctly deal with nested dictionary structures. When using a dataset with a nested dictionary, the inner dictionaries are replaced with the first tensor in that inner dictionary, and following tensors are restored for incorrect keys.
+This is not an issue with tf.contrib.framework.nest, only with datasets, which appear to instead use tensorflow.contrib.data.python.util.nest. The particular difference causing the bug appears to be https://github.com/tensorflow/tensorflow/blob/r1.3/tensorflow/python/util/nest.py#L279 vs. https://github.com/tensorflow/tensorflow/blob/r1.3/tensorflow/contrib/data/python/util/nest.py#L184
+Source code / logs
+import tensorflow as tf
+from tensorflow.contrib.data.python.util import nest as data_nest
+
+test_value = {
+    "a": {
+        "aa": tf.constant(1),
+        "ab": tf.constant([2,2]),
+    },
+    "b": tf.constant([3, 3, 3]),
+}
+
+
+print tf.contrib.framework.nest.map_structure(lambda t: t.shape, test_value)
+# {
+#   'a': {
+#       'aa': TensorShape([]),
+#       'ab': TensorShape([Dimension(2)])
+#   },
+#   'b': TensorShape([Dimension(3)])
+# } <- these are the correct shapes
+
+
+d = tf.contrib.data.Dataset.from_tensors(test_value)
+print d.output_shapes
+# {
+#   'a': TensorShape([]),
+#   'b': TensorShape([Dimension(2)])
+# } <- incorrect
+
+print data_nest.map_structure(lambda t: t.shape, test_value)
+# {
+#   'a': TensorShape([]),
+#   'b': TensorShape([Dimension(2)])
+# } <- incorrect

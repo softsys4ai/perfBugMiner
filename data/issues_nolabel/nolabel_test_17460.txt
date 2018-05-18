@@ -1,0 +1,44 @@
+Precision in tf.gradients changed in 1.6 vs. <1.6
+
+System information
+Try the following code using different values for the infinitesimal 1e-15:
+def TFDistance(A):
+	"""
+	Compute a distance matrix of A, a coordinate matrix
+	Using the factorization:
+	Dij = <i|i> - 2<i|j> + <j,j>
+	Args:
+		A: a Nx3 matrix
+	Returns:
+		D: a NxN matrix
+	"""
+	r = tf.reduce_sum(A*A, 1)
+	r = tf.reshape(r, [-1, 1]) 
+	# Tensorflow can only reverse mode grad the sqrt if all these elements
+	# are nonzero so add a small infinitesimal 
+	D = r - 2*tf.matmul(A, tf.transpose(A)) + tf.transpose(r) + 1e-15
+	return tf.sqrt(D)
+xyzs = tf.random_uniform([2,3],dtype=tf.float64)*10.0
+sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
+init = tf.global_variables_initializer()
+sess.run(init)
+sess.run([TFDistance(xyzs),tf.gradients(TFDistance(xyzs),xyzs)],feed_dict={x:0.2})
+The issue is that in tf < 1.6 a small infinitesimal  (< 1e-15) was enough to avoid nan in tf.gradients due to 1/sqrt(0.0). For some reason in tf 1.6 this is returning a nan for anything less than 1e-13, which produces an unacceptable error in the result.
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+OSX, pip and pip3 tf 1.6
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+'v1.6.0-0-gd2e24b6039', '1.6.0')
+Python version:
+2.7 and 3.3
+CUDA/cuDNN version:
+CPU
+Exact command to reproduce:
+(See script above)
+
+Describe the problem
+In versions of tensorflow previous to 1.6 this code would not issue a nan gradient for reasonable infinitesimals (<1e-26). Suddenly the way numerical precision is handled in the gradient computation has obviously changed, and changed in a way which is clipping things near zero and doing so differently depending on if colocation of gradients is requested....
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.

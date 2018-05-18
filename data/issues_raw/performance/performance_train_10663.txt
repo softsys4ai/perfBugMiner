@@ -1,0 +1,79 @@
+MemoryError when freezing large model
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.2.0-rc2
+Bazel version (if compiling from source): 0.5.1
+CUDA/cuDNN version: CUDA8 / CuDNN6
+GPU model and memory: Tesla K80, 11439MiB
+Exact command to reproduce: ~/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph --input_graph=fcn.pbtxt --output_graph=frozen.pb --input_checkpoint=ckpt --output_nodes_names="Softmax"
+
+Describe the problem
+I'm attempting to freeze a large model with the freeze_graph tool and I get a MemoryError. This seems really weird to me since the machine should have more than enough memory. I also tried running with CUDA_VISIBLE_DEVICES="" but got the same result.
+ubuntu@ip-172-31-33-208:~/code/segnet$ free -g
+              total        used        free      shared  buff/cache   available
+Mem:             59           1          51           0           7          58
+Swap:             0           0           0
+
+drwxr-xr-x 2 ubuntu ubuntu 4.0K Jun  7 22:37 variables
+-rw-r--r-- 1 ubuntu ubuntu 513M Jun  7 22:37 saved_model.pb
+drwxrwxr-x 2 ubuntu ubuntu 4.0K Jun 12 20:45 data
+drwxrwxr-x 3 ubuntu ubuntu 4.0K Jun 12 21:39 ..
+-rw-rw-r-- 1 ubuntu ubuntu 1.1K Jun 12 23:07 load.py
+-rw-rw-r-- 1 ubuntu ubuntu 1.5G Jun 12 23:09 fcn.pbtxt
+-rw-rw-r-- 1 ubuntu ubuntu 4.8K Jun 12 23:09 ckpt.index
+-rw-rw-r-- 1 ubuntu ubuntu 1.6G Jun 12 23:09 ckpt.data-00000-of-00001
+-rw-rw-r-- 1 ubuntu ubuntu   65 Jun 12 23:09 checkpoint
+-rw-rw-r-- 1 ubuntu ubuntu 513M Jun 12 23:09 ckpt.meta
+drwxrwxr-x 4 ubuntu ubuntu 4.0K Jun 12 23:09 .
+
+I first converted the saved_model.pb to a .pbtxt, fcn.pbtxt with a checkpoint ckpt with this script https://gist.github.com/domluna/ed477cb5698c787f29c7d56fba381fed. I couldn't get the freeze tool to work with saved_model.pb which was created based on tf.saved_model.
+Source code / logs
+ubuntu@ip-172-31-33-208:~/code/segnet$ ~/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph --input_graph=fcn.pbtxt --output_graph=frozen.pb --output_nodes_names="Softmax"
+Traceback (most recent call last):
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/tools/freeze_graph.py", line 255, in <module>
+    app.run(main=main, argv=[sys.argv[0]] + unparsed)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/tools/freeze_graph.py", line 187, in main
+    FLAGS.variable_names_blacklist)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/tools/freeze_graph.py", line 165, in freeze_graph
+    input_graph_def = _parse_input_graph_proto(input_graph, input_binary)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/tools/freeze_graph.py", line 134, in _parse_input_graph_proto
+    text_format.Merge(f.read(), input_graph_def)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 476, in Merge
+    descriptor_pool=descriptor_pool)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 526, in MergeLines
+    return parser.MergeLines(lines, message)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 559, in MergeLines
+    self._ParseOrMerge(lines, message)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 574, in _ParseOrMerge
+    self._MergeField(tokenizer, message)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 675, in _MergeField
+    merger(tokenizer, message, field)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 764, in _MergeMessageField
+    self._MergeField(tokenizer, sub_message)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 675, in _MergeField
+    merger(tokenizer, message, field)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 764, in _MergeMessageField
+    self._MergeField(tokenizer, sub_message)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 675, in _MergeField
+    merger(tokenizer, message, field)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 764, in _MergeMessageField
+    self._MergeField(tokenizer, sub_message)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 675, in _MergeField
+    merger(tokenizer, message, field)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 764, in _MergeMessageField
+    self._MergeField(tokenizer, sub_message)
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 662, in _MergeField
+    tokenizer.Consume(':')
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 1016, in Consume
+    if not self.TryConsume(token):
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 1003, in TryConsume
+    self.NextToken()
+  File "/home/ubuntu/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/protobuf/python/google/protobuf/text_format.py", line 1236, in NextToken
+    match = self._TOKEN.match(self._current_line, self._column)
+MemoryError

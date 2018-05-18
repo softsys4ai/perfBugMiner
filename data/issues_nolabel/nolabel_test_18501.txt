@@ -1,0 +1,19 @@
+Enable mobile libtensorflow_cc.so
+
+Hey team TF!
+I'm not expecting a merge on this, but wanted to submit it for posterity. I've been working for a few years on a project where we use tensorflow as part of a C++ application running simultaneously on armv7, arm64, and ubuntu x64, additionally utilizing ceres, protobuf, opencv and eigen in our pipeline.
+There seems to be a throng of different versions of tensorflow within the same build system, all with different capabilities, APIs and build instructions; so my recurring torment has been attempting to update tensorflow and consolidate those versions and dependencies into something that works seamlessly for our application. I had hope TF Lite would help solve this, but since upsampling ops seem to be missing still, its impossible for me to use as of yet, though I do have hope for the future. :)
+During my previous endavour, I ended up customizing //tensorflow/contrib/makefile, which combined with android-ndk-r11 and a bunch of skitty rules was made to work for all three platforms. Unfortunately, this meant a mess of a build system that wasn't always up to date with the bazel core, and no chance of reliable optimized builds.
+So for this time around, I decided to update to NDKr15 and look into all the various errors preventing the full libtensorflow_cc.so from building, resolving them to the best of my efforts, while caring little for breaking the lackluster libtensorflow_inference.so adaptation, which to my despair seemed to have no C++ API and zero documentation for native usage.
+This PR resolves all build- and link-preventing issues in libtensorflow_cc.so and all of its dependencies in r1.7, whilst breaking and removing all android build graph branches to force a full build as close to ubuntu libtensorflow_cc.so as possible.
+The majority of all incompatibilities with android seem to be related to android STL library issues, especially with functions from STL math libraries like std::asinh, which for android are placed in a global namespace (::asinh). I tried to resolve these with solutions that would work equally well on all platforms.
+The remainder are discrepancies with ubuntu, e.g. pthread which is included implicitly in android, missing string functions and lack of bfloat16-support. These were resolved while making an effort to maintain multi-platform support.
+I'll also add that I have not yet had a chance to test this on a physical mobile device, but it seems promising and compiles on armv7 thus far.
+The build command I'm using contains additional flags necessary for android compatibility, and may be somewhat daunting:
+bazel build --config=monolithic --crosstool_top=//external:android/crosstool --host_crosstool_top=@bazel_tools//tools/cpp:toolchain --cpu=TARGET_PLATFORM //tensorflow:libtensorflow_cc.so --cxxopt="-std=c++11" --copt="-DMDB_USE_ROBUST=0" --cxxopt="-DTENSORFLOW_DISABLE_META" --cxxopt="-DEIGEN_HAS_C99_MATH" --cxxopt="-Wno-c++11-narrowing"
+Notes on this command:
+lmdb attempts to use an (on android) undefined PTHREAD_MUTEX_ROBUST, so disable that.
+TENSORFLOW_DISABLE_META seems to resolve some build issues for android inside tensorflow and was cut from a filed issue.
+auto detecting EIGEN_HAS_C99_MATH seems to fail on android, so enable it manually to overcome static asserts for missing functions.
+Disabling the warning for c++11-narrowing is required for "Eigen::DSizes<Eigen::DenseIndex, 2> slice_indices{position, 0};" to compile in batch_kernels.cc - since the Concat operation calling it is templated with long long, and Eigen seems to expect a signed int in some circumstances. This may be a cause for concern.
+I'm hoping some parts of this can be useful either for team TF, or for external developers who like me need to integrate on android within a modern C++ environment, and for various reasons cannot use TF Lite.

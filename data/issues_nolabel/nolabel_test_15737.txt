@@ -1,0 +1,80 @@
+AttentionWrapper zero_state(batch_size, tf.float32).clone(cell_state=encoder_state) fails when batch size is 1
+
+Hello!
+I believe to have found a small bug when using the zero_state(batch_size, tf.float32).clone(cell_state=encoder_state) command. When batch size is 1, the error ValueError: The shape for decoder/while/Merge_5:0 is not an invariant for the loop. It enters the loop with shape (1, 512), but has shape (?, 512) after one iteration. Provide shape invariants using either the shape_invariants argument of tf.while_loop or set_shape() on the loop variables. is thrown. This error does not occur when batch size is 2 or larger. The error also doesn't occur if I remove the .clone command.
+I tried investigating where the error is, but couldn't find the cause. I'm using this in context of trying to build a neural transducer, but also get the same error for basic seq2seq:
+(Based on the NMT tutorial)
+# .... Encoder, constants etc...
+# Decoder
+helper = tf.contrib.seq2seq.TrainingHelper(
+    decoder_inputs_embedded, decoder_full_length, time_major=True) 
+
+attention_states = tf.transpose(encoder_outputs, [1, 0, 2])  # attention_states: [batch_size, max_time, num_units]
+attention_mechanism = tf.contrib.seq2seq.LuongAttention(
+    encoder_hidden_units, attention_states,
+    memory_sequence_length=encoder_inputs_length)
+decoder_cell = tf.contrib.seq2seq.AttentionWrapper(
+    tf.contrib.rnn.LSTMCell(decoder_hidden_units),
+    attention_mechanism,
+    attention_layer_size=decoder_hidden_units)
+
+projection_layer = layers_core.Dense(
+    vocab_size, use_bias=False)
+
+
+decoder = tf.contrib.seq2seq.BasicDecoder(
+    decoder_cell, helper, decoder_cell.zero_state(batch_size, tf.float32).clone(cell_state=encoder_state),
+    output_layer=projection_layer)
+
+# ---- Training ----
+outputs, last_state, _ = tf.contrib.seq2seq.dynamic_decode(decoder, output_time_major=True)
+logits = outputs.rnn_output
+decoder_prediction = outputs.sample_id
+TF Version: ('v1.4.0-19-ga52c8d9', '1.4.1')
+System details:
+== cat /etc/issue ===============================================
+Linux nikita-coolboi 4.13.0-21-generic #24-Ubuntu SMP Mon Dec 18 17:29:16 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="17.10 (Artful Aardvark)"
+VERSION_ID="17.10"
+VERSION_CODENAME=artful
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+c++ (Ubuntu 7.2.0-8ubuntu3) 7.2.0
+Copyright (C) 2017 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+== uname -a =====================================================
+Linux nikita-coolboi 4.13.0-21-generic #24-Ubuntu SMP Mon Dec 18 17:29:16 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+
+== check pips ===================================================
+numpy (1.13.3)
+protobuf (3.5.1)
+tensorflow (1.4.1)
+tensorflow-tensorboard (0.4.0rc3)
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.4.1
+tf.GIT_VERSION = v1.4.0-19-ga52c8d9
+tf.COMPILER_VERSION = v1.4.0-19-ga52c8d9
+Sanity check: array([1], dtype=int32)
+
+== env ==========================================================
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+tf.sh: line 105: nvidia-smi: command not found
+
+== cuda libs  ===================================================
+
+I believe this is an important issue, as often times when experimenting with new seq2seq models I start off with trying to get it to work for a batch size of 1.
+Thanks!
+Nikita

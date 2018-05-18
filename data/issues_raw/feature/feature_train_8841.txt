@@ -1,0 +1,42 @@
+Gradient of reduce_prod not available on GPU
+
+The following example fails to colocate the values:
+with tf.device('/gpu:2'):
+    x = tf.placeholder(tf.float32, shape=[None, 100])
+    weight_dense_1 = tf.Variable(tf.zeros([100, 10]))
+    dense_1_out = tf.matmul(x, weight_dense_1)
+    y = tf.reduce_prod(tf.cast(tf.shape(dense_1_out), tf.float32))
+    grad = tf.gradients(y, [weight_dense_1], colocate_gradients_with_ops=True)
+A bunch of warnings like this is displayed:
+WARNING:tensorflow:Tried to colocate gradients_1/Prod_1_grad/Rank with an op Prod_1 that had a different device: /device:CPU:0 vs /device:GPU:2. Ignoring colocation property.
+
+The symptom is similar to #3397. Using CPU or specifying all input dimensions solves the problem. But the cause seems different.
+Gradient of Prod operation is defined in python/ops/math_grad.py. There, the operation is forced to run on CPU (see 182fef1), mentioning the listdiff() operation is CPU-only.
+I tried remove the forcing line and run this. It yields a kind explanation:
+InvalidArgumentError: Cannot assign a device to node 'gradients/Prod_grad/range_1': Could not satisfy explicit device specification '/device:GPU:2' because no supported kernel for GPU devices is available.
+Colocation Debug Info:
+Colocation group had the following types and devices: 
+InvertPermutation: GPU CPU 
+Transpose: GPU CPU 
+ConcatV2: GPU CPU 
+Pack: GPU CPU 
+Cumprod: GPU CPU 
+ListDiff: CPU 
+Shape: GPU CPU 
+    ...(many GPU CPU ops)
+Reshape: GPU CPU 
+Gather: CPU 
+
+Two operations used here, namely Gather and ListDiff, are defined on CPU-only. As some of the operations needed in calculating the gradient are CPU-only, by the colocation rule, they get grouped into CPU-only.
+This also occurs when using moments() or sufficient_statistics() (the former calls the latter). There, when some of the axes of the tensor are unknown (like batch size), the total number of values (which is needed for the mean and variance) is calculated by reduce_prod() on shape().
+When the value of mean or variance is differentiated in some way (which is the case in batch normalization), a colocation between tensors named like gradients/moments/sufficient_statistics/count_grad/Rank and moments/sufficient_statistics/count fails.
+Though listdiff() is renamed later on Python interface to setdiff1d(), it's still named ListDiff internally.
+gather() operation is defined on GPU too, but only on float types.
+It seems there hasn't been any issue on this. Would it mean that Prod() op is not differentiated in most of the cases?
+How this can be solved? I'm not sure if the setdiff1d() operation is needed.
+For me, this occured when using moments(), where the reciprocal of number of values is multiplicated to the sum of values. I think this is unnecessary, as it can be done with reduce_mean(). Is it right?
+Environment info
+Operating System: Ubuntu 16.04.
+Installed version of CUDA and cuDNN: CUDA 8.0.61 / cuDNN 5.1.10.
+pip3-installed tensorflow-gpu==1.0.1; all links here pointed to r1.0, but the problematic parts are the same as master.
+python -c "import tensorflow; print(tensorflow.__version__)" yields: 1.0.1.

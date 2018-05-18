@@ -1,0 +1,71 @@
+Error for slim dataset using fixed length reader
+
+I want to use tensorflow slim data provider. All examples I can find only are only reading tfrecord files. However, I want to read binary files directly by my own reader. I use fixed length reader to extract Cifar10 binary data.
+However, "dataBytes = tf.decode_raw(data, tf.unit8)" always produce error that "AttributeError: module 'tensorflow' has no attribute 'unit8'" when using in slim DatasetDataProvider.
+But no such error occurs when I use the reader directly without using DatasetDataProvider. Did I not use it correctly or does DatasetDataProvider only support tfrecord readers? Thank you.
+My codes are as below:
+CIFAR_LABEL_BYTE = 1
+CIFAR_HEIGHT = 32
+CIFAR_WIDTH = 32
+CIFAR_DEPTH = 3
+CIFAR_RECORD_BYTE = CIFAR_HEIGHT * CIFAR_WIDTH * CIFAR_DEPTH + CIFAR_LABEL_BYTE
+
+CIFAR_CLASS_NUM = 10
+CIFAR_TRAINING_NUM = 50000
+CIFAR_TEST_NUM = 10000
+
+_ITEMS_TO_DESCRIPTIONS = {
+	'image': 'A [32 x 32 x 3] color image.',
+	'label': 'A single integer between 0 and 9',
+}
+
+class CifarBinaryDecoder(DataDecoder):
+  def decode(self, data, items):
+	outputs = []
+            print(data.shape)
+	dataBytes = tf.decode_raw(data, tf.uint8)
+	for item in items:
+	  if item == 'label':
+		currLabel = tf.cast(tf.strided_slice(dataBytes, [0], CIFAR_LABEL_BYTE), tf.int32)
+		outputs.append(currLabel)
+	  if item == 'image':
+		imageData = tf.reshpae(tf.strided_slice(dataBytes, [CIFAR_LABEL_BYTE],[CIFAR_RECORD_BYTE]), [CIFAR_DEPTH, CIFAR_HEIGHT, CIFAR_WIDTH])
+		imageData = tf.transpose(imageData, [1, 2, 0])
+		outputs.append(imageData)
+
+	return outputs
+
+ def list_items(self):
+	return ['label', 'image']
+
+def get_cifar10_training_filenames(binary_data_dir):
+  file_pattern = ['test_batch.bin']
+  return file_pattern
+
+def get_cifar_training_dataset(binary_data_dir):
+  file_pattern = get_cifar10_training_filenames(binary_data_dir)
+  decoder = CifarBinaryDecoder()
+  return slim.dataset.Dataset(data_sources = file_pattern,
+							  reader = tf.FixedLengthRecordReader,
+							  decoder = decoder,
+							  num_samples = CIFAR_TRAINING_NUM,
+							  items_to_descriptions = _ITEMS_TO_DESCRIPTIONS,
+							  num_classes = CIFAR_CLASS_NUM)
+
+def main(_):  
+  dataset = get_cifar_training_dataset(FLAGS.cifar_data_dir)
+  provider = slim.dataset_data_provider.DatasetDataProvider(
+	  dataset,
+	  num_readers = 1,
+	  common_queue_capacity = 1000,
+	  common_queue_min = 500,
+	  reader_kwargs={'record_bytes' : CIFAR_RECORD_BYTE})
+
+ with tf.Session() as sess:
+	init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+	sess.run(init_op)
+	tf.train.start_queue_runners()
+
+	for i in range(2):
+	  [img, lab] = provider.get(['image', 'label'])
+              image, label = sess.run([img, lab])

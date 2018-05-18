@@ -1,0 +1,43 @@
+Gradients and variables was not shared in Adam optimizers when using bucketing
+
+All,
+I used bucketing-like technology for seq2seq task:
+# For different length in encoder and decoder
+model_map = {}
+for i in encoder_shape:
+    for j in decoder_shape:
+        with variable_scope.variable_scope(variable_scope.get_variable_scope(),
+                                 reuse=True if tt > 0 else None):
+            model = Seq2SeqModel()
+            model.build(encoder[:i], decoder[:j])
+            model_map[i*100+j] = model
+And get shared model's parameters:
+for t in tf.all_variables():
+    print t.name, t.get_shape() 
+Print: 
+embedding_attention_seq2seq/RNN/EmbeddingWrapper/embedding:0 (50000, 256)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Matrix:0 (1056, 1600)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Bias:0 (1600,)
+
+Model's optimizer is like below:
+#every model have an optimizer
+params = tf.trainable_variables()
+opt = tf.train.AdamOptimizer(1e-3)
+gradients = tf.gradients(self.loss, params)
+self.optimizer = opt.apply_gradients(zip(gradients, params))
+But I find that the optimizers don't share gradient:
+embedding_attention_seq2seq/RNN/EmbeddingWrapper/embedding/Adam:0 (50000, 256)
+embedding_attention_seq2seq/RNN/EmbeddingWrapper/embedding/Adam_1:0 (50000, 256)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Matrix/Adam:0 (1056, 1600)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Matrix/Adam_1:0 (1056, 1600)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Bias/Adam:0 (1600,)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Bias/Adam_1:0 (1600,)
+embedding_attention_seq2seq/RNN/EmbeddingWrapper/embedding/Adam_2:0 (50000, 256)
+embedding_attention_seq2seq/RNN/EmbeddingWrapper/embedding/Adam_3:0 (50000, 256)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Matrix/Adam_2:0 (1056, 1600)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Matrix/Adam_3:0 (1056, 1600)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Bias/Adam_2:0 (1600,)
+embedding_attention_seq2seq/RNN/MultiRNNCell/Cell0/GRUCell/Gates/Linear/Bias/Adam_3:0 (1600,)
+
+With the growth of the number of buckets, the GPU memory will grow too. And meanwhile I get a larger model in tf.train.Saver.save().
+So is it possible to share gradient in bucketing?

@@ -1,0 +1,159 @@
+Changing batch size changes output for float32 matmuls elementwise by ~1e-8 (at least on CPU)
+
+While developing a Hierarchical Attention Network, we have discovered that changing the batch size of the input effects the output of dynamic RNNs (while keeping everything else constant). In other words, feeding in [[1,2,3,4,5]] and [[6,7,8,9,10]] individually with batch size 1 will give a different result than feeding in [[1,2,3,4,5],[6,7,8,9,10]] together with batch size 2. We are currently running Bidirectional Dynamic RNNs with GRUs on the CPU-version of Tensorflow 1.2.
+While the change in output is small, when a network has many layers of RNNs, the differences become amplified. In our case, changing the batch size from 1 to 10 changes the network accuracy on our test set from 50% to 46%.
+System information and shortened sample code below.
+System information
+== cat /etc/issue ===============================================
+Linux pc93071.ornl.gov 3.10.0-514.26.1.el7.x86_64 #1 SMP Tue Jun 20 01:16:02 EDT 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="7.3 (Maipo)"
+VERSION_ID="7.3"
+REDHAT_BUGZILLA_PRODUCT_VERSION=7.3
+REDHAT_SUPPORT_PRODUCT_VERSION="7.3"
+== are we in docker =============================================
+No
+== compiler =====================================================
+c++ (GCC) 4.8.5 20150623 (Red Hat 4.8.5-11)
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+== uname -a =====================================================
+Linux pc93071.ornl.gov 3.10.0-514.26.1.el7.x86_64 #1 SMP Tue Jun 20 01:16:02 EDT 2017 x86_64 x86_64 x86_64 GNU/Linux
+== check pips ===================================================
+numpy (1.13.1)
+numpydoc (0.6.0)
+protobuf (3.3.0)
+tensorflow (1.2.1)
+== check for virtualenv =========================================
+False
+== tensorflow import ============================================
+tf.VERSION = 1.2.1
+tf.GIT_VERSION = v1.2.0-5-g435cdfc
+tf.COMPILER_VERSION = v1.2.0-5-g435cdfc
+Sanity check: array([1], dtype=int32)
+== env ==========================================================
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+== nvidia-smi ===================================================
+tf_env_collect.sh: line 105: nvidia-smi: command not found
+== cuda libs  ===================================================
+Source code / logs
+import numpy as np
+import tensorflow as tf
+from tensorflow.contrib.rnn import LSTMCell, GRUCell
+
+embeddings = np.random.rand(8000,350).astype(np.float32)
+embeddings -= embeddings.mean()
+embeddings /= (embeddings.std()*2.5)
+
+#doc input and line count
+line = tf.placeholder(tf.int32, shape=[None,10])
+num_words = tf.reduce_sum(tf.cast(tf.greater(line,0),tf.int32),1)
+word_embeds = tf.nn.embedding_lookup(tf.get_variable('embeddings',
+              initializer=embeddings,dtype=tf.float32),line)
+
+[word_outputs_fw,word_outputs_bw],_ = \
+        tf.nn.bidirectional_dynamic_rnn(GRUCell(5),GRUCell(5),
+        word_embeds,sequence_length=num_words,
+        dtype=tf.float32)
+
+word_outputs = tf.concat((word_outputs_fw, word_outputs_bw),2)
+
+init_op = tf.global_variables_initializer()
+sess = tf.Session()
+sess.run(init_op)
+
+a = np.array([[1,2,3,4,5,0,0,0,0,0]])
+b = np.array([[6,7,8,9,10,11,12,13,14,15]])
+ab = np.array([[1,2,3,4,5,0,0,0,0,0],[6,7,8,9,10,11,12,13,14,15]])
+
+feed_dict = {line:a}
+print sess.run(word_outputs,feed_dict=feed_dict)
+feed_dict = {line:b}
+print sess.run(word_outputs,feed_dict=feed_dict)
+feed_dict = {line:ab}
+print sess.run(word_outputs,feed_dict=feed_dict)
+
+Sample Output
+Below, the first two matrices are the results of feeding in two inputs one at a time with batch size 1, while the second two matrices are the results of feeding in two inputs together with batch size 2. You can see that the outputs are not exactly the same. While the differences between the two are small, this becomes a major issue when there are multiple layers of RNNs as the differences become more pronounced after each layer.
+[[[ 0.07946277 -0.09917585  0.01027258 -0.03145921 -0.06281948  0.27924815
+   -0.32083094 -0.18930595  0.17904316 -0.09718883]
+  [ 0.09456758 -0.06845391 -0.02745478 -0.10440759 -0.07491632  0.27888948
+   -0.27896836  0.03206063  0.09979809 -0.00771215]
+  [ 0.01643243  0.12345143  0.12964873  0.01598591 -0.18927756  0.37746075
+   -0.03456679 -0.01384296  0.03874877  0.06282371]
+  [ 0.04219431  0.02407469 -0.1588002   0.1497623  -0.17770161  0.3960323
+    0.16187154 -0.04393335 -0.02065297  0.10994863]
+  [-0.13827246 -0.07322901 -0.012384    0.12282669  0.07407188 -0.14240782
+    0.140168    0.02362901  0.06010906  0.05862212]
+  [ 0.          0.          0.          0.          0.          0.          0.
+    0.          0.          0.        ]
+  [ 0.          0.          0.          0.          0.          0.          0.
+    0.          0.          0.        ]
+  [ 0.          0.          0.          0.          0.          0.          0.
+    0.          0.          0.        ]
+  [ 0.          0.          0.          0.          0.          0.          0.
+    0.          0.          0.        ]
+  [ 0.          0.          0.          0.          0.          0.          0.
+    0.          0.          0.        ]]]
+[[[ 0.16048311 -0.02057735  0.18933752 -0.12690066 -0.04377137  0.32376432
+    0.13263705 -0.07457904  0.14895026 -0.18088266]
+  [ 0.16808736 -0.11579071 -0.11836589 -0.31363881  0.1567639  -0.08804542
+    0.1359456  -0.03568897  0.12253968 -0.08998561]
+  [ 0.19741508 -0.01034784 -0.03235145 -0.27677989  0.1338885  -0.14571345
+    0.08804264 -0.02352159  0.04717591 -0.37237346]
+  [ 0.24377933 -0.27160296 -0.11816068 -0.45893419 -0.09967859 -0.04910848
+    0.03985181 -0.01856269  0.04410465 -0.21198548]
+  [ 0.16746353 -0.20125373 -0.2098352  -0.36264825  0.02557869 -0.06599348
+   -0.11331714 -0.17118242 -0.08420456 -0.22979215]
+  [-0.09969822 -0.14207448  0.12536064 -0.22236535  0.11328859 -0.09342889
+   -0.02536193 -0.28028104 -0.11790876 -0.10144062]
+  [-0.09796695 -0.14415297 -0.19729097 -0.25542045 -0.15568495 -0.12689842
+   -0.14712927 -0.35488427 -0.06447952 -0.19063833]
+  [-0.12240371 -0.07732555 -0.2645728   0.11042064 -0.19387801  0.07324903
+   -0.03920996  0.05104404 -0.09357925 -0.13582835]
+  [-0.07295815 -0.02809375 -0.24317381  0.04480781 -0.06040902  0.03428879
+    0.10196722 -0.06142509 -0.36903486 -0.16991363]
+  [-0.01382132 -0.09746805  0.13226555  0.19477166  0.02158988  0.09287433
+    0.01845972 -0.16030487 -0.2186746  -0.07543172]]]
+[[[ 0.07946277 -0.09917583  0.01027257 -0.03145922 -0.06281949  0.27924818
+   -0.32083094 -0.1893059   0.17904317 -0.09718874]
+  [ 0.09456757 -0.06845395 -0.02745485 -0.10440758 -0.07491633  0.27888948
+   -0.27896842  0.03206065  0.09979802 -0.00771213]
+  [ 0.01643244  0.12345135  0.1296487   0.01598606 -0.18927751  0.37746072
+   -0.0345668  -0.01384297  0.03874873  0.06282371]
+  [ 0.0421943   0.02407462 -0.15880026  0.14976241 -0.17770153  0.39603227
+    0.16187152 -0.04393341 -0.02065307  0.10994864]
+  [-0.13827249 -0.07322903 -0.01238406  0.12282679  0.07407197 -0.14240779
+    0.14016804  0.02362898  0.06010904  0.05862212]
+  [ 0.          0.          0.          0.          0.          0.          0.
+    0.          0.          0.        ]
+  [ 0.          0.          0.          0.          0.          0.          0.
+    0.          0.          0.        ]
+  [ 0.          0.          0.          0.          0.          0.          0.
+    0.          0.          0.        ]
+  [ 0.          0.          0.          0.          0.          0.          0.
+    0.          0.          0.        ]
+  [ 0.          0.          0.          0.          0.          0.          0.
+    0.          0.          0.        ]]
+
+ [[ 0.16048311 -0.02057736  0.18933751 -0.12690073 -0.04377136  0.32376438
+    0.13263711 -0.07457898  0.14895013 -0.18088272]
+  [ 0.16808733 -0.11579067 -0.11836579 -0.31363881  0.15676391 -0.0880454
+    0.13594568 -0.03568894  0.12253958 -0.08998567]
+  [ 0.19741504 -0.01034782 -0.0323514  -0.27677989  0.13388851 -0.14571348
+    0.08804271 -0.02352155  0.0471758  -0.37237346]
+  [ 0.2437793  -0.27160296 -0.11816064 -0.45893413 -0.09967858 -0.04910852
+    0.03985184 -0.01856264  0.04410452 -0.21198554]
+  [ 0.16746351 -0.20125373 -0.20983508 -0.36264819  0.02557869 -0.06599346
+   -0.11331721 -0.17118247 -0.08420463 -0.22979221]
+  [-0.09969822 -0.14207451  0.12536073 -0.22236532  0.11328855 -0.09342889
+   -0.02536207 -0.28028107 -0.11790879 -0.10144066]
+  [-0.09796697 -0.14415301 -0.19729097 -0.25542039 -0.15568499 -0.12689844
+   -0.14712939 -0.35488427 -0.06447949 -0.19063836]
+  [-0.12240377 -0.07732558 -0.2645728   0.11042073 -0.19387813  0.07324899
+   -0.03921008  0.05104404 -0.0935792  -0.13582836]
+  [-0.07295817 -0.02809371 -0.24317381  0.04480787 -0.06040911  0.03428881
+    0.10196713 -0.06142508 -0.3690348  -0.16991359]
+  [-0.0138213  -0.09746802  0.13226555  0.19477174  0.02158987  0.09287442
+    0.0184597  -0.16030489 -0.21867451 -0.07543168]]]

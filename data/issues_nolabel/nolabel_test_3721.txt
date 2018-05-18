@@ -1,0 +1,85 @@
+contrib outputs_collections bug
+
+Problem description
+TensorFlow version r0.10
+It seems to me that there is a bug with the outputs_collections in tensorflow/tensorflow/contrib/layers. When trying to add the outputs of the layers (say, conv2d) to the tf.GraphKeys.ACTIVATIONS collection, I run into errors with NamedOutputs such as the following:
+...
+Run summarize_activations() from tensorflow/tensorflow/contrib/layers/python/layers/summaries.py
+...
+/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/layers/python/layers/summaries.pyc in summarize_collection(collection, name_filter, summarizer)
+    160     if name_filter is None or re.match(name_filter, op.op.name):
+    161       tensors.append(op)
+--> 162   return summarize_tensors(tensors, summarizer)
+    163
+    164
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/layers/python/layers/summaries.pyc in summarize_tensors(tensors, summarizer)
+    150 def summarize_tensors(tensors, summarizer=summarize_tensor):
+    151   """Summarize a set of tensors."""
+--> 152   return [summarizer(tensor) for tensor in tensors]
+    153
+    154
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/layers/python/layers/summaries.pyc in summarize_tensor(tensor, tag)
+    135   """
+    136   # Skips string tensors and boolean tensors (not handled by the summaries).
+--> 137   if (tensor.dtype.is_compatible_with(dtypes.string) or
+    138       tensor.dtype.base_dtype == dtypes.bool):
+    139     return None
+
+AttributeError: 'NamedOutputs' object has no attribute 'dtype'
+
+Root of problem
+README and code are not consistent
+The readme (located at tensorflow/tensorflow/contrib/layers/README.md) indicates that "weights, biases, and activations (i.e., outputs) are, by default, added to the specified collections." They even show a piece of code such as output_collections=(tf.GraphKeys.ACTIVATIONS,). However, looking into the code in tensorflow/tensorflow/contrib/layers/python/layers/layers.py it seems to me that there is nothing adding activations to the tf.GraphKeys.ACTIVATIONS collection. I believe one solution to this problem is to use the _apply_activation function already written in the file:
+def _apply_activation(y, activation_fn, output_collections):
+  if activation_fn:
+    y = activation_fn(y)
+  ops.add_to_collections(list(output_collections or []) +
+                         [ops.GraphKeys.ACTIVATIONS], y)
+  return y
+
+instead of using only
+if activation_fn:
+      outputs = activation_fn(outputs)
+return utils.collect_named_outputs(outputs_collections, sc.name, outputs)
+
+Code walkthrough
+tensorflow/tensorflow/contrib/layers/python/layers/layers.py uses this line several times (such as in conv2d):
+utils.collect_named_outputs(outputs_collections, sc, outputs)
+Opening tensorflow/tensorflow/contrib/layers/python/layers/utils.py we see that this ultimately calls:
+ops.add_to_collections(collections, NamedOutputs(name, outputs))
+However, it seems to me that when using the summarize_activations function in https://github.com/tensorflow/tensorflow/blob/r0.10/tensorflow/contrib/layers/python/layers/summaries.py, it expects the value to be outputs rather than NamedOutputs(name, outputs). In other words, the summarize_activations function seems to expect something along the lines of:
+ops.add_to_collections(collections, outputs)
+rather than
+ops.add_to_collections(collections, NamedOutputs(name, outputs))
+Further description (not particularly informative if you are already familiar with the tensorflow repo)
+If we look into what ops.add_to_collections is doing, we see that in tensorflow/tensorflow/python/framework/ops.py this ultimately calls:
+self.add_to_collection(name, value)
+add_to_collection(...) is described in the same file as:
+  def add_to_collection(self, name, value):
+    """Stores `value` in the collection with the given `name`.
+    Note that collections are not sets, so it is possible to add a value to
+    a collection several times.
+    Args:
+      name: The key for the collection. The `GraphKeys` class
+        contains many standard names for collections.
+      value: The value to add to the collection.
+
+So, our value here is value = NamedOutputs(name, outputs) from earlier.
+However, if we look at the summarize_activations in tensorflow/tensorflow/contrib/layers/python/layers/summaries.py, we see that:
+def summarize_activations(name_filter=None, summarizer=summarize_activation):
+  """Summarize activations, using `summarize_activation` to summarize."""
+  return summarize_collection(ops.GraphKeys.ACTIVATIONS, name_filter,
+                              summarizer)
+
+def summarize_collection(collection, name_filter=None,
+                         summarizer=summarize_tensor):
+  """Summarize a graph collection of tensors, possibly filtered by name."""
+  tensors = []
+  for op in ops.get_collection(collection):
+    if name_filter is None or re.match(name_filter, op.op.name):
+      tensors.append(op)
+  return summarize_tensors(tensors, summarizer)
+
+In other words, summarize_collection(...) expects the collection to contain tensors instead of NamedOutputs(name, outputs).

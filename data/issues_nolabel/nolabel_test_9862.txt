@@ -1,0 +1,40 @@
+output of tf.nn.convolution is not consistent for bigger 3d nets
+
+Code :
+import tensorflow as tf
+def Conv3D(x, filter_shape, stride = 1, padding = 'VALID', dilation_rate = (1,1,1)):
+      W = tf.get_variable(name = 'weights', shape = filter_shape, initializer = tf.contrib.layers.xavier_initializer())
+      b = tf.get_variable(name = 'bias', shape = filter_shape[4], initializer = tf.constant_initializer(0.1))
+      conv_out = tf.nn.convolution(x, W, b, padding = padding, strides = [1,1,1], dilation_rate = dilation_rate)
+     ret_val = tf.nn.bias_add(conv_out,b)
+     return ret_val
+
+def MaxPool3D(x, dilation_rate = (1,1,1)):
+      ret_val = tf.nn.pool(x, window_shape = [2,2,2], pooling_type = 'MAX', padding = 'VALID', dilation_rate = dilation_rate, strides = [1,1,1])
+      return ret_val
+
+
+layer = {}
+dilation = 1
+inputs = tf.placeholder(tf.float32, (None, 80, 80, 80, 1))
+layer[1] = Conv3D(inputs, [3,3,3,1,128], dilation_rate = (dilation, dilation, dilation))
+layer[2] = Conv3D(layer[1], [3,3,3,128,64], dilation_rate = (dilation, dilation, dilation))
+layer[3] = MaxPool3D(layer[2], dilation_rate = (dilation, dilation, dilation))
+dilation = 2*dilation
+layer[4] = Conv3D(layer[3], [3,3,3,64,128], dilation_rate = (dilation, dilation, dilation))
+layer[5] = MaxPool3D(layer[4], dilation_rate = (dilation, dilation, dilation))
+dilation = 2*dilation
+layer[6] = Conv3D(layer[5], [3,3,3,128, 256], dilation_rate = (dilation, dilation, dilation))
+layer[7] = MaxPool3D(layer[6], dilation_rate = (dilation, dilation, dilation))
+dilation = 2*dilation
+layer[8] = Conv3D(layer[7], [3,3,3,256,64], dilation_rate = (dilation, dilation, dilation))
+
+inputs_np = np.random.randn(1,80,80,80,1)
+sess = tf.Session()
+logits1 = sess.run(layer[8], feed_dict = {inputs : inputs_np})
+logits1_duplicate = sess.run(layer[8], feed_dict = {inputs : inputs_np})
+
+sum_diff = np.sum(logits1 - logits1_duplicate)
+print(' sum diff : ', sum_diff)
+
+When I run this code, I get a non zero sum_diff. Why is the network's output not consistent with multiple runs ? I will appreciate some help

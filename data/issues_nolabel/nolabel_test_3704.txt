@@ -1,0 +1,43 @@
+scalar_summary within map_fn hangs when run.
+
+On tf 0.9, it seems that I cannot collect summaries from within map_fn. The following code would reproduce the problem:
+
+import tensorflow as tf
+
+summaries = []
+def summarize_and_plus_one(inp):
+    summaries.append(tf.scalar_summary('inp_%s' % inp, inp))
+    inp += 1
+    return inp
+
+a = tf.constant([1,2,3,4])
+b = tf.map_fn(summarize_and_plus_one, a)
+
+with tf.Session() as sess:
+    print(sess.run(b))
+    sess.run(tf.merge_all_summaries()) # The code would hang here. 
+
+
+If I unpack first and apply the function without map_fn, the code finishes as expected:
+
+import tensorflow as tf
+
+summaries = []
+def summarize_and_plus_one(inp):
+    summaries.append(tf.scalar_summary('inp_%s' % inp, inp))
+    inp += 1
+    return inp
+
+a = tf.constant([1,2,3,4])
+
+res = []
+for x in tf.unpack(a):
+    res.append(summarize_and_plus_one(x))
+b = tf.pack(res)
+
+with tf.Session() as sess:
+    print(sess.run(b))
+    sess.run(tf.merge_all_summaries())
+
+
+Is this a known issue? It seems the problem is with map_fn (or while_loop).

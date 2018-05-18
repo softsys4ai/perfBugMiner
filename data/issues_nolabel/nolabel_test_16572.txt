@@ -1,0 +1,62 @@
+tf.dynamic_placeholder gives inconsistent results in Tensorflow 1.5
+
+I'm seeing inconsistencies when calling tf.dynamic_partition(...) with Tensorflow 1.5.
+I'm using tf.dynamic_partition(...) to select rows from two tensors. First is a 1D tensor of spare logits, second is a 2D tensor of one-hot encoded labels. My selector is a 1D tensor with entries made of 0s and 1s.
+Say matches_mask has shape (268800,) and 320 of its elements are set to 1, rest are 0.
+scalar_labels has shape(268800,) and one_hot_encoded_logits has shape (268800, 2).
+The expected behaviour for
+_, selected_scalar_labels = tf.dynamic_partition(scalar_labels, matches_mask, num_partitions=2)
+_, selected_one_hot_encoded_logits = tf.dynamic_partition(one_hot_encoded_logits, matches_mask, num_partitions=2)
+
+is that selected_scalar_labels has shape (320, ) and selected_one_hot_encoded_logits has shape (320, 2).
+This code works perfectly fine on two machines, one running Ubuntu 16.4, Tensorflow 1.3 and Tensorflow 1.4 (tested both versions) and CUDA 8 and the other running Ubuntu 16.4, Tensorflow 1.4 and CUDA 8.
+However today I upgraded first machine to Ubuntu 16.4, Tensorflow 1.5 and CUDA 9 and above breaks.
+For some reason while selected_scalar_labels are as expected, selected_one_hot_encoded_logits have some strange shapes, such as (268352, 2).
+I tried writing a minimal test script, such as
+labels_placeholder = tf.placeholder(dtype=tf.int32, shape=[None])
+logits_placeholder = tf.placeholder(dtype=tf.float32, shape=[None, 2])
+
+mask_placeholder = tf.placeholder(dtype=tf.int32, shape=[None])
+
+_, selected_labels_op = tf.dynamic_partition(labels_placeholder, mask_placeholder, num_partitions=2)
+_, selected_logits_op = tf.dynamic_partition(logits_placeholder, mask_placeholder, num_partitions=2)
+
+with tf.Session() as session:
+
+    for _ in range(100):
+
+        print()
+
+        size = 268800
+
+        labels = np.random.randint(0, 2, size=size)
+        logits = np.random.uniform(0, 1, size=(size, 2))
+
+        mask = np.random.binomial(1, np.random.uniform(0, 1), size)
+
+        feed_dictionary = {labels_placeholder: labels, logits_placeholder: logits, mask_placeholder: mask}
+
+        selected_labels, selected_logits = session.run([selected_labels_op, selected_logits_op], feed_dictionary)
+
+        print("selected_labels: {}".format(selected_labels.shape))
+        print("selected_logits: {}".format(selected_logits.shape))
+but that gave correct results.
+Problem occurs in a more complicated pipeline that is a part of Single Shot Detector's loss computations.
+Unfortunately computing matches_mask is a complex task that depends on image being used on input and SSD configuration, so I can't really provide here a complete test case without posting a few hundreds lines of code that isn't for public use + images. matches_mask itself is very simple though, just a 1D tensor of 0s and 1s.
+I appreciate that without presenting a test case that fails it's unlikely anyone will look into this problem, but I decided to post the issue in case someone else sees similar behaviour - from my point of view it seems to be a new bug introduced by Tensorflow 1.5 or its dependencies.
+I have of course double checked that mymatches_mask, scalar_labels and one_hot_encoded_logits have expected dimensions and dtypes before dynamic_partition is called and that matches_mask is made of 0s and 1s only.
+Environments on which code works as expected:
+
+Ubuntu 16.04, tensorflow 1.3 installed with pip install tensorflow-gpu, CUDA 8.0, cuDNN 6.0, GPU: Tesla V100
+Ubuntu 16.04, tensorflow 1.4 installed with pip install tensorflow-gpu, CUDA 8.0, cuDNN 6.0, GPU: GTX 1080 Ti
+tf.GIT_VERSION: v1.4.0-19-ga52c8d9
+tf.VERSION: 1.4.1
+Ubuntu 16.04, tensorflow 1.4 installed with pip install tensorflow-gpu, CUDA 8.0, cuDNN 6.0, GPU: Tesla V100
+tf.GIT_VERSION: v1.4.0-rc1-11-g130a514
+tf.VERSION: 1.4.0
+
+Environments on which code fails:
+4) Ubuntu 16.04, tensorflow 1.5 installed with pip install tensorflow-gpu, CUDA 9.0, cuDNN 7.0, GPU: Tesla V100
+tf.GIT_VERSION: v1.5.0-0-g37aa430d84
+tf.VERSION: 1.5.0
+Environments 1, 3 and 4 are the same machine, the only differences are in Tensorflow and CUDA versions and dependencies they install.

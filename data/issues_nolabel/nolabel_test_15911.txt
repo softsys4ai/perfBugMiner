@@ -1,0 +1,101 @@
+Crash when using CUDA API while using Tensorflow. "current context was not created by the StreamExecutor cuda_driver API"
+
+Expected behavior
+I expect to work with the CUDA library by using libcudart directly in my Python script before and while Tensorflow is being used - without errors.
+Actual behavior
+The script crashes with following error as soon as I've used libcudart through ctypes before tensorflow is imported.
+2018-01-06 14:45:50.641211: F tensorflow/stream_executor/cuda/cuda_driver.cc:232] current context was not created by the StreamExecutor cuda_driver API: 0x7fe122002400; a CUDA runtime call was likely performed without using a StreamExecutor context
+
+Environment
+
+
+
+Name
+Value
+
+
+
+
+OS
+Mac OS 10.12.4
+
+
+tensorflow-gpu
+pip 1.1.0, v1.1.0-rc0-61-g1ec6ed5
+
+
+Device
+GPU Titan X pascal
+
+
+Python
+2.7.12
+
+
+Python
+3.5.2
+
+
+CUDA
+8.0
+
+
+cuDNN
+5.1.5
+
+Reproduce
+from __future__ import print_function
+
+import ctypes
+import platform
+
+system = platform.system()
+
+if system == "Linux":
+    libcudart = ctypes.cdll.LoadLibrary("libcudart.so")
+elif system == "Darwin":
+    libcudart = ctypes.cdll.LoadLibrary("libcudart.dylib")
+elif system == "Windows":
+    libcudart = ctypes.windll.LoadLibrary("libcudart.dll")
+else:
+    raise Exception("Cannot identify system.")
+
+version = ctypes.c_int()
+rc = libcudart.cudaRuntimeGetVersion(ctypes.byref(version))
+if rc != 0:
+    raise ValueError("Could not get version")
+if version.value < 6050:
+    raise Exception("CUDA version must be >= 6.5")
+
+libcudart.cudaSetDevice(0)
+
+free = ctypes.c_size_t()
+total = ctypes.c_size_t()
+rc = libcudart.cudaMemGetInfo(ctypes.byref(free), ctypes.byref(total))
+
+print("Memory " + str(free.value) +  " of " + str(total.value))
+
+del libcudart
+
+import tensorflow as tf
+
+hello = tf.constant('Hello, TensorFlow!')
+
+# Start tf session
+sess = tf.Session()
+
+# Run the op
+print(sess.run(hello))
+Execute
+$ python3 tf-cuda-crash.py
+
+Output will be like
+$ python3 tf-cuda-crash.py
+Memory 9916960768 of 12884574208
+2018-01-06 14:45:50.639837: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2018-01-06 14:45:50.639863: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2018-01-06 14:45:50.639870: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2018-01-06 14:45:50.641211: F tensorflow/stream_executor/cuda/cuda_driver.cc:232] current context was not created by the StreamExecutor cuda_driver API: 0x7fe122002400; a CUDA runtime call was likely performed without using a StreamExecutor context
+[1]    4240 abort      python3 tf-cuda-crash.py
+
+Happens with both Python2 and 3.

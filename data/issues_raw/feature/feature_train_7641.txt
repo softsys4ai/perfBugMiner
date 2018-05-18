@@ -1,0 +1,93 @@
+'LookupError: No gradient defined for operation '...' (op type: ResizeBicubic)' is raised
+
+I tried to use tf.image.resize_images with method=ResizeMethod.BICUBIC.
+The shorten version of my code is the following:
+# module import is omitted
+# config setting is omitted
+# global variable declaration is omitted
+
+def train():
+    # file queuing and reading are omitted.
+    magnification = tf.random_uniform([1], minval = 0, maxval = 4, dtype = tf.float32)
+
+    image_patches_blurred = tf.image.resize_images(image_patches, [tf.to_int32(64/magnification[0]), tf.to_int32(64/magnification[0])], \
+                                                    method = tf.image.ResizeMethod.BICUBIC)
+    image_patches_blurred = tf.image.resize_images(image_patches_blurred, [64, 64], method = tf.image.ResizeMethod.BICUBIC)
+
+    with tf.variable_scope('generator'):
+        G = Stage_Unet_model.generator(image_patches_blurred, batch_size = 16, image_size = 64, input_channels = 3, gf_dim = 32)
+
+    # Model Loss definition is omitted
+
+    # Summary Operation is omitted
+
+    # tf variables loading
+    all_vars = tf.global_variables()
+    model_generator_vars = [k for k in all_vars if k.name.startswith("generator")]
+
+    # Gradient Clipping
+    generator_grads = tf.gradients(G_loss, model_generator_vars)
+    generator_grads, _ = tf.clip_by_global_norm(generator_grads, clip_norm = 1.0)
+    generator_var_pairs = zip(generator_grads, model_generator_vars)
+
+    # tf.train.Saver and global_step declaration is omitted
+
+    # tf.train.AdamOptimizer
+    Adam = tf.train.AdamOptimizer(config.learning_rate)
+    G_optim = Adam.apply_gradients(generator_var_pairs, global_step = G_global_step)
+
+    # merge summary operation is omitted
+
+    with tf.Session() as sess:
+        #...
+        for epoch in range(config.epoch):
+            for idx in range(config.train_data_number):
+                # Note that graph operations related with model D are omitted
+                train_D_l, train_G_l, train_D_t_s, train_G_t_s, D_step, G_step, _, __ = sess.run([D_loss, G_loss, \
+                                                                D_tot_summary, G_tot_summary, \
+                                                                D_global_step, G_global_step, D_optim, G_optim])
+        #...
+
+if __name__ == '__main__':
+    if not tf.gfile.Exists(log_dir):
+        tf.gfile.MakeDirs(log_dir)
+    train()
+Running the above code will result in the following error:
+$ python train_stage1.py 
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+Traceback (most recent call last):
+  File "train_stage1.py", line 216, in <module>
+    train()
+  File "train_stage1.py", line 150, in train
+    generator_grads = tf.gradients(G_loss, model_generator_vars)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients_impl.py", line 459, in gradients
+    (op.name, op.type))
+LookupError: No gradient defined for operation 'ResizeBicubic_3' (op type: ResizeBicubic)
+
+Thank you for any help.
+Environment info
+Operating System:
+Installed version of CUDA and cuDNN:
+$ ls -l /usr/local/cuda-8.0/lib64/libcud*
+-rw-r--r-- 1 root root   558720 11월  4 05:18 /usr/local/cuda-8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 11월  4 05:18 /usr/local/cuda-8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root       19 11월  4 05:18 /usr/local/cuda-8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rwxr-xr-x 1 root root   415432 11월  4 05:18 /usr/local/cuda-8.0/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root   775162 11월  4 05:18 /usr/local/cuda-8.0/lib64/libcudart_static.a
+-rwxr-xr-x 1 root root 79337624 11월  4 05:20 /usr/local/cuda-8.0/lib64/libcudnn.so
+-rwxr-xr-x 1 root root 79337624 11월  4 05:20 /usr/local/cuda-8.0/lib64/libcudnn.so.5
+-rwxr-xr-x 1 root root 79337624 11월  4 05:20 /usr/local/cuda-8.0/lib64/libcudnn.so.5.1.5
+-rw-r--r-- 1 root root 69756172 11월  4 05:20 /usr/local/cuda-8.0/lib64/libcudnn_static.a
+
+If installed from binary pip package, provide:
+$ python -c "import tensorflow; print(tensorflow.__version__)"
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+1.0.0

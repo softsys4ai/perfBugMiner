@@ -1,0 +1,24 @@
+CudnnLSTM doesn't work with AdamOptimizer
+
+I am testing how to use CudnnLSTM, there is not a lot of documentation on this. In my own experiment, I found when use AdamOptimizer with CudnnLSTM, it always raises the following Exception.
+I also found another repository using CudnnLSTM, and uploaded it here: https://github.com/boche/LM-PTB-CUDNNLSTM. It also raises the same exception.
+
+File "ptb_word_lm.py", line 465, in main
+m = PTBModel(is_training=True, config=config, debug=FLAGS.debug)
+File "ptb_word_lm.py", line 254, in init
+self._train_op = optimizer.apply_gradients(zip(allgrads, allvars))
+File "/data/ASR1/ramons/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 409, in apply_gradients
+self._create_slots(var_list)
+File "/data/ASR1/ramons/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/training/adam.py", line 119, in _create_slots
+self._zeros_slot(v, "m", self._name)
+File "/data/ASR1/ramons/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 609, in _zeros_slot
+named_slots[var] = slot_creator.create_zeros_slot(var, op_name)
+File "/data/ASR1/ramons/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/training/slot_creator.py", line 121, in create_zeros_slot
+val = array_ops.zeros(primary.get_shape().as_list(), dtype=dtype)
+File "/data/ASR1/ramons/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/framework/tensor_shape.py", line 782, in as_list
+raise ValueError("as_list() is not defined on an unknown TensorShape.")
+ValueError: as_list() is not defined on an unknown TensorShape.
+
+For now, using GradientDescentOptimizer is okay, but it seems all other fancy optimizers all have similar problems. I have looked up this problem on stackoverflow, and found a related thread: http://stackoverflow.com/questions/40698821/tensorflow-adamoptimizer-throws-error-when-variable-has-validate-shape-false .
+It seems the problem is that parameter buffer used in CudnnLSTM doesn't have fixed shape (validate_shape=False, defined in line 145 of https://github.com/boche/LM-PTB-CUDNNLSTM/blob/master/ptb_word_lm.py ) , which is required by AdamOptimizer.
+Cudnn seems to be faster (less time per epoch), but if we can't use better learning algorithms with it (meaning more epochs), then the total running time may not be improved so much.

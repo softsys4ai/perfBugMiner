@@ -1,0 +1,93 @@
+[Bug]: Unable to update the batch_normalization layer moving_mean/moving_variance of keras
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): Tensorflow 1.4.1
+Bazel version (if compiling from source): N/A
+Python version: Python 3.5
+CUDA/cuDNN version: 8.0
+GPU model and memory: 1080 Ti
+Exact command to reproduce: see below
+
+It is following up this issue about training models by mixing Tensorflow with Keras using this style, exampled here. Basically, using Inception architectures in keras.applications.InceptionV3 and training using sess.run() with a placeholder K.learning_phase() to indicate the training/testing mode.
+At beginning, I found the evaluation accuracy in testing mode (loaded back from a checkpoint) is different from the results when evaluation on the fly during training. But when I evaluated using training mode, it can give me reasonable but not good results. So I knew the problem happened in batch normalization.
+I tried either using tf.keras and keras independent version (2.1.2). But both not work.
+After some investigations, I found there should an issue of Keras of using batch normalization. I track the moving_mean and moving_variance and found they never update (maintaining the initial values, zero and one). In tf. keras, I notice its batchnorm inherits tf.layers.BatchNormalization (see here). However, by checking the tutorial of this tf.layers.BatchNormalization,
+It required to add a update_ops in optimizer. But it never mentioned in Keras (which should be
+clarified).
+I did not see Keras using update_ops anywhere. So i believe if you want to fine-tune a keras predefined model in applications, you never be able to update your moving_mean and moving_variance for your new data.
+Note that I also tried keras independent version. It never worked. moving_mean and moving_variance are always not changed. I  tracked the value of batch_mean which is used to update moving_mean. batch_mean has values but not on moving_mean.
+In addition, I found moving_mean and moving_variance are in tf.trainable_variables() when using keras but not in tf.keras. I am not sure if this matters.
+Here is an example code
+image = keras.preprocessing.image
+def preprocess_input(x):
+    # the same as keras.applications.inception_v3
+    with tf.name_scope('preprocess_input'):
+        x /= 255.
+        x -= 0.5
+        x *= 2.
+        return x
+
+def get_main_network(name, input_tensor, use_weights=False):
+
+    processed_tensor = preprocess_input(input_tensor)
+
+    if name == 'inception':
+        base_model = keras.applications.InceptionV3(include_top=True,
+                                                    weights='imagenet' if use_weights else None,
+                                                    pooling='avg',
+                                                    input_tensor=processed_tensor)
+    
+    model = keras.models.Model(inputs=base_model.input, outputs=base_model.output)
+ 
+    return model
+
+img_shape=[299,299]
+img = tf.placeholder(tf.float32, shape=[None]+img_shape+[3])
+
+with tf.name_scope('model'):
+    model = get_main_network('inception', input_tensor=img, use_weights=False)
+    output = model.output
+    logit = tf.cast(tf.argmax(output, axis=1), np.float32)
+
+# define loss
+with tf.name_scope('cross_entropy'):
+    cross_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=label, logits=output)  
+
+# define optimizer
+with tf.name_scope('learning_rate'):
+    global_step = tf.Variable(0, name='global_step', trainable=False)
+    learning_rate = tf.train.exponential_decay(opt.learning_rate, global_step,
+                                        iter_epoch*opt.lr_decay_epoch, opt.lr_decay, staircase=True)
+    optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.9) #.minimize(cross_entropy_loss, global_step=global_step)
+
+''' **This matters a lot but not working for independent keras version'**''
+update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+with tf.control_dependencies(update_ops):
+    train_step = optimizer.minimize(cross_entropy_loss, global_step=global_step)
+
+''' Initialization '''
+init_op = tf.variables_initializer([]) # a fake one, variables already initialized in keras
+sess.run(init_op)
+
+img_path = 'elephant.jpg'
+imgs= image.load_img(img_path, target_size=img_shape)
+x = image.img_to_array(imgs)
+x = np.expand_dims(x, axis=0)
+saver = tf.train.Saver(max_to_keep=20) # must be added in the end
+with sess.as_default():
+    
+    feed_dict = {   
+                        img: x_batch,
+                        label: y_batch,
+                        K.learning_phase(): True
+                    }
+        _, loss = sess.run([train_step, 
+                                    cross_entropy_loss, 
+                                    ], feed_dict=feed_dict)
+
+
+@tensorflowbutler responsed

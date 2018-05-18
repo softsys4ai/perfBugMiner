@@ -1,0 +1,46 @@
+Synchronous Training using SyncReplicasOptimizer
+
+I'm trying to implement a synchronous distributed Recurrent Neural Network using TensorFlow on multiple servers. Here's the link to my code: https://github.com/tushar00jain/spark-ml/blob/master/rnn-sync.ipynb. I've also provided the relevant part below.
+I want the computations within the same batch to happen in parallel but I think it's still computing separate RNNs on each worker server and updating the parameters on the parameter server separately. I know this because I am printing the _current_state variable after I run the graph for each batch. Also, the _total_loss for the same global step is different on each worker server.
+I'm following the instructions provided at the following links: https://www.tensorflow.org/deploy/distributed#replicated_training https://www.tensorflow.org/api_docs/python/tf/train/SyncReplicasOptimizer
+Is this a bug or is there something wrong with my code?
+    sess = sv.prepare_or_wait_for_session(server.target)
+    queue_runners = tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS)
+    sv.start_queue_runners(sess, queue_runners)
+
+    tf.logging.info('Started %d queues for processing input data.',
+                    len(queue_runners))
+
+    if is_chief:
+            sv.start_queue_runners(sess, chief_queue_runners)
+            sess.run(init_tokens_op)
+
+    print("{0} session ready".format(datetime.now().isoformat()))
+    #####################################################################
+
+    ########################### training loop ###########################
+    _current_state = np.zeros((batch_size, state_size))
+    for batch_idx in range(args.steps):
+        if sv.should_stop() or tf_feed.should_stop():
+            break
+
+        batchX, batchY = feed_dict(tf_feed.next_batch(batch_size))
+
+        print('==========================================================')
+        print(_current_state)
+
+        if args.mode == "train":
+            _total_loss, _train_step, _current_state, _predictions_series, _global_step = sess.run(
+            [total_loss, train_step, current_state, predictions_series, global_step],
+            feed_dict={
+                batchX_placeholder:batchX,
+                batchY_placeholder:batchY,
+                init_state:_current_state
+            })
+
+            print(_global_step, batch_idx)
+            print(_current_state)
+            print('==========================================================')
+
+            if _global_step % 5 == 0:
+                print("Step", _global_step, "Loss", _total_loss)

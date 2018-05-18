@@ -1,0 +1,98 @@
+Loading LSTM "SavedModel" from golang results in crash
+
+NOTE: Issues that are not bugs or feature requests will be closed. Please ask usage questions on StackOverflow.
+You must complete this information or else your issue will be closed
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow)?: Yes
+TensorFlow installed from (source or binary)?: binary
+TensorFlow version: 1.0.1
+Bazel version (if compiling from source): -
+CUDA/cuDNN version: -
+GPU Model and Memory: -
+Exact command to reproduce: -
+
+Describe the problem clearly
+I have a 'saved model' of a NN that look like this (keras - model.summary()):
+_________________________________________________________________
+Layer (type)                 Output Shape              Param #   
+=================================================================
+input_1 (InputLayer)         (None, 15, 300)           0         
+_________________________________________________________________
+masking_1 (Masking)          (None, 15, 300)           0         
+_________________________________________________________________
+lstm_1 (LSTM)                (None, 300)               721200    
+_________________________________________________________________
+dropout_1 (Dropout)          (None, 300)               0         
+_________________________________________________________________
+dense_1 (Dense)              (None, 145)               43645     
+_________________________________________________________________
+activation_1 (Activation)    (None, 145)               0         
+=================================================================
+Total params: 764,845.0
+Trainable params: 764,845.0
+Non-trainable params: 0.0
+_________________________________________________________________
+
+When I try to load it using the golang bindings, it results in a crash:
+$ go run example.go 
+I tensorflow/cc/saved_model/loader.cc:194] Loading SavedModel from: ./load
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+I tensorflow/cc/saved_model/loader.cc:114] Restoring SavedModel bundle.
+I tensorflow/cc/saved_model/loader.cc:148] Running LegacyInitOp on SavedModel bundle.
+I tensorflow/cc/saved_model/loader.cc:238] Loading SavedModel: success. Took 150044 microseconds.
+fatal error: unexpected signal during runtime execution
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x8c1a6cc]
+
+runtime stack:
+runtime.throw(0x40cadf9, 0x2a)
+	/usr/local/go/src/runtime/panic.go:596 +0x95
+runtime.sigpanic()
+	/usr/local/go/src/runtime/signal_unix.go:274 +0x2db
+
+goroutine 1 [syscall, locked to thread]:
+runtime.cgocall(0x4094920, 0xc420053dd0, 0x40cabb6)
+	/usr/local/go/src/runtime/cgocall.go:131 +0xe2 fp=0xc420053d90 sp=0xc420053d50
+github.com/tensorflow/tensorflow/tensorflow/go._Cfunc_TF_LoadSessionFromSavedModel(0x4516690, 0x0, 0x45167c0, 0xc42000e030, 0x1, 0x4515e50, 0x0, 0x45135f0, 0x0)
+	github.com/tensorflow/tensorflow/tensorflow/go/_obj/_cgo_gotypes.go:438 +0x51 fp=0xc420053dd0 sp=0xc420053d90
+github.com/tensorflow/tensorflow/tensorflow/go.LoadSavedModel.func1(0x4516690, 0x0, 0x45167c0, 0xc42000e030, 0x1, 0x4515e50, 0x0, 0x45135f0, 0x414d0f0)
+	/Users/berset/git/gopath/src/github.com/tensorflow/tensorflow/tensorflow/go/saved_model.go:56 +0x156 fp=0xc420053e28 sp=0xc420053dd0
+github.com/tensorflow/tensorflow/tensorflow/go.LoadSavedModel(0x40c5552, 0x6, 0xc420053f68, 0x1, 0x1, 0x0, 0x0, 0x4124480, 0x40a49e0)
+	/Users/berset/git/gopath/src/github.com/tensorflow/tensorflow/tensorflow/go/saved_model.go:56 +0x1b4 fp=0xc420053ed8 sp=0xc420053e28
+main.main()
+	/Users/berset/git/gopath/src/github.com/campanja/ssinet/example.go:9 +0x8e fp=0xc420053f88 sp=0xc420053ed8
+runtime.main()
+	/usr/local/go/src/runtime/proc.go:185 +0x20a fp=0xc420053fe0 sp=0xc420053f88
+runtime.goexit()
+	/usr/local/go/src/runtime/asm_amd64.s:2197 +0x1 fp=0xc420053fe8 sp=0xc420053fe0
+
+goroutine 17 [syscall, locked to thread]:
+runtime.goexit()
+	/usr/local/go/src/runtime/asm_amd64.s:2197 +0x1
+exit status 2
+$ 
+
+Source Code / Logs
+The go code looks like this:
+package main
+
+import (
+    "fmt"
+    tf "github.com/tensorflow/tensorflow/tensorflow/go"
+)
+
+func main() {
+    m, err := tf.LoadSavedModel("./load", []string{"serve"}, nil)
+    if err != nil {
+        fmt.Println(err)
+    }
+    fmt.Println(m)
+    fmt.Println("load successful!")
+}
+
+I'm attaching a sample saved model and the code to generate the crash.
+sample.zip
+I can use the same code/bundling process to save / load NNs with only Dense layers for example.
+I also did try to printf debug this and I think the problem arises around the "TensorArrayV3" or "TensorArrayReadV3" or some such operation.

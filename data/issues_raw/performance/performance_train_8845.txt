@@ -1,0 +1,145 @@
+Tensorboard not showing data on Windows
+
+I have a simple example of a MNIST classifier that works well for the dataset. However, Tensorboard is unable to read the data from the saved logs. I have inspected the data using tensorboard --inspect --logdir... and the files seem to be in order.
+I have tested this and a much simpler model on a different machine, and got the same results. Tensorboard runs and the interface is accessible, but no data is shown (I tested with Google Chrome and Edge).
+The code is as follows:
+from tensorflow.examples.tutorials.mnist import input_data
+mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
+
+import tensorflow as tf
+sess = tf.InteractiveSession()
+
+with tf.name_scope('input'):
+    x = tf.placeholder(tf.float32, shape=[None, 784])
+    y_ = tf.placeholder(tf.float32, shape=[None, 10])
+
+def variable_summaries(var):
+  with tf.name_scope('summaries'):
+    mean = tf.reduce_mean(var)
+    tf.summary.scalar('mean', mean)
+    with tf.name_scope('stddev'):
+      stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+    tf.summary.scalar('stddev', stddev)
+    tf.summary.scalar('max', tf.reduce_max(var))
+    tf.summary.scalar('min', tf.reduce_min(var))
+    tf.summary.histogram('histogram', var)
+
+def weight_variable(shape):
+  initial = tf.truncated_normal(shape, stddev=0.1, name='weights')
+  return tf.Variable(initial)
+
+def bias_variable(shape):
+  initial = tf.constant(0.1, shape=shape, name='bias')
+  return tf.Variable(initial)
+
+def conv2d(x, W):
+  return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME', name='conv')
+
+def max_pool_2x2(x):
+  return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME', name='pool')
+
+with tf.name_scope('conv1'):
+    W_conv1 = weight_variable([5, 5, 1, 32])
+    b_conv1 = bias_variable([32])
+    variable_summaries(W_conv1)
+    variable_summaries(b_conv1)
+
+    x_image = tf.reshape(x, [-1, 28, 28, 1], name='reshape')
+    tf.summary.image('image', x_image, 3)
+
+    h_conv1 = tf.nn.relu(conv2d(x_image, W_conv1) + b_conv1, name='relu')
+    h_pool1 = max_pool_2x2(h_conv1)
+    variable_summaries(h_conv1)
+    variable_summaries(h_pool1)
+
+with tf.name_scope('conv2x'):
+    W_conv2x = weight_variable([5, 5, 32, 64])
+    b_conv2x = bias_variable([64])
+    variable_summaries(W_conv2x)
+    variable_summaries(b_conv2x)
+
+    h_conv2x = tf.nn.relu(conv2d(h_pool1, W_conv2x) + b_conv2x, name='relu')
+    h_pool2x = max_pool_2x2(h_conv2x)
+    variable_summaries(h_conv2x)
+    variable_summaries(h_pool2x)
+
+with tf.name_scope('conv2y'):
+    W_conv2y = weight_variable([3, 3, 32, 64])
+    b_conv2y = bias_variable([64])
+    variable_summaries(W_conv2y)
+    variable_summaries(b_conv2y)
+
+    h_conv2y = tf.nn.relu(conv2d(h_pool1, W_conv2y) + b_conv2y, name='relu')
+    h_pool2y = max_pool_2x2(h_conv2x)
+    variable_summaries(h_conv2y)
+    variable_summaries(h_pool2y)
+
+with tf.name_scope('concat'):
+    h_pool2 = tf.concat([h_pool2x, h_pool2y], 3)
+    variable_summaries(h_pool2)
+
+with tf.name_scope('fc1'):
+    W_fc1 = weight_variable([7 * 7 * (64*2), 1024])
+    b_fc1 = bias_variable([1024])
+    variable_summaries(W_fc1)
+    variable_summaries(b_fc1)
+
+    h_pool2_flat = tf.reshape(h_pool2, [-1, 7 * 7 * (64*2)])
+    h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1, name='relu')
+    variable_summaries(h_pool2_flat)
+    variable_summaries(h_fc1)
+
+keep_prob = tf.placeholder(tf.float32)
+h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob, name='dropout')
+variable_summaries(h_fc1_drop)
+
+with tf.name_scope('fc2'):
+    W_fc2 = weight_variable([1024, 10])
+    b_fc2 = bias_variable([10])
+    variable_summaries(W_fc2)
+    variable_summaries(b_fc2)
+
+    y_conv = tf.matmul(h_fc1_drop, W_fc2) + b_fc2
+    variable_summaries(y_conv)
+
+learning_rate = tf.placeholder(tf.float32, shape=[])
+tf.summary.scalar('learning_rate', learning_rate)
+
+with tf.name_scope('loss'):
+    cross_entropy = tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=y_conv)
+    train_step = tf.train.AdamOptimizer(learning_rate).minimize(cross_entropy)
+    variable_summaries(cross_entropy)
+
+correct_prediction = tf.equal(tf.argmax(y_conv,1), tf.argmax(y_,1))
+accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32), name='accuracy')
+tf.summary.scalar('accuracy', accuracy)
+
+merged = tf.summary.merge_all()
+train_writer = tf.summary.FileWriter('summaries/train', sess.graph)
+test_writer = tf.summary.FileWriter('summaries/test', sess.graph)
+
+tf.global_variables_initializer().run()
+
+for i in range(101):
+  batch = mnist.train.next_batch(100)
+  summary, _, acc = sess.run([merged, train_step, accuracy], feed_dict={x:batch[0], y_: batch[1], learning_rate:0.02, keep_prob: 0.5})
+  train_writer.add_summary(summary, i)
+  #train_writer.add_graph(sess.graph, i)
+  print("step %d, training accuracy %g" % (i, acc))
+  if i % 100 == 0:
+    #This is just a test model, the accuracy is not important
+    batch = mnist.test.next_batch(100)
+    summary, acc = sess.run([merged, accuracy], feed_dict={x:batch[0], y_: batch[1], learning_rate:0, keep_prob: 1.0})
+    test_writer.add_summary(summary, i)
+    print("step %d, test accuracy %g" % (i, acc))
+
+train_writer.close()
+test_writer.close()
+
+The logs are provided below.
+summaries.zip
+System information:
+Windows 10
+CUDA 8.0, cuDNN 5.0
+Tensorflow 1.0.1
+Python 3.5 64-bit

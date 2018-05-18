@@ -1,0 +1,112 @@
+Feature request: Add a subclass of seq2seq.Decoder to support regression
+
+Currently, seq2seq decoder class only supports classification which uses 1D softmax with embedding. The library is very good for this particular task. However, seq2seq is also extremely useful in regression tasks by replacing embedding with a dense layer.
+As of 1.2, the current architecture only allows 1D sequence data by supplying a Dense layer as _embedding_fn to TrainingHelper. Currently, training is working(loss decreases) but I have yet to find a way to decode.
+I have tried to modify these following pieces to support 2D regression:
+TrainingHelper
+BasicDecoder
+dynamic_decode
+GreedyEmbeddingHelper(used during decoding, not working)
+I had to change a lot of seq2seq internals, but here is more or less my code:
+            self.decoder_cell, self.decoder_initial_state = self.build_decoder_cell()
+
+            # Input projection layer to feed embedded inputs to the cell
+            # ** Essential when use_residual=True to match input/output dims
+            input_layer = Dense(self.hidden_units, dtype=self.dtype, name='input_projection')
+
+            # Output projection layer to convert cell_outputs to actual values
+            output_layer = Dense(self.dimension, name='output_projection')
+
+if self.mode == 'train':
+    # decoder_inputs_train :: [batch_size , max_time_steps + 1]
+    # Decoder inputs having gone through input projection layer
+    self.decoder_inputs_proj = input_layer(self.decoder_inputs_train)
+
+    # Helper to feed inputs for training: read inputs from dense ground truth vectors
+    training_helper = seq2seq.TrainingHelper(inputs=self.decoder_inputs_proj,
+                                       sequence_length=self.decoder_inputs_length_train,
+                                       time_major=False,
+                                       name='training_helper')
+
+    training_decoder = seq2seq.BasicDecoder(cell=self.decoder_cell,
+                                       helper=training_helper,
+                                       initial_state=self.decoder_initial_state,
+                                       output_layer=output_layer)
+                                       #output_layer=None)
+
+    # Maximum decoder time_steps in current batch
+    max_decoder_length = tf.reduce_max(self.decoder_inputs_length_train)
+
+    # decoder_outputs_train: BasicDecoderOutput
+    #                        namedtuple(rnn_outputs, sample_id)
+    # decoder_outputs_train.rnn_output: [batch_size, max_time_step + 1, dimension] if output_time_major=False
+    #                                   [max_time_step + 1, batch_size, dimension] if output_time_major=True
+    # decoder_outputs_train.sample_id: [batch_size], tf.int32
+    (self.decoder_outputs_train, self.decoder_last_state_train,
+     self.decoder_outputs_length_train) = (seq2seq.dynamic_decode(
+        decoder=training_decoder,
+        output_time_major=False,
+        impute_finished=True,
+        maximum_iterations=max_decoder_length))
+
+    # More efficient to do the projection on the batch-time-concatenated tensor
+    # logits_train: [batch_size, max_time_step + 1, dimension]
+    self.decoder_logits_train = tf.identity(self.decoder_outputs_train.rnn_output)
+
+    # RMSE
+    self.loss = tf.reduce_mean(tf.sqrt(
+          tf.abs(tf.subtract(self.decoder_logits_train, self.decoder_targets_train))
+        ), axis=2)
+    self.loss = tf.reduce_sum(self.loss)
+
+    # Contruct graphs for minimizing loss
+    self.init_optimizer()
+And here is the code for decoding and this is where I get all sorts of errors:
+
+elif self.mode == 'decode':
+
+    # Start_tokens: [batch_size,] `int32` vector
+    start_tokens = tf.ones([self.batch_size, self.dimension], tf.float32) * 0.1337
+    end_token = 0.1337
+
+    def project_inputs(inputs):
+        print "INPUT SHAPE", inputs.shape
+        return input_layer(inputs)
+
+    if not self.use_beamsearch_decode:
+        # Helper to feed inputs for greedy decoding: uses the argmax of the output
+        decoding_helper = seq2seq.GreedyEmbeddingHelper(start_tokens=start_tokens,
+                                                        end_token=end_token,
+                                                        embedding=project_inputs)
+        # Basic decoder performs greedy decoding at each time step
+        print("building greedy decoder..")
+        inference_decoder = seq2seq.BasicDecoder(cell=self.decoder_cell,
+                                                 helper=decoding_helper,
+                                                 initial_state=self.decoder_initial_state,
+                                                 output_layer=output_layer)
+    # For GreedyDecoder, return
+    # decoder_outputs_decode: BasicDecoderOutput instance
+    #                         namedtuple(rnn_outputs, sample_id)
+    # decoder_outputs_decode.rnn_output: [batch_size, max_time_step, num_decoder_symbols]   if output_time_major=False
+    #                                    [max_time_step, batch_size, num_decoder_symbols]   if output_time_major=True
+    # decoder_outputs_decode.sample_id: [batch_size, max_time_step], tf.int32       if output_time_major=False
+    #                                   [max_time_step, batch_size], tf.int32               if output_time_major=True
+
+    (self.decoder_outputs_decode, self.decoder_last_state_decode,
+     self.decoder_outputs_length_decode) = (seq2seq.dynamic_decode(
+        decoder=inference_decoder,
+        output_time_major=False,
+        #impute_finished=True,  # error occurs
+        maximum_iterations=self.max_decode_step))
+
+    if not self.use_beamsearch_decode:
+        # decoder_outputs_decode.sample_id: [batch_size, max_time_step]
+        # Or use argmax to find decoder symbols to emit:
+        # self.decoder_pred_decode = tf.argmax(self.decoder_outputs_decode.rnn_output,
+        #                                      axis=-1, name='decoder_pred_decode')
+
+        # Here, we use expand_dims to be compatible with the result of the beamsearch decoder
+        # decoder_pred_decode: [batch_size, max_time_step, 1] (output_major=False)
+        self.decoder_pred_decode = tf.expand_dims(self.decoder_outputs_decode.sample_id, -1)
+
+It would be great if someone could sort it out and streamline the process.

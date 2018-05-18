@@ -1,0 +1,59 @@
+Latency of simple tf.data.Dataset transformations is higher than raw Python
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): pip install tensorflow (CPU only)
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version: 3.5.2
+
+Describe the problem
+I'm trying to improve performance by moving to tf.data.Datasets to manage epochs and minibatches (particularly I/O performance on a GPU when I come to scaling up). However I'm finding that this is much slower than just using nested for loops in Python.
+Source code / logs
+Here's an example using a dataset with 10,000 numbers, 10 epochs and a minibatch size of 100:
+import tensorflow as tf
+import numpy as np
+from time import time
+
+MINI_BATCH = 100
+EPOCHS = 10
+
+# Dataset consisting of 10000 random numbers
+raw_data = np.random.randn(10000)
+
+# Raw Python implementation
+start = time()
+split_data = np.split(raw_data, 10000 // MINI_BATCH)
+
+for _ in range(EPOCHS):
+    for i, batch in enumerate(split_data):
+        # Do stuff with batch data
+        x = batch * 2
+print("Raw Python done in", time() - start)
+
+
+# TensorFlow implementation
+start = time()
+dataset = tf.data.Dataset.from_tensor_slices(raw_data)
+dataset = dataset.repeat(EPOCHS)
+dataset = dataset.batch(MINI_BATCH)
+iterator = dataset.make_one_shot_iterator()
+next_chunk = iterator.get_next()
+
+with tf.Session() as sess:
+    while True:
+        try:
+            batch = sess.run(next_chunk)
+            # Do stuff with batch data
+            x = batch * 2
+        except tf.errors.OutOfRangeError:
+            break
+print("TensorFlow done in", time() - start)
+
+Output:
+Raw Python done in 0.0011773109436035156
+TensorFlow done in 0.14212393760681152
+
+Does anyone know why this might be the case?
+I'm guessing that most of the overhead is in the evaluation of iterator.get_next() on every loop. If this is not supposed to be evaluated it would be useful to have some examples of how it should be used without using sess.run each time.

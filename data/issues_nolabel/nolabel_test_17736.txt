@@ -1,0 +1,150 @@
+worker task crashed  in distributed training if ps task or other worker task not started
+
+System information
+
+Have I written custom code: yes
+**OS Platform and Distribution **: CentOS Linux release 7.4.1708
+**TensorFlow installed from **: binary
+**TensorFlow version **: 'v1.6.0-0-gd2e24b6039', '1.6.0'
+Python version:  2.7.5
+CUDA/cuDNN version:   N/A
+GPU model and memory:   N/A
+Exact command to reproduce:  N/A
+
+Describe the problem
+worker task will crashed after 10s, if ps task or other worker task not started. not sure it's a bug or misused the api.
+Source code / logs
+logs:
+
+2018-03-15 19:59:32.309238: I tensorflow/core/platform/cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX2 FMA
+2018-03-15 19:59:32.312834: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> bjlt-h1269.sy:42557}
+2018-03-15 19:59:32.312861: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:37060, 1 -> bjlt-h1270.sy:57571}
+2018-03-15 19:59:32.315443: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:324] Started server with target: grpc://localhost:37060
+Variables initialized ...
+WARNING:tensorflow:From ./demo.py:75: init (from tensorflow.python.training.supervisor) is deprecated and will be removed in a future version.
+Instructions for updating:
+Please switch to tf.train.MonitoredTrainingSession
+2018-03-15 19:59:36.773767: E tensorflow/core/distributed_runtime/master.cc:269] Master init: Unavailable: OS Error
+Traceback (most recent call last):
+File "./demo.py", line 173, in 
+tf.app.run(main=main)
+File "/usr/lib/python2.7/site-packages/tensorflow/python/platform/app.py", line 126, in run
+_sys.exit(main(argv))
+File "./demo.py", line 76, in main
+with sv.prepare_or_wait_for_session(server.target, config = tf.ConfigProto(gpu_options=gpu_options, allow_soft_placement = True, log_device_placement = True)) as sess:
+File "/usr/lib/python2.7/site-packages/tensorflow/python/training/supervisor.py", line 726, in prepare_or_wait_for_session
+init_feed_dict=self._init_feed_dict, init_fn=self._init_fn)
+File "/usr/lib/python2.7/site-packages/tensorflow/python/training/session_manager.py", line 281, in prepare_session
+sess.run(init_op, feed_dict=init_feed_dict)
+File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 905, in run
+run_metadata_ptr)
+File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1137, in _run
+feed_dict_tensor, options, run_metadata)
+File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1355, in _do_run
+options, run_metadata)
+File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1374, in _do_call
+raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.UnavailableError: OS Error
+
+full code see https://github.com/Qihoo360/XLearning/blob/master/examples/tensorflow/demo.py
+code:
+def main(_):
+  # cluster specification
+  FLAGS.task_index = int(os.environ["TF_INDEX"])
+  FLAGS.job_name = os.environ["TF_ROLE"]
+  cluster_def = json.loads(os.environ["TF_CLUSTER_DEF"])
+  cluster = tf.train.ClusterSpec(cluster_def)
+
+  print("ClusterSpec:", cluster_def)
+  print("current task id:", FLAGS.task_index, " role:", FLAGS.job_name)
+  
+  gpu_options = tf.GPUOptions(allow_growth = True)
+  server = tf.train.Server(cluster, job_name=FLAGS.job_name,task_index=FLAGS.task_index,config = tf.ConfigProto(gpu_options=gpu_options,allow_soft_placement = True))
+  
+  if FLAGS.job_name == "ps":
+    server.join()
+  elif FLAGS.job_name == "worker":
+    # set the train parameters
+    learning_rate = FLAGS.learning_rate
+    training_epochs = FLAGS.training_epochs
+    batch_size = FLAGS.batch_size
+    iterData = trainData(FLAGS.data_path, batch_size)
+    
+    with tf.device(tf.train.replica_device_setter(worker_device=("/job:worker/task:%d"%(FLAGS.task_index)),cluster=cluster)):
+      # count the number of updates
+      global_step = tf.get_variable('global_step', [],initializer = tf.constant_initializer(0), trainable = False)
+      # input 
+      with tf.name_scope('input'):
+        x = tf.placeholder(tf.float32, shape=[None, 100], name="x-input")
+        y_ = tf.placeholder(tf.float32, shape=[None, 2], name="y-input")
+      # model parameters
+      tf.set_random_seed(1)
+      with tf.name_scope("weights"):
+        W1 = tf.Variable(tf.random_normal([100, 50]))
+        W2 = tf.Variable(tf.random_normal([50, 2]))
+      # bias
+      with tf.name_scope("biases"):
+        b1 = tf.Variable(tf.zeros([50]))
+        b2 = tf.Variable(tf.zeros([2]))
+      # implement model
+      with tf.name_scope("softmax"):
+        # y is our prediction
+        z1 = tf.add(tf.matmul(x,W1),b1)
+        a1 = tf.nn.softmax(z1)
+        z2 = tf.add(tf.matmul(a1,W2),b2)
+        y = tf.nn.softmax(z2)
+      # specify cost function
+      with tf.name_scope('cross_entropy'):
+        # this is our cost
+        cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ * tf.log(y), reduction_indices=[1]))
+      # specify optimizer
+      with tf.name_scope('train'):
+        # optimizer is an "operation" which we can execute in a session
+        grad_op = tf.train.GradientDescentOptimizer(learning_rate)
+        train_op = grad_op.minimize(cross_entropy, global_step=global_step)
+      # init_op
+      tf.summary.scalar('cross_entropy', cross_entropy )
+      merged = tf.summary.merge_all()
+      init_op = tf.global_variables_initializer()
+      saver = tf.train.Saver()
+      print("Variables initialized ...")
+    sv = tf.train.Supervisor(is_chief = (FLAGS.task_index == 0), global_step = global_step, init_op = init_op)
+    with sv.prepare_or_wait_for_session(server.target, config = tf.ConfigProto(gpu_options=gpu_options, allow_soft_placement = True, log_device_placement = True)) as sess:
+      # perform training cycles
+      start_time = time.time()
+      if(FLAGS.task_index == 0):
+        train_writer = tf.summary.FileWriter(FLAGS.log_dir, sess.graph)
+      for epoch in range(training_epochs):
+        # number of batches in one epoch                
+        sys.stderr.write("reporter progress:%0.4f\n"%(float(epoch)/(training_epochs)))
+        totalStep = iterData.batchCount()
+        for step in range(totalStep):
+          iterator_curr = iterData.nextBatch()
+          flag = 0
+          for iter in iterator_curr:
+            if 0 == flag:
+                train_x = iter[1].reshape(1,100)
+                train_y = oneHot(iter[0]).reshape(1,2)
+            else:
+                train_x = np.concatenate((train_x, iter[1].reshape(1,100)))
+                train_y = np.concatenate((train_y, oneHot(iter[0]).reshape(1,2)))
+            flag = 1
+          _, summary, cost, gstep = sess.run(
+                  [train_op, merged, cross_entropy, global_step],
+                  feed_dict={x: train_x, y_: train_y})
+          elapsed_time = time.time() - start_time
+          start_time = time.time()
+          if(FLAGS.task_index == 0):
+            train_writer.add_summary(summary, gstep)
+          print("Step: %d," % (gstep),
+                " Epoch: %2d," % (epoch),                            
+                " Cost: %.4f," % cost,
+                " Time: %3.2fms" % float(elapsed_time*1000))
+        sys.stderr.write("reporter progress:%0.4f\n"%(float(epoch+1)/(training_epochs)))
+  
+      print("Train Completed.")
+      if(FLAGS.task_index == 0):
+        train_writer.close()
+        print("saving model...")
+        saver.save(sess, FLAGS.save_path+"/model.ckpt")
+    print("done")

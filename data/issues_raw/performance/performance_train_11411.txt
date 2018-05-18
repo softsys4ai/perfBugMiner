@@ -1,0 +1,55 @@
+Fetching data in Distributed Tensorflow has too much latency
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+
+https://gist.github.com/ahaider3/ae4f6d2d790d963a93b346bb0138a41d
+The above is a simple benchmark which tests the overhead of distributed TF. It fetches a configurable sized variable from the parameter server and does a matmul on the worker. It also does a matmul from a locally stored variable on the worker. The time difference between these two operations would be the overhead I am measuring.
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Redhat
+
+
+TensorFlow installed from (source or binary):
+source
+
+
+TensorFlow version (use command below):
+tensorflow 1.2
+
+
+Python version:
+python 2.7.7
+
+
+Exact command to reproduce:
+
+
+python matmul_benchmark.py --num_features=256 --batch_size=128 --num_hidden=64 --job_name=ps &
+python matmul_benchmark.py --num_features=256 --batch_size=128 --num_hidden=64 --job_name=worker
+By increasing batch_size, the timing difference between local/remote computation eventually becomes negligible.
+However, for small batch sizes the overhead can become 2x/3x:
+For example, here are two runs for different model/dataset sizes:
+
+128 features, batch size of 32, hidden layer size of 256  returns:
+Local GEMM Time:  0.0002624  Network Fetch GEMM Time: 0.0006798
+
+
+256 features, batch size of 128, hidden layer size of 128  returns:
+Local GEMM Time: 0.0002995 Network Fetch GEMM Time: 0.0006124
+
+Describe the problem
+Distributed tensorflow introduces overhead due to its communication stack. By overhead I mean the additional time required for workers to receive data from parameter servers when compared to doing the same computation without fetching any remote data.
+This is a problem because due to this overhead I have to use 2/3 nodes to just provide performance on-par with non-distributed (single process) tensorflow. The number of nodes required to be on-par with single process TF increases further when I use gpus.
+Fetching small variables provides a constant overhead which limits scaling and efficiency .
+This overhead creates two issues in Distributed Tensorflow:
+
+I have to add several workers just to equal the performance of a single process.
+The overhead of fetching model parameters doesn't scale but the amount of computation does
+decrease as I add more workers. Thus, once I get to a moderately small batch size for each worker I can't scale because the constant overhead of fetching remote model parameters.
+
+There have been several issues posted with distributed tensorflow. #6116 is an improvement to large tensor transfer while this problem exists for small tensors. #4498 might have been caused by CPU performance bottleneck and not network. However for my problem, network transfer is definitely the bottleneck. I have tried using RDMA and have seen minimal benefit.
+Source code / logs
+https://gist.github.com/ahaider3/ae4f6d2d790d963a93b346bb0138a41d

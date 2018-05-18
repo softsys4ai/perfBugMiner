@@ -1,0 +1,43 @@
+[RFE] Runtime GPU Docker image without Jupyter
+
+Current image size for nightly-gpu:
+$ docker images tensorflow/tensorflow:nightly-gpu
+REPOSITORY              TAG                 IMAGE ID            CREATED             SIZE
+tensorflow/tensorflow   nightly-gpu         8f64c1fbb504        12 hours ago        2.62GB
+Current Dockerfile:
+https://github.com/tensorflow/tensorflow/blob/abd5375ba8d373045321d1eebdb4501c36ab0ccd/tensorflow/tools/docker/Dockerfile.gpu
+I see two potential improvements:
+
+
+We already switched the FROM to use the runtime base image of CUDA. We could go one step further and use nvidia/cuda:9.0-base. This flavor of CUDA is new with CUDA 9.0, it just installs the repos and libcudart. You have to manually install the CUDA libraries you want afterwards. The gain wouldn't be that big with TensorFlow since you use most of the libraries from the CUDA toolkit. But we will at least remove NPP from the shipped image.
+
+
+Looks like many dependencies in the current Dockerfile are required for Jupyter. Can we provide a new tag without Jupyter? Or stop shipping Jupyter in the runtime image? Users will still be able to use the devel image.
+
+
+I have a quick Dockerfile proof-of-concept with both improvements:
+FROM nvidia/cuda:9.0-base-ubuntu16.04
+
+LABEL maintainer="Gunhan Gulsoy <gunan@google.com>"
+
+RUN echo "/usr/local/cuda-9.0/extras/CUPTI/lib64" > /etc/ld.so.conf.d/cupti.conf && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 \
+        libcudnn7 \
+        cuda-command-line-tools-9-0 \
+        cuda-cudart-9-0 \
+        cuda-cufft-9-0 \
+        cuda-cublas-9-0 \
+        cuda-cusparse-9-0 \
+        cuda-curand-9-0 \
+        cuda-cusolver-9-0 \
+        python-pip \
+        && \
+    rm -rf /var/lib/apt/lists/
+
+RUN pip --no-cache-dir install --upgrade \
+        pip setuptools
+
+RUN pip --no-cache-dir install http://ci.tensorflow.org/view/tf-nightly/job/tf-nightly-linux/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON2,label=gpu-linux/lastSuccessfulBuild/artifact/pip_test/whl/tf_nightly_gpu-1.head-cp27-cp27mu-manylinux1_x86_64.whl
+
+Size is now 1.73 GB, down from 2.62 GB. And there is still room for improvement in CUDA 9.1 when CUPTI has its own package (today we have to pull cuda-command-line-tools-9-0), or if we disable CUPTI tracing (not sure if possible).

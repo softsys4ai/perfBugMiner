@@ -1,0 +1,72 @@
+TypeError: Expected int32, got list containing Tensors of type '_Message' instead.
+
+Hi,
+I am using TF ver 0.12.head on Ubuntu 16.04 Python 2.7 and following this for learning inception model in TF Slim
+
+import numpy as np
+import os
+import tensorflow as tf
+import urllib2
+
+from datasets import imagenet
+from nets import inception
+from preprocessing import inception_preprocessing
+
+slim = tf.contrib.slim
+
+batch_size = 3
+image_size = inception.inception_v1.default_image_size
+checkpoints_dir = '/tmp/checkpoints/'
+with tf.Graph().as_default():
+    url = 'https://upload.wikimedia.org/wikipedia/commons/7/70/EnglishCockerSpaniel_simon.jpg'
+    image_string = urllib2.urlopen(url).read()
+    image = tf.image.decode_jpeg(image_string, channels=3)
+    processed_image = inception_preprocessing.preprocess_image(image, image_size, image_size, is_training=False)
+    processed_images  = tf.expand_dims(processed_image, 0)
+    
+    # Create the model, use the default arg scope to configure the batch norm parameters.
+    with slim.arg_scope(inception.inception_v1_arg_scope()):
+        logits, _ = inception.inception_v1(processed_images, num_classes=1001, is_training=False)
+    probabilities = tf.nn.softmax(logits)
+    
+    init_fn = slim.assign_from_checkpoint_fn(
+        os.path.join(checkpoints_dir, 'inception_v1.ckpt'),
+        slim.get_model_variables('InceptionV1'))
+    
+    with tf.Session() as sess:
+        init_fn(sess)
+        np_image, probabilities = sess.run([image, probabilities])
+        probabilities = probabilities[0, 0:]
+        sorted_inds = [i[0] for i in sorted(enumerate(-probabilities), key=lambda x:x[1])]
+        
+    plt.figure()
+    plt.imshow(np_image.astype(np.uint8))
+    plt.axis('off')
+    plt.show()
+
+    names = imagenet.create_readable_names_for_imagenet_labels()
+    for i in range(5):
+        index = sorted_inds[i]
+        print('Probability %0.2f%% => [%s]' % (probabilities[index], names[index]))
+
+However I am getting the following issue when running this:
+    logits, _ = inception.inception_v1(processed_images, num_classes=1001, is_training=False)
+  File "/home/deepankar1994/Desktop/MTP/TensorFlowEx/TFSlim/models/slim/nets/inception_v1.py", line 290, in inception_v1
+    net, end_points = inception_v1_base(inputs, scope=scope)
+  File "/home/deepankar1994/Desktop/MTP/TensorFlowEx/TFSlim/models/slim/nets/inception_v1.py", line 96, in inception_v1_base
+    net = tf.concat(3, [branch_0, branch_1, branch_2, branch_3])
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_ops.py", line 1053, in concat
+    dtype=dtypes.int32).get_shape(
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 651, in convert_to_tensor
+    as_ref=False)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 716, in internal_convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/constant_op.py", line 176, in _constant_tensor_conversion_function
+    return constant(v, dtype=dtype, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/constant_op.py", line 165, in constant
+    tensor_util.make_tensor_proto(value, dtype=dtype, shape=shape, verify_shape=verify_shape))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_util.py", line 367, in make_tensor_proto
+    _AssertCompatible(values, dtype)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_util.py", line 302, in _AssertCompatible
+    (dtype.name, repr(mismatch), type(mismatch).__name__))
+TypeError: Expected int32, got list containing Tensors of type '_Message' instead.

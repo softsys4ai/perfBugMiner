@@ -1,0 +1,99 @@
+fatal error: cuda/include/cuda.h: No such file or directory
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes, I followed the official documentation for custom operations.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+
+Linux pc 4.4.0-81-generic #104-Ubuntu SMP Wed Jun 14 08:17:06 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+
+
+TensorFlow installed from (source or binary):
+tried both
+TensorFlow version (use command below):
+
+
+
+
+version
+status
+comment
+
+
+
+
+('v1.2.0-rc1-7529-g8a4d849', '1.4.0')
+not working
+from pip or from source
+
+
+('v1.2.0-rc2-21-g12f033d', '1.2.0')
+working
+from pypip
+
+
+Python version: 2.7 (irrelevant)
+Bazel version (if compiling from source):
+
+Build label: 0.6.1
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Oct 5 21:54:59 2017 (1507240499)
+Build timestamp: 1507240499
+Build timestamp as int: 1507240499
+
+
+GCC/Compiler version (if compiling from source): irrelevant
+tried both
+
+g++4.8
+g++5.0
+
+
+CUDA/cuDNN version: irrelevant
+
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2016 NVIDIA Corporation
+Built on Sun_Sep__4_22:14:01_CDT_2016
+Cuda compilation tools, release 8.0, V8.0.44
+
+
+GPU model and memory: irrelevant
+Exact command to reproduce:
+
+cd /tmp
+mkdir tf_issue
+cd tf_issue
+virtualenv test
+source test/bin/activate
+pip install tensorflow # in some way: either tensorflow-gpu or from wheel package created by bazel
+git clone https://github.com/cgtuebingen/tf_custom_op
+cd tf_custom_op
+cmake .
+make
+Describe the problem
+Compiling custom ops with
+#include "tensorflow/core/util/cuda_kernel_helper.h"
+fails due to missing files
+/code/lib/python2.7/site-packages/tensorflow/include/tensorflow/core/util/cuda_kernel_helper.h:24:31: fatal error: cuda/include/cuda.h: No such file or directory
+
+This file cuda/include/cuda.h does not exists! Neither in the pip package nor in the git repository.
+Removing #include "tensorflow/core/util/cuda_kernel_helper.h"
+gives plenty of other issues
+/code/kernels/matrix_add_kernel.cu(13): error: namespace "tensorflow" has no member "CudaLaunchConfig"
+/code/kernels/matrix_add_kernel.cu(59): error: namespace "tensorflow" has no member "CudaLaunchConfig"
+/code/kernels/matrix_add_kernel.cu(59): error: expected a ";"
+/code/kernels/matrix_add_kernel.cu(63): error: identifier "cfg" is undefined
+/code/kernels/matrix_add_kernel.cu(88): error: namespace "tensorflow" has no member "CudaLaunchConfig"
+/code/kernels/matrix_add_kernel.cu(88): error: expected a ";"
+/code/kernels/matrix_add_kernel.cu(92): error: identifier "cfg" is undefined
+
+As I already wrote in a related issue #12860, the commit 2c598e8 is causing this issue by changing
+-#include "third_party/gpus/cuda/include/cuda.h"
++#include "cuda/include/cuda.h"
+Copying the old cuda.h gives
+[...]/local/lib/python2.7/site-packages/tensorflow/include/tensorflow/core/platform/default/mutex.h:25:22: fatal error: nsync_cv.h: No such file or directory
+
+which does not exist, too.
+This problem is not related to custom code, it is related to ignore/omitting files in commit 2c598e8
+As mention in #12860, this affects many people. In fact, the entire way of writing customs ops with CUDA seems to be broken. Copying own source-code to the TensorFlow-repo was not necessary until TF1.3. Interestingly, even recent NIPS paper implementations state in their readme, they only support TFv1.2. I don't think the proposed workaround of downgrading to TFv1.2 should be the way to go.

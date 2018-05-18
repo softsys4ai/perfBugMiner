@@ -1,0 +1,172 @@
+Building Tensorflow 1.4.1 from source successful on MacOS, but pip install to Python 2.7.14 of wheel file fails with "not supported wheel on this platform"
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+MacOX Yosemite 10.10.5
+
+
+TensorFlow installed from (source or binary):
+source (binary loads fine, no problem)
+
+
+TensorFlow version (use command below):
+Tensorflow 1.4.1
+
+
+Python version:
+Python 2.7.14
+
+
+Bazel version (if compiling from source):
+0.9.0
+
+
+GCC/Compiler version (if compiling from source):
+Xcode7.2.1
+
+
+CUDA/cuDNN version:
+N/a
+
+
+GPU model and memory:
+N/a
+
+
+Exact command to reproduce:
+
+
+See my notes for TensorFlow 1.4.1 install from source below...  Note: Bazel build completed successfully, only issue is the failure to "pip install ..." the wheel file.
+Describe the problem
+< see the tl:dr at bottom of notes...>
+Can't load generated wheel file of Tensorflow 1.4.1 into Python 2.7.14, despite having built everything local.  Tried with several Python versions, MacOS orginal version, Python 2.7.14 (from binary upgrade), and using a Python 2.7.14 that I built an installed locally.  Note: Tensorflow  1.4.0 binary can be loaded and runs ok (but operates differently than TensorFlow 1.4.0 that I have running on CentOS-7.4 box, hence my interest in building from source, and tracking down why this is the case
+Source code / logs
+Bazel Build was ok, built for CPU only , 4044 actions, successful completion.  Also the build_pip_package works fine.  Only issue is the failure to pip install the wheel file
+Here are notes of exactly what I did...
+TensorFlow Build Notes using Bazel                    - MCL, Jan. 5, 2018
+Done on Macbook, Yosemite 10.10.5, using Xcode-7.2.1
+You need to get Xcode7.2.1 from Apple and install it.
+For TensorFlow build using Bazel you need to install:
+- JDK8  (Java Development Kit #8, (not #9...))
+- Bazel (built from source, see: /home/Bazel
+- Xcode7.2.1 (which offers clang 700.xxx version)
+
+First tried with: Xcode6.3.x (needed to put DOSbox on iPad as DOSpad)
+Had to update Xcode.  After Xcode7.2.1 install (copy .dmg to /Applications/Xcode7.2.1)
+Note the directory had to be manually created first.
+Run it all as root on the Macbook...
+cd /home/TensorFlow/tensorflow-1.4.1
+Needed to do a "make clean" in Bazel.  Do this:
+bazel clean --expunge     (pitche le vache... totemo, eh?)
+Run this to build...
+Note: the ./configure is a Q&A.  For initial build, no special features were
+selected (ie. I selected "n" to all the "build with this cool thing? (Y/n): " )
+  ./configure   
+
+Once configure is complete, do this... (note, it is all one line...)
+  bazel build --config=opt --incompatible_load_argument_is_label=false 
+
+//tensorflow/tools/pip_package:build_pip_package
+The build runs for 66 minutes, and reports:
+
+  Elapsed time: 3985.215 s
+  Critical Path: 132.83 s
+  Build completed successfully, 4044 total actions.
+
+
+This makes a build_pip_package.sh file in the ../tensorflow/tools/pip_package subdir.
+You now need to make the .whl (the compressed package pip uses to install to python)
+from this thing the Bazel build made.  You run the script: "bazel-bin" to do this.
+On the Macbook (and Linux), you will need to enter: "bazel-bin/tensorflow... "
+for it to work.
+Note: "pwd" reports: "/home/TensorFlow/tensorflow-1.4.1
+Note: The TensorFlow build instructions use top level directory "/tmp", but I
+don't want it destroyed if it works.  (/tmp means "temporary", eh?)
+I created top level "/tftop"
+Note: "bazel-bin" is a directory.  You are running the "build_pip_package" script
+that is down in there, not the build_pip_package.sh script in ./tensorflow tree.
+  ./bazel-bin/tensorflow/tools/pip_package/build_pip_package /tftop/tensorflow_pkg
+
+     I ran this to /tftop, which might be wrong, since I got a bunch of warnings
+     about *.dll, *.lib, *.h, * (for Eigen), * (for external), * (for google)...
+     and some other, all not being found.  Tried to run it again, using /tmp, and
+     I got message:
+
+
+" ./bazel-bin/tensorflow/tools/pip_package/build_pip_package: No such file or directory"
+     The "build_pip_package" destroys the build-generated files.  (this is no 
+     problem, it turns out.  Just re-run the "bazel build ...", as bazel remembers
+     all the compiles, and the build_pip_package thing completes in a few seconds...
+
+     The file that is created in /tftop/tensorflow_pkg is:
+
+      tensorflow-1.4.1-cp27-cp27m-macosx_10_4_x86_64.whl
+   
+     This TensorFlow install instructions say to use this:
+
+  sudo pip install /tftop/tensorflow_pkg/tensorflow-1.4.1-py2-none-any.whl
+
+     But it, of course, does not work, as there is no such file...
+
+     And when I try, (as root):
+
+  pip install /tftop/tensorflow_pkg/tensorflow-1.4.1-cp27-cp27m-macosx_10_4_x86_64.whl
+
+  I get the showstopper message:
+
+
+tensorflow-1.4.1-cp27-cp27m-macosx_10_4_x86_64.whl is not a supported wheel on this platform
+
+     and for now, I am completely stopped. 
+
+What I did:
+    Re-ran Bazel (it remembers everything was compiled.  Ran in a few seconds...)
+
+    Ran:
+         bazel-bin/tensorflow/tools/pip_package/build_pip_package /tmp/tensorflow_pkg
+
+    < exactly as indicated in the TensorFlow  documentation, here:
+           https://www.tensorflow.org/install/install_sources#common_installation_problems
+    >
+
+    Got exactly the same warning messages about a bunch of missing files...
+
+    Tried: 
+            pip install /tmp/tensorflow_pkg/tensorflow-1.4.0-py2-none-any.whl
+
+           (of course, did not work.  No such filename....  You have to use the wheel file
+            that the build process generates, which is in the /tmp/tensorflow_pkg directory... )
+
+        pip install /tmp/tensorflow_pkg/tensorflow-1.4.1-cp27-cp27m-macosx_10_4_x86_64.whl
+
+            (this "pip install" is to a local-built Python 2.7.14, which currently has the
+             Tensorflow-1.4.0 binary successfully installed, which successfully operates...)
+
+        Error message: (same)
+
+
+"tensorflow-1.4.1-cp27-cp27m-macosx_10_4_x86_64.whl is not a supported wheel on this platform"
+       Tried with different versions of Python (tweaked the PATH in .bash_profile to 
+       get my custom built one, and the ..framework system verison. Same problem for both.
+
+Result:  TensorFlow Build successful, "pip install ..." to Python 2.7.14 on MacOSX
+fails with version mis-match.  (? or a bug maybe ?)
+Post-Mortem Questions:
+I was expecting the documentation to match this install process.
+I probably need the "-py2-none-any.whl" type of wheel to be generated, right?
+What I am getting is some very MacOSX version-specific thing being built, which
+is failing the "pip install ..." because of a version-mismatch, maybe..
+TL;DR:  How can I force the build process to build the "-py2-none-any.whl" type of wheel (which
+does not have fascist-style version-checking (:D), and just builds the .whl file as per
+what the TensorFlow build instructions describe?
+or
+Is there some tweak I can make to the build process (which all seems to be working quite fine),
+to tell the process to really, actually, please code the built version of TensorFlow 1.4.1, to
+the actual machine (the Yosemite 10.10.5 Macbook), that I have run the build upon??
+
+Mark Langdon, Jan. 5, 2018

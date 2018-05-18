@@ -1,0 +1,81 @@
+Tensorflow freezes on iOS during Session::Run
+
+Tensorflow hangs on iOS during Session::Run. I have a deep LSTM model that requires running session.run many times. The program occasionally hangs after running a few sessions without consuming any cpu. Tensorflow seems to get stuck at DirectSession::WaitForNotification.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+#2121
+#2788
+Environment info
+Operating System: iOS
+git rev-parse HEAD:  e60e724
+Build label: 0.2.3
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Tue May 17 14:22:21 2016 (1463494941)
+Build timestamp: 1463494941
+Build timestamp as int: 1463494941
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+std::vector<tensorflow::Tensor> outputs;
+for (int t = 0; t < count; ++t) {        
+    std::vector<std::pair<std::string, tensorflow::Tensor>> feed =....
+    auto status = g_session->Run(feed, out_layer_names, {}, &outputs);
+    if (!status.ok()) {
+        LOG(ERROR) << status.ToString();
+        return @"Internal Error!";
+    }
+    ....
+}
+
+Logs or other output that would be helpful
+This is a stack trace of all of the threads when the program freezes:
+
+
+thread #1: tid = 0x206350, 0x0000000183256e1c libsystem_kernel.dylib__psynch_cvwait + 8, queue = 'com.apple.main-thread', stop reason = signal SIGSTOP frame #0: 0x0000000183256e1c libsystem_kernel.dylib__psynch_cvwait + 8
+frame #1: 0x000000018331c9c0 libsystem_pthread.dylib_pthread_cond_wait + 640 frame #2: 0x0000000182c453ec libc++.1.dylibstd::__1::condition_variable::wait(std::__1::unique_lockstd::__1::mutex&) + 56
+frame #3: 0x00000001000ef6fc Apptensorflow::DirectSession::WaitForNotification(tensorflow::Notification*, long long) + 176 frame #4: 0x00000001000eb1cc Apptensorflow::DirectSession::WaitForNotification(tensorflow::DirectSession::RunState*, tensorflow::CancellationManager*, long long) + 48
+frame #5: 0x00000001000e91b8 App`tensorflow::DirectSession::Run(tensorflow::RunOptions const&, std::__1::vector<std::__1::pair<std::__1::basic_string<char, std::__1::char_traits, std::__1::allocator >, tensorflow::Tensor>, std::__1::allocator<std::__1::pair<std::__1::basic_string<char, std::__1::char_traits, std::__1::allocator >, tensorflow::Tensor> > > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits, std::__1::allocator >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits, std::__1::allocator > > > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits, std::__1::allocator >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits, std::__1::allocator > > > const&, std::__1::vector<tensorflow::Tensor, std::__1::allocatortensorflow::Tensor >, tensorflow::RunMetadata) + 1868
+
+frame #6: 0x00000001000e8a40 Apptensorflow::DirectSession::Run(std::__1::vector<std::__1::pair<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, tensorflow::Tensor>, std::__1::allocator<std::__1::pair<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, tensorflow::Tensor> > > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > > const&, std::__1::vector<tensorflow::Tensor, std::__1::allocator<tensorflow::Tensor> >*) + 112 frame #7: 0x000000010052e01c Apptensorflow::internal::AppendProtoDebugString(tensorflow::strings::ProtoTextOutput*, tensorflow::Feature const&) + 6028
+frame #8: 0x000000010053c138 Appmain + 24316 frame #9: 0x0000000100535f00 Apptensorflow::internal::AppendProtoDebugString(tensorflow::strings::ProtoTextOutput*, tensorflow::Feature const&) + 38512
+frame #10: 0x0000000100535794 Apptensorflow::internal::AppendProtoDebugString(tensorflow::strings::ProtoTextOutput*, tensorflow::Feature const&) + 36612 frame #11: 0x000000018a173d30 UIKit-[UIApplication sendAction:to:from:forEvent:] + 96
+frame #12: 0x000000018a2e7880 UIKit-[UIBarButtonItem(UIInternal) _sendAction:withEvent:] + 168 frame #13: 0x000000018a173d30 UIKit-[UIApplication sendAction:to:from:forEvent:] + 96
+frame #14: 0x000000018a173cb0 UIKit-[UIControl sendAction:to:forEvent:] + 80 frame #15: 0x000000018a15e128 UIKit-[UIControl _sendActionsForEvents:withEvent:] + 452
+frame #16: 0x000000018a15e290 UIKit-[UIControl _sendActionsForEvents:withEvent:] + 812 frame #17: 0x000000018a17359c UIKit-[UIControl touchesEnded:withEvent:] + 584
+frame #18: 0x000000018a1730c4 UIKit-[UIWindow _sendTouchesForEvent:] + 2484 frame #19: 0x000000018a16e328 UIKit-[UIWindow sendEvent:] + 2988
+frame #20: 0x000000018a13eda0 UIKit-[UIApplication sendEvent:] + 340 frame #21: 0x000000018a92875c UIKit__dispatchPreprocessedEventFromEventQueue + 2736
+frame #22: 0x000000018a922130 UIKit__handleEventQueue + 784 frame #23: 0x0000000184236b5c CoreFoundationCFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION + 24
+frame #24: 0x00000001842364a4 CoreFoundation__CFRunLoopDoSources0 + 524 frame #25: 0x00000001842340a4 CoreFoundation__CFRunLoopRun + 804
+frame #26: 0x00000001841622b8 CoreFoundationCFRunLoopRunSpecific + 444 frame #27: 0x0000000185c16198 GraphicsServicesGSEventRunModal + 180
+frame #28: 0x000000018a1a97fc UIKit-[UIApplication _run] + 684 frame #29: 0x000000018a1a4534 UIKitUIApplicationMain + 208
+frame #30: 0x00000001005362b4 Appmain + 120 frame #31: 0x00000001831455b8 libdyld.dylibstart + 4
+
+thread #4: tid = 0x206397, 0x000000018331ad88 libsystem_pthread.dylibstart_wqthread frame #0: 0x000000018331ad88 libsystem_pthread.dylibstart_wqthread
+thread #8: tid = 0x20639b, 0x0000000183239188 libsystem_kernel.dylibmach_msg_trap + 8, name = 'com.apple.uikit.eventfetch-thread' frame #0: 0x0000000183239188 libsystem_kernel.dylibmach_msg_trap + 8
+frame #1: 0x0000000183238ff8 libsystem_kernel.dylibmach_msg + 72 frame #2: 0x00000001842365d0 CoreFoundation__CFRunLoopServiceMachPort + 192
+frame #3: 0x00000001842341ec CoreFoundation__CFRunLoopRun + 1132 frame #4: 0x00000001841622b8 CoreFoundationCFRunLoopRunSpecific + 444
+frame #5: 0x0000000184c9f26c Foundation-[NSRunLoop(NSRunLoop) runMode:beforeDate:] + 304 frame #6: 0x0000000184cbfdd0 Foundation-[NSRunLoop(NSRunLoop) runUntilDate:] + 96
+frame #7: 0x000000018ab1dc38 UIKit-[UIEventFetcher threadMain] + 136 frame #8: 0x0000000184d9ce68 FoundationNSThread__start + 1024
+frame #9: 0x000000018331d850 libsystem_pthread.dylib_pthread_body + 240 frame #10: 0x000000018331d760 libsystem_pthread.dylib_pthread_start + 284
+frame #11: 0x000000018331ad94 libsystem_pthread.dylib`thread_start + 4
+thread #9: tid = 0x2063c0, 0x0000000183256e1c libsystem_kernel.dylib__psynch_cvwait + 8 frame #0: 0x0000000183256e1c libsystem_kernel.dylib__psynch_cvwait + 8
+frame #1: 0x000000018331c9c0 libsystem_pthread.dylib_pthread_cond_wait + 640 frame #2: 0x0000000182c453ec libc++.1.dylibstd::__1::condition_variable::wait(std::__1::unique_lockstd::__1::mutex&) + 56
+frame #3: 0x000000010019535c Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 6296 frame #4: 0x0000000100194e40 Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 4988
+frame #5: 0x00000001001949dc Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 3864 frame #6: 0x00000001001946e4 Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 3104
+frame #7: 0x00000001001a5828 Appvoid* std::__1::__thread_proxy<std::__1::tuple<std::__1::function<void ()> > >(void*) + 100 frame #8: 0x000000018331d850 libsystem_pthread.dylib_pthread_body + 240
+frame #9: 0x000000018331d760 libsystem_pthread.dylib_pthread_start + 284 frame #10: 0x000000018331ad94 libsystem_pthread.dylibthread_start + 4
+thread #10: tid = 0x2063c1, 0x0000000183256e1c libsystem_kernel.dylib__psynch_cvwait + 8 frame #0: 0x0000000183256e1c libsystem_kernel.dylib__psynch_cvwait + 8
+frame #1: 0x000000018331c9c0 libsystem_pthread.dylib_pthread_cond_wait + 640 frame #2: 0x0000000182c453ec libc++.1.dylibstd::__1::condition_variable::wait(std::__1::unique_lockstd::__1::mutex&) + 56
+frame #3: 0x000000010019535c Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 6296 frame #4: 0x0000000100194e40 Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 4988
+frame #5: 0x00000001001949dc Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 3864 frame #6: 0x00000001001946e4 Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 3104
+frame #7: 0x00000001001a5828 Appvoid* std::__1::__thread_proxy<std::__1::tuple<std::__1::function<void ()> > >(void*) + 100 frame #8: 0x000000018331d850 libsystem_pthread.dylib_pthread_body + 240
+frame #9: 0x000000018331d760 libsystem_pthread.dylib_pthread_start + 284 frame #10: 0x000000018331ad94 libsystem_pthread.dylibthread_start + 4
+thread #11: tid = 0x2063c2, 0x0000000183256e1c libsystem_kernel.dylib__psynch_cvwait + 8 frame #0: 0x0000000183256e1c libsystem_kernel.dylib__psynch_cvwait + 8
+frame #1: 0x000000018331c9c0 libsystem_pthread.dylib_pthread_cond_wait + 640 frame #2: 0x0000000182c453ec libc++.1.dylibstd::__1::condition_variable::wait(std::__1::unique_lockstd::__1::mutex&) + 56
+frame #3: 0x000000010019535c Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 6296 frame #4: 0x0000000100194e40 Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 4988
+frame #5: 0x00000001001949dc Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 3864 frame #6: 0x00000001001946e4 Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 3104
+frame #7: 0x00000001001a5828 Appvoid* std::__1::__thread_proxy<std::__1::tuple<std::__1::function<void ()> > >(void*) + 100 frame #8: 0x000000018331d850 libsystem_pthread.dylib_pthread_body + 240
+frame #9: 0x000000018331d760 libsystem_pthread.dylib_pthread_start + 284 frame #10: 0x000000018331ad94 libsystem_pthread.dylibthread_start + 4
+thread #12: tid = 0x2063c3, 0x0000000183256e1c libsystem_kernel.dylib__psynch_cvwait + 8 frame #0: 0x0000000183256e1c libsystem_kernel.dylib__psynch_cvwait + 8
+frame #1: 0x000000018331c9c0 libsystem_pthread.dylib_pthread_cond_wait + 640 frame #2: 0x0000000182c453ec libc++.1.dylibstd::__1::condition_variable::wait(std::__1::unique_lockstd::__1::mutex&) + 56
+frame #3: 0x000000010019535c Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 6296 frame #4: 0x0000000100194e40 Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 4988
+frame #5: 0x00000001001949dc Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 3864 frame #6: 0x00000001001946e4 Apptensorflow::thread::ThreadPool::CurrentThreadId() const + 3104
+frame #7: 0x00000001001a5828 Appvoid* std::__1::__thread_proxy<std::__1::tuple<std::__1::function<void ()> > >(void*) + 100 frame #8: 0x000000018331d850 libsystem_pthread.dylib_pthread_body + 240
+frame #9: 0x000000018331d760 libsystem_pthread.dylib_pthread_start + 284 frame #10: 0x000000018331ad94 libsystem_pthread.dylibthread_start + 4

@@ -1,0 +1,29 @@
+Backward pass of broadcasting on GPU is non-deterministic
+
+import tensorflow as tf
+
+def run(on_gpu):
+    tf.reset_default_graph()
+    tf.set_random_seed(42)
+    with tf.device('/gpu:0' if on_gpu else '/cpu:0'):
+        a = tf.random_normal([16, 16])
+        b = tf.get_variable('b', shape = [], initializer = tf.constant_initializer(value = 0.0))
+        c = a*b
+        grad = tf.gradients(c, [b], gate_gradients=tf.train.Optimizer.GATE_GRAPH)[0]
+
+    sess = tf.Session()
+    sess.run(tf.initialize_all_variables())
+    grad_val = sess.run(grad)
+    return grad_val
+
+for i in xrange(20):
+    print repr(run(on_gpu=True)),
+print ''
+for i in xrange(20):
+    print repr(run(on_gpu=False)),
+Result:
+23.066511 23.066511 23.066513 23.066513 23.066511 23.066513 23.066509 23.066513 23.066513 23.066511 23.066513 23.066511 23.066513 23.066513 23.066509 23.066511 23.066513 23.066513 23.066511 23.066511 
+23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509 23.066509
+
+As you can see, consistent result across CPU runs but inconsistent result across GPU runs.
+No doubt a CUDA reduction order issue, but it'd be really nice if we can have deterministic reduction. I am using tf 0.8.0 (self-compiled against CuDNN v5). CuDNN version is 5005 (not rc)

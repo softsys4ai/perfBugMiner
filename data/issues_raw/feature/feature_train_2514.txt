@@ -1,0 +1,37 @@
+Feature Request: multi-epoch alternative to tf.QueueBase.close()
+
+Examples on the web demonstrate signaling the end of queue data by calling queue.close() in the data producer and then catching the tf.errors.OutOfRangeError exception in the data consumer.
+This works fine for a single epoch, but I do multiple epochs, alternating between training data and testing data, and I can't reuse the queue after calling queue.close().
+The two solutions that I have thought of using the existing code are:
+
+enqueue() some sentinel at the end of an epoch in the data producer and then tf.Assert() against the sentinel and catch the tf.errors.InvalidArgumentError in the data consumer.
+know the number of enqueue's for the epoch and only dequeue that number.
+Both seem a little hacky.
+
+Multi-epoch use of queues might be simplified by adding one of the following:
+
+A queue.reset(), that throws one tf.errors.OutOfRangeError on dequeue() or some other exception.
+A queue.close(reset=True), that only throws one tf.errors.OutOfRangeError on dequeue() or some other exception.
+
+example usage of 1):
+q = tf.FIFOQueue(...)
+placeholder = ...
+enqueue_op = q.enqueue(placeholder)
+....
+
+def producer(data_dir, sess, q, enqueue_op, placeholder):
+  for ...:
+    sess.run(enqueue_op, {placeholder:...})
+  sess.run(q.reset())
+
+def do_epoch(data_dir, learn):
+  threading.Thread(target=producer, args=(data_dir, sess, q, enqueue_op, placeholder)).start()
+  while True:
+    try:
+      sess.run(...)
+    exception tf.errors.OutOfRangeError:
+      break
+
+for epoch in range(NUM_EPOCHS):
+  ... = do_epoch(TRAIN_DIR, learn=True)
+  ... = do_epoch(TEST_DIR, learn=False)

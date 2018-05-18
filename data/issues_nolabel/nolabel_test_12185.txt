@@ -1,0 +1,109 @@
+`numpy >= 1.11.0` is not sufficient (repro script included)
+
+Our pip package includes a dependency on numpy >= 1.11.0. However, when numpy version 1.11.0 is already installed and then the user installs TensorFlow, TensorFlow fails to load with the following error:
+SystemError: initialization of _pywrap_tensorflow_internal raised unreported exception
+
+The root cause is:
+RuntimeError: module compiled against API version 0xb but this version of numpy is 0xa
+
+This problem occurs on Python 3 only (I only tested Python 3.4).
+This is a regression from build 582 to build 583. I include a repro script below.
+$ cat examine.sh
+#!/bin/sh
+# USAGE: ./examine.sh JENKINS_BUILD_ID
+set -eu
+virtualenv="$(mktemp -d)"
+virtualenv "${virtualenv}" -p python3
+. "${virtualenv}/bin/activate"
+pip install numpy==1.11.0
+build_id="$1"
+NIGHTLY_URL="https://ci.tensorflow.org/view/Nightly/job/nightly-matrix-cpu/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON3,label=cpu-slave/${build_id}/artifact/pip_test/whl/tensorflow-1.head-cp34-cp34m-linux_x86_64.whl"
+pip install "${NIGHTLY_URL}"
+python -c 'import tensorflow'
+printf 'Done; everything checks out.\n'
+Removing the pip install numpy==1.11.0, or subsequently removing it with pip uninstall -y numpy==1.11.0, or installing TensorFlow with pip install -I "${NIGHTLY_URL} all fix the issue.
+The change log for those two builds is 349932f...dff1062, but nothing in there looks particularly suspicious. Perhaps something changed on the Jenkins side?
+Here is the result of the repro script on builds 582 and 583:
+$ ./examine.sh 582
+Running virtualenv with interpreter /usr/bin/python3
+Using base prefix '/usr'
+New python executable in /tmp/tmp.IS6cENR7vo/bin/python3
+Also creating executable in /tmp/tmp.IS6cENR7vo/bin/python
+Installing setuptools, pip, wheel...done.
+Collecting numpy==1.11.0
+  Using cached numpy-1.11.0-cp34-cp34m-manylinux1_x86_64.whl
+Installing collected packages: numpy
+Successfully installed numpy-1.11.0
+Collecting tensorflow==1.head from https://ci.tensorflow.org/view/Nightly/job/nightly-matrix-cpu/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON3,label=cpu-slave/582/artifact/pip_test/whl/tensorflow-1.head-cp34-cp34m-linux_x86_64.whl
+  Downloading https://ci.tensorflow.org/view/Nightly/job/nightly-matrix-cpu/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON3,label=cpu-slave/582/artifact/pip_test/whl/tensorflow-1.head-cp34-cp34m-linux_x86_64.whl (46.5MB)
+    100% |████████████████████████████████| 46.5MB 33kB/s 
+Collecting six>=1.10.0 (from tensorflow==1.head)
+  Using cached six-1.10.0-py2.py3-none-any.whl
+Collecting protobuf>=3.3.0 (from tensorflow==1.head)
+  Using cached protobuf-3.3.0-cp34-cp34m-manylinux1_x86_64.whl
+Requirement already satisfied: numpy>=1.11.0 in ./tmp.IS6cENR7vo/lib/python3.4/site-packages (from tensorflow==1.head)
+Collecting tensorflow-tensorboard<0.2.0,>=0.1.0 (from tensorflow==1.head)
+  Using cached tensorflow_tensorboard-0.1.2-py3-none-any.whl
+Requirement already satisfied: wheel>=0.26 in ./tmp.IS6cENR7vo/lib/python3.4/site-packages (from tensorflow==1.head)
+Requirement already satisfied: setuptools in ./tmp.IS6cENR7vo/lib/python3.4/site-packages (from protobuf>=3.3.0->tensorflow==1.head)
+Collecting werkzeug>=0.11.10 (from tensorflow-tensorboard<0.2.0,>=0.1.0->tensorflow==1.head)
+  Using cached Werkzeug-0.12.2-py2.py3-none-any.whl
+Collecting markdown==2.2.0 (from tensorflow-tensorboard<0.2.0,>=0.1.0->tensorflow==1.head)
+Collecting bleach==1.5.0 (from tensorflow-tensorboard<0.2.0,>=0.1.0->tensorflow==1.head)
+  Using cached bleach-1.5.0-py2.py3-none-any.whl
+Collecting html5lib==0.9999999 (from tensorflow-tensorboard<0.2.0,>=0.1.0->tensorflow==1.head)
+Installing collected packages: six, protobuf, werkzeug, markdown, html5lib, bleach, tensorflow-tensorboard, tensorflow
+Successfully installed bleach-1.5.0 html5lib-0.9999999 markdown-2.2.0 protobuf-3.3.0 six-1.10.0 tensorflow-1.3.0rc2 tensorflow-tensorboard-0.1.2 werkzeug-0.12.2
+Done; everything checks out.
+
+$ ./examine.sh 583
+Running virtualenv with interpreter /usr/bin/python3
+Using base prefix '/usr'
+New python executable in /tmp/tmp.Iwv3luN526/bin/python3
+Also creating executable in /tmp/tmp.Iwv3luN526/bin/python
+Installing setuptools, pip, wheel...done.
+Collecting numpy==1.11.0
+  Using cached numpy-1.11.0-cp34-cp34m-manylinux1_x86_64.whl
+Installing collected packages: numpy
+Successfully installed numpy-1.11.0
+Collecting tensorflow==1.head from https://ci.tensorflow.org/view/Nightly/job/nightly-matrix-cpu/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON3,label=cpu-slave/583/artifact/pip_test/whl/tensorflow-1.head-cp34-cp34m-linux_x86_64.whl
+  Downloading https://ci.tensorflow.org/view/Nightly/job/nightly-matrix-cpu/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON3,label=cpu-slave/583/artifact/pip_test/whl/tensorflow-1.head-cp34-cp34m-linux_x86_64.whl (46.4MB)
+    100% |████████████████████████████████| 46.4MB 32kB/s 
+Requirement already satisfied: numpy>=1.11.0 in ./tmp.Iwv3luN526/lib/python3.4/site-packages (from tensorflow==1.head)
+Collecting protobuf>=3.3.0 (from tensorflow==1.head)
+  Using cached protobuf-3.3.0-cp34-cp34m-manylinux1_x86_64.whl
+Requirement already satisfied: wheel>=0.26 in ./tmp.Iwv3luN526/lib/python3.4/site-packages (from tensorflow==1.head)
+Collecting autograd>=1.1.11 (from tensorflow==1.head)
+Collecting six>=1.10.0 (from tensorflow==1.head)
+  Using cached six-1.10.0-py2.py3-none-any.whl
+Collecting tensorflow-tensorboard<0.2.0,>=0.1.0 (from tensorflow==1.head)
+  Using cached tensorflow_tensorboard-0.1.2-py3-none-any.whl
+Requirement already satisfied: setuptools in ./tmp.Iwv3luN526/lib/python3.4/site-packages (from protobuf>=3.3.0->tensorflow==1.head)
+Collecting scipy>=0.17 (from autograd>=1.1.11->tensorflow==1.head)
+  Using cached scipy-0.19.1-cp34-cp34m-manylinux1_x86_64.whl
+Collecting future>=0.15.2 (from autograd>=1.1.11->tensorflow==1.head)
+Collecting werkzeug>=0.11.10 (from tensorflow-tensorboard<0.2.0,>=0.1.0->tensorflow==1.head)
+  Using cached Werkzeug-0.12.2-py2.py3-none-any.whl
+Collecting markdown==2.2.0 (from tensorflow-tensorboard<0.2.0,>=0.1.0->tensorflow==1.head)
+Collecting html5lib==0.9999999 (from tensorflow-tensorboard<0.2.0,>=0.1.0->tensorflow==1.head)
+Collecting bleach==1.5.0 (from tensorflow-tensorboard<0.2.0,>=0.1.0->tensorflow==1.head)
+  Using cached bleach-1.5.0-py2.py3-none-any.whl
+Installing collected packages: six, protobuf, scipy, future, autograd, werkzeug, markdown, html5lib, bleach, tensorflow-tensorboard, tensorflow
+Successfully installed autograd-1.1.11 bleach-1.5.0 future-0.16.0 html5lib-0.9999999 markdown-2.2.0 protobuf-3.3.0 scipy-0.19.1 six-1.10.0 tensorflow-1.3.0rc2 tensorflow-tensorboard-0.1.2 werkzeug-0.12.2
+RuntimeError: module compiled against API version 0xb but this version of numpy is 0xa
+RuntimeError: module compiled against API version 0xb but this version of numpy is 0xa
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/tmp/tmp.Iwv3luN526/lib/python3.4/site-packages/tensorflow/__init__.py", line 24, in <module>
+    from tensorflow.python import *
+  File "/tmp/tmp.Iwv3luN526/lib/python3.4/site-packages/tensorflow/python/__init__.py", line 49, in <module>
+    from tensorflow.python import pywrap_tensorflow
+  File "/tmp/tmp.Iwv3luN526/lib/python3.4/site-packages/tensorflow/python/pywrap_tensorflow.py", line 41, in <module>
+    from tensorflow.python.pywrap_tensorflow_internal import *
+  File "/tmp/tmp.Iwv3luN526/lib/python3.4/site-packages/tensorflow/python/pywrap_tensorflow_internal.py", line 28, in <module>
+    _pywrap_tensorflow_internal = swig_import_helper()
+  File "/tmp/tmp.Iwv3luN526/lib/python3.4/site-packages/tensorflow/python/pywrap_tensorflow_internal.py", line 24, in swig_import_helper
+    _mod = imp.load_module('_pywrap_tensorflow_internal', fp, pathname, description)
+  File "/tmp/tmp.Iwv3luN526/lib/python3.4/imp.py", line 243, in load_module
+    return load_dynamic(name, filename, file)
+SystemError: initialization of _pywrap_tensorflow_internal raised unreported exception

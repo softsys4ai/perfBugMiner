@@ -1,0 +1,76 @@
+FIFOQueue speed problem
+
+Hi I am testing the speed of FIFOQueue. I create a queue of Tensor with type of tf.float32 and shape of (576, 3, 220, 220). Then I push a tensor to the queue, followed by pop the tensor from the queue.
+The speed of single node version( sess = tf.Session())  and distributed version of tensorflow (even in single machine single process scenario, sess = tf.Session(server.target) ) differs much.
+Pushing and poping take about 0.2s in single node version while 4s in  distributed version.
+I know that using distributed version of tensorflow will encounter some proto serialize overhead, but the overhead seems too much.
+The main code is like this (I also give a link to full source code below, which can be used to reproduce the problem)
+    raw_shape = [576, 3, 220, 220]
+    shape = tf.TensorShape(raw_shape)
+    if FLAGS.cluster:    
+        server = tf.train.Server.create_local_server()
+        sess = tf.Session(server.target)
+    else:
+        sess = tf.Session()
+    with tf.device('/cpu:0'): 
+        q = tf.FIFOQueue(10, tf.float32, shape)
+        rand_data = tf.zeros(shape)
+        init_op = tf.initialize_local_variables()
+        sess.run(init_op)
+        result = q.dequeue()
+        x = tf.placeholder(tf.float32, shape, 'data')
+        enqueue_op = q.enqueue(x)
+        while True:
+            log('pushing')
+            sess.run(enqueue_op, feed_dict = {x: np.zeros(raw_shape)})
+            log('push done')
+            sess.run(result)
+            log('pop done')
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+#3009
+But this issue is more related to threading, not same as mine case.
+Environment info
+Operating System:
+Ubuntu 14.04
+CPU E5-2643 v3 @ 3.40GHz
+Installed version of CUDA and cuDNN:
+None (I used CUDA_VISIBLE_DEVICES='')
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+d6b2598
+The output of bazel version
+Build label: 0.4.0
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Nov 2 17:54:14 2016 (1478109254)
+Build timestamp: 1478109254
+Build timestamp as int: 1478109254
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+https://gist.github.com/gowithqi/6bcb1dc50facfd992639f09e9af463a8
+Log
+CUDA_VISIBLE_DEVICES='' python test_queue_release.py --cluster=true
+2016-11-28 16:18:13.767 pushing
+2016-11-28 16:18:13.998 push done
+2016-11-28 16:18:14.112 pop done
+2016-11-28 16:18:14.112 pushing
+2016-11-28 16:18:14.337 push done
+2016-11-28 16:18:14.501 pop done
+2016-11-28 16:18:14.502 pushing
+2016-11-28 16:18:14.746 push done
+2016-11-28 16:18:14.916 pop done
+2016-11-28 16:18:14.916 pushing
+2016-11-28 16:18:15.155 push done
+2016-11-28 16:18:15.269 pop done
+
+CUDA_VISIBLE_DEVICES='' python test_queue_release.py --cluster=true
+2016-11-28 16:17:00.218 pushing
+2016-11-28 16:17:03.470 push done
+2016-11-28 16:17:07.395 pop done
+2016-11-28 16:17:07.395 pushing
+2016-11-28 16:17:10.908 push done
+2016-11-28 16:17:14.732 pop done
+2016-11-28 16:17:14.733 pushing
+2016-11-28 16:17:17.878 push done
+2016-11-28 16:17:21.788 pop done

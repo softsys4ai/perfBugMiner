@@ -1,0 +1,24 @@
+XLA implementation of FFT on CPU pulls in tf/core:framework
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macos 10.11
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): commit 63c6562 (master as of April 15 2018)
+Python version:  n/a
+Bazel version (if compiling from source): n/a
+GCC/Compiler version (if compiling from source): n/a
+CUDA/cuDNN version: n/a
+GPU model and memory: n/a
+Exact command to reproduce: bazel build --config=opt //tensorflow/compiler/xla/service/cpu:runtime_fft. It works, but see below.
+
+Describe the problem
+Short version: The CPU implementation of the XLA FFT operation appears to pull in tensorflow::Tensor and ...::TensorShape as a dependency, via //tensorflow/core:framework.
+Long version: The FFT implementation comes in three flavors; real-to-complex, complex-to-real, and complex-to-complex. The first two flavors involve allocating a temporary buffer for an intermediate step in the computation. This is currently achieved by creating a tensorflow::Tensor object. This requires linking against //tensorflow/core:framework.
+This feels like a bug, or at least unintentional and undesirable. For instance, every other op listed in tensorflow/compiler/xla/service/cpu/BUILD, besides runtime_fft, depends only on :framework_lite. My understanding re: allocating temporary space was that (at least for the AOT compiler, not sure about JIT) there were specific temporary buffers set aside, and that allocation should work through that system; not by just letting malloc run wild. Is that understanding correct? (Aside: Eigen's FFT op internally calls malloc, regardless of FFT flavor, which likewise bypasses the AOT temporary buffers. Is that ok?)
+Is anyone currently working on this? (Has anyone noticed anything awry?) If I were to try fixing this myself, would anyone have any suggestions on how to allocate a temporary buffer in an XLA-friendly way? I thought one possibility would be writing an Algebraic Simplifier pass to rewrite real-to-complex and complex-to-real flavors in terms of the complex-to-complex flavor (which doesn't need to create a tf::Tensor), but that's my only idea.
+Source code / logs
+References:
+tensorflow/compiler/xla/service/cpu/BUILD
+tensorflow/compiler/xla/service/cpu/runtime_fft_impl.h

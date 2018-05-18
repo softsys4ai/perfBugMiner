@@ -1,0 +1,27 @@
+Performance degradation with large lookup tables - optimizer._apply_sparse_duplicate_indices  (TF V1.0.1)
+
+Hi,
+I ran into this performance issue while trying to upgrade tensorflow from version 0.12.1  to 1.X.
+We ran a network with large embedding lookup tables:
+
+100K X 32 (for example, word embedding -  with 100K unique words)
+300K X 128 (for example, categorical feature with cardinality of 300K unique items)
+
+After upgrading TF version to 1.0.1,  GPU usage dropped in from 60% to 30%.
+Training time went up in 50%-200% (depends on how big is the embedding lookup table).
+This is the commit that caused the performance degradation:
+f9f56f9
+The handling of unique indexes is very slow and does not run in parallel with others operations.
+Please note the big unique blocks in the middle.
+
+Here is a work around (not handling unique indexes ):
+class MyOptimizer(tf.train.AdamOptimizer):
+        def __init__(self, learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8,
+               use_locking=False, name="Adam"):
+                super(MyOptimizer,self).__init__(learning_rate,beta1, beta2, epsilon, use_locking,name)
+
+        def _apply_sparse_duplicate_indices(self, grad, var):
+                return self._apply_sparse(grad, var)
+
+Thanks,
+Erez

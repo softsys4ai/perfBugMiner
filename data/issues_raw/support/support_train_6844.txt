@@ -1,0 +1,234 @@
+changing number of outputs/classes
+
+my StackOverflow thread: http://stackoverflow.com/questions/41645571/changing-number-of-outputs-classes-in-tensorflow
+Environment info
+Operating System: OSX
+
+python3 installed with miniconda3, TF installation link: https://storage.googleapis.com/tensorflow/mac/cpu/tensorflow-0.11.0rc1-py3-none-any.whl
+Version 0.11.0rc1
+
+Minimal example:
+import tensorflow as tf
+import numpy as np
+
+tf.reset_default_graph()
+
+x = tf.placeholder(tf.float32, (None, 2))
+y = tf.placeholder(tf.int32, (None,))
+
+w = tf.Variable(tf.truncated_normal(shape=(2, 2)))
+b = tf.Variable(tf.zeros(shape=(1, 2)))
+
+n_more = tf.placeholder(tf.int32, ())
+
+w_more = tf.truncated_normal((2, n_more))
+new_w = tf.concat(concat_dim=1, values=[w, w_more])
+change_w_op = tf.assign(w, new_w, validate_shape=False)
+
+b_more = tf.zeros(shape=(1, n_more))
+new_b = tf.concat(concat_dim=1, values=[b, b_more])
+change_b_op = tf.assign(b, new_b, validate_shape=False)
+
+
+p = tf.matmul(x, w) + b
+p1 = tf.matmul(x, w)
+
+loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(p, y))
+loss1 = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(p1, y))
+opt = tf.train.GradientDescentOptimizer(0.1)
+grads_and_vars = opt.compute_gradients(loss, var_list=[w, b])
+train_op = opt.apply_gradients(grads_and_vars)
+
+grads_and_vars1 = opt.compute_gradients(loss1, var_list=[w])
+train_op1 = opt.apply_gradients(grads_and_vars1)
+
+init = tf.initialize_all_variables()
+
+sess = tf.Session()
+sess.run(init)
+
+# add two more classes
+res = sess.run([change_w_op, change_b_op], feed_dict={n_more: 2})
+sess.run([w, b])
+#>[array([[-0.49880403,  0.1797405 , -0.66030115, -0.2065938 ],
+#>        [-1.19939673,  1.05717182,  0.03949607,  1.66543031]], dtype=float32),
+#> array([[-0.02882343,  0.02882343,  0.        ,  0.        ]], dtype=float32)]
+# Works as expected
+res = sess.run([p, p1], 
+             feed_dict={
+                 x:np.random.randn(3, 2), 
+                 y:np.random.randint(0, 4, 3)
+             })
+# both elements in the res are (3, 4) arrays  -- Works as expected
+
+res = sess.run([loss, loss1], 
+             feed_dict={
+                 x:np.random.randn(3, 2), 
+                 y:np.random.randint(0, 4, 3)
+             })
+# res = [2.4644723, 2.4450662]  --  Works as expected
+
+res = sess.run(grads_and_vars1, 
+             feed_dict={
+                 x:np.random.randn(3, 2), 
+                 y:np.random.randint(0, 2, 3)
+             })
+# res is a list of two (2, 4) arrays -- Works as expected
+
+res = sess.run(grads_and_vars, 
+             feed_dict={
+                 x:np.random.randn(3, 2), 
+                 y:np.random.randint(0, 2, 3)
+             })
+
+
+The last one produces the error below.
+My main questions are:
+What am I doing wrong here?
+Why changing w does not cause problems but changing b does?
+Is this a bug?
+---------------------------------------------------------------------------
+InvalidArgumentError                      Traceback (most recent call last)
+/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+    971     try:
+--> 972       return fn(*args)
+    973     except errors.OpError as e:
+
+/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/client/session.py in _run_fn(session, feed_dict, fetch_list, target_list, options, run_metadata)
+    953                                  feed_dict, fetch_list, target_list,
+--> 954                                  status, run_metadata)
+    955 
+
+/Users/merekhinsky/.conda/envs/e1/lib/python3.5/contextlib.py in __exit__(self, type, value, traceback)
+     65             try:
+---> 66                 next(self.gen)
+     67             except StopIteration:
+
+/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/framework/errors.py in raise_exception_on_not_ok_status()
+    462           compat.as_text(pywrap_tensorflow.TF_Message(status)),
+--> 463           pywrap_tensorflow.TF_GetCode(status))
+    464   finally:
+
+InvalidArgumentError: Incompatible shapes: [3,4] vs. [1,2]
+	 [[Node: gradients/add_grad/BroadcastGradientArgs = BroadcastGradientArgs[T=DT_INT32, _device="/job:localhost/replica:0/task:0/cpu:0"](gradients/add_grad/Shape, gradients/add_grad/Shape_1)]]
+
+During handling of the above exception, another exception occurred:
+
+InvalidArgumentError                      Traceback (most recent call last)
+<ipython-input-206-b8a2a3bd8471> in <module>()
+      2              feed_dict={
+      3                  x:np.random.randn(3, 2),
+----> 4                  y:np.random.randint(0, 2, 3)
+      5              })
+      6 res
+
+/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+    715     try:
+    716       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 717                          run_metadata_ptr)
+    718       if run_metadata:
+    719         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    913     if final_fetches or final_targets:
+    914       results = self._do_run(handle, final_targets, final_fetches,
+--> 915                              feed_dict_string, options, run_metadata)
+    916     else:
+    917       results = []
+
+/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+    963     if handle is None:
+    964       return self._do_call(_run_fn, self._session, feed_dict, fetch_list,
+--> 965                            target_list, options, run_metadata)
+    966     else:
+    967       return self._do_call(_prun_fn, self._session, handle, feed_dict,
+
+/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+    983         except KeyError:
+    984           pass
+--> 985       raise type(e)(node_def, op, message)
+    986 
+    987   def _extend_graph(self):
+
+InvalidArgumentError: Incompatible shapes: [3,4] vs. [1,2]
+	 [[Node: gradients/add_grad/BroadcastGradientArgs = BroadcastGradientArgs[T=DT_INT32, _device="/job:localhost/replica:0/task:0/cpu:0"](gradients/add_grad/Shape, gradients/add_grad/Shape_1)]]
+
+Caused by op 'gradients/add_grad/BroadcastGradientArgs', defined at:
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/runpy.py", line 184, in _run_module_as_main
+    "__main__", mod_spec)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/runpy.py", line 85, in _run_code
+    exec(code, run_globals)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/ipykernel/__main__.py", line 3, in <module>
+    app.launch_new_instance()
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/traitlets/config/application.py", line 658, in launch_instance
+    app.start()
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/ipykernel/kernelapp.py", line 474, in start
+    ioloop.IOLoop.instance().start()
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/zmq/eventloop/ioloop.py", line 177, in start
+    super(ZMQIOLoop, self).start()
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tornado/ioloop.py", line 887, in start
+    handler_func(fd_obj, events)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tornado/stack_context.py", line 275, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/zmq/eventloop/zmqstream.py", line 440, in _handle_events
+    self._handle_recv()
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/zmq/eventloop/zmqstream.py", line 472, in _handle_recv
+    self._run_callback(callback, msg)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/zmq/eventloop/zmqstream.py", line 414, in _run_callback
+    callback(*args, **kwargs)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tornado/stack_context.py", line 275, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/ipykernel/kernelbase.py", line 276, in dispatcher
+    return self.dispatch_shell(stream, msg)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/ipykernel/kernelbase.py", line 228, in dispatch_shell
+    handler(stream, idents, msg)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/ipykernel/kernelbase.py", line 390, in execute_request
+    user_expressions, allow_stdin)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/ipykernel/ipkernel.py", line 196, in do_execute
+    res = shell.run_cell(code, store_history=store_history, silent=silent)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/ipykernel/zmqshell.py", line 501, in run_cell
+    return super(ZMQInteractiveShell, self).run_cell(*args, **kwargs)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/IPython/core/interactiveshell.py", line 2717, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/IPython/core/interactiveshell.py", line 2821, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/IPython/core/interactiveshell.py", line 2881, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-196-ab717a15c74f>", line 31, in <module>
+    grads_and_vars = opt.compute_gradients(loss, var_list=[w, b])
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/training/optimizer.py", line 253, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/ops/gradients.py", line 469, in gradients
+    in_grads = _AsList(grad_fn(op, *out_grads))
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/ops/math_grad.py", line 555, in _AddGrad
+    rx, ry = gen_array_ops._broadcast_gradient_args(sx, sy)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/ops/gen_array_ops.py", line 388, in _broadcast_gradient_args
+    name=name)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 749, in apply_op
+    op_def=op_def)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2380, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1298, in __init__
+    self._traceback = _extract_stack()
+
+...which was originally created as op 'add', defined at:
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/runpy.py", line 184, in _run_module_as_main
+    "__main__", mod_spec)
+[elided 18 identical lines from previous traceback]
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/IPython/core/interactiveshell.py", line 2881, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-196-ab717a15c74f>", line 25, in <module>
+    p = tf.matmul(x, w) + b
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/ops/math_ops.py", line 751, in binary_op_wrapper
+    return func(x, y, name=name)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/ops/gen_math_ops.py", line 71, in add
+    result = _op_def_lib.apply_op("Add", x=x, y=y, name=name)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 749, in apply_op
+    op_def=op_def)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2380, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/Users/merekhinsky/.conda/envs/e1/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1298, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Incompatible shapes: [3,4] vs. [1,2]
+	 [[Node: gradients/add_grad/BroadcastGradientArgs = BroadcastGradientArgs[T=DT_INT32, _device="/job:localhost/replica:0/task:0/cpu:0"](gradients/add_grad/Shape, gradients/add_grad/Shape_1)]]

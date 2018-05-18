@@ -1,0 +1,52 @@
+Feature suggestion: Loss Normalization
+
+I would like to suggest the following feature be added to TensorFlow. As far as I know, the feature does not exist in TensorFlow. There are some issues that must be discussed and solved before making the pull-request.
+Motivation
+When optimizing multiple objectives in TensorFlow, the combined loss-function is typically a weighted sum of the individual loss-functions. Finding the weights for the loss-functions is done experimentally as the weights may depend on a number of factors.
+For example, in Style Transfer we want to combine two images so the result has the 'style' of one input image and the 'content' of another image. We do this by creating two loss-functions that we will optimize together. The problem is that when we choose different layers in the neural network for the loss-functions, then their magnitudes may change dramatically, so the weights for the loss-functions will also need to be modified.
+The solution I came up with in my recent tutorial on Style Transfer, is to automatically normalize each loss-function so we can define the weights independently of any given choice of layers:
+https://github.com/Hvass-Labs/TensorFlow-Tutorials/blob/master/15_Style_Transfer.ipynb
+The solution I propose below is a bit more elegant than in the tutorial, and I think it can be made even better.
+Overall Idea
+The idea is to evaluate each loss-function to its scalar-value and then divide the loss-function with this scalar-value. This creates a new node in the TensorFlow graph which holds the original loss-function divided by some scalar-value. The new node in the graph is still a mathematical function that can be differentiated, and for the given input it evaluates to the value 1. We do this normalization for each of the loss-functions so they all evaluate to 1. Then we can define loss-weights more easily and independently of e.g. the exact choice of layers in the Style Transfer algorithm.
+Code
+In terms of pseudo-code, what we want to do is simply:
+def loss_normalize(loss):
+    return loss / value_of(loss)
+
+But if we merely return loss/loss then it does not calculate the value of loss for the denominator, instead we get a mathematical function divided by itself. I also tried tf.identity(loss) but that did not work either. Neither does type-casting.
+So we need a small hack. We create a scalar float-variable and assign the loss-value to it. When the variable is used in an assignment like this, then it is not necessary to initialize it first. This works:
+def loss_normalize(loss):
+    loss_value = tf.Variable(1.0)
+    
+    loss_normalized = loss / loss_value.assign(loss)
+
+    return loss_normalized
+
+Usage
+Imagine that we have defined two loss functions, e.g.:
+style_loss = ...
+content_loss = ...
+
+Normally we would have some strange weights that might need to be changed if we choose different layers in the network for the loss-functions. These weights do not indicate how we are actually weighting the loss-functions for the style and content, for example:
+combined_loss = 1e-10 * style_loss + 1e-3 * content_loss
+
+If instead we normalize the loss-functions first, then we can define the weights more intuitively. For example, we might want 90% of the combined-loss to be for the style and only 10% for the content. We would do it like this:
+combined_loss = 0.9 * loss_normalize(style_loss) + \
+                0.1 * loss_normalize(content_loss)
+
+Even if you change the layers used in the two loss-functions, we do not need to change our weights. This may be useful in many other applications than just Style Transfer.
+Issues
+Before I make a pull-request there are several issues that must be discussed and solved.
+
+
+The hack using a variable to get the loss-value is not very elegant. I wonder if it would be possible to add something like value_of(loss) to TensorFlow? I guess it would be a bit similar to loss.eval() except that we don't want to run the session.
+
+
+Division by zero should be handled somehow. If the loss-function is inherently non-negative then we can add a small number such as 1e-10 to the denominator. But this would not be bomb-proof for loss-functions that can take on negative values. Is there a good standard solution for this in TensorFlow?
+
+
+It might be a better design to make loss_normalize() take a list of loss-functions so we don't have to wrap all of the loss-functions individually. What do you think? Is there an elegant way of implementing this in TensorFlow, or do I have to resort to Python's list comprehension?
+
+
+It might be useful to have a placeholder bool that decides whether or not to update the normalization. This would allow us to normalize the loss-functions only in the first iteration, or we could normalize every n'th iteration. The reason this might be useful, is that the optimizer might get trapped in a local optimum if we normalize the loss-functions in every iteration. I experimented a bit with tf.placeholder_with_default() and tf.cond() but it gave me some strange errors about tensor-shapes. Any ideas on how to make an elegant implementation for this?

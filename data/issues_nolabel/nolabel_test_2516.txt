@@ -1,0 +1,72 @@
+tf.test.compute_gradient returns unexpected analytical Jacobian for complex polynomial
+
+Environment info
+Operating System: Ubuntu 14.04.4 LTS
+Titan X GPU
+Python 2.7.11
+Installed version of CUDA and cuDNN: Cuda 7.5, cuDNN 5.0.5
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+(tensorflow)sarroff@eltopo:~$ ls -l /usr/local/cuda/lib64/libcud*
+-rw-r--r-- 1 root root   322936 Aug 15  2015 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root       19 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root   383336 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root   720192 Aug 15  2015 /usr/local/cuda/lib64/libcudart_static.a
+-rwxr-xr-x 1 root root 59909104 May 22 13:27 /usr/local/cuda/lib64/libcudnn.so
+-rwxr-xr-x 1 root root 59909104 May 22 13:27 /usr/local/cuda/lib64/libcudnn.so.5
+-rwxr-xr-x 1 root root 59909104 May 22 13:27 /usr/local/cuda/lib64/libcudnn.so.5.0.5
+-rw-r--r-- 1 root root 58775484 May 22 13:27 /usr/local/cuda/lib64/libcudnn_static.a
+
+
+Which pip package you installed.
+N/A (Installed from source)
+The output from python -c "import tensorflow; print(tensorflow.version)".
+
+(tensorflow)sarroff@eltopo:~$ python -c "import tensorflow; print(tensorflow.__version__)"
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so locally
+0.8.0
+
+If installed from sources, provide the commit hash:
+4b7bc31
+Steps to reproduce
+I have a complex variable z = x+iy and complex polynomial function f(z) = z^2. I am computing df/dz. tf.gradients returns the expected value but the returned analytical value of tf.test.compute_gradient does not:
+(In Python shell, logging messages snipped.)
+>>> import numpy as np
+>>> z = np.asarray(np.random.randn() + 1j*np.random.randn(), dtype=np.complex64)
+>>> # Value of z
+... print z
+(-1.15801084042+0.433556616306j)
+>>> z_tf = tf.constant(z)
+>>> f = z_tf**2
+>>> with tf.Session() as sess:
+...     analytical, numerical = tf.test.compute_gradient(z_tf, (), f, (), x_init_value=z)
+...     df_dz = sess.run(tf.gradients(f, z_tf))
+... 
+>>> # Expected derivative
+... 2*z
+(-2.3160216808319092+0.86711323261260986j)
+>>> 
+>>> # Automatically computed derivative:
+... print df_dz
+[(-2.3160217+0.86711359j)]
+>>> 
+>>> # analytical derivative from compute_gradient
+... print analytical
+[[-2.31602168 -0.86711359]
+ [ 0.86711359 -2.31602168]]
+>>> 
+>>> # numerical derivative from compute_gradient
+... print numerical
+[[-2.31617689  0.86712837]
+ [-0.86700916 -2.31587887]]
+According to the TensorFlow API documentation, compute_gradient returns the analytical and numerical Jacobians
+J[:m, :n] = d(Re y)/d(Re x)
+J[:m, n:] = d(Im y)/d(Re x)
+J[m:, :n] = d(Re y)/d(Im x)
+J[m:, n:] = d(Im y)/d(Im x)
+
+It appears that the analytical Jacobian is incorrect, and more specifically, that J[:m, n:] = d(Im y)/d(Re x) and J[m:, :n] = d(Re y)/d(Im x) may be swapped.

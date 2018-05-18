@@ -1,0 +1,117 @@
+fix: Error on we feed float16 values into BeamSearchDecoder
+
+I tried to feed float16 values into BeamSearchDecoder. Then Type Error occurred.
+The cause is that:
+
+_mask_probs in beam_search_decoder calls array_ops.one_hot() and the on_value arg is 0..
+one_hot in array_ops infers the dtype of on_value from the value 0.
+dtype of on_value becomes tf.float32
+then raises TypeError: dtype <dtype: 'float32'> of on_value does not match dtype parameter <dtype: 'float16'>
+
+The main cause is that array_ops.one_hot gets value 0. but the dtype is unknown, so I convert the value 0. into tensor that has right dtype before it is fed to one_hot.
+Code that raises error
+import tensorflow as tf
+from tensorflow.python.layers import core as layers_core
+
+FL_TYPE = tf.float16  # error does not occur if FL_TYPE is tf.float32
+hidden_dim = 16
+vocab_size = 100
+beam_width = 2
+
+with tf.Graph().as_default():
+    cell = tf.nn.rnn_cell.GRUCell(hidden_dim)
+    embeddings = tf.Variable(tf.random_uniform(shape=[vocab_size, hidden_dim], dtype=FL_TYPE))
+    output_layer = layers_core.Dense(vocab_size, use_bias=False)
+
+    decoder = tf.contrib.seq2seq.BeamSearchDecoder(
+        cell=cell,
+        embedding=embeddings,
+        start_tokens=tf.ones([1], dtype=tf.int32),
+        end_token=99,
+        initial_state=tf.random_uniform(shape=[beam_width, hidden_dim], dtype=FL_TYPE),
+        beam_width=beam_width,
+        output_layer=output_layer,
+    )
+    decoder_outputs, _, _ = tf.contrib.seq2seq.dynamic_decode(
+        decoder=decoder,
+        maximum_iterations=20,
+         scope='generator_decode'
+    )
+
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        sess.run(decoder_outputs)
+output is bellow
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+<ipython-input-14-321fa872acec> in <module>()
+     24         decoder=decoder,
+     25         maximum_iterations=20,
+---> 26          scope='generator_decode'
+     27     )
+     28 
+
+~/.pyenv/versions/3.5.2/lib/python3.5/site-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py in dynamic_decode(decoder, output_time_major, impute_finished, maximum_iterations, parallel_iterations, swap_memory, scope)
+    307         ],
+    308         parallel_iterations=parallel_iterations,
+--> 309         swap_memory=swap_memory)
+    310 
+    311     final_outputs_ta = res[1]
+
+~/.pyenv/versions/3.5.2/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py in while_loop(cond, body, loop_vars, shape_invariants, parallel_iterations, back_prop, swap_memory, name, maximum_iterations)
+   2932         swap_memory=swap_memory)
+   2933     ops.add_to_collection(ops.GraphKeys.WHILE_CONTEXT, loop_context)
+-> 2934     result = loop_context.BuildLoop(cond, body, loop_vars, shape_invariants)
+   2935     if maximum_iterations is not None:
+   2936       return result[1]
+
+~/.pyenv/versions/3.5.2/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py in BuildLoop(self, pred, body, loop_vars, shape_invariants)
+   2718       self.Enter()
+   2719       original_body_result, exit_vars = self._BuildLoop(
+-> 2720           pred, body, original_loop_vars, loop_vars, shape_invariants)
+   2721     finally:
+   2722       self.Exit()
+
+~/.pyenv/versions/3.5.2/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py in _BuildLoop(self, pred, body, original_loop_vars, loop_vars, shape_invariants)
+   2660         flat_sequence=vars_for_body_with_tensor_arrays)
+   2661     pre_summaries = ops.get_collection(ops.GraphKeys._SUMMARY_COLLECTION)  # pylint: disable=protected-access
+-> 2662     body_result = body(*packed_vars_for_body)
+   2663     post_summaries = ops.get_collection(ops.GraphKeys._SUMMARY_COLLECTION)  # pylint: disable=protected-access
+   2664     if not nest.is_sequence(body_result):
+
+~/.pyenv/versions/3.5.2/lib/python3.5/site-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py in body(time, outputs_ta, state, inputs, finished, sequence_lengths)
+    252       """
+    253       (next_outputs, decoder_state, next_inputs,
+--> 254        decoder_finished) = decoder.step(time, inputs, state)
+    255       if decoder.tracks_own_finished:
+    256         next_finished = decoder_finished
+
+~/.pyenv/versions/3.5.2/lib/python3.5/site-packages/tensorflow/contrib/seq2seq/python/ops/beam_search_decoder.py in step(self, time, inputs, state, name)
+    497           beam_width=beam_width,
+    498           end_token=end_token,
+--> 499           length_penalty_weight=length_penalty_weight)
+    500 
+    501       finished = beam_search_state.finished
+
+~/.pyenv/versions/3.5.2/lib/python3.5/site-packages/tensorflow/contrib/seq2seq/python/ops/beam_search_decoder.py in _beam_search_step(time, logits, next_cell_state, beam_state, batch_size, beam_width, end_token, length_penalty_weight)
+    539   # Final Shape: [batch_size, beam_width, vocab_size]
+    540   step_log_probs = nn_ops.log_softmax(logits)
+--> 541   step_log_probs = _mask_probs(step_log_probs, end_token, previously_finished)
+    542   total_probs = array_ops.expand_dims(beam_state.log_probs, 2) + step_log_probs
+    543 
+
+~/.pyenv/versions/3.5.2/lib/python3.5/site-packages/tensorflow/contrib/seq2seq/python/ops/beam_search_decoder.py in _mask_probs(probs, eos_token, finished)
+    723       dtype=probs.dtype,
+    724       on_value=0.,
+--> 725       off_value=probs.dtype.min)
+    726   finished_probs = array_ops.tile(
+    727       array_ops.reshape(finished_row, [1, 1, -1]),
+
+~/.pyenv/versions/3.5.2/lib/python3.5/site-packages/tensorflow/python/ops/array_ops.py in one_hot(indices, depth, on_value, off_value, axis, dtype, name)
+   2337         if on_exists and on_dtype != dtype:
+   2338           raise TypeError("dtype {0} of on_value does not match "
+-> 2339                           "dtype parameter {1}".format(on_dtype, dtype))
+   2340         if off_exists and off_dtype != dtype:
+   2341           raise TypeError("dtype {0} of off_value does not match "
+
+TypeError: dtype <dtype: 'float32'> of on_value does not match dtype parameter <dtype: 'float16'>

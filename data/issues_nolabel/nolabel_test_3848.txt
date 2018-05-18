@@ -1,0 +1,86 @@
+Using epochs in tf.train.slice_input_producer gives uninitialized value when combined with batching
+
+Environment info
+MacOS X 10.11.4 no CUDA
+Tensorflow 0.10.0rc0, installed precompiled pip
+Problem
+I have my test data saved as XXX_input.png and XXX_cb.png (for label) and tried to use the
+python code below to create the batched input tensors:
+def _load_png_file(path, name):
+    file_content = tf.read_file(path)
+    png = tf.image.decode_png(file_content, channels=3)
+    png = tf.slice(png, [0, 0, 0], [ 128, 128, 3])
+    return tf.image.convert_image_dtype(png, dtype=tf.float32, name=name)
+
+def load_data(path):
+    if not tf.gfile.Exists(path):
+        raise ValueError("Datadir {} don't exists!".format(path))
+    photo_files = []                                                                
+    cb_files = []
+    for file_name in os.listdir(path):                                                  
+        if file_name.endswith("_input.png"):
+            file_path = os.path.join(path, file_name)                                        
+            photo_files.append(file_path)
+            cb_files.append(file_path.replace("_input.png", "_cb.png"))
+
+    photos = tf.convert_to_tensor(photo_files, dtype=tf.string)
+    cbs = tf.convert_to_tensor(cb_files, dtype=tf.string)
+    input_queue = tf.train.slice_input_producer([photos, cbs],          
+            num_epochs=FLAGS.num_epochs, # <-- delete this line to make it work
+            shuffle=True)
+
+    photo = _load_png_file(input_queue[0], "photo")
+    cb = _load_png_file(input_queue[1], "cb")
+    capacity = FLAGS.min_after_dequeue + 3 * FLAGS.batch_size                       
+    photo_batch, cb_batch = tf.train.batch([photo, cb],
+            capacity=capacity,                                                             
+            batch_size=FLAGS.batch_size)
+    return photo_batch, cb_batch
+When I try to use it it will generate an error as below. When I remove the num_epochs argument to tf.train.slice_input_producer everything works as expected (net converge etc) so I don't there is something wrong with the rest of the code.
+E tensorflow/core/client/tensor_c_api.cc:485] Attempting to use uninit[221/1918]
+lue input_producer/input_producer/fraction_of_32_full/limit_epochs/epochs
+         [[Node: input_producer/input_producer/fraction_of_32_full/limit_epochs/
+CountUpTo = CountUpTo[T=DT_INT64, _class=["loc:@input_producer/input_producer/fraction_of_32_full/limit_epochs/epochs"], limit=2, _device="/job:localhost/replic
+a:0/task:0/cpu:0"](input_producer/input_producer/fraction_of_32_full/limit_epochs/epochs)]]
+ERROR:tensorflow:Exception in QueueRunner: Attempting to use uninitialized value
+ input_producer/input_producer/fraction_of_32_full/limit_epochs/epochs
+         [[Node: input_producer/input_producer/fraction_of_32_full/limit_epochs/CountUpTo = CountUpTo[T=DT_INT64, _class=["loc:@input_producer/input_producer/fr
+action_of_32_full/limit_epochs/epochs"], limit=2, _device="/job:localhost/replic
+a:0/task:0/cpu:0"](input_producer/input_producer/fraction_of_32_full/limit_epoch
+s/epochs)]]
+Caused by op u'input_producer/input_producer/fraction_of_32_full/limit_epochs/Co
+untUpTo', defined at:
+  File "train.py", line 94, in <module>
+    tf.app.run()
+  File "/Users/kalle/Development/tensorflow_cbnet/.env/lib/python2.7/site-packag
+es/tensorflow/python/platform/app.py", line 30, in run
+    sys.exit(main(sys.argv))
+  File "train.py", line 91, in main
+    train()
+  File "train.py", line 30, in train
+    x, y = cbnet.load_data("/Users/kalle/Development/nn_data/train")
+  File "/Users/kalle/Development/tensorflow_cbnet/cbnet.py", line 42, in load_data
+    shuffle=True)
+  File "/Users/kalle/Development/tensorflow_cbnet/.env/lib/python2.7/site-packag
+es/tensorflow/python/training/input.py", line 266, in slice_input_producer
+    shared_name=shared_name)
+  File "/Users/kalle/Development/tensorflow_cbnet/.env/lib/python2.7/site-packages/tensorflow/python/training/input.py", line 223, in range_input_producer
+    shared_name, name, "fraction_of_%d_full" % capacity)
+  File "/Users/kalle/Development/tensorflow_cbnet/.env/lib/python2.7/site-packag
+es/tensorflow/python/training/input.py", line 133, in input_producer
+    input_tensor = limit_epochs(input_tensor, num_epochs)
+  File "/Users/kalle/Development/tensorflow_cbnet/.env/lib/python2.7/site-packages/tensorflow/python/training/input.py", line 84, in limit_epochs
+    counter = epochs.count_up_to(num_epochs)
+  File "/Users/kalle/Development/tensorflow_cbnet/.env/lib/python2.7/site-packag
+es/tensorflow/python/ops/variables.py", line 577, in count_up_to
+    return state_ops.count_up_to(self._variable, limit=limit)
+  File "/Users/kalle/Development/tensorflow_cbnet/.env/lib/python2.7/site-packages/tensorflow/python/ops/gen_state_ops.py", line 127, in count_up_to
+    result = _op_def_lib.apply_op("CountUpTo", ref=ref, limit=limit, name=name)
+  File "/Users/kalle/Development/tensorflow_cbnet/.env/lib/python2.7/site-packag
+es/tensorflow/python/framework/op_def_library.py", line 703, in apply_op
+    op_def=op_def)
+  File "/Users/kalle/Development/tensorflow_cbnet/.env/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2310, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/Users/kalle/Development/tensorflow_cbnet/.env/lib/python2.7/site-packag
+es/tensorflow/python/framework/ops.py", line 1232, in __init__
+    self._traceback = _extract_stack()

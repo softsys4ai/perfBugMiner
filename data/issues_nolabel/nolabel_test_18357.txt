@@ -1,0 +1,47 @@
+Bug: GPU resources not released appropriately when graph is reset & session is closed
+
+Have I written custom code: Forked network arch for FasterRCNN from https://github.com/endernewton/tf-faster-rcnn
+OS Platform and Distribution: Ubuntu 16.04.4, x86_64 GNU/Linux
+TensorFlow installed from:
+Bazel version: 0.5.2
+CUDA/cuDNN version: CUDA V8.0.61, release 8.0
+GPU model and memory: Nvidia Tesla K80, 12 GB memory
+Exact procedure to reproduce: Load graph and net in GPU memory, use tf.reset_default_graph() followed by sess.close(), GPU memory not freed as seen through nvidia-smi
+
+Possible duplicate but re-opening here since it doesn't appear to have been resolved & there's no way to re-open the previously filed ones:
+Versions Used/Tried:
+
+System: aws EC2 (ubuntu) (with p2.xlarge elastic GPU instance)
+GPU: NVIDIA Tesla K80
+Tensorflow versions: 1.3.0, 1.5.5 (tried on both)
+CUDA Version: 8.0, 9.0 (tried on both)
+
+Calling tf.reset_graph() and sess.close() doesn't free GPU as seen using nvidia-smi.
+It might be possible that nvidia-smi doesn't update but in that case, there wouldn't be resource errors on subsequent code trying to run on the GPU as seen here:
+
+What i tried after this was to use a subprocess within my script to kill the previous processes occupying resources on the GPU as seen here:
+
+Although this works, it seems like incredibly bad practice & I shouldn't be doing this.
+What I tried then was to use the numba host API for interacting with the GPU to shut down processes i.e. clear current_context and then clear deallocations from the GPU like this:
+from numba import cuda current_context = get_context(devnum=0) current_context.reset() cuda.current_context().deallocations.clear()
+When this didn't work out, as a last resort, i tried to use this:
+from numba import cuda cuda.gpus[0].numba.cuda.cudadrv.devices.reset()
+which works but results in a substantial memory leak everytime it runs which implies that after running my code a few times, the leak accumulated to a large enough value to again give me  resource errors.
+
+Context: I am trying to deploy a deep learning model using a flask API. Since this is a pipeline with multiple computation graphs, I cannot afford to keep all of those in memory so i need to do something like this:
+
+Upload data & store it
+Build Graph
+Run Inference on stored data
+Remove graph from memory
+Build new graph
+Run Inference on stored data again
+.
+.
+....and so on
+
+
+What I suspect might be going on under the hood:
+It's possible that tf.reset_graph() frees memory but doesn't remove the actual process holding onto that chunk of memory in the GPU in which case it makes sense for nvidia-smi to still show me the PID occupying memory in the GPU. But shouldn't tf.reset_graph() followed by sess.close() be freeing the GPU entirely?
+
+Any help on the issue will be appreciated.

@@ -1,0 +1,82 @@
+The net using while_loop with batch_normalization can't train
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):source
+TensorFlow version (use command below):
+v1.7.0-18-g92e6c3e 1.7.0
+Python version: 3.5
+Bazel version (if compiling from source):0.11.1
+GCC/Compiler version (if compiling from source):5.4
+CUDA/cuDNN version:9.0
+GPU model and memory:nvidia 1080 titian
+
+Describe the problem
+I need add a batch_normalization layer in while_loop body, but it breaks down when i training the net. Everything is OK if i remove x = tf.layers.batch_normalization(x, training=flag)
+Source code / logs
+This a simple example
+import tensorflow as tf
+from data_pre import get_data
+
+data, labels = get_data(
+    ['../UCR_TS_Archive_2015/ItalyPowerDemand/ItalyPowerDemand_TRAIN'], 24, 2,True, 0, 2)  #pylint: disable=line-too-long
+
+flag = True
+
+def cond(i, x):
+    return i < 1
+
+def body(i, x):
+    x = tf.layers.conv1d(x, 1, 7, padding='same')
+    x = tf.layers.batch_normalization(x, training=flag)
+    x = tf.nn.relu(x)
+    return i + 1, x
+
+_, y = tf.while_loop(cond, body, [0, data], back_prop=False)
+
+y = tf.layers.flatten(y)
+logits = tf.layers.dense(y, 2)
+
+loss = tf.losses.mean_squared_error(labels, logits)
+optimizer = tf.train.AdamOptimizer()
+update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+with tf.control_dependencies(update_ops):
+    train_op = optimizer.minimize(loss, tf.train.get_global_step())
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+    for _ in range(10):
+        sess.run(train_op)
+    coord.request_stop()
+    coord.join(threads)
+
+This is the error info
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1327, in _do_call
+    return fn(*args)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1312, in _run_fn
+    options, feed_dict, fetch_list, target_list, run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1420, in _call_tf_sessionrun
+    status, run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/errors_impl.py", line 516, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: The node 'gradients/mean_squared_error/div_grad/Neg' has inputs from different frames. The input 'while/batch_normalization/AssignMovingAvg_1' is in frame 'while/while_context'. The input 'one_hot' is in frame ''.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "./test.py", line 40, in <module>
+    sess.run(train_op)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 905, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1140, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1321, in _do_run
+    run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1340, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: The node 'gradients/mean_squared_error/div_grad/Neg' has inputs from different frames. The input 'while/batch_normalization/AssignMovingAvg_1' is in frame 'while/while_context'. The input 'one_hot' is in frame ''.

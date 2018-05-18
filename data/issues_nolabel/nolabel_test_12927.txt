@@ -1,0 +1,50 @@
+No op named GatherTree using BeamSearchDecoder
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): pip
+TensorFlow version (use command below): 1.2.1
+Python version: 3.5
+GPU model and memory: GeForce GTX 1080 (8 GB)
+
+Describe the problem
+I was implementing a seq2seq model, and inference went well using greedy algorithm(GreedyEmbeddingHelper). But when I tried to use BeamSearchDecoder to infer from a trained model, I encountered "No op named GatherTree in defined operations.". Strangely enough, I couldn't find the same error elsewhere.
+Error message
+Traceback (most recent call last):
+  File "infer.py", line 88, in <module>
+    out_file='result/result.out', checkpoint=checkpoint)
+  File "infer.py", line 48, in predict
+    loader = tf.train.import_meta_graph(checkpoint + '.meta')
+  File "/home/user0/anaconda3/lib/python3.5/site-packages/tensorflow/python/training/saver.py", line 1686, in import_meta_graph
+    **kwargs)
+  File "/home/user0/anaconda3/lib/python3.5/site-packages/tensorflow/python/framework/meta_graph.py", line 504, in import_scoped_meta_graph
+    producer_op_list=producer_op_list)
+  File "/home/user0/anaconda3/lib/python3.5/site-packages/tensorflow/python/framework/importer.py", line 283, in import_graph_def
+    raise ValueError('No op named %s in defined operations.' % node.op)
+ValueError: No op named GatherTree in defined operations.
+
+Source code to reproduce the problem
+# Inference module
+loaded_graph = tf.Graph()
+with tf.Session(graph=loaded_graph) as sess:
+	loader = tf.train.import_meta_graph(checkpoint + '.meta')
+	loader.restore(sess, checkpoint)
+
+	input_data = loaded_graph.get_tensor_by_name('inputs:0')
+	logits = loaded_graph.get_tensor_by_name('inferences:0')
+	src_seq_len = loaded_graph.get_tensor_by_name('source_sequence_length:0')
+	tgt_seq_len = loaded_graph.get_tensor_by_name('target_sequence_length:0')
+
+	for i in range(len(text)):
+		text_seq = src2seq_word(text[i], True)
+		answer = sess.run(logits, {input_data: [text_seq] * batch_size,
+			                                  tgt_seq_len: [len(text_seq)] * batch_size,
+			                                  src_seq_len: [len(text_seq)] * batch_size}
+			                         )[:, :, 0]
+
+Program failed at loader = tf.train.import_meta_graph(checkpoint + '.meta')
+# Related code
+training_logits = tf.identity(train_decoder_output.rnn_output, name='logits')
+inference_logits = tf.identity(infer_decoder_output.predicted_ids, name='inferences')

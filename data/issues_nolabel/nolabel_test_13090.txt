@@ -1,0 +1,118 @@
+Session creation silently failing on iOS when loading a SavedModel
+
+Issue:
+I am trying to integrate a TensorFlow solution into my iOS apps, but inference doesn't seem to work when I try to run simple graphs created in Python. In fact, the tensorflow_inception_graph from the examples is the only graph that seems to work with iOS inference. Every other inference attempt is met with the following error:
+
+Invalid argument: Session was not created with a graph before Run()!
+
+So what I'm finding is that on mobile if we try to run a canned neural network like the tensorflow_inception_graph, inference works perfectly but if we try to run any kind of custom model like 1 + 1 = 2, the graph won't run.
+To demonstrate this, I used Python to write and export to a SavedModel the simplest graph I can think of: it just adds 1 + 1:
+g = tf.Graph()
+with g.as_default():
+    output = tf.add(tf.constant(1), 1, name="output_tensor")
+
+builder = tf.saved_model.builder.SavedModelBuilder('/path/to/export')
+with tf.Session(graph=g) as sess:
+    builder.add_meta_graph_and_variables(sess, tags=[])
+
+builder.save()
+
+Now to test that inference is actually possible, I reload the saved_model.pb into Python:
+with tf.Session() as sess:
+    tf.saved_model.loader.load(sess, [], '/path/to/export')
+
+    print(sess.run('output_tensor:0')) // prints 2
+
+Following in the footsteps of the simple example located at https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/ios, I go to perform inference on iOS using the static C++ library built using the makefile and the instructions provided at the link.
+using namespace tensorflow;
+using namespace std;
+using namespace ::google::protobuf;
+using namespace ::google::protobuf::io;
+
+SessionOptions options;
+Session* session_pointer = nullptr;
+Status session_status = NewSession(options, &session_pointer);
+
+cout << session_status.ToString() << endl; // prints OK
+
+unique_ptr<Session> session(session_pointer);
+    
+GraphDef model_graph;
+NSString* model_path = FilePathForResourceName(@"saved_model", @"pb");
+PortableReadFileToProto([model_path UTF8String], &model_graph);
+    
+Status session_init = session->Create(model_graph);
+
+cout << session_init.ToString() << endl; // prints OK, proves the graph was indeed created before run
+
+vector<Tensor> outputs;
+Status session_run = session->Run({}, {"output_tensor:0"}, {}, &outputs);
+
+cout << session_run.ToString() << endl; // prints Invalid argument: Session was not created with a graph before Run()!
+
+Troubleshooting:
+I've tried rebuilding multiple times from 1.3.0 (latest, nightly), 1.2.1 and tried using the TensorFlow-experimental Pod. (I also tried using the TensorFlow-iOS pod, but it seems to be empty.)
+There are (unanswered) Stack Overflow questions that refer to this issue occurring on both platforms:
+
+
+Android: https://stackoverflow.com/questions/41252122/tensorflow-on-android-error-during-inference-invalid-argument-session-was-not
+
+
+iOS: https://stackoverflow.com/questions/46201109/inference-error-with-tensorflow-c-on-ios-invalid-argument-session-was-not-c
+
+
+On GitHub, there's been several issues related to this reported over the last year: #7088, #5553, #3480, #6806, and #3352. None of the resolutions (if any) for these issues provide a concrete answer of how to get around this problem.
+However, found in the comments of #3480 , @petewarden's post about using optimize_for_inference, quantize_graph, and convert_graphdef_memmapped_format on the model before running inference present a possible solution. So I ran those three commands and got the same error:
+
+google.protobuf.message.DecodeError: Truncated message.
+
+Since we can perform successful inference on the model in Python (as shown above), the possibility of the model being corrupt (as @petewarden suggested in #3002) is ruled out. Therefore, the above "Truncated Error" message may point to where the problem is on mobile: Unsuccessful parsing of general models stored in protobuf files.
+Closing thoughts on issue:
+The point is this: The error message "Invalid argument: Session was not created with a graph before Run()!" doesn't provide any information to me regarding what should be debugged in my implementation. Additionally, it appears to not even point to the source of the error as I have verified three things:
+
+All arguments passed to the session and graph are valid (Invalid Argument)
+Session was created with a graph before Run() and the Status was reported to be OK (Session was not created with a graph before Run()!)
+The error is likely triggered due to unsuccessful parsing on mobile devices of custom models serialized in protobuf files
+
+Library Versions:
+TensorFlow Python version: ('v1.3.0-rc2-20-g0787eee', '1.3.0')
+TensorFlow C++ version: 1.3.0, built using build_all_ios.sh. Also tried with version 1.2.1 and TensorFlow-experimental pod
+System information:
+== cat /etc/issue ===============================================
+Darwin mbmagenic12 16.5.0 Darwin Kernel Version 16.5.0: Fri Mar  3 16:52:33 PST 2017; root:xnu-3789.51.2~3/RELEASE_X86_64 x86_64
+Mac OS X 10.12.4
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+Apple LLVM version 8.1.0 (clang-802.0.42)
+Target: x86_64-apple-darwin16.5.0
+Thread model: posix
+InstalledDir: /Library/Developer/CommandLineTools/usr/bin
+
+== uname -a =====================================================
+Darwin mbmagenic12 16.5.0 Darwin Kernel Version 16.5.0: Fri Mar  3 16:52:33 PST 2017; root:xnu-3789.51.2~3/RELEASE_X86_64 x86_64
+
+== check pips ===================================================
+numpy (1.13.1)
+protobuf (3.1.0.post1)
+tensorflow (1.3.0)
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.3.0
+tf.GIT_VERSION = v1.3.0-rc2-20-g0787eee
+tf.COMPILER_VERSION = v1.3.0-rc2-20-g0787eee
+Sanity check: array([1], dtype=int32)
+
+== env ==========================================================
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+./tf.sh: line 105: nvidia-smi: command not found
+
+== cuda libs  ===================================================

@@ -1,0 +1,91 @@
+TensorFlow r0.9rc0 and r0.10rc0 cluster memory leak and core dump
+
+Environment info
+Operating System:
+$ uname -svm
+Linux #50-Ubuntu SMP Wed Jul 13 00:07:12 UTC 2016 x86_64
+$ lsb_release -a
+Distributor ID: Ubuntu
+Description:    Ubuntu 16.04.1 LTS
+Release:        16.04
+Codename:       xenial
+
+Installed version of CUDA and cuDNN:
+$ find /usr/lib -name libcud\*
+/usr/lib/i386-linux-gnu/libcuda.so.1
+/usr/lib/i386-linux-gnu/libcuda.so.361.42
+/usr/lib/i386-linux-gnu/libcuda.so
+/usr/lib/x86_64-linux-gnu/libcudnn_static.a
+/usr/lib/x86_64-linux-gnu/libcudnn_static_v5.a
+/usr/lib/x86_64-linux-gnu/libcuda.so.1
+/usr/lib/x86_64-linux-gnu/libcudart.so.7.5.18
+/usr/lib/x86_64-linux-gnu/libcudnn.so
+/usr/lib/x86_64-linux-gnu/libcuda.so.361.42
+/usr/lib/x86_64-linux-gnu/libcudnn.so.5.0.5
+/usr/lib/x86_64-linux-gnu/libcudart.so
+/usr/lib/x86_64-linux-gnu/libcudart.so.7.5
+/usr/lib/x86_64-linux-gnu/libcudadevrt.a
+/usr/lib/x86_64-linux-gnu/libcudnn.so.5
+/usr/lib/x86_64-linux-gnu/stubs/libcuda.so
+/usr/lib/x86_64-linux-gnu/libcuda.so
+/usr/lib/x86_64-linux-gnu/libcudart_static.a
+
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+Built from source:
+* No Google Cloud Platform support
+* GPU support
+* CUDA Compute Capability: 3.0, 3.5 and 5.2
+
+printf '\n\nY\n\n\n/usr\n\n\n3.0,3.5,5.2\n' | ./configure
+
+tensorflow-0.9.0rc0-py3-none-any.whl
+
+0.9.0rc0
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+The output of bazel version
+
+$ git rev-parse HEAD
+2f5ca43750dcd052843fd02a841bf041c3958670
+
+$ bazel version
+...............
+Build label: 0.2.2
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Apr 21 13:01:41 2016 (1461243701)
+Build timestamp: 1461243701
+Build timestamp as int: 1461243701
+
+Steps to reproduce
+
+I'll provide a gist with an example and update.
+
+What have you tried?
+
+Tried disabling summary and checkpoint restart.
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+On 16 worker processes the memory consumption on the (single) PS process grows with >1MB/s. The worker processes also grows in memory size but not as much. My workers are only executing a sequence of "sess.run(..)" commands in the loop so I don't think its even possible to add stuff to the graph. We'll try to prove me wrong in the gist if I can get a usable repro.
+Update (TensorFlow r0.10 and debugging)
+I just checked with the latest version of TensorFlow (r0.10) and it seems to leaks memory in the same way. Disclaimer: I used the TensorFlow package from TensorFlow.org but I have cuDNN 5 installed right now.
+The TensorFlow package I used (in a Python 3.5 conda environment called tf-r0.10):
+$ export TF_BINARY_URL=https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.10.0rc0-cp35-cp35m-linux_x86_64.whl
+$ pip install --upgrade $TF_BINARY_URL
+
+
+I tried adding a sess.graph.finalize() and I got no exceptions, thus I make the assumption that the code does not create any new nodes in each iteration.
+If I use the tmalloc from Ubuntu 16.04 (libtcmalloc-minimal4) the memory leak just got worse, but I did not get any output that I could try and examine why?
+
+pre_window: source activate tf-r0.10 && export CUDA_VISIBLE_DEVICES='' LD_PRELOAD=/usr/lib/libtcmalloc_minimal_debug.so.4 HEAPPROFILE=/tmp/heapprofile HEAPCHECK=1
+
+I can still reproduce the core dump with the for _ in range(100) change:
+terminate called after throwing an instance of 'std::system_error'
+  what():  Resource temporarily unavailable
+Aborted (core dumped)

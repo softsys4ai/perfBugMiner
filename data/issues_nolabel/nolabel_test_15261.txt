@@ -1,0 +1,108 @@
+ValueError: Variable Model/LSTMenc/rnn/basic_lstm_cell/weights does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below): ('v1.1.0-rc0-61-g1ec6ed5', '1.1.0')
+Python version: 2.7.12
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+If I put reuse=None while creating BasicLSTMCell in the following code, I get this error:
+Traceback (most recent call last):
+  File "pretrain.py", line 358, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "pretrain.py", line 251, in main
+    valid_model = build_model(word_vocab, train=False)
+  File "pretrain.py", line 200, in build_model
+    dropout=FLAGS.dropout))
+  File "/home/raghuram.vadapalli/styletransfer/NeuralSum/model.py", line 218, in lstm_doc_enc
+    initial_state=initial_rnn_state, dtype=tf.float32)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/rnn/python/ops/core_rnn.py", line 197, in static_rnn
+    (output, state) = call_cell()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/rnn/python/ops/core_rnn.py", line 184, in <lambda>
+    call_cell = lambda: cell(input_, state)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 235, in __call__
+    with _checked_scope(self, scope or "basic_lstm_cell", reuse=self._reuse):
+  File "/usr/lib/python2.7/contextlib.py", line 17, in __enter__
+    return self.gen.next()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 93, in _checked_scope
+    "the argument reuse=True." % (scope_name, type(cell).__name__))
+ValueError: Attempt to have a second RNNCell use the weights of a variable scope that already has weights: 'Model/LSTMenc/rnn/basic_lstm_cell'; and the cell was not constructed as BasicLSTMCell(..., reuse=True).  To share the weights of an RNNCell, simply reuse it in your second calculation, or create a new one with the argument reuse=True.
+
+If I put reuse=True, I get this error
+Traceback (most recent call last):
+  File "pretrain.py", line 358, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "pretrain.py", line 244, in main
+    train_model = build_model(word_vocab, train=True)
+  File "pretrain.py", line 146, in build_model
+    dropout=FLAGS.dropout))
+  File "/home/raghuram.vadapalli/styletransfer/NeuralSum/model.py", line 218, in lstm_doc_enc
+    initial_state=initial_rnn_state, dtype=tf.float32)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/rnn/python/ops/core_rnn.py", line 197, in static_rnn
+    (output, state) = call_cell()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/rnn/python/ops/core_rnn.py", line 184, in <lambda>
+    call_cell = lambda: cell(input_, state)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 713, in __call__
+    output, new_state = self._cell(inputs, state, scope)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 241, in __call__
+    concat = _linear([inputs, h], 4 * self._num_units, True)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 1044, in _linear
+    _WEIGHTS_VARIABLE_NAME, [total_arg_size, output_size], dtype=dtype)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.py", line 1049, in get_variable
+    use_resource=use_resource, custom_getter=custom_getter)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.py", line 948, in get_variable
+    use_resource=use_resource, custom_getter=custom_getter)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.py", line 356, in get_variable
+    validate_shape=validate_shape, use_resource=use_resource)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.py", line 341, in _true_getter
+    use_resource=use_resource)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.py", line 671, in _get_single_variable
+    "VarScope?" % name)
+ValueError: Variable Model/LSTMenc/rnn/basic_lstm_cell/weights does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+
+Source code / logs
+def lstm_doc_enc(input_cnn,
+                   batch_size=20,
+                   num_rnn_layers=2,
+                   rnn_size=650,
+                   max_doc_length=35,
+                   dropout=0.0):
+
+    # lstm document encoder
+    with tf.variable_scope('LSTMenc') as scope:
+        def create_rnn_cell():
+            cell = tf.contrib.rnn.BasicLSTMCell(rnn_size, state_is_tuple=True, forget_bias=0.0, reuse=True)
+            if dropout > 0.0:
+                cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=1.-dropout)
+            return cell
+
+        if num_rnn_layers > 1:
+            cell = tf.contrib.rnn.MultiRNNCell([create_rnn_cell() for _ in range(num_rnn_layers)], state_is_tuple=True)
+        else:
+            cell = create_rnn_cell()
+
+        initial_rnn_state = cell.zero_state(batch_size, dtype=tf.float32)
+
+        input_cnn = tf.reshape(input_cnn, [batch_size, max_doc_length, -1])
+        input_cnn2 = [tf.squeeze(x, [1]) for x in tf.split(input_cnn, max_doc_length, 1)]
+
+        outputs, final_rnn_state = tf.contrib.rnn.static_rnn(cell, input_cnn2,
+                                         initial_state=initial_rnn_state, dtype=tf.float32)
+
+    return adict(
+        initial_enc_state=initial_rnn_state,
+        final_enc_state=final_rnn_state,
+        enc_outputs=outputs
+    )

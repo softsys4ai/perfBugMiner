@@ -1,0 +1,27 @@
+BeamSearchDecoder incorrectly truncates results when used with dynamic_decode
+
+System information (irrelevant for this bug)
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04/Any
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.3.0-rc2-20-g0787eee 1.3.0
+Python version: Python 3.5.2 :: Continuum Analytics, Inc.
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: irrelevant
+GPU model and memory: irrelevant
+Exact command to reproduce: irrelevant
+
+Describe the problem
+tf.contrib.seq2seq.BeamSearchDecoder incorrectly truncates some of the results because the same index was previously used for a beam member that ended at a earlier step.
+The root of the problem is that the while_loop body in dynamic_decode assumes that sequences are independent and will finish only once. In the same time BeamSearchDecoder creates a tree-like structure where a beam index can be reused in a later step for a state that originates from a different parent index.  This causes the decoding loop to sometimes record the wrong sequence length for a beam member. Then this wrong sequence length is passed to BeamSearchDecoder.finalize which returns a truncated sequence.
+Source code / logs
+I use the following code to workaround the problem. This causes the right sequence to be returned but still the length returned by dynamic_decode is wrong.
+class FixedBeamSearchDecoder(seq2seq.BeamSearchDecoder):
+    def finalize(self, outputs, final_state, sequence_lengths):
+        # BeamSearchDecoder does not follow the correct semantics of the the finished flag
+        # which results in taking wrong length here and getting wrong decoded string.
+        # We substitute the sequence length recorded by dynamic_decoder (which is wrong because
+        # of the wrong finished flag returned by BeamSearchDecoder.step) with the length
+        # recorded in BeamSearchState which is correct.
+        return super().finalize(outputs, final_state, final_state.lengths)

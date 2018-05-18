@@ -1,0 +1,43 @@
+model.saver.save() freeze and get killed
+
+Below is my flow for training an encoder-decoder model.
+The training runs alright. But the program froze and eventually got killed during the call to Saver.export_meta_graph().
+However, I was able to get the saved checkpoint and continue training.
+Does anyone know what may be the cause for this problem?
+    for t in xrange(FLAGS.num_epochs):
+        print("Epoch %d" % t)
+
+        start_time = time.time()
+
+        # shuffling training examples
+        # random.shuffle(train_set)
+
+        # progress bar
+        for _ in tqdm(xrange(FLAGS.steps_per_checkpoint)):
+            time.sleep(0.01)
+            random_number_01 = np.random.random_sample()
+            bucket_id = min([i for i in xrange(len(train_buckets_scale))
+                             if train_buckets_scale[i] > random_number_01])
+            formatted_example = model.get_batch(train_set, bucket_id)
+            _, step_loss, _ = model.step(sess, formatted_example, bucket_id, 
+                                         forward_only=False)
+            loss += step_loss
+            current_step += 1
+
+        epoch_time = time.time() - start_time
+
+        # Once in a while, we save checkpoint, print statistics, and run evals.
+        if t % FLAGS.epochs_per_checkpoint == 0:
+
+            # Print statistics for the previous epoch.
+            loss /= FLAGS.steps_per_checkpoint
+            ppx = math.exp(loss) if loss < 300 else float('inf')
+            print("learning rate %.4f epoch-time %.2f perplexity %.2f" % (
+                model.learning_rate.eval(), epoch_time, ppx))
+
+            # Decrease learning rate if no improvement of loss was seen over last 3 times.
+            if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
+                sess.run(model.learning_rate_decay_op)
+            previous_losses.append(loss)
+
+            checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")

@@ -1,0 +1,75 @@
+[suggestion] New option for dynamic_decode function
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug, a feature request, or a significant problem with documentation (for small docs fixes please send a PR instead).
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4
+Python version: 2.7
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 8
+GPU model and memory: 1080ti, 11GB
+Exact command to reproduce:
+
+Describe the problem
+I found that while using dynamic_decode with option maximum_iterations, The first priority of output length is the maximum length of given decoder input when maximum length of decoder input < maximum_iteration. Can you provide a new option that I can just fix the size of decoder output size, not considering the maximum length of given decoder input.
+example code
+import tensorflow as tf
+
+
+batch_size = 4
+hidden_size = 5
+
+# [batch, sequence_length, depth]
+
+memory = tf.get_variable('memory', [4, 10, 5], dtype = tf.float32)
+len_enc = tf.Variable([5,6,7,8])
+
+# [batch, sequence_length, depth]
+embd_dec_input = tf.get_variable('dec_input', [4, 8, 5], dtype = tf.float32)
+len_dec = tf.Variable([3,4,5,6])
+
+
+# Create an attention mechanism
+attention_mechanism = tf.contrib.seq2seq.LuongAttention(
+        hidden_size, memory,
+        memory_sequence_length=len_enc)
+
+# Build decoder cell
+decoder_cell = tf.nn.rnn_cell.GRUCell(hidden_size)
+
+decoder_cell = tf.contrib.seq2seq.AttentionWrapper(
+        decoder_cell, attention_mechanism,
+        attention_layer_size=hidden_size)
+
+# Helper for decoder cell
+helper = tf.contrib.seq2seq.TrainingHelper(
+    embd_dec_input, len_dec
+)
+
+# Decoder initial state
+initial_state = decoder_cell.zero_state(dtype = tf.float32, batch_size = batch_size)
+
+# Decoder
+decoder = tf.contrib.seq2seq.BasicDecoder(
+    decoder_cell, helper, initial_state,
+    output_layer=None)
+
+# Simply fix the decoder output length as the length of decoder input
+max_iter = 8
+
+outputs, _, _ = tf.contrib.seq2seq.dynamic_decode(decoder, impute_finished = True, maximum_iterations = max_iter)
+
+Even my maximum length of decoder input length is 6, I want the decoder to output with maximum length 8

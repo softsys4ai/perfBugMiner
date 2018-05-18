@@ -1,0 +1,67 @@
+Is there a way to cache intermediate Tensor result?
+
+I attempt to implement naive RBM/DBN through tensorflow's python API.
+The functionality is easy to implement if you don't care about computational performance.
+For now, I've tried many alternatives solutions and find it difficult to implement with high performance since there's no way to cache the intermediate tensor result.
+While lacking of the ability to cache the intermediate result, there will be too much memory migrate from GPU to RAM or vice versa (say I'm using GPU) if I want to do something through intermediate result.
+Here's part of my code to illustrate my meaning.
+    import tensorflow as tf
+    alpha = .01
+    mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
+    trX, trY, teX, teY = mnist.train.images, mnist.train.labels,\
+        mnist.test.images, mnist.test.labels
+    W = tf.Variable(tf.random_normal([784, 100]), name="weights")
+    hb = tf.Variable(tf.zeros([100]), name="hbias")
+    vb = tf.Variable(tf.zeros([784]), name="vbias")
+    v0 = tf.placeholder("float", [None, 784])
+
+    h0 = tf.nn.sigmoid(tf.matmul(v0, W) + hb)
+    h0 = sample_prob(h0)
+    v1 = tf.nn.sigmoid(tf.matmul(h0, tf.transpose(W)) + vb)
+    v1 = sample_prob(v1)
+    h1 = tf.nn.sigmoid(tf.matmul(v1, W) + hb)
+
+    pg = tf.matmul(tf.transpose(v0), h0)
+    ng = tf.matmul(tf.transpose(v1), h1)
+
+    dW = (pg - ng) / tf.to_float(tf.shape(v0)[0])
+    dhb = tf.reduce_mean(h0 - h1, 0)
+    dvb = tf.reduce_mean(v0 - v1, 0)
+
+    update_W_op = W.assign_add(alpha * dW)
+    update_hb_op = hb.assign_add(alpha * dhb)
+    update_vb_op = vb.assign_add(alpha * dvb)
+
+    with tf.Session() as sess:
+        sess.run(tf.initialize_all_variables())
+        for _ in range(10):
+            for start, end in zip(
+                    range(0, 50000, 100), range(100, 50000, 100)):
+                X = trX[start:end]
+                # sess.run([dW, dhb, dvb, h1], feed_dict={v0: X})
+                # sess.run(h1, feed_dict={v0: X})
+                # sess.run(dW)
+                # sess.run(dhb)
+                # sess.run(dvb)
+                # _W = sess.run(update_W_op)
+                # _hb = sess.run(update_hb_op)
+                # _vb = sess.run(update_vb_op)
+                [_W, _hb, _vb] = sess.run([update_W_op, update_hb_op, update_vb_op], feed_dict={v0: X})
+This is the most efficient way I could think out. But, there's no way to optimize the progress by calculating [_W, _hb, _vb] with the aid of intermediate result pg, ng, h0, h1, v0, v1. It's obvious that here comes so much duplicated  but useless extra computation.
+If feed v0 with X once, the follower Tensor need the former Tensor.
+h0 needs v0, so needs X
+v1 needs  h0, so needs X
+h1 needs v1, so needs X
+......
+update_W_op needs dW, so needs X
+update_hb_op needs  dhb, so needs X
+update_vb_op needs dvb, so needs X
+Since there's no way to cache the intermediate result, you can only get one Tensor result for one computation. There's no way to avoid the duplication computation and X memory migration cost.
+I was wondering if there's a property of Tensor say cached = False, we could set it to True manually. And when intermediate cached result is enough to go on, we need not to feed data in, and just using intermediate cache to compute. If you want to flush the cache, just feed in the new data into the placeholder. But for now, if the graph contains placeholder in the path, the data must be feed in specifically.
+For example, if the cache is enabled.
+h0.cached = True
+h1.cached = True
+v0.cached = True
+v1.cached = True
+sess.run(h1, feed_dict={v0: X})
+sess.run([update_W_op, update_hb_op, update_vb_op])  # using cache h0,h1,v0,v1 is enough to compute the three update without X fed in.

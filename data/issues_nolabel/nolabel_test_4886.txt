@@ -1,0 +1,26 @@
+Gradient of tf.reduce_max and tf.nn.max_pool don't agree with each other, and theano
+
+a = tf.placeholder(dtype=tf.float32, name='a', shape=[4])
+b = tf.reduce_max(a)
+b2 = tf.nn.max_pool(tf.reshape(a, [1, 2, 2, 1]),
+        [1,2,2,1], [1,1,1,1], 'VALID')[0,0,0,0]
+c = tf.gradients([b], [a])[0]
+c2 = tf.gradients([b2], [a])[0]
+
+with tf.Session() as sess:
+    v = np.asarray([1, 2, 2, 2], dtype='float32')
+    print sess.run(c, feed_dict={a:v})  # 0, 0.3, 0.3, 0.3
+    print sess.run(c2, feed_dict={a:v})  # 0, 1, 0, 0
+
+import theano.tensor as T
+import theano.tensor.signal.downsample as D
+a = T.fvector('a')
+b = T.max(a)
+b2 = T.reshape(a, [1,2,2])
+b2 = D.max_pool_2d(b2, [2,2])[0,0,0]
+c = T.grad(b, a)
+c2 = T.grad(b2, a)
+print c.eval({a: v})    # 0, 1, 1, 1
+print c2.eval({a: v})    # 0, 1, 1, 1
+Bug or feature? 😦 Although as subgradient they all seem to make sense, but is there a reason to justify the difference of reduce_max and max_pool?
+I saw the comment for reduce_max and it seems like the first one is feature.

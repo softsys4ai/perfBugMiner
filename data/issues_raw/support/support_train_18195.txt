@@ -1,0 +1,73 @@
+Saving frozen model to tflite error
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes, I write own model define, loss and training codes.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 14.04
+TensorFlow installed from (source or binary): binary, pip install
+TensorFlow version (use command below): 1.4.0
+Python version:  2.7
+Bazel version (if compiling from source): 0.10.0
+GCC/Compiler version (if compiling from source): 4.9.4
+CUDA/cuDNN version: 8.0
+GPU model and memory: GeForce GTX 1060
+Exact command to reproduce:
+
+Describe the problem
+I have train some customized model with tensorflow and trying to make it a tensorflow lite model for mobile apps. I success in freezing the model and viewing it in tensorboard. I get error when I trying to save it to a tensorflow lite file.
+my model defins like:
+`def P_Net(inputs,label=None,bbox_target=None,landmark_target=None,training=True):
+    #define common param
+    with slim.arg_scope([slim.conv2d],
+                        activation_fn=prelu,
+                        weights_initializer=slim.xavier_initializer(),
+                        biases_initializer=tf.zeros_initializer(),
+                        weights_regularizer=slim.l2_regularizer(0.0005), 
+                        padding='valid'):
+        print inputs.get_shape()
+        net = slim.conv2d(inputs, 28, 3, stride=1,scope='conv1')
+......
+        conv4_1 = slim.conv2d(net,num_outputs=2,kernel_size=[1,1],stride=1,scope='conv4_1',activation_fn=tf.nn.softmax)
+        #conv4_1 = slim.conv2d(net,num_outputs=1,kernel_size=[1,1],stride=1,scope='conv4_1',activation_fn=tf.nn.sigmoid)
+
+        print conv4_1.get_shape()
+        #batch*H*W*4
+        bbox_pred = slim.conv2d(net,num_outputs=4,kernel_size=[1,1],stride=1,scope='conv4_2',activation_fn=None)
+        print bbox_pred.get_shape()`
+
+where conv4_1 and conv4_2 is the output layer.
+I freeze the model with:
+freeze_graph.freeze_graph('out_put_model/model.pb', '', False, model_path, 'Squeeze,Squeeze_1', '', '', 'out_put_model/frozen_model.pb', '', '')
+I use tensorboard to view the graph and even try to read them back and forward. it produces same result as reading from checkpoint.
+
+
+Squeeze and Squeeze_1 is the output nodes. image_height, image_width, input_image is input nodes. all of the input nodes is not fixed shape, and resized in the graph.
+code of input placeholder like:
+with graph.as_default():
+            #define tensor and op in graph(-1,1)
+            self.image_op = tf.placeholder(tf.float32, name='input_image')
+            self.width_op = tf.placeholder(tf.int32, name='image_width')
+            self.height_op = tf.placeholder(tf.int32, name='image_height')
+            image_reshape = tf.reshape(self.image_op, [1, self.height_op, self.width_op, 3])
+            #self.cls_prob batch*2
+            #self.bbox_pred batch*4
+            #construct model here
+            #self.cls_prob, self.bbox_pred = net_factory(image_reshape, training=False)
+            #contains landmark
+            self.cls_prob, self.bbox_pred, _ = net_factory(image_reshape, training=False)
+
+I find the tensorflow 1.4.0 don't have tf lite module and checkout tensorflow master branch from github. and run bazel toco for a tflite model.
+bazel run --config=opt //tensorflow/contrib/lite/toco:toco -- --input_file='/home/sen/mtcnn_cat/MTCNN-Tensorflow/test/out_put_model/frozen_model.pb' --output_file='/home/sen/mtcnn_cat/MTCNN-Tensorflow/test/out_put_model/pnet.tflite' --inference_type=FLOAT --input_shape=None,None,None --input_array=image_height,image_width,input_image --output_array=Squeeze,Squeeze_1 --input_format=TENSORFLOW_GRAPHDEF --output_format=TFLITE --dump_graphviz=/tmp
+but I got this error:
+INFO: Analysed target //tensorflow/contrib/lite/toco:toco (0 packages loaded).
+INFO: Found 1 target...
+Target //tensorflow/contrib/lite/toco:toco up-to-date:
+  bazel-bin/tensorflow/contrib/lite/toco/toco
+INFO: Elapsed time: 0.288s, Critical Path: 0.00s
+INFO: Build completed successfully, 1 total action
+
+INFO: Running command line: bazel-bin/tensorflow/contrib/lite/toco/toco '--input_file=/home/sensetime/mtcnn_cat/MTCNN-Tensorflow/test/out_put_model/frozen_model.pb' '--output_file=/home/sensetime/mtcnn_cat/MTCNN-Tensorflow/test/out_put_model/pnet.tflite' '--inference_type=FLOAT' '--input_shape=None,None,None' '--input_array=image_height,image_width,input_image' '--output_array=Squeeze,Squeeze_1' '--input_format=TENSORFLOW_GRAPHDEF' '--output_format=TFLITE' '--dump_graphviz=/tmp'
+ERROR: Non-zero return code '1' from command: Process exited with status 1
+
+what's the problem? is the input_array, input_shape, output_array parameter right?
+Thanks and any suggestion is welcome.

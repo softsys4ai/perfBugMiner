@@ -1,0 +1,70 @@
+contrib STFT magnitudes different to librosa's
+
+System information
+
+Have I written custom code: Yes
+OS Platform and Distribution: Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version: 1.4
+Python version: 3.5.2
+Bazel version: N/A
+GCC/Compiler version: N/A
+CUDA/cuDNN version: 6.0
+GPU model and memory: nvidia quadro m2000m 4gb
+Exact command to reproduce: See below code
+
+Hi all!
+I was comparing the TensorFlow's contrib STFT against librosa's and noticed there are some discrepancies in terms of output between the two. Not sure if this normal between libraries implementations, but I wanted to raise it in case it matters!
+I'm also aware it could be some small bug or difference in implementation/argument that I have supplied.
+Code:
+import tensorflow as tf
+import numpy as np
+import librosa
+
+np.random.seed(666)
+np.set_printoptions(precision=5, suppress=True)
+
+audio_length_seconds = 2
+sample_rate = 44100
+audio_frames_length = int(sample_rate * audio_length_seconds)
+audio_shape = [None, audio_frames_length]
+fft_size = 1024
+hop_size = 512
+
+tf.reset_default_graph()
+
+audio = tf.placeholder(tf.float32, 
+                       shape=audio_shape)
+stfts = tf.contrib.signal.stft(audio, 
+                               frame_length=fft_size, 
+                               frame_step=hop_size,
+                               fft_length=fft_size,
+                               pad_end=True)
+real = tf.real(stfts)
+imag = tf.imag(stfts)
+magnitudes = tf.abs(stfts)
+phases = tf.atan2(imag, real)
+features = tf.concat([magnitudes, phases], axis=2)
+
+sess = tf.Session()
+with sess.as_default():
+    
+    data = np.random.random((1, audio_frames_length))
+    tf_results = magnitudes.eval({audio: data})
+    
+    lr_results = librosa.core.stft(y=data.reshape((-1)),
+                                   n_fft=fft_size,
+                                   hop_length=hop_size,
+                                   win_length=fft_size)
+                                   
+    lr_results = np.abs(lr_results)
+    
+    difference = np.abs(tf_results - lr_results.T)
+    print("Differences:\nmin:", np.min(difference), 
+          "max:", np.max(difference), 
+          "mean:", np.mean(difference), 
+          "std:", np.std(difference))
+
+And the expected output from the print would be:
+Differences:
+min: 6.97374e-05 max: 246.904 mean: 2.92715 std: 2.45132

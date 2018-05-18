@@ -1,0 +1,37 @@
+Centered padded batch on tf.data.dataset with image-features and bounding boxes
+
+Hello everyone,
+I have a feature request to the tf.data.dataset API which might also benefit many other users.
+The use case is this:
+Suppose you have a regular instance based segmentation dataset containing images features, image-targets (for segmentation), bounding boxes, and a class- and instance id to each bounding box. (Mapillary is a nice example for that, even though it natively does not contain bounding boxes, but they can be inferred, because it has pixel wise instances)
+If you use the tf.data.dataset API to create a dataset in one or another way (for instance use a generator and then create the dataset with tf.data.Dataset.from_generator), you can create a dataset including the feature_images, target_images and bounding boxes.
+Now you want to batch them together.
+The problem is, that the images may have different sizes and the number of bounding boxes per image may be different for each entry of the dataset. Therefore you can not batch them unless you make sure they have the same size. To keep the aspect ratio in the images one could consider padding the images according to the biggest size in the batch. Also the bounding boxes can be padded, according to the maximum number of bounding boxes in the batch. And there already is a function that does that: tf.data.dataset.padded_batch. Unfortunately the padding is always applied to the end of the dimension:
+A picture with
+[[1,1,1,1]
+ [1,1,1,1]
+ [1,1,1,1]
+ [1,1,1,1]]
+
+padded by 2 would look like:
+[[1,1,1,1,0,0]
+ [1,1,1,1,0,0]
+ [1,1,1,1,0,0]
+ [1,1,1,1,0,0]
+ [0,0,0,0,0,0]
+ [0,0,0,0,0,0]]
+
+This would likely lead to dead or irrelevant neurons within the receptive field at the right or bottom of the image. Therefore a centered padding would be nice:
+[[0,0,0,0,0,0]
+ [0,1,1,1,1,0]
+ [0,1,1,1,1,0]
+ [0,1,1,1,1,0]
+ [0,1,1,1,1,0]
+ [0,0,0,0,0,0]]
+
+Up until here there already exists an issue that covers the behaviour here . But now comes the tricky part: If we pad the image at the top or the left, we need an offset to the bounding boxes according to the padding because the edges of the bounding boxes are in image coordinates and shift when the image is padded.
+So here is my suggestion:
+One could extend the tf.data.dataset.padded_patch to perform centered padding on each dimension with an additional centered flag or so, similar as suggested in the issue above, but also returns the maximum dimension within each element of the batch. This information can then be used to adjust the bounding box location.
+Alternative:
+One could also consider an operator to return the maximum dimensions within the bath to use that information for padding. I could imagine, to have a self written padding function and use tf.data.map and the maximum batch dimensions information to incorporate the padding to the dataset per element using tf.pad or similar. The nice thing about this alternative approach is, that the users can build the padding as they want since tf.pad already can do central padding and other styles.
+I had a little dive into the functionality of padded_batch and it seems that the calculation of the maximum dimension is done in tensorflow/core/kernels/data/padded_batch_dataset_op.cc line 264 ff. This however is in the iterator class, which I presume is called when the data is actually passed through. So I'm not sure if or how to return the maximum batch dimensions from there to the point where I can use it to pad the images. If this is indeed not possible, I'd appreciate other suggestions because the way it is, the tf.data.dataset can not be used for this kind of data.

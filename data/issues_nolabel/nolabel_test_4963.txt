@@ -1,0 +1,79 @@
+protoc failed: error executing command
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+None
+Environment info
+Operating System:
+uname -a
+Linux n-62-18-47 2.6.32-573.22.1.el6.x86_64 #1 SMP Tue Mar 22 17:15:28 CDT 2016 x86_64 x86_64 x86_64 GNU/Linux
+
+Installed version of CUDA and cuDNN: CUDA: 8.0, cuDNN 5.0
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+ls -l /appl/cuda/8.0/lib64/libcud*
+-rw-r--r-- 1 sebo root 560184 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 sebo root     16 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 sebo root     19 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.27
+-rwxr-xr-x 1 sebo root 394472 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart.so.8.0.27
+-rw-r--r-- 1 sebo root 737516 Sep  1 14:31 /appl/cuda/8.0/lib64/libcudart_static.a
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD): 8d11983
+The output of bazel version
+
+bazel --batch version
+INFO: Reading 'startup' options from /zhome/ff/2/77654/.bazelrc: --batch --output_user_root=/work1/s123598/.bazel
+Build label: 0.3.2-2016-10-13 (@2891ec5)
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Oct 13 15:05:25 2016 (1476371125)
+Build timestamp: 1476371125
+Build timestamp as int: 1476371125
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+# install tensorflow
+git clone https://github.com/tensorflow/tensorflow
+cd tensorflow
+# set configuration parameters
+export PYTHON_BIN_PATH=`which python3`
+export TF_NEED_GCP=0
+export TF_NEED_HDFS=0
+export TF_NEED_CUDA=1
+export GCC_HOST_COMPILER_PATH=`which gcc`
+export TF_CUDA_VERSION=8.0
+export CUDA_TOOLKIT_PATH=/appl/cuda/8.0/
+export TF_CUDNN_VERSION=5
+export CUDNN_INSTALL_PATH=/appl/cudnn/v5.0-prod
+export TF_CUDA_COMPUTE_CAPABILITIES="3.5,5.2"
+
+cat > $HOME/.bazelrc <<EOF
+# --batch: always run in batch mode, since there are some firewall issues.
+# --output_user_root: HOME is NFS (filesystem), this will not work with bazel, use WORKDIR instead
+startup --batch --output_user_root=$WORKDIR/.bazel
+EOF
+
+# one python configuration can't be set directly use yes to accept automatically
+yes "" | CC=gcc CXX=g++ ./configure
+
+# build tensorflow
+CC=gcc CXX=g++ bazel build --copt="-w" --ignore_unsupported_sandboxing --spawn_strategy=standalone --verbose_failures \
+-c opt --config=cuda //tensorflow/tools/pip_package:build_pip_package
+
+What other attempted solutions have you tried?
+Just getting here took some time. I had to compile bazel, pcre, swig. Put bazel in batch model and get a workdirectory that wasn't NFS. But this I have no idea how to fix.
+Logs or other output that would be helpful
+full log: https://gist.github.com/AndreasMadsen/474389dc54efe948e9887eafb78679ef
+INFO: From ProtoCompile tensorflow/core/example/example.pb.h [for host]:
+bazel-out/host/genfiles/external/protobuf/src: warning: directory does not exist.
+ERROR: /zhome/ff/2/77654/tensorflow/tensorflow/core/debug/BUILD:33:1: null failed: protoc failed: error executing command
+  (cd /work1/s123598/.bazel/48591a606b240b3533e6a6889ad3b508/execroot/tensorflow && \
+  exec env - \
+  bazel-out/host/bin/external/protobuf/protoc '--cpp_out=bazel-out/local_linux-py3-opt/genfiles/' '--plugin=protoc-gen-grpc=bazel-out/host/bin/external/grpc/grpc_cpp_plugin' '--grpc_out=bazel-out/local_linux-py3-opt/genfiles/' -I. -Iexternal/protobuf/src -Ibazel-out/local_linux-py3-opt/genfiles/external/protobuf/src tensorflow/core/debug/debug_service.proto): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+bazel-out/local_linux-py3-opt/genfiles/external/protobuf/src: warning: directory does not exist.
+bazel-out/host/bin/external/grpc/grpc_cpp_plugin: program not found or is not executable
+--grpc_out: protoc-gen-grpc: Plugin failed with status code 1.
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+ERROR: /zhome/ff/2/77654/tensorflow/tensorflow/tools/pip_package/BUILD:23:1 null failed: protoc failed: error executing command
+  (cd /work1/s123598/.bazel/48591a606b240b3533e6a6889ad3b508/execroot/tensorflow && \
+  exec env - \
+  bazel-out/host/bin/external/protobuf/protoc '--cpp_out=bazel-out/local_linux-py3-opt/genfiles/' '--plugin=protoc-gen-grpc=bazel-out/host/bin/external/grpc/grpc_cpp_plugin' '--grpc_out=bazel-out/local_linux-py3-opt/genfiles/' -I. -Iexternal/protobuf/src -Ibazel-out/local_linux-py3-opt/genfiles/external/protobuf/src tensorflow/core/debug/debug_service.proto): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+INFO: Elapsed time: 189.979s, Critical Path: 68.86s

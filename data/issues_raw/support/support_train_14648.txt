@@ -1,0 +1,95 @@
+labels produced by Dataset  API can not be well operated!  when use tf.reduce_sum or tf.split on labels ,it returnss the wrong result
+
+my system :
+cuda 8.0
+tensorflow-gpu (1.3.0)
+tensorflow-tensorboard (0.1.7)
+python 2.7
+ubuntu 14.04
+description：*
+
+I use Dataset and Estimator to train my model.  When I test the
+return value  of Dataset , the return value(images and labels) of input_fn is right.
+But when I use tf.reduce_sum or tf.split to the labels, all results got wrong.
+I can't undenstand what had happend.
+
+*******key code
+def dataset_parser(value,is_training): # return signal  imagel and label
+def input_fn(is_training,num_epochs=1) # return batch imagel and label
+FLAGS.batch_size=5
+sess = tf.InteractiveSession()
+images,labels = input_fn(True,1)
+sess.run(labels)
+
+the labels of one batch
+
+array([[ 0.        ,  1.        ,  2.75984216,  5.86036015],
+[ 1.        ,  0.        ,  3.82080388,  4.23745823],
+[ 1.        ,  0.        ,  7.59959507,  4.93859673],
+[ 0.        ,  1.        ,  3.29546738,  5.50357151],
+[ 0.        ,  1.        ,  2.0612247 ,  6.73015881]], dtype=float32)
+
+
+label,weight,score = tf.split(value=labels,num_or_size_splits=[2,1,1],axis=1)
+i = 1
+print labels
+print sess.run(label[i])
+print sess.run(weight[i])
+print sess.run(score[i])
+
+we expected to get the split value of [1,0] [3.82080388,],[ 4.23745823] ,but the result is following
+
+Tensor("IteratorGetNext:1", shape=(?, 4), dtype=float32)
+[ 0.  1.]
+[ 2.85865355]
+[ 5.57142878]
+
+
+a = tf.reduce_sum(labels,0)
+print  sess.run(a)
+
+we expected to get the values of [  2. 　　 , 3.　　　,  19.53693319　　 , 27.27014543],but we get the following result.
+
+[  4.           1.          25.82047653  24.87050629]
+
+
+# """"""""""""""""""""""""""""""code detail """""""""""""""""""""""""""""""""""""""""""""""""""""
+def dataset_parser(value,is_training):
+    features = {}
+    features['image'] = tf.FixedLenFeature([], tf.string)
+    features['average_score'] = tf.FixedLenFeature((),tf.float32,default_value=0)
+    features['aes_tag'] = tf.FixedLenFeature((),tf.float32,default_value=0)
+ 
+    parsed = tf.parse_single_example(value, features=features)
+    image = tf.decode_raw(parsed['image'],tf.uint8)
+    image = tf.reshape(image,[256,256,3])
+
+    aes_tag = tf.one_hot(tf.cast(parsed['aes_tag'],tf.int32),FLAGS.num_classes)
+    if is_training:
+        weight = tf.where(tf.greater(score,5),FLAGS.beta,FLAGS.alpha)
+        label = tf.reshape(tf.concat([aes_tag,[weight],[score]],0),(4,))
+    
+    else:
+        weight = tf.ones(1,dtype=tf.float32)
+        label = tf.reshape(tf.concat([aes_tag,weight],0),(3,))
+
+    
+    return image,label
+
+
+def input_fn(is_training,num_epochs=1):
+    """Input function which provides batches for train or eval."""
+    dataset = tf.contrib.data.TFRecordDataset([FLAGS.train_data_path if is_training  else FLAGS.test_data_path])
+
+    if is_training:
+        dataset = dataset.repeat(num_epochs)
+
+    dataset = dataset.map(lambda value: dataset_parser(value, is_training),
+        num_threads=5,output_buffer_size=FLAGS.batch_size)
+
+    if is_training:
+        buffer_size = 1250 + 2 * FLAGS.batch_size
+        dataset = dataset.shuffle(buffer_size=buffer_size)
+    iterator = dataset.batch(FLAGS.batch_size).make_one_shot_iterator()
+    images, labels = iterator.get_next()
+    return images, labels

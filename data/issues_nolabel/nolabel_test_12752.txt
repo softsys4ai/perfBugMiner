@@ -1,0 +1,20 @@
+Avoid gcc7 memcpy build error by updating BoringSSL
+
+Tensorflow produces this build error with gcc7 due to ambiguous memcpy inlining in all versions of BoringSSL prior to google/boringssl@17cf2cb  on Dec 12, 2016:
+In file included from /usr/include/string.h:639:0,
+                 from external/boringssl/src/crypto/asn1/a_bitstr.c:59:
+In function 'memcpy',
+    inlined from 'i2c_ASN1_BIT_STRING' at external/boringssl/src/crypto/asn1/a_bitstr.c:118:5:
+/usr/include/bits/string3.h:53:10: error: '__builtin_memcpy': specified size between 18446744071562067968 and 18446744073709551615 exceeds maximum object size 9223372036854775807 [-Werror=stringop-overflow=]
+   return __builtin___memcpy_chk (__dest, __src, __len, __bos0 (__dest));
+          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: all warnings being treated as errors
+
+Updating BoringSSL snapshot from 7-11-16 to 7-7-17 fixes this.
+July 7 snapshot was picked because this is the stable build that Apollo uses:
+https://github.com/ApolloAuto/apollo/pull/185/files
+Reliance on older snapshots of BoringSSL with this same memcpy bug is also breaking GRPC and Tensorflow Serving on modern gcc toolchains in the same way:
+grpc/grpc#10843
+grpc/grpc#11765
+tensorflow/serving#475
+Note: This build error is ubiquitous since bazel's primary workspace.bzl downloads and builds BoringSSL regardless of whether it is required (i.e., even when Google Cloud Storage support is disabled and when SSL support is not enabled).

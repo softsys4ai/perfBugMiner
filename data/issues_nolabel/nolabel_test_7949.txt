@@ -1,0 +1,28 @@
+Can't do "weights" quantization on an LSTM RNN
+
+On TensorFlow 1.0, trying to do quantization on the following graph:
+cell = tf.contrib.rnn.BasicLSTMCell(num_units=64)
+
+outputs, _ = tf.nn.dynamic_rnn(
+    cell=cell,
+    dtype=tf.float32,
+    sequence_length=tf.constant([3, 2]),
+    inputs=tf.constant([[[1.,1.,1.]], [[1.,1.,0.]]]))
+
+outputs = tf.identity(outputs, name="y")
+Fails with:
+Traceback (most recent call last):
+  File "import.py", line 18, in <module>
+    result = sess.run(outputs)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1035, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: The node 'rnn/while/Select_1' has inputs from different frames. The input 'rnn/while/basic_lstm_cell/add_1' is in frame ''. The input 'rnn/while/GreaterEqual_1' is in frame 'rnn/while/rnn/while/'.
+
+Instructions to reproduce here: https://github.com/reuben/tf-export-test (just run reproduce.sh)
+It seems like the quantization code is unaware of control flow contexts, so it creates a broken graph when adding dequantize nodes. Interestingly, using a BasicRNNCell instead of a BasicLSTMCell works. Maybe because BasicRNNCell only does a single matmul + bias_add, and those have quantized kernel implementations and don't need dequantize nodes? It's not clear to me.

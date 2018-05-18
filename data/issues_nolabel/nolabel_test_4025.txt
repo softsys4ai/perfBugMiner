@@ -1,0 +1,141 @@
+TensorForest Fails in Modified wide_n_deep SKFlow Tutorial
+
+Environment info
+Operating System: Ubuntu
+Package: https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-0.10.0rc0-cp27-none-linux_x86_64.whl
+Version: 0.10.0rc0
+Edit: See update at bottom for stuff I found wrong
+I cannot get TensorForest to work using the input_fn parameter as input. It failed in my code, so I tried using it in the wide_n_deep tutorial which failed for the same reasons. Categorical inputs using Sparse tensors are rejected saying the wrong dtype is being used (they're all String). Without using categorical inputs, it gets further but fails saying that it cannot concat Tensors. I was able to run the tests for the TensorForest successfully with the Iris dataset (link here), but I would like to use the input_fn ability with a similar style to the tutorial if possible. I can provide the source but the only thing changed was using the tf.contrib.learn.TensorForestEstimator with the number of classes and features specified in tf.contrib.tensor_forest.tensor_forest.ForestHParams as the params input. Can someone look into this?
+Steps to reproduce
+
+Modify wide_n_deep tutorial to use a TensorForestEstimator
+
+What I've tried
+
+Running using input_fn as parameter to fit
+Running using input_fn without categorical inputs to fit
+
+Output that would be helpful
+Output including categorical sparse tensors
+Traceback (most recent call last):
+  File "wide_n_deep_tutorial.py", line 224, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+    sys.exit(main(sys.argv))
+  File "wide_n_deep_tutorial.py", line 220, in main
+    train_and_eval()
+  File "wide_n_deep_tutorial.py", line 213, in train_and_eval
+    m.fit(input_fn=lambda: input_fn(df_train), steps=FLAGS.train_steps)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 240, in fit
+    max_steps=max_steps)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 550, in _train_model
+    train_op, loss_op = self._get_train_ops(features, targets)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/random_forest.py", line 149, in _get_train_ops
+    features, spec = data_ops.ParseDataTensorOrDict(features)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/tensor_forest/data/data_ops.py", line 169, in ParseDataTensorOrDict
+    return _ParseSparse(data)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/tensor_forest/data/data_ops.py", line 101, in _ParseSparse
+    raise ValueError('Only sparse tensors of type string are supported.')
+ValueError: Only sparse tensors of type string are supported.
+
+Output without categorical sparse tensors
+Traceback (most recent call last):
+  File "wide_n_deep_tutorial.py", line 224, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+    sys.exit(main(sys.argv))
+  File "wide_n_deep_tutorial.py", line 220, in main
+    train_and_eval()
+  File "wide_n_deep_tutorial.py", line 213, in train_and_eval
+    m.fit(input_fn=lambda: input_fn(df_train), steps=FLAGS.train_steps)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 240, in fit
+    max_steps=max_steps)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 550, in _train_model
+    train_op, loss_op = self._get_train_ops(features, targets)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/random_forest.py", line 149, in _get_train_ops
+    features, spec = data_ops.ParseDataTensorOrDict(features)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/tensor_forest/data/data_ops.py", line 171, in ParseDataTensorOrDict
+    return _ParseDense(data)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/tensor_forest/data/data_ops.py", line 144, in _ParseDense
+    else data[k] for k in sorted(data.keys())
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_ops.py", line 759, in concat
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_array_ops.py", line 414, in _concat
+    values=values, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 703, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2312, in create_op
+    set_shapes_for_outputs(ret)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1704, in set_shapes_for_outputs
+    shapes = shape_func(op)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/array_ops.py", line 815, in _ConcatShape
+    (value_shape.ndims, concat_dim))
+ValueError: Expected concat_dim in range [0, 1), but got 1
+
+UPDATE
+I've fooled around with more stuff and been sifting through the source and have found the following.
+
+Tensor Forest doesn't support both categorical and continuous inputs (only Sparse OR Dense)? Why is that, and can we expect that being implemented soon?
+If solely sparse tensors are inputted, _ParseSparse fails because constants.DATA_ALL_CATEGORICAL is not defined (I believe it should be constants.DATA_CATEGORICAL)
+Upon changing that variable to constants.DATA_CATEGORICAL, everything seems ok until my terminal gets flooded with these warnings:
+
+W tensorflow/contrib/tensor_forest/core/ops/sample_inputs_op.cc:164] Could not find any values for input 1 inside sparse_input_indices
+W tensorflow/contrib/tensor_forest/core/ops/sample_inputs_op.cc:164] Could not find any values for input 2 inside sparse_input_indices
+W tensorflow/contrib/tensor_forest/core/ops/sample_inputs_op.cc:164] Could not find any values for input 1 inside sparse_input_indices
+W tensorflow/contrib/tensor_forest/core/ops/sample_inputs_op.cc:164] Could not find any values for input 2 inside sparse_input_indices
+
+Those warnings repeat over and over and eventually the model runs successfully.
+4. I tried messing with _Parse_Dense and changed the array_ops.concat to array_ops.pack with axis=1, which returns the expected 2-D tensor. concat doesn't work as it is unable to create the dimension, whereas pack can. This resolved the continuous input issue, but I received a negligible error
+Traceback (most recent call last):
+  File "wide_n_deep_tutorial.py", line 224, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+    sys.exit(main(sys.argv))
+  File "wide_n_deep_tutorial.py", line 220, in main
+    train_and_eval()
+  File "wide_n_deep_tutorial.py", line 213, in train_and_eval
+    m.fit(input_fn=lambda: input_fn(df_train), steps=FLAGS.train_steps)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 240, in fit
+    max_steps=max_steps)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 550, in _train_model
+    train_op, loss_op = self._get_train_ops(features, targets)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/random_forest.py", line 163, in _get_train_ops
+    **self.training_args),
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/tensor_forest/python/tensor_forest.py", line 378, in training_graph
+    **tree_kwargs))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/tensor_forest/python/tensor_forest.py", line 570, in training_graph
+    regression=self.params.regression))
+  File "<string>", line 219, in count_extremely_random_stats
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 463, in apply_op
+    (prefix, dtypes.as_dtype(input_arg.type).name))
+TypeError: Input 'input_data' of 'CountExtremelyRandomStats' Op has type int64 that does not match expected type of float32.
+
+I easily fixed above error by changing all continuous inputs to tf.float32 from tf.int64, so that might be a feature request of interest.
+5. After these modifications to source, I was able to use input_fn successfully with solely the continuous features of the census data set of the wide_n_deep tutorial (obtained ~82% on the testing set with 10 training steps). Not sure why but it took a while for that to run, didn't really look into it though.
+6. I tried including the categorical inputs via tf.string dtype constant tensors, but received another error saying input to StringToFloat was not 2-D.
+     tensorflow.python.framework.errors.InvalidArgumentError: input_data should be two-dimensional
+
+I was able to resolve it by changing convert_ops.string_to_float to tf.string_to_number, but I am still unable to input via Sparse Tensors.
+7. Another issue I found: not all metrics seem to work when passed in (I passed in streaming_precision, streaming_recall, streaming_accuracy, and confusion_matrix)
+    Traceback (most recent call last):  
+      File "read.py", line 336, in <module>
+        tf.app.run()
+      File "/usr/local/python2.7/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+        sys.exit(main(sys.argv))
+      File "read.py", line 315, in main
+        eval_steps=1
+      File "/usr/local/tensorflow/heartwood/cross_validation/evaluate.py", line 37, in evaluate
+        'cm': tf.contrib.metrics.confusion_matrix
+      File "/usr/local/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 356, in evaluate
+        name=name)
+      File "/usr/local/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 630, in _evaluate_model
+        eval_dict = self._get_eval_ops(features, targets, metrics)
+      File "/usr/local/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/random_forest.py", line 198, in _get_eval_ops
+        result[name] = metric(probabilities, labels)
+      File "/usr/local/python2.7/dist-packages/tensorflow/contrib/metrics/python/ops/confusion_matrix_ops.py", line 73, in confusion_matrix
+        predictions, name='predictions', dtype=dtypes.int64),
+      File "/usr/local/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 621, in convert_to_tensor
+        ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+      File "/usr/local/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 564, in _TensorTensorConversionFunction
+        % (dtype.name, t.dtype.name, str(t)))
+    ValueError: Tensor conversion requested dtype int64 for Tensor with dtype float32: 'Tensor("probabilities:0", shape=(?, 2), dtype=float32)'

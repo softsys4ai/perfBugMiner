@@ -1,0 +1,113 @@
+Linalg.LinearOperators do not give any performance improvement
+
+Describe the problem
+The performance gaurantees are not visible for the Linalg.LinearOperators (e.g., DiagOperator)   I have implemented a basic case below as per the documentation. Is there any reason why the performance of diag operator is same as full matrix ?
+Cuda and other versions not included as the issue is reproducible across GPU and CPU modes.
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+
+Yes, but using only preliminary Linalg operations.
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux xxxx-xxxop 4.10.0-28-generic #32~16.04.2-Ubuntu SMP Thu Jul 20 10:19:48 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="16.04.4 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+
+
+TensorFlow installed from (source or binary):
+Binary
+
+
+TensorFlow version (use command below):
+== tensorflow import ============================================
+tf.VERSION = 1.8.0
+tf.GIT_VERSION = v1.8.0-0-g93bc2e2072
+tf.COMPILER_VERSION = v1.8.0-0-g93bc2e2072
+Sanity check: array([1], dtype=int32)
+
+
+Python version:
+Python 3.6.0 |Continuum Analytics, Inc.| (default, Dec 23 2016, 12:22:00)
+
+
+Bazel version (if compiling from source):
+
+
+GCC/Compiler version (if compiling from source):
+
+
+CUDA/cuDNN version:
+
+
+GPU model and memory:
+
+
+Exact command to reproduce:
+Check the source code.
+
+
+Source code / logs
+import numpy as np
+import tensorflow as tf
+rng = np.random.RandomState(1)
+class Data:
+    num_data = 10
+    num_ind = 50
+    D_in = 100
+    D_out = 2
+
+    Xmu = rng.randn(num_data, D_in)
+    Xcov = rng.randn(num_data, D_in, D_in)
+    Xcov = Xcov @ np.transpose(Xcov, (0, 2, 1))
+    Z = rng.randn(num_ind, D_in)
+N = Data.num_data
+Xmu = tf.convert_to_tensor(Data.Xmu)
+Xcov = tf.convert_to_tensor(Data.Xcov)
+C = tf.cholesky(Xcov)
+
+Z_tiled = tf.tile(tf.expand_dims(tf.transpose(Data.Z), 0), [N, 1, 1])
+C_operator = tf.linalg.LinearOperatorLowerTriangular(C)
+C_diag_operator = tf.linalg.LinearOperatorDiag(tf.matrix_diag_part(C))
+def compute_matrix_solve(C, Z_tiled):
+#     return tf.matrix_triangular_solve(C, Z_tiled, lower=True)  # NxDxM
+    return tf.matrix_solve(C, Z_tiled)  # NxDxM
+
+def compute_matrix_matmul(C, Z_tiled):
+    mat = tf.matmul(C, Z_tiled)
+    return mat 
+
+def compute_operator_solve(C_operator, Z_tiled):
+    operator_value = C_operator.solve(Z_tiled)
+    return operator_value
+
+def compute_operator_matmul(C_operator, Z_tiled):
+    operator_value = C_operator.matmul(Z_tiled)
+    return operator_value
+with tf.Session() as sess:
+    mat_solve = sess.run(compute_matrix_solve(C, Z_tiled))
+    op_solve = sess.run(compute_operator_solve(C_operator, Z_tiled))
+    
+    tf_mat_mul = sess.run(compute_matrix_matmul(C, Z_tiled))
+    op_matmul = sess.run(compute_operator_matmul(C_operator, Z_tiled))
+
+np.testing.assert_allclose(mat_solve, op_solve)
+np.testing.assert_allclose(tf_mat_mul, op_matmul)
+with tf.Session() as sess:
+    %timeit sess.run(compute_matrix_solve(C, Z_tiled))
+    %timeit sess.run(compute_operator_solve(C_operator, Z_tiled))
+    %timeit sess.run(compute_operator_solve(C_diag_operator, Z_tiled))
+69.1 ms ± 1.33 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
+69.4 ms ± 515 µs per loop (mean ± std. dev. of 7 runs, 10 loops each)
+73.7 ms ± 1.55 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
+
+with tf.Session() as sess:
+    %timeit sess.run(compute_matrix_matmul(C, Z_tiled))
+    %timeit sess.run(compute_operator_matmul(C_operator, Z_tiled))
+    %timeit sess.run(compute_operator_matmul(C_diag_operator, Z_tiled))
+    
+58.5 ms ± 447 µs per loop (mean ± std. dev. of 7 runs, 10 loops each)
+60.8 ms ± 808 µs per loop (mean ± std. dev. of 7 runs, 10 loops each)
+63.8 ms ± 1.78 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)

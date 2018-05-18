@@ -1,0 +1,51 @@
+New implementation of `tf.clip_by_value` changes behavior of the op.
+
+FYI, @jart and @nfelt
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Debian GNU/Linux (upgraded from: Ubuntu 14.04.5 LTS)
+TensorFlow installed from (source or binary): binary (pip package)
+TensorFlow version (use command below): Nightly 1.8.0 build 254 (tf-nightly)
+Python version: Python 2.7.13
+Exact command to reproduce within TensorBoard's repository:
+bazel test //tensorboard/plugins/pr_curve:pr_curves_plugin_test
+
+Describe the problem
+Every night, TensorBoard's python tests on travis installs the latest nightly version of TensorFlow. One day, I find that TensorBoard's :pr_curves_plugin_test is failing for python 2.
+https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/pr_curve/pr_curves_plugin_test.py
+Interestingly, the test still passes for python 3.
+I confirmed that the test succeeds if I install tf-nightly build 253 and then bazel test the target within TensorBoard's repo.
+pip install -I https://ci.tensorflow.org/view/tf-nightly/job/tf-nightly-linux/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON2,label=cpu-slave/253/artifact/pip_test/whl/tf_nightly-1.8.0.dev20180409-cp27-cp27mu-linux_x86_64.whl
+
+The :pr_curves_plugin_test fails if I install tf-nightly build 254.
+pip install -I https://ci.tensorflow.org/view/tf-nightly/job/tf-nightly-linux/TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON2,label=cpu-slave/254/artifact/pip_test/whl/tf_nightly-1.8.0.dev20180410-cp27-cp27mu-linux_x86_64.whl
+
+Therefore, a TensorFlow change introduced to build 254 seems to be a likely cause. During setUp, the :pr_curves_plugin_test runs a demo script that seeds randomness and then generates test data from a tf.distributions.Normal distribution.
+Could any changes to TensorFlow's seeding or tf.distributions.Normal logic (introduced to build 254) cause this breakage? Regardless of how we fix :pr_curves_plugin_test (Either TensorBoard's test logic could change, or we could partially roll back a TensorFlow change.), I'm curious about the root cause of the difference in behavior. Thanks!
+Source code / logs
+Here are the logs for the failed test. They just describe how the floating point data derived from the PR curves plugin demo have changed.
+Testing //.../plugins/pr_curve:pr_curves_plugin_test; 40s linux-sandbox
+...F....
+======================================================================
+FAIL: testPrCurvesDataCorrect (__main__.PrCurvesPluginTest)
+Tests that responses for PR curves for run-tag combos are correct.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/travis/.bazel-output-base/bazel-sandbox/2643229171274820909/execroot/org_tensorflow_tensorboard/bazel-out/k8-fastbuild/bin/tensorboard/plugins/pr_curve/pr_curves_plugin_test.runfiles/org_tensorflow_tensorboard/tensorboard/plugins/pr_curve/pr_curves_plugin_test.py", line 217, in testPrCurvesDataCorrect
+    pr_curve_entry=entries[0])
+  File "/home/travis/.bazel-output-base/bazel-sandbox/2643229171274820909/execroot/org_tensorflow_tensorboard/bazel-out/k8-fastbuild/bin/tensorboard/plugins/pr_curve/pr_curves_plugin_test.runfiles/org_tensorflow_tensorboard/tensorboard/plugins/pr_curve/pr_curves_plugin_test.py", line 87, in validatePrCurveEntry
+    assert_allclose(expected_precision, pr_curve_entry['precision'])
+  File "/home/travis/virtualenv/python2.7.14/lib/python2.7/site-packages/numpy/testing/nose_tools/utils.py", line 1396, in assert_allclose
+    verbose=verbose, header=header, equal_nan=equal_nan)
+  File "/home/travis/virtualenv/python2.7.14/lib/python2.7/site-packages/numpy/testing/nose_tools/utils.py", line 779, in assert_array_compare
+    raise AssertionError(msg)
+AssertionError: 
+Not equal to tolerance rtol=0, atol=1e-07
+(mismatch 75.0%)
+ x: array([0.333333, 0.385321, 0.542169, 0.75    ])
+ y: array([0.333333, 0.391026, 0.630137, 0.666667])
+----------------------------------------------------------------------
+Ran 8 tests in 38.439s
+FAILED (failures=1)
+================================================================================

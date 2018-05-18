@@ -1,0 +1,35 @@
+tf.image.resize_images() expects statically known rank
+
+It looks like the op tf.image.resize_images() has no effect on the image shape when the parameters new_height and new_width are dynamically computed (this is possible since the fix of issue #1001).
+For example, this piece of code
+shape = tf.shape(image)
+height = shape[0]
+width = shape[1]
+new_shorter_edge = tf.constant(400, dtype=tf.int32)
+
+height_smaller_than_width = tf.less_equal(height, width)
+new_height_and_width = tf.cond(
+    height_smaller_than_width,
+    lambda: (new_shorter_edge, _compute_longer_edge(height, width, new_shorter_edge)),
+    lambda: (_compute_longer_edge(width, height, new_shorter_edge), new_shorter_edge)
+)
+
+image = tf.image.resize_images(image, new_height_and_width[0], new_height_and_width[1])
+image = tf.Print(image, [tf.shape(image), height, width, new_height_and_width[0], new_height_and_width[1]])
+return tf.image.random_crop(image, [224, 224])
+
+throws the following exception:
+I tensorflow/core/kernels/logging_ops.cc:79] [122 160 3][122][160][400][524]
+W tensorflow/core/common_runtime/executor.cc:1096] 0x7f9c08008490 Compute status: Failed precondition: width must be >= target_width: width = 160, target_width = 224
+
+So as you can see in the first line of the printout, the shape of the image is not affected by tf.image.resize_images. Is this a bug or am I doing something wrong?
+
+I also made up a workaround for this:
+image = tf.expand_dims(image, 0)
+image = tf.image.resize_bilinear(image, tf.pack(new_height_and_width))
+image = tf.squeeze(image, [0])
+image = tf.Print(image, [tf.shape(image), height, width, new_height_and_width[0], new_height_and_width[1]])
+return tf.image.random_crop(image, [224, 224])
+
+for example prints
+I tensorflow/core/kernels/logging_ops.cc:79] [400 711 3][281][500][400][711]

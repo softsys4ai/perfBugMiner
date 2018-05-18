@@ -1,0 +1,22 @@
+tf.gather's gradient fails on GPU in eager mode
+
+Tested with TensorFlow v1.7.0 on Ubuntu 16.06.
+Consider the following contrived example:
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+
+tfe.enable_eager_execution()
+
+with tf.device('/gpu:0'):
+    with tfe.GradientTape() as tape:
+        params = tfe.Variable(tf.zeros((1024,)))
+        indices = tf.constant(range(5))
+        output = tf.reduce_sum(tf.gather(params, indices))
+    print(tape.gradient(output, [params]))
+When executed, it fails with:
+Tensorflow.python.framework.errors_impl.InvalidArgumentError: Tensors on conflicting devices: cannot compute Cast as input #0 was expected to be on /job:localhost/replica:0/task:0/device:GPU:0 but is actually on /job:localhost/replica:0/task:0/device:CPU:0 (operation running on /job:localhost/replica:0/task:0/device:GPU:0) Tensors can be copied explicitly using .gpu() or .cpu(), or transparently copied by using tfe.enable_eager_execution(tfe.DEVICE_PLACEMENT_SILENT). Copying tensors between devices may slow down your model [Op:Cast] name: ToInt32
+
+This does not occur on the CPU.
+The issue can be fixed by removing the to_int32 call and just changing the out_types to int32 here in array_grad.py as follows:
+params_shape = array_ops.shape(params, out_type=ops.dtypes.int32) # int64 -> int32
+# params_shape = math_ops.to_int32(params_shape) [remove this line]

@@ -1,0 +1,33 @@
+Grpc+RDMA problem
+
+For RDMA, when start the ps server, it will do RDMA connect to worker server, but failed because worker still not started:
+# python tf_rdma.py --ps_hosts='workernode2:1111' --worker_hosts='workernode3:2222' --job_name=ps --task_id=0
+....
+2018-04-04 11:23:38.912680: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:324] Started server with target: grpc://localhost:1111
+2018-04-04 11:23:38.920106: E tensorflow/contrib/verbs/rdma_mgr.cc:119] Connecting to /job:worker/replica:0/task:0: Got Transport closed. Retrying (1/5)...
+2018-04-04 11:23:41.920544: E tensorflow/contrib/verbs/rdma_mgr.cc:119] Connecting to /job:worker/replica:0/task:0: Got OS Error. Retrying (2/5)...
+2018-04-04 11:23:43.921039: E tensorflow/contrib/verbs/rdma_mgr.cc:119] Connecting to /job:worker/replica:0/task:0: Got OS Error. Retrying (3/5)...
+2018-04-04 11:23:46.922376: E tensorflow/contrib/verbs/rdma_mgr.cc:119] Connecting to /job:worker/replica:0/task:0: Got OS Error. Retrying (4/5)...
+2018-04-04 11:23:48.922817: E tensorflow/contrib/verbs/rdma_mgr.cc:119] Connecting to /job:worker/replica:0/task:0: Got OS Error. Retrying (5/5)...
+2018-04-04 11:23:48.922848: I tensorflow/contrib/verbs/rdma_mgr.cc:128] Connected to remote node /job:worker/replica:0/task:0
+
+Then start the worker server:
+# python tf_rdma.py --ps_hosts='workernode2:1111' --worker_hosts='workernode3:2222' --job_name=worker --task_id=0
+...
+2018-04-04 14:12:38.008214: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> workernode2:1111}
+2018-04-04 14:12:38.008256: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:2222}
+2018-04-04 14:12:38.013784: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> workernode2:1111}
+2018-04-04 14:12:38.013803: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:2222}
+2018-04-04 14:12:38.019732: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:324] Started server with target: grpc://localhost:2222
+2018-04-04 14:12:38.028558: I tensorflow/contrib/verbs/rdma_mgr.cc:128] Connected to remote node /job:ps/replica:0/task:0
+
+the worker server can do RDMA connect successfully. But hanged up with the follows:
+(gdb) bt
+#0  0x00007fbdcc4f7a54 in mlx4_poll_cq () from /lib64/libmlx4-rdmav2.so
+#1  0x00007fbdf16301d8 in tensorflow::RdmaMgr::ConnectivityCheck() () from /usr/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#2  0x00007fbdf1628874 in tensorflow::VerbsServer::Start() () from /usr/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#3  0x00007fbdf12abf9b in _wrap_PyServer_Start () from /usr/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+#4  0x00007fbe01542aa4 in PyEval_EvalFrameEx () from /lib64/libpython2.7.so.1.0
+
+I think ps server should wait worker server setup before connect worker server.
+Am I right?

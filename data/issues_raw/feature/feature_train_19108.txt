@@ -1,0 +1,56 @@
+Set the weights in tf.layers with other variables but not as initializers.
+
+System information
+
+Have I written custom code: N/A (There is no example of meta learning with tf.layers)
+OS Platform and Distribution: Linux Ubuntu 16.04
+TensorFlow installed from: Installed tf-nightly with pip
+TensorFlow version: v1.8.0-rc1-934-g291d85be42 1.9.0-dev20180426
+Python version: 3.5.2
+Bazel version: N/A
+GCC/Compiler version: N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A
+
+Describe the problem
+Nowadays, with advances in deep learning, the researchers sometimes need to set the weights of their model based on some formula (not initialize them but initialize something which calculates that formula) and then use that to backpropagate through the variables which computed that formula. For example in meta learning, I have a model, let's say it is just one layer tf.layers.dense(). I want to compute gradients and then use that gradients to build updated model graph and compute gradients on that. The backpropagation should tell me how should I update my first model weights to adapt well. Look at the code below:
+Source code / logs
+train = tf.placeholder(dtype=tf.float32, shape=(None, 4), name='train')
+train_out = tf.placeholder(dtype=tf.float32, shape=(None, 1), name='train_out')
+
+validation = tf.placeholder(dtype=tf.float32, shape=(None, 4))
+validation_out = tf.placeholder(dtype=tf.float32, shape=(None, 1))
+
+with tf.variable_scope('model'):
+    model_out = tf.layers.dense(train, 1, activation=tf.nn.relu)
+
+with tf.variable_scope('loss'):
+    loss = tf.square(model_out - train_out)
+
+with tf.variable_scope('gradients'):
+    optimizer = tf.train.AdamOptimizer()
+    grads = optimizer.compute_gradients(loss)
+
+with tf.variable_scope('updated_model'):
+    updated_vars = {
+        grad_info[1].name[6:]: grad_info[1] - 0.1 * grad_info[0] \
+        for grad_info in grads if grad_info[0] is not None
+        }
+
+    # meta_out = tf.nn.relu(tf.matmul(validation, updated_vars['dense/kernel:0']) + updated_vars['dense/bias:0'])
+    meta_out = tf.layers.dense(validation, 1, activation=tf.nn.relu, 
+kernel_initializer=updated_vars['dense/kernel:0'], bias_initializer=updated_vars['dense/bias:0'])
+
+
+with tf.variable_scope('meta_loss'):
+    meta_loss = tf.square(meta_out - validation_out)
+
+with tf.variable_scope('meta_optimizer'):
+    model_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='model')
+    meta_optimizer = tf.train.AdamOptimizer()
+    meta_train_op = meta_optimizer.minimize(meta_loss, var_list=model_vars)
+
+In this code, I have commented one line. In that line, I did not use tf.layers but instead implemented what should happen in that layer myself. I think we need to be able to do that with tf.layers as well.
+Please notice that we cannot use initializer because initializers should be set when we run tf.global_variables_initializer() and have another meaning(Which is to set the value of a variable). Here we do not want to initial those weights of layers with values but just with variables which we calculated in some other way and be able to backpropagate through them.
+I think one way to solve this is to allow creating tf.layers' models with setting kernel and bias directly instead of using initializers. I would be more than happy if I could help with this issue.

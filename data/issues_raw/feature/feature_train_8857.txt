@@ -1,0 +1,48 @@
+Utility for repeatedly running tensors on queued input and accumulating the results
+
+I've written a utility function in TensorFlow that I've found quite helpful for loading Tensors with queue based inputs into memory, e.g., for looking at input data stored in the form of TF-records files or for looking at inference results. I've found it especially useful for interactively exploring the results of saved models from IPython notebooks, i.e., doing inference on small datasets or small portions of big datasets.
+Here's what the API looks like:
+from typing import Mapping, Optional, Dict
+
+def run_repeatedly(
+    batched_tensors: Mapping[object, tf.Tensor],
+    checkpoint_dir: Optional[str] = None,
+    max_num_batches: Optional[int] = None) -> Dict[object, np.ndarray]:
+  """Repeatedly run tensors until they are exhausted.
+
+  Args:
+    batched_tensors: dict of tensors to evaluate, each of which should have a
+      first axis corresponding to a batch of examples.
+    checkpoint_dir: optional path to checkpoint to load.
+    max_num_batches: optional maximum number of batches to run.
+
+  Returns:
+    A dict of numpy.ndarray objects containing the result of evaluating
+    batched_tensors and concatenated across batches along the first axis.
+
+  Raises:
+    ValueError: if checkpoint_dir has no valid checkpoint
+  """
+  # the implementation makes use of tf.contrib.metrics.streaming_concat
+  # and a tf.train.Supervisor: it handles all the boilerplate around starting
+  # up a session.
+And a few usage example:
+
+Previewing features loaded from files:
+
+tensors = tf.contrib.learn.read_batch_features(....)
+arrays = run_repeatedly(tensors, max_num_batches=10)
+
+
+For running inference on a full dataset while also accumulating input tensors (useful for debugging):
+
+tensors = tf.contrib.learn.read_batch_features(....)
+predictions = make_predictions(tensor_inputs, ...)
+tensors.update(predictions)
+arrays = run_repeatedly(tensors, checkpoint_dir=path_to_saved_model)
+
+Does something like this belong somewhere in core TensorFlow, or maybe one of the contrib libraries?
+This is somewhat similar to Estimator.predict from tf.contrib.learn, but with a few key differences:
+
+It's more flexible, not expecting inputs in the form of a tf.learn model.
+It automatically concatenates across batches. In practice, I find this highly useful, because I can often store the results of a model in memory even though I don't have enough memory to run inference on everything at once.

@@ -1,0 +1,47 @@
+[WIP] MPI Support for Tensor data communication
+
+This adds a second communication path to the distributed TensorFlow implementation, next to the gRPC communication path. This new communication path uses the Message Passing Interface (MPI) API to handle communication between processes allowing TensorFlow to take advantage of modern high performance networks such as Infiniband.
+This pull request is used to start a discussion about this implementation, any draw backs, alternatives and requests for feedback and participation from the open source community.
+The current pull request makes the following changes
+
+A new communication path has been added for sending and receiving Tensors between distinct processes.
+This new communication path uses the MPI API to handle setting up the connections and the data transfer.
+When using a CUDA-Aware (and/or GPUDirect RDMA) MPI implementation this path works for both CPU and GPU based Tensor data.
+
+This new path is implemented by modifying the current 'send' and 'receive' operations. The original gRPC code stays in place and is responsible for setting up connections and all non-tensordata communications.
+Although MPI supports one sided RDMA operations, this example implementation uses plain blocking send/receive operations. This because the current TensorFlow (memory) model makes it difficult to efficiently implement the communication using MPI_Get/MPI_Put (see below).
+Usage
+In order to setup the required MPI environment the Python instances have to be launched using 'mpirun'. An example launch script, which does not modify the original TF script, is supplied in: tensorflow/tools/dist_test/mpi/start-openmpi.sh
+The launching can be done differently if one handles the task type/id selection inside the TF python script, by either reading the environment variables as set by mpirun or by using the mpi4py Python library to retrieve process IDs and hostnames.
+The MPI execution path can be disabled by setting the environment variable 'MPI_PATH_DISABLED' to 1, like:
+export MPI_PATH_DISABLED=1
+MPI Requirements
+
+The MPI implementation should be built with support for MPI_THREAD_MULTIPLE
+To enable this path for GPU data, the MPI implementation should be built with CUDA support (CUDA-Aware MPI)
+Tested using OpenMPI-2.0.1
+Currently the path to the OpenMPI library is hard-coded in the "third_party/gpus/crosstool/CROSSTOOL.tpl" file, this should be made an option in the configure code.
+
+Implementation details
+MPI process ID mapping to gRPC names
+To handle communication between processes MPI identifies processes using a unique process-ID. TensorFlow uses gRPC which uses names based on things like 'worker', 'gpu', 'task'. To enable the MPI path in co-existence with the gRPC communication stack the names of the gRPC 'server' are mapped to the unique MPI IDs during the initialization of the gRPC stack. This conversion is then available once the tensor-data will be communicated.
+Send details
+The original 'send' operation places a tensor in a table which is then picked up by the gRPC thread once a request for that data arrives. In the MPI path we place an MPI_Send call which will block until the matching MPI_Recv call is made on the receiving side. By making a hash of the tensor description we create a unique combination of sending-process/tensor-id which will be matched by the receiving process. This enables multiple tensors to be in flight from a single process using different send threads. Sending is a two-step process, the first message contains the properties of the Tensor (data type & shape) followed by a message containing the actual data.
+The send call is intercept in the file: 'tensorflow/core/distributed_runtime/base_rendezvous_mgr.cc'
+In this function: BaseRemoteRendezvous::Send
+The code verifies that the destination is a different process from the sending process, if this is the case (and the implementation is enabled at run-time) then it will enter the new 'SendToRemote' functions.  Otherwise it will progress through the original code.
+To keep the changes as organized as possible, the actual implementation of the sending-functions are in:  tensorflow/core/distributed_runtime/rpc/grpc_remote_worker.cc
+The other file modifications are required to get the path enabled through out the calling stack.
+Receive details
+The original 'receive' operation requests a named-tensor from a remote process by placing a request through the gRPC stack. In the MPI path this request has been replaced by a set of receive calls that match the send operations. If there is no matching send operation yet, then the path will block until the sending process has arrived at the same point. The send and receive operations are matched using a hash of the requested tensor name.
+The first message will describe the tensor, this description is passed on to the memory allocation functions after which the actual tensor data flows directly into the newly allocated memory buffer.
+All the modified receive functionality is in: tensorflow/core/distributed_runtime/rpc/grpc_remote_worker.cc
+By inheriting the 'GrpcRemoteWorker' and replacing the 'RecvTensorAsync' function.
+Note: It is possible that a tensor with the same name is send (received) multiple times between the same set of processes. This is not a problem as messages are handled as unique units and have unique follow up IDs (based on thread IDs).
+TensorFlow limitations
+
+Memory is constantly being (de)allocated in between iterations. This hinders the performance when using Infiniband connections as memory buffers must be pinned/mapped before they can be used. This can impact the effective bandwidth by a factor 3 as this pinning is a relatively costly operation.
+It would be more efficient if memory buffers for the same tensors would be reused/retained in between iterations, this makes the pinning of memory buffers a one-time occurrence. It also allows for the removal of the allocation step in the 'receive' functions.
+
+Minds.ai
+Jeroen Bédorf

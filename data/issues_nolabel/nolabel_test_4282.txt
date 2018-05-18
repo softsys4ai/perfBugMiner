@@ -1,0 +1,36 @@
+Unspecified dimension after tf.sparse_tensor_dense_matmul
+
+Environment info
+Operating System:
+Problem encountered on linux CPU build installed from 47501a5ebc62fcb8a3d7832722d39997696897dc.
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+indices = [[0, 0], [1, 2]]
+values = [1., 1.]
+shape = [4, 6]
+test_sparse = tf.SparseTensor(indices, values, shape)
+v = tf.ones((6, 1))
+
+sess = tf.Session()
+sess.run(tf.initialize_all_variables())
+
+mult = tf.sparse_tensor_dense_matmul(test_sparse, v)
+print(mult)
+--> <tf.Tensor 'SparseTensorDenseMatMul_1/SparseTensorDenseMatMul:0' shape=(?, 1) dtype=float32>
+
+# but of course
+sess.run(mult).shape
+--> (4, 1)
+
+My question is: why is it that the shape of mult is partially unspecified before run time? It can be inferred from the shape of test_sparse and v that mult will have shape (4, 1).
+This is very annoying because it prevents me from initializing a Variable with the result of a sparse matmul as in the following:
+mult_val = tf.Variable(tf.sparse_tensor_dense_matmul(test_sparse, v))
+--> ValueError: initial_value must have a shape specified: Tensor("SparseTensorDenseMatMul/SparseTensorDenseMatMul:0", shape=(?, 1), dtype=float32)
+
+On the other hand, dense matmul has the desired behavior:
+dense_mult = tf.matmul(tf.sparse_tensor_to_dense(test_sparse, v))
+dense_mult.get_shape()
+--> TensorShape([Dimension(4), Dimension(1)])
+
+So why does sparse matmul behave differently? Is this a bug? An implementation quirk?
+In the meanwhile, how can I initialize a Variable with the result of a sparse matmul without having to densify the sparse matrix first?

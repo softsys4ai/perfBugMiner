@@ -1,0 +1,170 @@
+S_IREAD and S_IWRITE errors from gif_archive in CentOS 6.8 Build
+
+Hi there,
+I've been attempting off and on for the last 1-2 weeks to get Tensorflow to build on CentOS 6.8. I've spent a lot of time reading through old issues and piecing/hacking together suggestions from developers and other users on how to configure the build. I'm using a hand-built version of GCC (v. 4.9.3) in a non-default location with the system version of binutils (more info below).
+I've managed to get the tutorial_trainers_example to build and run successfully, but I'm now running into trouble when attempting to build the pip wheel (see below). It looks like there may be some missing header files.
+Relevant Threads
+The most helpful threads I've found during this process have been the following:
+#110 (especially comments from @rdipietro)
+bazelbuild/bazel#760 (thanks @damienmg)
+The only mention I can find of the specific error (granted, for a completely different platform) is in this recent Stackoverflow thread:
+http://stackoverflow.com/questions/39855672/tensorflow-how-to-compile-libtensorflow-cc-so-for-android
+The fact that this is a recent thread makes me think that perhaps there was some sort of error that was introduced into the build config in the last few weeks/months.
+Environment info
+Operating System:
+$ lsb_release -a
+LSB Version:    :base-4.0-amd64:base-4.0-noarch:core-4.0-amd64:core-4.0-noarch
+Distributor ID: CentOS
+Description:    CentOS release 6.8 (Final)
+Release:    6.8
+Codename:   Final
+$ uname -a
+Linux vmp1250 2.6.32-642.1.1.el6.x86_64 #1 SMP Tue May 31 21:57:07 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+$ ls -lh /gpfs22/local/centos6/cuda-7.5/lib/libcud*
+-rw-r--r--. 1 root root 185K Sep 17  2015 /gpfs22/local/centos6/cuda-7.5/lib/libcudadevrt.a
+lrwxrwxrwx. 1 root root   16 Sep 17  2015 /gpfs22/local/centos6/cuda-7.5/lib/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx. 1 root root   19 Sep 17  2015 /gpfs22/local/centos6/cuda-7.5/lib/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x. 1 root root 305K Sep 17  2015 /gpfs22/local/centos6/cuda-7.5/lib/libcudart.so.7.5.18
+-rw-r--r--. 1 root root 545K Sep 17  2015 /gpfs22/local/centos6/cuda-7.5/lib/libcudart_static.a
+
+$ ls -lh /gpfs22/local/centos6/cudnn-7.5-v5/lib64/
+total 227M
+lrwxrwxrwx. 1 1000 1000  13 May 25 10:38 libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx. 1 1000 1000  17 May 25 10:38 libcudnn.so.5 -> libcudnn.so.5.0.5
+-rwxrwxr-x. 1 1000 1000 58M Apr 22 19:15 libcudnn.so.5.0.5
+-rw-rw-r--. 1 1000 1000 57M Apr 22 19:15 libcudnn_static.a
+
+If installed from source, provide
+The commit hash (git rev-parse HEAD):
+
+Most recent (df871ed)
+
+The output of bazel version:
+$ bazel version
+Build label: 0.3.2- (@non-git)
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Fri Oct 7 20:15:17 2016 (1475871317)
+Build timestamp: 1475871317
+Build timestamp as int: 1475871317
+
+Custom Build Config for Bazel & Tensorflow
+For the bazel build:
+
+Modified tools/cpp/CROSSTOOL to point to C and C++ compilers in non-default locations
+Added an extra linker_flag line in tools/cpp/CROSSTOOL
+Added a bunch of cxx_builtin_include_directory lines to point to all the appropriate header files within GCC 4.9.3 in tools/cpp/CROSSTOOL
+
+For the Tensorflow build:
+
+Modified third_party/gpus/crosstool/CROSSTOOL.tpl to point to C++ compiler in custom location
+Added an extra linker_flag line to third_party/gpus/crosstool/CROSSTOOL.tpl
+Updated third_party/gpus/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc.tpl to point to the versions of NVCC and GCC that are in non-default locations
+Commented out the line cmd = 'PATH=' + PREFIX_DIR + ' ' + cmd in third_party/gpus/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc.tpl (otherwise as cannot be found).
+
+I can provide the exact lines I used if you'd like. Just let me know.
+Description of Problem
+Environment setup (I realize some of this may be overkill):
+$ export PATH=/gpfs22/local/centos6/swig/3.0.5/x86_64/gcc49/nonet/bin:/gpfs22/local/centos6/cuda-7.5/bin:/gpfs22/local/centos6/python2/anaconda2/bin:/gpfs21/scratch/frenchwr/tensorflow/bazel-0.3.2/output:/gpfs22/local/centos6/gcc/4.9.3/x86_64/bin:/gpfs22/local/centos6/java/1.8.0/bin:/usr/local/git/latest/x86_64/gcc46/nonet/bin:/usr/local/git/latest/x86_64/gcc46/nonet/libexec/git-core:/usr/scheduler/slurm/sbin:/usr/scheduler/slurm/bin:/usr/lpp/mmfs/bin:/usr/local/bin:/usr/local/common/bin:/usr/bin:/bin:/usr/scheduler/slurm/sbin:/usr/scheduler/slurm/bin:/usr/lpp/mmfs/bin:/usr/local/bin:/usr/local/common/bin:/usr/bin:/bin:/usr/local/git/latest/x86_64/gcc46/nonet/bin:/usr/local/git/latest/x86_64/gcc46/nonet/libexec/git-core:/usr/scheduler/slurm/sbin:/usr/scheduler/slurm/bin:/usr/lpp/mmfs/bin:/usr/local/bin:/usr/local/common/bin:/usr/bin:/bin:/usr/scheduler/slurm/sbin:/usr/scheduler/slurm/bin:/usr/lpp/mmfs/bin:/usr/local/bin:/usr/local/common/bin:/usr/bin:/bin:/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/var/cfengine/bin:/var/cfengine/bin
+$ export LD_LIBRARY_PATH=/gpfs22/local/centos6/cudnn-7.5-v5/lib64:/gpfs22/local/centos6/swig/3.0.5/x86_64/gcc49/nonet/share/swig/3.0.5:/gpfs22/local/centos6/cuda-7.5/lib:/gpfs22/local/centos6/cuda-7.5/lib64:/gpfs22/local/centos6/java/1.8.0/lib:/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib:/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib64:/gpfs22/local/centos6/java/1.8.0/lib/:/gpfs22/local/centos6/python2/anaconda2/lib
+$ export JAVA_HOME=/gpfs22/local/centos6/java/1.8.0
+$ export JAVA_ROOT=/gpfs22/local/centos6/java/1.8.0
+$ export CXX=/gpfs22/local/centos6/gcc/4.9.3/x86_64/bin/g++
+$ export CC=/gpfs22/local/centos6/gcc/4.9.3/x86_64/bin/gcc
+$ export GCC_ROOT=/gpfs22/local/centos6/gcc/4.9.3/x86_64
+$ export LDFLAGS="-L/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib -L/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib64 -L/gpfs22/local/centos6/cuda-7.5/lib64 -L/gpfs22/local/centos6/cuda-7.5/lib -L/gpfs22/local/centos6/cudnn-7.5-v5/lib64 -L/gpfs22/local/centos6/python2/anaconda2/lib"
+$ export CXXFLAGS="-L/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib -L/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib64 -L/gpfs22/local/centos6/cuda-7.5/lib64 -L/gpfs22/local/centos6/cuda-7.5/lib -L/gpfs22/local/centos6/cudnn-7.5-v5/lib64 -L/gpfs22/local/centos6/python2/anaconda2/lib"
+$ export CPLUS_INCLUDE_PATH="/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib/gcc/:/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib/gcc/x86_64-unknown-linux-gnu/4.9.3/:/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib/gcc/x86_64-unknown-linux-gnu/4.9.3/include/:/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib/gcc/x86_64-unknown-linux-gnu/4.9.3/include-fixed/:/gpfs22/local/centos6/gcc/4.9.3/x86_64/include/c++/4.9.3/:/gpfs22/local/centos6/gcc/4.9.3/x86_64/include/c++/4.9.3/x86_64-unknown-linux-gnu/:/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib64/:/gpfs22/local/centos6/gcc/4.9.3/x86_64/lib/:/gpfs22/local/centos6/cuda-7.5/include/:/gpfs22/local/centos6/cudnn-7.5-v5/include/"
+$ export PYTHONPATH=/gpfs22/local/centos6/python2/anaconda2/lib/python2.7:$PYTHONPATH
+$ export PYTHON_ROOT=/gpfs22/local/centos6/python2/anaconda2
+$ export PYTHON27_INC=$PYTHON_ROOT/include/python2.7
+$ export CUDA_HOME=/gpfs22/local/centos6/cuda-7.5
+$ export SWIG_ROOT=/gpfs22/local/centos6/swig/3.0.5/x86_64/gcc49/nonet
+$ export NVVM_ROOT=/gpfs22/local/centos6/cuda-7.5/nvvm
+$ export LIBRARY_PATH=/gpfs22/local/centos6/cudnn-7.5-v5/lib64:$LIBRARY_PATH
+$ export CPATH=/gpfs22/local/centos6/cudnn-7.5-v5/include:$CPATH
+$ export CUDNN_ROOT=/gpfs22/local/centos6/cudnn-7.5-v5
+$ export SWIG_PATH=$(which swig)
+
+Tensorflow Configuration:
+$ $ ./configure
+/scratch/frenchwr/tensorflow/tensorflow-head /scratch/frenchwr/tensorflow/tensorflow-head
+Please specify the location of python. [Default is /gpfs22/local/centos6/python2/anaconda2/bin/python]: 
+Do you wish to build TensorFlow with Google Cloud Platform support? [y/N] N
+No Google Cloud Platform support will be enabled for TensorFlow
+Do you wish to build TensorFlow with Hadoop File System support? [y/N] N
+No Hadoop File System support will be enabled for TensorFlow
+Found possible Python library paths:
+  /gpfs22/local/centos6/python2/anaconda2/lib/python2.7/site-packages
+  /gpfs22/local/centos6/python2/anaconda2/lib/python2.7
+Please input the desired Python library path to use.  Default is [/gpfs22/local/centos6/python2/anaconda2/lib/python2.7/site-packages]
+
+/gpfs22/local/centos6/python2/anaconda2/lib/python2.7/site-packages
+Do you wish to build TensorFlow with GPU support? [y/N] y
+GPU support will be enabled for TensorFlow
+Please specify which gcc should be used by nvcc as the host compiler. [Default is /gpfs22/local/centos6/gcc/4.9.3/x86_64/bin/gcc]: 
+Please specify the Cuda SDK version you want to use, e.g. 7.0. [Leave empty to use system default]: 7.5
+Please specify the location where CUDA 7.5 toolkit is installed. Refer to README.md for more details. [Default is /usr/local/cuda]: /gpfs22/local/centos6/cuda-7.5
+Please specify the Cudnn version you want to use. [Leave empty to use system default]: 5.0.5
+Please specify the location where cuDNN 5.0.5 library is installed. Refer to README.md for more details. [Default is /gpfs22/local/centos6/cuda-7.5]: /gpfs22/local/centos6/cudnn-7.5-v5
+Please specify a list of comma-separated Cuda compute capabilities you want to build with.
+You can find the compute capability of your device at: https://developer.nvidia.com/cuda-gpus.
+Please note that each additional compute capability significantly increases your build time and binary size.
+[Default is: "3.5,5.2"]: 5.2
+INFO: Starting clean (this may take a while). Consider using --expunge_async if the clean takes more than several minutes.
+.................
+INFO: All external dependencies fetched successfully.
+Configuration finished
+
+Tutorials Example Trainer Build:
+bazel build -c opt --config=cuda --verbose_failures --subcommands //tensorflow/cc:tutorials_example_trainer
+
+Tutorials Example Trainer Run:
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcurand.so.7.5 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcufft.so.7.5 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcudnn.so.5.0.5 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcublas.so.7.5 locally
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 0 with properties: 
+name: GeForce GTX TITAN X
+major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:02:00.0
+Total memory: 12.00GiB
+Free memory: 11.87GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:972] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:982] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:02:00.0)
+000000/000001 lambda = 1.841570 x = [0.669396 0.742906] y = [3.493999 -0.669396]
+000000/000009 lambda = 1.841570 x = [0.669396 0.742906] y = [3.493999 -0.669396]
+...
+...
+
+Pip Wheel Build (extra command line options suggested by @rdipietro in #110):
+$ bazel build -c opt --config=cuda --linkopt '-lrt' --copt="-DGPR_BACKWARDS_COMPATIBILITY_MODE" --conlyopt="-std=c99" //tensorflow/tools/pip_package:build_pip_package
+...
+...
+INFO: From Compiling external/protobuf/src/google/protobuf/compiler/cpp/cpp_message.cc:
+external/protobuf/src/google/protobuf/compiler/cpp/cpp_message.cc:376:8: warning: 'std::string google::protobuf::compiler::cpp::{anonymous}::MessageTypeProtoName(const google::protobuf::FieldDescriptor*)' defined but not used [-Wunused-function]
+ string MessageTypeProtoName(const FieldDescriptor* field) {
+        ^
+ERROR: /gpfs22/home/frenchwr/.cache/bazel/_bazel_frenchwr/4ceedd0aac0f37a9bc9063198121367a/external/gif_archive/BUILD:6:1: C++ compilation of rule '@gif_archive//:gif' failed: crosstool_wrapper_driver_is_not_gcc failed: error executing command external/local_config_cuda/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc -U_FORTIFY_SOURCE '-D_FORTIFY_SOURCE=1' -fstack-protector -fPIE -Wall -Wunused-but-set-parameter ... (remaining 37 argument(s) skipped): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+external/gif_archive/egif_lib.c: In function 'EGifOpenFileName':
+external/gif_archive/egif_lib.c:62:6: error: 'S_IREAD' undeclared (first use in this function)
+      S_IREAD | S_IWRITE);
+      ^
+external/gif_archive/egif_lib.c:62:6: note: each undeclared identifier is reported only once for each function it appears in
+external/gif_archive/egif_lib.c:62:16: error: 'S_IWRITE' undeclared (first use in this function)
+      S_IREAD | S_IWRITE);
+                ^
+external/gif_archive/egif_lib.c: In function 'EGifOpenFileHandle':
+external/gif_archive/egif_lib.c:119:5: warning: implicit declaration of function 'fdopen' [-Wimplicit-function-declaration]
+     f = fdopen(FileHandle, "wb");    /* Make it into a stream: */
+     ^
+external/gif_archive/egif_lib.c:119:7: warning: assignment makes pointer from integer without a cast
+     f = fdopen(FileHandle, "wb");    /* Make it into a stream: */
+       ^
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+INFO: Elapsed time: 403.336s, Critical Path: 394.04s

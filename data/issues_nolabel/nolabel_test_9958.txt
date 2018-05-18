@@ -1,0 +1,62 @@
+Android demo app crashes when using quantized model obtained from graph_transform tool?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Only edited ClassifierActivity.java to suit a custom model
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Android smartphone / host machine: Ubuntu 16.04 LTS
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.1
+Bazel version (if compiling from source): 0.4.5
+CUDA/cuDNN version: 8.0/5.1
+GPU model and memory: GTX 860M
+
+Describe the problem
+I am currently following the guide in: http://nilhcem.com/android/custom-tensorflow-classifier
+to train a custom classifier. However, I am using my own frozen graph that I obtained from my own training. What I noticed was when I used the quantized graph obtained through the graph_transform method, the app simply crashes without even running. In the guide, it is recommended to run this command on the inference graph:
+bazel-bin/tensorflow/python/tools/optimize_for_inference \
+  --input=/tf_files/retrained_graph.pb \
+  --output=/tf_files/retrained_graph_optimized.pb \
+  --input_names=Mul \
+  --output_names=final_result
+
+While I think it may be in conflict with the quantized graph transformations, I ran this command to test, and the app did crash. Here are the observations for all 4 permutations I tested:
+
+quantization + optimize_for_inference = app crash
+quantization only = app crash
+optimize_for_inference on frozen graph = app works
+frozen_graph only = app works
+
+So my conclusion is the quantization operations within the quantized graph caused the app to fail.
+Here is the quantization command I ran:
+/home/kwotsin/tensorflow-android/tensorflow/bazel-bin/tensorflow/tools/graph_transforms/transform_graph \
+--in_graph=./frozen_model_mobilenet.pb \
+--out_graph=./quantized_model_mobilenet.pb \
+--inputs='Placeholder_only' \
+--outputs='MobileNet/Predictions/Softmax' \
+--transforms='
+  add_default_attributes
+  strip_unused_nodes(type=float, shape="1,299,299,3")
+  remove_nodes(op=Identity, op=CheckNumerics)
+  fold_constants(ignore_errors=true)
+  fold_batch_norms
+  fold_old_batch_norms
+  quantize_weights
+  quantize_nodes
+  strip_unused_nodes
+  sort_by_execution_order'
+
+And the java file I edited to build my APK:
+  private static final int INPUT_SIZE = 224;
+  private static final int IMAGE_MEAN = 128;
+  private static final float IMAGE_STD = 128;
+  private static final String INPUT_NAME = "Placeholder_only";
+  private static final String OUTPUT_NAME = "MobileNet/Predictions/Softmax";
+
+  private static final String MODEL_FILE = "file:///android_asset/quantized_model_mobilenet.pb";
+  private static final String LABEL_FILE =
+      "file:///android_asset/mobilenet_labels.txt";
+
+Other than these edit, every other file is the same. I then imported this project in Android Studio, and ran the build apk option located on the top toolbar of Android Studio.
+So far, existing tutorials I've seen (e.g. those from Pete Warden) use the quantize_graph method to run on mobile devices. Is graph_transform compatible for quantizing models for mobile devices yet?

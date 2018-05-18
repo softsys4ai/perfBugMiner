@@ -1,0 +1,176 @@
+[Feature] Dataset API - Reinitializable Iterator resets to first dataset element
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): slightly altered stock example (see below)
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): 1.4.0 from source
+Python version: 3.6.3
+Bazel version (if compiling from source): 0.7.0
+GCC/Compiler version (if compiling from source): gcc (Ubuntu 5.4.0-6ubuntu1~16.04.5) 5.4.0 20160609
+CUDA/cuDNN version: 8.0
+GPU model and memory: Nvidia 1060
+
+Describe the problem
+Currently the re-initializable iterator API using .from_structure and Iterator.make_initializer always resets the get_next() op of the iterator to fetch the first element of its Dataset instance again after running sess.run(training_init_op) or sess.run(validation_init_op), respectively.
+Is this really the intended behavior? This means, that if you want to switch between training and validation Datasets within one epoch (i.e. in a shorter rhythm than the full dataset length) you will always only iterate over the first batch_size * number-of-training-steps-before-validation-step elements of the training set during training.
+Source code / logs
+I guess the code example will make it clearer:
+# Define training and validation datasets with the same structure.
+training_dataset = tf.data.Dataset.range(100)
+validation_dataset = tf.data.Dataset.range(50)
+
+# A reinitializable iterator is defined by its structure. We could use the
+# `output_types` and `output_shapes` properties of either `training_dataset`
+# or `validation_dataset` here, because they are compatible.
+iterator = tf.data.Iterator.from_structure(training_dataset.output_types,
+                                  training_dataset.output_shapes)
+
+next_element = iterator.get_next()
+
+
+training_init_op = iterator.make_initializer(training_dataset)
+validation_init_op = iterator.make_initializer(validation_dataset)
+
+with tf.Session() as sess:
+   # Run 20 epochs in which the training dataset is traversed, followed by the
+   # validation dataset.
+   for i in range(5):
+       # Initialize an iterator over the training dataset.
+       print("#########################  ", i)
+       sess.run(training_init_op)
+       for _ in range(10):
+           nel = sess.run(next_element)
+           print("train: ", type(nel), nel)
+
+       # Initialize an iterator over the validation dataset.
+       sess.run(validation_init_op)
+       for _ in range(5):
+           nel = sess.run(next_element)
+           print("valid: ", type(nel), nel)
+
+Produces the output:
+#########################   0
+train:  <class 'numpy.int64'> 0
+train:  <class 'numpy.int64'> 1
+train:  <class 'numpy.int64'> 2
+train:  <class 'numpy.int64'> 3
+train:  <class 'numpy.int64'> 4
+train:  <class 'numpy.int64'> 5
+train:  <class 'numpy.int64'> 6
+train:  <class 'numpy.int64'> 7
+train:  <class 'numpy.int64'> 8
+train:  <class 'numpy.int64'> 9
+valid:  <class 'numpy.int64'> 0
+valid:  <class 'numpy.int64'> 1
+valid:  <class 'numpy.int64'> 2
+valid:  <class 'numpy.int64'> 3
+valid:  <class 'numpy.int64'> 4
+#########################   1
+train:  <class 'numpy.int64'> 0
+train:  <class 'numpy.int64'> 1
+train:  <class 'numpy.int64'> 2
+train:  <class 'numpy.int64'> 3
+train:  <class 'numpy.int64'> 4
+train:  <class 'numpy.int64'> 5
+train:  <class 'numpy.int64'> 6
+train:  <class 'numpy.int64'> 7
+train:  <class 'numpy.int64'> 8
+train:  <class 'numpy.int64'> 9
+valid:  <class 'numpy.int64'> 0
+valid:  <class 'numpy.int64'> 1
+valid:  <class 'numpy.int64'> 2
+valid:  <class 'numpy.int64'> 3
+valid:  <class 'numpy.int64'> 4
+...
+
+Apparently, the latter 90 elements of the training set and the latter 45 elements of the validation set never get evaluated. I don't really see the real-world use-case for this behavior.
+I know that you can implement the other functionality via the feedable iterator scheme using one_shot_iterators (but not using initializable iterators) as highlighted by the code below (pay attention to the different iterators used for training and validation here):
+# Define training and validation datasets with the same structure.
+training_dataset = tf.data.Dataset.range(10000000).repeat(2)
+validation_dataset = tf.data.Dataset.range(5000000).repeat(2)
+
+# A feedable iterator is defined by a handle placeholder and its structure. We
+# could use the `output_types` and `output_shapes` properties of either
+# `training_dataset` or `validation_dataset` here, because they have
+# identical structure.
+handle = tf.placeholder(tf.string, shape=[])
+iterator = tf.data.Iterator.from_string_handle(
+    handle, training_dataset.output_types, training_dataset.output_shapes)
+next_element = iterator.get_next()
+
+# You can use feedable iterators with a variety of different kinds of iterator
+training_iterator = training_dataset.make_one_shot_iterator()
+validation_iterator = validation_dataset.make_initializable_iterator()
+
+with tf.Session() as sess:
+    # The `Iterator.string_handle()` method returns a tensor that can be evaluated
+    # and used to feed the `handle` placeholder.
+    training_handle = sess.run(training_iterator.string_handle())
+    validation_handle = sess.run(validation_iterator.string_handle())
+    # Loop forever, alternating between training and validation.
+    for i in range(5):
+        print("######################## ", i)
+        i += 1
+        # Run 10 steps using the training dataset. Note that the training dataset is
+        # 2 * the original set, i.e. we run 2 epochs (see .repeat() argument), and we resume from where
+        # we left off in the previous `while` loop iteration.
+        for _ in range(10):
+            nel = sess.run(next_element, feed_dict={handle: training_handle})
+            print("train: ", type(nel), nel)
+
+        # Run one pass over the validation dataset.
+        sess.run(validation_iterator.initializer)
+        for _ in range(5):
+            nel = sess.run(next_element, feed_dict={handle: validation_handle})
+            print("valid: ", type(nel), nel)
+
+creates output:
+########################  0
+train:  <class 'numpy.int64'> 0
+train:  <class 'numpy.int64'> 1
+train:  <class 'numpy.int64'> 2
+train:  <class 'numpy.int64'> 3
+train:  <class 'numpy.int64'> 4
+train:  <class 'numpy.int64'> 5
+train:  <class 'numpy.int64'> 6
+train:  <class 'numpy.int64'> 7
+train:  <class 'numpy.int64'> 8
+train:  <class 'numpy.int64'> 9
+valid:  <class 'numpy.int64'> 0
+valid:  <class 'numpy.int64'> 1
+valid:  <class 'numpy.int64'> 2
+valid:  <class 'numpy.int64'> 3
+valid:  <class 'numpy.int64'> 4
+########################  1
+train:  <class 'numpy.int64'> 10
+train:  <class 'numpy.int64'> 11
+train:  <class 'numpy.int64'> 12
+train:  <class 'numpy.int64'> 13
+train:  <class 'numpy.int64'> 14
+train:  <class 'numpy.int64'> 15
+train:  <class 'numpy.int64'> 16
+train:  <class 'numpy.int64'> 17
+train:  <class 'numpy.int64'> 18
+train:  <class 'numpy.int64'> 19
+valid:  <class 'numpy.int64'> 0
+valid:  <class 'numpy.int64'> 1
+valid:  <class 'numpy.int64'> 2
+valid:  <class 'numpy.int64'> 3
+valid:  <class 'numpy.int64'> 4
+########################  2
+train:  <class 'numpy.int64'> 20
+train:  <class 'numpy.int64'> 21
+train:  <class 'numpy.int64'> 22
+train:  <class 'numpy.int64'> 23
+train:  <class 'numpy.int64'> 24
+train:  <class 'numpy.int64'> 25
+train:  <class 'numpy.int64'> 26
+train:  <class 'numpy.int64'> 27
+train:  <class 'numpy.int64'> 28
+train:  <class 'numpy.int64'> 29
+valid:  <class 'numpy.int64'> 0
+valid:  <class 'numpy.int64'> 1
+valid:  <class 'numpy.int64'> 2
+valid:  <class 'numpy.int64'> 3
+valid:  <class 'numpy.int64'> 4

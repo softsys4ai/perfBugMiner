@@ -1,0 +1,105 @@
+Importing graph with tf.contrib.resampler.resampler fails
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+OSx High Sierra
+TensorFlow installed from (source or binary):
+pip install
+TensorFlow version (use command below):
+1.5.0
+Python version:
+3.5.4
+CUDA/cuDNN version:
+CPU
+Bazel version (if compiling from source):
+N/A
+GPU model and memory:
+N/A
+Exact command to reproduce:
+See below
+
+Describe the problem
+Importing a graph def with a  tf.contrib.resampler.resampler op fails iff tf.contrib is not imported first.
+Execute:
+import tensorflow as tf
+
+def export_model(filename, sess, output_node_names):
+    from tensorflow.python.framework import graph_util
+    output_graph_def = graph_util.convert_variables_to_constants(sess,
+                                                                 sess.graph.as_graph_def(add_shapes=True),
+                                                                 output_node_names)
+    with tf.gfile.GFile(filename, "wb") as f:
+        f.write(output_graph_def.SerializeToString())
+        
+def read_frozen_protobuf(path):
+    with tf.gfile.FastGFile(str(path), 'rb') as f:
+        graph_def = tf.GraphDef()
+        graph_def.ParseFromString(f.read())
+        return graph_def
+
+    
+def export(filename):
+    tf.reset_default_graph()
+    g = tf.Graph()
+    with tf.Session(graph=g, config=tf.ConfigProto(allow_soft_placement=True)) as sess:
+        images = tf.placeholder(dtype=tf.float64, shape=[32, 32], name='images')
+        points = tf.placeholder(dtype=tf.float64, shape=[32, 2], name='points')
+        resampled = tf.contrib.resampler.resampler(images, points, name='resampled')
+        output_node_names = ['resampled/Resampler']
+        export_model(filename, sess, output_node_names)
+        
+def load(filename):
+    import numpy as np
+    tf.reset_default_graph()
+    g = tf.Graph()
+    with tf.Session(graph=g, config=tf.ConfigProto(allow_soft_placement=True)) as sess:
+        images = np.zeros((32, 32), dtype=np.float64)
+        points = np.zeros((32, 2), dtype=np.float64)
+        graph_def = read_frozen_protobuf(filename)
+        tf.import_graph_def(graph_def, 
+                            input_map={'images': images,
+                                       'points': points},
+                            return_elements=['resampled/Resampler:0'])
+        
+######################################################
+frozen_graph_def = '/tmp/test.frozen'
+export(frozen_graph_def)
+load(frozen_graph_def)
+
+Then, in a new interpreter (where the load(..) function is defined), execute:
+frozen_graph_def = '/tmp/test.frozen'
+load(frozen_graph_def)
+
+This give the error message:
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-1-64251e160f7d> in <module>()
+     42 frozen_graph_def = '/tmp/test.frozen'
+     43 # export(frozen_graph_def)
+---> 44 load(frozen_graph_def)
+
+<ipython-input-1-64251e160f7d> in load(filename)
+     37                             input_map={'images': images,
+     38                                        'points': points},
+---> 39                             return_elements=['resampled/Resampler:0'])
+     40 
+     41 ######################################################################
+
+/lib/python3.5/site-packages/tensorflow/python/util/deprecation.py in new_func(*args, **kwargs)
+    314                 'in a future version' if date is None else ('after %s' % date),
+    315                 instructions)
+--> 316       return func(*args, **kwargs)
+    317     return tf_decorator.make_decorator(func, new_func, 'deprecated',
+    318                                        _add_deprecated_arg_notice_to_docstring(
+
+/lib/python3.5/site-packages/tensorflow/python/framework/importer.py in import_graph_def(graph_def, input_map, return_elements, name, op_dict, producer_op_list)
+    539         # Set any default attr values that aren't present.
+    540         if node.op not in op_dict:
+--> 541           raise ValueError('No op named %s in defined operations.' % node.op)
+    542         op_def = op_dict[node.op]
+    543         for attr_def in op_def.attr:
+
+ValueError: No op named Resampler in defined operations.

@@ -1,0 +1,69 @@
+OOM when allocating tensor with shape
+
+I'm using tensorflow 1.3, tested on a linux machine with 2 NVIDIA Tesla K80 cards,
+however, I keep getting OOM error on GPU, but it does not happen when using cpu for training:
+
+---log below
+Exception happened during training, message: OOM when allocating tensor with shape[1792,4096]
+[[Node: projectx/trainig_gpu_0/gradients/projectx/trainig_gpu_0/decoder/projectxDecoderCell_1/lstm_0/lstm_0/lstm_cell/MatMul_36_grad/MatMul_1 = MatMul[T=DT_FLOAT, transpose_a=true, transpose_b=false, _device="/job:localhost/replica:0/task:0/device:GPU:0"](projectx/trainig_gpu_0/decoder/projectxDecoderCell_1/lstm_0/lstm_0/lstm_cell/concat_36, projectx/trainig_gpu_0/gradients/projectx/trainig_gpu_0/decoder/projectxDecoderCell_1/lstm_0/lstm_0/lstm_cell/BiasAdd_36_grad/tuple/control_dependency)]]
+[[Node: projectx/trainig_gpu_0/gradients/concat/_2929 = _Recvclient_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device_incarnation=1, tensor_name="edge_646323_projectx/trainig_gpu_0/gradients/concat", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"]]
+Caused by op 'projectx/trainig_gpu_0/gradients/projectx/trainig_gpu_0/decoder/projectxDecoderCell_1/lstm_0/lstm_0/lstm_cell/MatMul_36_grad/MatMul_1', defined at:
+File "sync_train.py", line 383, in 
+main()
+File "sync_train.py", line 380, in main
+train(config)
+File "sync_train.py", line 64, in train
+train_model = projectx.projectx(n_gpu, config, is_training=True, reuse=False)
+File "/kaldi/exp/tacotron/exp_2/projectx.py", line 291, in init
+grads_and_vars = self.optimizer.compute_gradients(loss)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/optimizer.py", line 414, in compute_gradients
+colocate_gradients_with_ops=colocate_gradients_with_ops)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/gradients_impl.py", line 581, in gradients
+grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/gradients_impl.py", line 353, in _MaybeCompile
+return grad_fn()  # Exit early
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/gradients_impl.py", line 581, in 
+grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/math_grad.py", line 922, in _MatMulGrad
+grad_b = math_ops.matmul(a, grad, transpose_a=True)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/math_ops.py", line 1891, in matmul
+a, b, transpose_a=transpose_a, transpose_b=transpose_b, name=name)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/gen_math_ops.py", line 2437, in _mat_mul
+name=name)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+op_def=op_def)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 2956, in create_op
+op_def=op_def)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 1470, in init
+self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+...which was originally created as op 'projectx/trainig_gpu_0/decoder/projectxDecoderCell_1/lstm_0/lstm_0/lstm_cell/MatMul_36', defined at:
+File "sync_train.py", line 383, in 
+main()
+[elided 1 identical lines from previous traceback]
+File "sync_train.py", line 64, in train
+train_model = projectx.projectx(n_gpu, config, is_training=True, reuse=False)
+File "/kaldi/exp/tacotron/exp_2/projectx.py", line 189, in init
+feed_previous=feed_previous)
+File "/kaldi/exp/tacotron/exp_2/projectx.py", line 427, in seq2seq
+pre_alignments)
+File "/kaldi/exp/tacotron/exp_2/decoder.py", line 99, in call
+attention_rnn_outputs, new_attention_rnn_state, context, alignments = self._attention_rnn_cell(prenet_output, state, pre_alignments)
+File "/kaldi/exp/tacotron/exp_2/attention.py", line 427, in call
+lstm_output, next_lstm_state = cell(lstm_inputs, states[i + 1])
+File "/kaldi/exp/tacotron/exp_2/zoneout_lstm.py", line 48, in call
+output, new_state = self._cell(inputs, state, scope)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/rnn_cell_impl.py", line 183, in call
+return super(RNNCell, self).call(inputs, state)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/layers/base.py", line 575, in call
+outputs = self.call(inputs, *args, **kwargs)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/rnn_cell_impl.py", line 611, in call
+lstm_matrix = self._linear1([inputs, m_prev])
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/rnn_cell_impl.py", line 1189, in call
+res = math_ops.matmul(array_ops.concat(args, 1), self._weights)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/math_ops.py", line 1891, in matmul
+a, b, transpose_a=transpose_a, transpose_b=transpose_b, name=name)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/gen_math_ops.py", line 2437, in _mat_mul
+name=name)
+ResourceExhaustedError (see above for traceback): OOM when allocating tensor with shape[1792,4096]
+[[Node: projectx/trainig_gpu_0/gradients/projectx/trainig_gpu_0/decoder/projectxDecoderCell_1/lstm_0/lstm_0/lstm_cell/MatMul_36_grad/MatMul_1 = MatMul[T=DT_FLOAT, transpose_a=true, transpose_b=false, _device="/job:localhost/replica:0/task:0/device:GPU:0"](projectx/trainig_gpu_0/decoder/projectxDecoderCell_1/lstm_0/lstm_0/lstm_cell/concat_36, projectx/trainig_gpu_0/gradients/projectx/trainig_gpu_0/decoder/projectxDecoderCell_1/lstm_0/lstm_0/lstm_cell/BiasAdd_36_grad/tuple/control_dependency)]]
+[[Node: projectx/trainig_gpu_0/gradients/concat/_2929 = _Recvclient_terminated=false, recv_device="/job:localhost/replica:0/task:0/device:CPU:0", send_device="/job:localhost/replica:0/task:0/device:GPU:0", send_device_incarnation=1, tensor_name="edge_646323_projectx/trainig_gpu_0/gradients/concat", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"]]

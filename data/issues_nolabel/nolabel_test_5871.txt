@@ -1,0 +1,39 @@
+Check the Status after call builder.Finalize() in generated io_ops.cc
+
+e.g.
+Let's assume someone passed an int32 tensor into ReaderReadUpTo as the third input(num_records), which should have a type of int64.
+ReaderReadUpTo::ReaderReadUpTo(const ::tensorflow::Scope& scope,
+                               ::tensorflow::ops::Input reader_handle,
+                               ::tensorflow::ops::Input queue_handle,
+                               ::tensorflow::ops::Input num_records) {
+  if (!scope.ok()) return;
+  auto _reader_handle = ::tensorflow::ops::AsNodeOut(scope, reader_handle);
+  if (!scope.ok()) return;
+  auto _queue_handle = ::tensorflow::ops::AsNodeOut(scope, queue_handle);
+  if (!scope.ok()) return;
+  auto _num_records = ::tensorflow::ops::AsNodeOut(scope, num_records);
+  if (!scope.ok()) return;
+  ::tensorflow::Node* ret;
+  const auto  unique_name = scope.GetUniqueNameForOp("ReaderReadUpTo");
+  auto builder = ::tensorflow::NodeBuilder(unique_name, "ReaderReadUpTo")
+                     .Input(_reader_handle)
+                     .Input(_queue_handle)
+                     .Input(_num_records)
+  ;
+  scope.UpdateBuilder(&builder);
+  scope.UpdateStatus(builder.Finalize(scope.graph(), &ret));
+  //HERE: builder.Finalize may fails. We should check if ret==NULL, otherwise it will cause a core dump.
+  ::tensorflow::NameRangeMap _outputs_range;
+  ::tensorflow::Status _status_ = ::tensorflow::NameRangesForNode(ret->def(), ret->op_def(), nullptr, &_outputs_range);
+  if (!_status_.ok()) {
+    scope.UpdateStatus(_status_);
+    return;
+  }
+
+  this->keys = Output(ret, _outputs_range["keys"].first);
+  this->values = Output(ret, _outputs_range["values"].first);
+}
+
+We need modify the function at tensorflow\tensorflow\cc\framework\cc_op_gen.cc:655
+string OpInfo::GetConstructorBody() const
+to add the check.

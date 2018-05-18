@@ -1,0 +1,55 @@
+Tensorflow hangs without explanation, some threads stay busy.
+
+I've got a machine running a GTX 980 Ti with 32 gb of ram (of which about half is used by the data loading pipeline) and a i7-5930K cpu driving a network. I'm running Ubuntu 14.04, I've got the drivers x86_64-361.45.11 installed, I've installed CUDA 7.5.18_linux with CUDNN linux-x64-v4.0-prod. Every 30 or so iterations the run method hangs and 2 to 5 virtual cores are busy, with the gpu not doing anything more than idling. I thought it hanged indefinitely but when I ran it overnight I saw that it actually completed what it was doing after some time. Pausing and continuing the process using gdb will make it continue immediately. I saw something like this with the initial release of 0.6.0 but it was fixed by 0.6.1 so I just pulled from master and assumed I would never see it again. Inspecting the root process just shows that its waiting on the run method:
+(gdb) bt full
+#0  pthread_cond_wait@@GLIBC_2.3.2 () at ../nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:185
+No locals.
+#1  0x00007f29299964dc in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+No symbol table info available.
+#2  0x00007f292b46a883 in tensorflow::DirectSession::WaitForNotification(tensorflow::DirectSession::RunState*, long long) ()
+   from /usr/local/lib/python3.4/dist-packages/tensorflow/python/_pywrap_tensorflow.so
+No symbol table info available.
+#3  0x00007f292b474800 in tensorflow::DirectSession::Run(tensorflow::RunOptions const&, std::vector<std::pair<std::string, tensorflow::Tensor>, std::allocator<std::pair<std::string, tensorflow::Tensor> > > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<std::string, std::allocator<std::string> > const&, std::vector<tensorflow::Tensor, std::allocator<tensorflow::Tensor> >*, tensorflow::RunMetadata*) () from /usr/local/lib/python3.4/dist-packages/tensorflow/python/_pywrap_tensorflow.so
+No symbol table info available.
+#4  0x00007f292b549c81 in TF_Run_Helper(TF_Session*, char const*, TF_Buffer const*, char const**, TF_Tensor**, int, char const**, TF_Tensor**, int, char const**, int, TF_Buffer*, TF_Status*) ()
+   from /usr/local/lib/python3.4/dist-packages/tensorflow/python/_pywrap_tensorflow.so
+No symbol table info available.
+#5  0x00007f292b54a0f1 in TF_Run () from /usr/local/lib/python3.4/dist-packages/tensorflow/python/_pywrap_tensorflow.so
+No symbol table info available.
+#6  0x00007f292a5787b2 in tensorflow::TF_Run_wrapper_helper(TF_Session*, char const*, TF_Buffer const*, tensorflow::gtl::InlinedVector<std::pair<char const*, tagPyArrayObject*>, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, TF_Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) ()
+   from /usr/local/lib/python3.4/dist-packages/tensorflow/python/_pywrap_tensorflow.so
+No symbol table info available.
+#7  0x00007f292a578de1 in tensorflow::TF_Run_wrapper(TF_Session*, TF_Buffer const*, tensorflow::gtl::InlinedVector<std::pair<char const*, tagPyArrayObject*>, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, TF_Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) ()
+   from /usr/local/lib/python3.4/dist-packages/tensorflow/python/_pywrap_tensorflow.so
+No symbol table info available.
+#8  0x00007f292a5666c8 in _wrap_TF_Run () from /usr/local/lib/python3.4/dist-packages/tensorflow/python/_pywrap_tensorflow.so
+No symbol table info available.
+...
+
+Inspection of one of the busy threads is also equally uninteresting:
+(gdb) bt full
+#0  0x00007f293767e3f7 in sched_yield () at ../sysdeps/unix/syscall-template.S:81
+No locals.
+#1  0x00007f292b76aa60 in Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(unsigned int) ()
+   from /usr/local/lib/python3.4/dist-packages/tensorflow/python/_pywrap_tensorflow.so
+No symbol table info available.
+#2  0x00007f292b769f52 in std::_Function_handler<void (), tensorflow::thread::EigenEnvironment::CreateThread(std::function<void ()>)::{lambda()#1}>::_M_invoke(std::_Any_data const&) ()
+   from /usr/local/lib/python3.4/dist-packages/tensorflow/python/_pywrap_tensorflow.so
+No symbol table info available.
+#3  0x00007f2929999a60 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+No symbol table info available.
+#4  0x00007f2937980182 in start_thread (arg=0x7f28657fa700) at pthread_create.c:312
+        __res = <optimized out>
+        pd = 0x7f28657fa700
+        now = <optimized out>
+        unwind_buf = {cancel_jmp_buf = {{jmp_buf = {139811478284032, -825179003405916230, 1, 0, 139811478284736, 139811478284032, 782688377649571770, 783080021823268794}, mask_was_saved = 0}}, priv = {
+            pad = {0x0, 0x0, 0x0, 0x0}, data = {prev = 0x0, cleanup = 0x0, canceltype = 0}}}
+        not_first_call = <optimized out>
+        pagesize_m1 = <optimized out>
+        sp = <optimized out>
+        freesize = <optimized out>
+        __PRETTY_FUNCTION__ = "start_thread"
+#5  0x00007f29376ad47d in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:111
+No locals.
+
+Finally the cpu usage revealed by htop doesn't seem to be fully accounted for in the displayed processes, 5 virtual cores might be busy but the processes are only credited with 0-300% cpu usage.

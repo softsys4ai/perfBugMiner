@@ -1,0 +1,63 @@
+Backpropagation through the while-loop doesn't work if external tensors are used inside
+
+In the simple example below I copy inputs to outputs in a while loop. When I try to take gradient of the outputs w.r. to inputs, I get an error. It's worth noting that 1) the forward pass works 2) the gradient computation works if I made inputs a TensorArray, like it is done in the scan implementation
+The code:
+with tf.Graph().as_default(), tf.Session() as sess:
+  num_steps = 9
+
+  inputs = tf.placeholder(dtype='float32', shape=(num_steps))
+  initial_outputs = tf.TensorArray(dtype=tf.float32, size=num_steps)
+  initial_i = tf.constant(0, dtype='int32')
+
+  def should_continue(i, *args):
+    return i < num_steps
+
+  def iteration(i, outputs_):
+    outputs_ = outputs_.write(i, tf.gather(inputs, i))
+    return i + 1, outputs_
+
+  i, outputs = tf.while_loop(
+    should_continue, iteration,
+    [initial_i, initial_outputs])
+
+  outputs = outputs.pack()
+  grad_wr_inputs = tf.convert_to_tensor(tf.gradients([tf.reduce_sum(outputs)], [inputs])[0])
+  print sess.run([outputs, grad_wr_inputs],
+                 feed_dict={inputs: [4, 6, 0, 7, 0, 0, 1, 2, 0]})
+The stack trace:
+---------------------------------------------------------------------------
+InvalidArgumentError                      Traceback (most recent call last)
+<ipython-input-354-e1d117e742f9> in <module>()
+     20   grad_wr_inputs = tf.convert_to_tensor(tf.gradients([tf.reduce_sum(outputs)], [inputs])[0])
+     21   print sess.run([outputs, grad_wr_inputs],
+---> 22                  feed_dict={inputs: [4, 6, 0, 7, 0, 0, 1, 2, 0]})
+
+/google/data/ro/teams/colab/tensorflow/google3/third_party/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+    366     try:
+    367       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 368                          run_metadata_ptr)
+    369       if run_metadata:
+    370         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/google/data/ro/teams/colab/tensorflow/google3/third_party/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    639     movers = self._update_with_movers(feed_dict_string, feed_map)
+    640     results = self._do_run(handle, target_list, unique_fetches,
+--> 641                            feed_dict_string, options, run_metadata)
+    642 
+    643     # User may have fetched the same tensor multiple times, but we
+
+/google/data/ro/teams/colab/tensorflow/google3/third_party/tensorflow/python/client/session.py in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+    707     if handle is None:
+    708       return self._do_call(_run_fn, self._session, feed_dict, fetch_list,
+--> 709                            target_list, options, run_metadata)
+    710     else:
+    711       return self._do_call(_prun_fn, self._session, handle, feed_dict,
+
+/google/data/ro/teams/colab/tensorflow/google3/third_party/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+    727         except KeyError:
+    728           pass
+--> 729       raise type(e)(node_def, op, message)
+    730 
+    731   def _extend_graph(self):
+
+InvalidArgumentError: All inputs to node Slice must be from the same frame.

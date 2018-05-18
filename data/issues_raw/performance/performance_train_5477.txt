@@ -1,0 +1,43 @@
+Deal with _control_flow_context when copying op
+
+In the current implementation of copying ops (both tf.contrib.copy_graph and tf.contrib.graph_editor)
+The code of copying an op looks like this
+# copy inputs
+inputs_ = copy_func(op.inputs)
+# copy control_inputs
+control_inputs_ = copy_func(control_inputs)
+# copy _node_def, _op_def
+node_def_ = deepcopy(op._node_def)
+op_def_ = deepcopy(op._op_def)
+output_types_ = op._output_types[:]
+input_types_ = op._input_types[:]
+# copy name
+name_ = copy_func(op.name)
+# init the new op with above copies
+new_op = tf_ops.Operation(node_def_, ...)
+# ... copy shape and add to graph
+But the op._control_flow_context is not copied at all. This causes problems when trying to compute gradients on a copied subgraph with control flow op like tf.cond. The error looks like
+    grads = optimizer.compute_gradients(-lower_bound)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 253, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients.py", line 461, in gradients
+    out_grads[i] = control_flow_ops.ZerosLikeOutsideLoop(op, i)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 1310, in ZerosLikeOutsideLoop
+    pred = op_ctxt.pred
+AttributeError: 'NoneType' object has no attribute 'pred'
+This is because the function ZerosLikeOutsideLoop uses _control_flow_context when the op is tf.switch
+def ZerosLikeOutsideLoop(op, index):
+  """Create zeros_like for the specified output of an op."""
+  val = op.outputs[index]
+  if not IsSwitch(op):
+    return array_ops.zeros_like(val, optimize=False)
+  else:
+    op_ctxt = op._get_control_flow_context()
+    pred = op_ctxt.pred
+    branch = op_ctxt.branch
+    switch_val = switch(op.inputs[0], pred)[1 - branch]
+    zeros_shape = array_ops.shape_internal(switch_val, optimize=False)
+    return array_ops.zeros(zeros_shape, dtype=val.dtype)
+
+I tried setting new_op. _control_flow_context as op._control_flow_context
+Now the error step passed. But I'm not sure whether this is right for dealing with _control_flow_context copy. Do you have some advice?

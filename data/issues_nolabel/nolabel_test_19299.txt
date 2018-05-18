@@ -1,0 +1,88 @@
+resource_mgr.h violates its own thread safety annotations
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): MacOS 10.13.4
+TensorFlow installed from (source or binary): Source (ff6be80)
+TensorFlow version (use command below): b'v1.8.0-1663-gb2511764a7' 1.8.0
+Python version: 3.6.2
+Bazel version (if compiling from source): 0.13.0-homebrew
+GCC/Compiler version (if compiling from source): Apple LLVM version 9.1.0 (clang-902.0.39.1)
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A
+
+Describe the problem
+Line 
+  
+    
+      tensorflow/tensorflow/core/framework/resource_mgr.h
+    
+    
+         Line 527
+      in
+      de4a6e6
+    
+    
+    
+    
+
+        
+          
+           ctx->set_output(0, resource_); 
+        
+    
+  
+
+ accesses resource_ without holding mutex_.  This is causing a warning for some custom op code of mine:
+Installing collected packages: debate
+  Found existing installation: debate 0.0.1
+    Uninstalling debate-0.0.1:
+      Successfully uninstalled debate-0.0.1
+  Running setup.py develop for debate
+    Complete output from command /Users/irving/anaconda/envs/openai/bin/python -c "import setuptools, tokenize;__file__='/Users/irving/openai/debate/setup.py';f=getattr(tokenize, 'open', open)(__file__);code=f.read().replace('\r\n', '\n');f.close();exec(compile(code, __file__, 'exec'))" develop --no-deps:
+    running develop
+    running egg_info
+    writing debate.egg-info/PKG-INFO
+    writing dependency_links to debate.egg-info/dependency_links.txt
+    writing requirements to debate.egg-info/requires.txt
+    writing top-level names to debate.egg-info/top_level.txt
+    file debate.py (for module debate) not found
+    reading manifest file 'debate.egg-info/SOURCES.txt'
+    reading manifest template 'MANIFEST.in'
+    writing manifest file 'debate.egg-info/SOURCES.txt'
+    running build_ext
+    building 'debate_ops' extension
+    g++ -Wno-unused-result -Wsign-compare -Wunreachable-code -DNDEBUG -g -fwrapv -O3 -Wall -Wstrict-prototypes -I/Users/irving/anaconda/envs/openai/include -arch x86_64 -I/Users/irving/anaconda/envs/openai/include -arch x86_64 -I/Users/irving/anaconda/envs/openai/include/python3.6m -c debate/search.cc -o build/temp.macosx-10.7-x86_64-3.6/debate/search.o -std=c++1z -Wall -Werror -Wno-sign-compare -Wthread-safety -stdlib=libc++ -I/Users/irving/anaconda/envs/openai/lib/python3.6/site-packages/tensorflow/include -D_GLIBCXX_USE_CXX11_ABI=0
+    In file included from debate/search.cc:7:
+    /Users/irving/anaconda/envs/openai/lib/python3.6/site-packages/tensorflow/include/tensorflow/core/framework/resource_mgr.h:527:22: error: passing variable 'resource_' by reference requires holding mutex 'mutex_' [-Werror,-Wthread-safety-reference]
+      ctx->set_output(0, resource_);
+                         ^
+    /Users/irving/anaconda/envs/openai/lib/python3.6/site-packages/tensorflow/include/tensorflow/core/framework/resource_mgr.h:334:12: note: in instantiation of member function 'tensorflow::ResourceHandleOp<debate::(anonymous namespace)::Search>::Compute' requested here
+      explicit ResourceHandleOp(OpKernelConstruction* context);
+               ^
+    debate/search.cc:463:1: note: in instantiation of member function 'tensorflow::ResourceHandleOp<debate::(anonymous namespace)::Search>::ResourceHandleOp' requested here
+    REGISTER_RESOURCE_HANDLE_KERNEL(Search);
+    ^
+    /Users/irving/anaconda/envs/openai/lib/python3.6/site-packages/tensorflow/include/tensorflow/core/framework/resource_mgr.h:350:27: note: expanded from macro 'REGISTER_RESOURCE_HANDLE_KERNEL'
+                              ResourceHandleOp<Type>)
+                              ^
+    1 error generated.
+    error: command 'g++' failed with exit status 1
+
+The code is at least almost correct, since
+
+The use of resource_ outside the lock is read only
+resource_ is only written to inside the lock.
+The unlocked read occurs only if initialized_ is set to true.
+
+However, it looks like there is still a race condition:
+
+Two threads could both detect that initialized_ is false at the same time.
+They both try to grab the lock.
+One of them succeeds, does some initialization, and allocates the resource.
+Once the first thread releases the lock, the second thread allocates the resource a second time.
+Possibly (I'm not sure) the two threads see different values when they call set_output.
+
+The moral of this story is probably to not ignore thread safety warnings.

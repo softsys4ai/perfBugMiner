@@ -1,0 +1,43 @@
+fatal issue with _reverse_seq in rnn.py
+
+I was trying to code bidirectional seq2seq on my own. I made a cell with a embedding wrapper,
+following is the code of _reverse_seq which is from tensorflow ver r0.7(r0.9 doesn't work either)
+def _reverse_seq(input_seq, lengths):
+  """Reverse a list of Tensors up to specified lengths.
+  Args:
+    input_seq: Sequence of seq_len tensors of dimension (batch_size, depth)
+    lengths:   A tensor of dimension batch_size, containing lengths for each
+               sequence in the batch. If "None" is specified, simply reverses
+               the list.
+  Returns:
+    time-reversed sequence
+  """
+  if lengths is None:
+    return list(reversed(input_seq))
+
+  for input_ in input_seq:
+    input_.set_shape(input_.get_shape().with_rank(2))
+
+
+  # Join into (time, batch_size, depth)
+  s_joined = array_ops.pack(input_seq)
+
+  # Reverse along dimension 0
+  s_reversed = array_ops.reverse_sequence(s_joined, lengths, 0, 1)
+  # Split again into list
+  result = array_ops.unpack(s_reversed)
+  return result
+it requires input_seq which is sequence of seq_len tensors of dimension (batch_size, depth)
+However, pay attention to a part of def bidirectional_rnn :
+with vs.variable_scope(name + "_FW"):
+    output_fw, _ = rnn(cell_fw, inputs, initial_state_fw, dtype,
+                       None) # modified
+  #print (inputs[0].get_shape())
+  #print (sequence_length.get_shape())
+
+  # Backward direction
+  with vs.variable_scope(name + "_BW"):
+    tmp, _ = rnn(cell_bw, _reverse_seq(inputs, sequence_length),
+                 initial_state_bw, dtype, None) #modified
+  output_bw = _reverse_seq(tmp, sequence_length)
+just because I use a cell with a embedding wrapper, those inputs i feed are not embedded vector but one-hot encodded, and it has confliction with the requirement of _reverse_seq input.

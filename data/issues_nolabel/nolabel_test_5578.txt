@@ -1,0 +1,63 @@
+Compile TensorFlow r0.11 from source
+
+setup build environment
+
+$ cat Dockerfile
+FROM ubuntu:16.04
+
+# Bazel.
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
+RUN echo "deb [arch=amd64] http://storage.googleapis.com/bazel-apt stable jdk1.8" | tee /etc/apt/sources.list.d/bazel.list
+RUN curl https://bazel.build/bazel-release.pub.gpg | apt-key add -
+RUN apt-get update && apt-get install -y --no-install-recommends bazel
+
+# TensorFlow src & dev deps.
+RUN apt-get install -y --no-install-recommends git python3-numpy swig python3-dev python3-wheel python3-setuptools
+RUN ln -s /usr/bin/python3 /usr/local/bin/python
+RUN git clone --recurse-submodules https://github.com/tensorflow/tensorflow.git /opt/tensorflow
+WORKDIR /opt/tensorflow
+$ docker build -t bazel .
+
+
+start and attach to build environment:
+
+$ docker run -it --name bazel-build bazel
+root@c7027f1dec32:/opt/tensorflow# git checkout r0.11
+Switched to branch 'r0.11'
+Your branch is up-to-date with 'origin/r0.11'.
+root@c7027f1dec32:/opt/tensorflow# ./configure 
+/opt/tensorflow /opt/tensorflow
+Please specify the location of python. [Default is /usr/local/bin/python]: 
+Do you wish to build TensorFlow with Google Cloud Platform support? [y/N] 
+No Google Cloud Platform support will be enabled for TensorFlow
+Do you wish to build TensorFlow with Hadoop File System support? [y/N] 
+No Hadoop File System support will be enabled for TensorFlow
+Found possible Python library paths:
+  /usr/local/lib/python3.5/dist-packages
+  /usr/lib/python3/dist-packages
+Please input the desired Python library path to use.  Default is [/usr/local/lib/python3.5/dist-packages]
+
+/usr/local/lib/python3.5/dist-packages
+Do you wish to build TensorFlow with GPU support? [y/N] 
+No GPU support will be enabled for TensorFlow
+Configuration finished
+Extracting Bazel installation...
+.............
+INFO: Starting clean (this may take a while). Consider using --expunge_async if the clean takes more than several minutes.
+.............
+WARNING: /root/.cache/bazel/_bazel_root/fbc06f9baef46cade6e35d9e4137e37c/external/protobuf/protobuf.bzl:90:19: Variables HOST_CFG and DATA_CFG are deprecated in favor of strings "host" and "data" correspondingly.
+WARNING: /root/.cache/bazel/_bazel_root/fbc06f9baef46cade6e35d9e4137e37c/external/protobuf/protobuf.bzl:96:28: Variables HOST_CFG and DATA_CFG are deprecated in favor of strings "host" and "data" correspondingly.
+INFO: All external dependencies fetched successfully.
+root@c7027f1dec32:/opt/tensorflow# 
+
+
+Now try to build:
+
+root@c7027f1dec32:/opt/tensorflow# bazel build -c opt //tensorflow/tools/pip_package:build_pip_package
+WARNING: Sandboxed execution is not supported on your system and thus hermeticity of actions cannot be guaranteed. See http://bazel.io/docs/bazel-user-manual.html#sandboxing for more information. You can turn off this warning via --ignore_unsupported_sandboxing.
+WARNING: /root/.cache/bazel/_bazel_root/fbc06f9baef46cade6e35d9e4137e37c/external/protobuf/protobuf.bzl:90:19: Variables HOST_CFG and DATA_CFG are deprecated in favor of strings "host" and "data" correspondingly.
+WARNING: /root/.cache/bazel/_bazel_root/fbc06f9baef46cade6e35d9e4137e37c/external/protobuf/protobuf.bzl:96:28: Variables HOST_CFG and DATA_CFG are deprecated in favor of strings "host" and "data" correspondingly.
+ERROR: /opt/tensorflow/tensorflow/python/BUILD:1728:1: in cc_library rule //tensorflow/python:tf_session_helper: non-test target '//tensorflow/python:tf_session_helper' depends on testonly target '//tensorflow/python:construction_fails_op' and doesn't have testonly attribute set.
+ERROR: Analysis of target '//tensorflow/tools/pip_package:build_pip_package' failed; build aborted.
+INFO: Elapsed time: 1.643s
+root@c7027f1dec32:/opt/tensorflow#

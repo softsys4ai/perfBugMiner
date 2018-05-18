@@ -1,0 +1,93 @@
+sparsemax implementation is not infinite-safe
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes, but I have a simple reproducer below
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Fedora 27
+
+
+TensorFlow installed from (source or binary): pip3 install --user tensorflow
+
+
+TensorFlow version (use command below):  1.4.0
+
+
+Python version: 3.6.3
+
+
+Bazel version (if compiling from source): no
+
+
+GCC/Compiler version (if compiling from source): no
+
+
+CUDA/cuDNN version: no
+
+
+GPU model and memory: no (x86_64 CPU)
+
+
+Exact command to reproduce:
+
+
+Describe the problem
+tf.contrib.sparsemax.sparsemax does not produce the correctly expected results when infinities are present in the input.
+Mathematically, a negative infinity should be treated the same as a very large negative number, and produce a 0 in the output.
+This is a real-world problem when sparsemax is combined with contrib.seq2seq.LuongAttention (as suggested in its documentation, and also as suggested in the sparsemax paper), because entries past the input length in the batch will have a score of -inf by default.
+Source code / logs
+Reproducer (assume tensorflow as tf)
+>>> tf.contrib.sparsemax.sparsemax([[1., -1e+5]]).eval(session=sess)
+array([[ 1.,  0.]], dtype=float32)
+>>> tf.contrib.sparsemax.sparsemax([[1., float('-inf')]]).eval(session=sess)
+2017-12-21 22:13:55.697302: W tensorflow/core/framework/op_kernel.cc:1192] Invalid argument: flat indices[0, :] = [0, -1] does not index into param (shape: [1,2]).
+2017-12-21 22:13:55.697997: W tensorflow/core/framework/op_kernel.cc:1192] Invalid argument: flat indices[0, :] = [0, -1] does not index into param (shape: [1,2]).
+2017-12-21 22:13:55.699634: W tensorflow/core/framework/op_kernel.cc:1192] Invalid argument: flat indices[0, :] = [0, -1] does not index into param (shape: [1,2]).
+2017-12-21 22:13:55.699980: W tensorflow/core/framework/op_kernel.cc:1192] Invalid argument: flat indices[0, :] = [0, -1] does not index into param (shape: [1,2]).
+Traceback (most recent call last):
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1323, in _do_call
+    return fn(*args)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1302, in _run_fn
+    status, run_metadata)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/framework/errors_impl.py", line 473, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: flat indices[0, :] = [0, -1] does not index into param (shape: [1,2]).
+	 [[Node: sparsemax_7/GatherNd = GatherNd[Tindices=DT_INT32, Tparams=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"](sparsemax_7/sub, sparsemax_7/stack)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 570, in eval
+    return _eval_using_default_session(self, feed_dict, self.graph, session)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 4455, in _eval_using_default_session
+    return session.run(tensors, feed_dict)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 889, in run
+    run_metadata_ptr)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1120, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1317, in _do_run
+    options, run_metadata)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1336, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: flat indices[0, :] = [0, -1] does not index into param (shape: [1,2]).
+	 [[Node: sparsemax_7/GatherNd = GatherNd[Tindices=DT_INT32, Tparams=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"](sparsemax_7/sub, sparsemax_7/stack)]]
+
+Caused by op 'sparsemax_7/GatherNd', defined at:
+  File "<stdin>", line 1, in <module>
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/contrib/sparsemax/python/ops/sparsemax.py", line 69, in sparsemax
+    tau_sum = array_ops.gather_nd(z_cumsum, indices)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/ops/gen_array_ops.py", line 1971, in gather_nd
+    "GatherNd", params=params, indices=indices, name=name)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "/home/redacted/.local/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): flat indices[0, :] = [0, -1] does not index into param (shape: [1,2]).
+	 [[Node: sparsemax_7/GatherNd = GatherNd[Tindices=DT_INT32, Tparams=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"](sparsemax_7/sub, sparsemax_7/stack)]]

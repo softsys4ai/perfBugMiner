@@ -1,0 +1,230 @@
+How do I compile Tensorflow source with Altera FPGA library (AOCLUtils & OPENCL)
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform : Linux Ubuntu 16.04
+TensorFlow installed from source
+TensorFlow version : 1.3
+Python version: v2.7.10
+Bazel version: 0.5.4
+Exact command to reproduce: set all as default value  ./configure , not use cuda
+
+Describe the problem
+I am studying posting matmul_op calculation  into Altera FPGA Arria 10 via OPENCL and combine source and OpenCL/AOCLUtils library as python package.
+However, I encountered much problem about this and always build (Bazel) failed when compile.
+The following share some experience in every stages and some problem over the past month.
+AOCLUtils library package
+
+/AOCLUtils/BUILD     --->for bazel
+/AOCLUtils/aocl_utils.h
+/AOCLUtils/opencl.h
+/AOCLUtils/options.h
+/AOCLUtils/opencl.cpp
+/AOCLUtils/options.cpp
+/AOCLUtils/scoped_ptrs.h
+
+OPENCL header library package in /home/mater/intelFPGA_pro/17.0/hld/host/include
+compiled library (*.so) in /home/mater/intelFPGA_pro/17.0/hld/host/linux64/lib ;  /home/mater/intelFPGA_pro/17.0/hld/board/a10_ref/linux64/lib
+
+CL/cl_d3d10.h
+CL/cl_ext.h
+CL/cl_gl.h
+CL/cl.hpp
+CL/opencl.h
+CL/cl_ext_altera.h
+CL/cl_gl_ext.h
+CL/cl.h
+CL/cl_platform.h
+
+
+
+Study third party library - SYCL  (Seems not support Altera FPGA)
+Original, tensorflow supports OpenCL via SYCL.
+However, it only seems support GPU & CPU, not Altera FPGA.
+Besides, I gave up this method.
+
+
+
+Success build a New(external) Op with AOCLUtils/OPENCL via g++, but it's my purpose.
+Refer : https://www.tensorflow.org/extend/adding_an_op
+I study example for a new op and build as library with AOCLUtils/OPENCL.
+The g++ command is as follow then built as zero_out_cl.so.
+Tensorflow can load this external library and run some calculation in FPGA
+(zero_out_module = tf.load_op_library('./zero_out_all.so'))
+
+Although my purpose is tensorflow python installation with AOCLUtils/OPENCL library,
+it makes sure that tensorflow can support FPGA library
+
+g++ -std=c++11 -shared main.cpp -o zero_out_cl.so -fPIC -I /home/mater/tensorflowCPU_1.3/lib/python2.7/site-packages/tensorflow/include -I/home/mater/intelFPGA/17.0/hld/host/include /home/mater/AI/FPGA/TF_OPENCL_ZeroOut/common/src/AOCLUtils/opencl.cpp /home/mater/AI/FPGA/TF_OPENCL_ZeroOut/common/src/AOCLUtils/options.cpp -L/home/mater/intelFPGA_pro/17.0/hld/board/a10_ref/linux64/lib -L/home/mater/intelFPGA_pro/17.0/hld/host/linux64/lib -Wl,--no-as-needed -lalteracl -laltera_a10_ref_mmd -lelf -I/home/mater/AI/FPGA/TF_OPENCL_ZeroOut/common/inc -O2 -D_GLIBCXX_USE_CXX11_ABI=0 
+
+
+
+Modify Tensorflow source code with AOCLUtils/OPENCL and always bazel build failed..
+*step 1. git clone into /home/mater/git/test/tensorflow_opencl (tensorflow root folder)
+*step 2. copy AOCLUtils package into tensorflow root folder
+*step 3. Add cc_library into WORKSPACE for external opencl library (not sure correct method)
+
+
+new_local_repository(
+    name = "opencl_headers",
+    path = "/home/mater/intelFPGA_pro/17.0/hld/host/include",
+    build_file_content = """
+cc_library(
+	name = "CL",
+	hdrs = glob(["CL/*.h"]),
+	visibility = ["//visibility:public"],
+	linkopts=["-shared"],
+)
+""",
+)
+
+new_local_repository(
+    name = "opencl_libs",
+    path = "/home/mater/intelFPGA_pro/17.0/hld/host/linux64/lib",
+    build_file_content = """
+cc_library(
+	name = "libopencl",
+	srcs = glob(["*.so"]),
+	visibility = ["//visibility:public"],
+	linkopts=["-shared"],
+)
+""",
+)
+
+new_local_repository(
+    name = "a10_lib",
+    path = "/home/mater/intelFPGA_pro/17.0/hld/board/a10_ref/linux64/lib",
+    build_file_content = """
+cc_library(
+	name = "liba10",
+	srcs = ["libaltera_a10_ref_mmd.so"],
+	visibility = ["//visibility:public"],
+	linkopts=["-shared"],
+)
+""",
+)
+
+*step 4. Add BUILD file into AOCLUtils folder
+
+cc_library(
+	name="aocutils",
+	srcs = glob(["*.cpp"]),
+	hdrs = glob(["*.h"]),
+	deps = ["@opencl_libs//:libopencl", "@opencl_headers//:CL", "@a10_lib//:liba10",],
+	visibility=["//visibility:public"],
+)
+
+*step 5. Add deps into tf_kernel_library in tensorflow root folder/tensorflow/core/kernels/BUILD
+I would like to run matmul_op calculation in FPGA so try to include FPGA library
+
+tf_kernel_library(
+    name = "matmul_op",
+...
+    deps = MATH_DEPS + [
+...
+    ]) + ["//AOCLUtils:aocutils",],
+
+*I tried 3 methods to build tensorflow source code as python installation package, but always failed
+*step 6A.  Original bazel build command (Failed situation A)
+Use original Bazel build command, but failed to find CL library.
+exception :   fatal error: CL/cl.h: No such file or directory
+command
+
+bazel build --config=opt //tensorflow/tools/pip_package:build_pip_package --verbose_failures --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0"
+
+result
+
+ERROR: /home/mater/git/test/tensorflow_opencl/AOCLUtils/BUILD:1:1: C++ compilation of rule '//AOCLUtils:aocutils' failed (Exit 1): gcc failed: error executing command 
+  (cd /home/mater/.cache/bazel/_bazel_mater/cf4207c477b73da1da7e3336942f640b/execroot/org_tensorflow && \
+  exec env - \
+    PWD=/proc/self/cwd \
+    PYTHON_BIN_PATH=/usr/bin/python \
+    PYTHON_LIB_PATH=/usr/local/lib/python2.7/dist-packages \
+    TF_NEED_CUDA=0 \
+    TF_NEED_OPENCL=0 \
+  /usr/bin/gcc -U_FORTIFY_SOURCE -fstack-protector -Wall -B/usr/bin -B/usr/bin -Wunused-but-set-parameter -Wno-free-nonheap-object -fno-omit-frame-pointer -g0 -O2 '-D_FORTIFY_SOURCE=1' -DNDEBUG -ffunction-sections -fdata-sections '-march=native' '-std=c++0x' '-march=native' '-D_GLIBCXX_USE_CXX11_ABI=0' -MD -MF bazel-out/local-opt/bin/AOCLUtils/_objs/aocutils/AOCLUtils/options.pic.d '-frandom-seed=bazel-out/local-opt/bin/AOCLUtils/_objs/aocutils/AOCLUtils/options.pic.o' -fPIC -iquote . -iquote bazel-out/local-opt/genfiles -iquote external/opencl_libs -iquote bazel-out/local-opt/genfiles/external/opencl_libs -iquote external/bazel_tools -iquote bazel-out/local-opt/genfiles/external/bazel_tools -iquote external/opencl_headers -iquote bazel-out/local-opt/genfiles/external/opencl_headers -iquote external/a10_lib -iquote bazel-out/local-opt/genfiles/external/a10_lib -isystem external/bazel_tools/tools/cpp/gcc3 -fno-canonical-system-headers -Wno-builtin-macro-redefined '-D__DATE__="redacted"' '-D__TIMESTAMP__="redacted"' '-D__TIME__="redacted"' -c AOCLUtils/options.cpp -o bazel-out/local-opt/bin/AOCLUtils/_objs/aocutils/AOCLUtils/options.pic.o)
+In file included from ./AOCLUtils/opencl.h:32:0,
+                 from ./AOCLUtils/aocl_utils.h:27,
+                 from AOCLUtils/options.cpp:22:
+external/opencl_headers/CL/opencl.h:42:19: fatal error: CL/cl.h: No such file or directory
+compilation terminated.
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+INFO: Elapsed time: 12.957s, Critical Path: 5.11s
+FAILED: Build did NOT complete successfully
+
+
+*step 6B.  Add link path in command (Failed situation B)
+Use original Bazel build command with CL external path included, but failed to missing dependency declarations.
+exception :   missing dependency declarations for the following files included by 'AOCLUtils/options.cpp'
+I think this method should be ok and bazel can find CL library location, but I can't understand what happen for this.
+I study some information about 'missing dependency declarations', and found 'CROSSTOOL' for GPU for this title. It didn't help me to solve it because I don't use GPU configuration.
+command like building a New(external) Op method
+
+bazel build --config=opt //tensorflow/tools/pip_package:build_pip_package --copt="-I/home/mater/intelFPGA/17.0/hld/host/include" --verbose_failures  --copt="-L/home/mater/intelFPGA_pro/17.0/hld/board/a10_ref/linux64/lib" --copt="-L/home/mater/intelFPGA_pro/17.0/hld/host/linux64/lib" --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0"
+
+result
+
+ERROR: /home/mater/git/test/tensorflow_opencl/AOCLUtils/BUILD:1:1: undeclared inclusion(s) in rule '//AOCLUtils:aocutils':
+this rule is missing dependency declarations for the following files included by 'AOCLUtils/options.cpp':
+  '/home/mater/intelFPGA/17.0/hld/host/include/CL/cl.h'
+  '/home/mater/intelFPGA/17.0/hld/host/include/CL/cl_platform.h'
+  '/home/mater/intelFPGA/17.0/hld/host/include/CL/cl_gl.h'
+  '/home/mater/intelFPGA/17.0/hld/host/include/CL/cl_gl_ext.h'
+  '/home/mater/intelFPGA/17.0/hld/host/include/CL/cl_ext.h'
+  '/home/mater/intelFPGA/17.0/hld/host/include/CL/cl_ext_altera.h'
+In file included from /home/mater/intelFPGA/17.0/hld/host/include/CL/cl_ext.h:42:0,
+                 from external/opencl_headers/CL/opencl.h:45,
+                 from ./AOCLUtils/opencl.h:32,
+                 from ./AOCLUtils/aocl_utils.h:27,
+                 from AOCLUtils/options.cpp:22:
+/home/mater/intelFPGA/17.0/hld/host/include/CL/cl_ext_altera.h:442:0: warning: ignoring #pragma warning  [-Wunknown-pragmas]
+ #pragma warning( push )
+ ^
+/home/mater/intelFPGA/17.0/hld/host/include/CL/cl_ext_altera.h:443:0: warning: ignoring #pragma warning  [-Wunknown-pragmas]
+ #pragma warning( disable:4201 )
+ ^
+/home/mater/intelFPGA/17.0/hld/host/include/CL/cl_ext_altera.h:459:0: warning: ignoring #pragma warning  [-Wunknown-pragmas]
+ #pragma warning( pop )
+ ^
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+
+
+*step 6C.  Build AOCLUtils as library,AOCUtils.so, at first, then build tensorflow with this library (Failed situation C)
+Due to the below two situation, I tried to build AOCUtils package as library. Maybe it can skip some exception for CL library missing.
+Although it passed c++ code compiled and continue to build about 10 minutes (below two situation show failed message immediately), it still be failed at packaging python due to not find AOCLUtils
+First command for AOCUtils.so
+
+g++ -std=c++11 -shared AOCLUtils/opencl.cpp AOCLUtils/options.cpp -o AOCLUtils/AOCUtils.so -fPIC -I /home/mater/tensorflowCPU_1.3/lib/python2.7/site-packages/tensorflow/include -I/home/mater/intelFPGA/17.0/hld/host/include -L/home/mater/intelFPGA_pro/17.0/hld/board/a10_ref/linux64/lib -L/home/mater/intelFPGA_pro/17.0/hld/host/linux64/lib -Wl,--no-as-needed -lalteracl -laltera_a10_ref_mmd -lelf -I/home/mater/git/test/tensorflow_opencl -O2 -D_GLIBCXX_USE_CXX11_ABI=0
+
+Modify AOCLUtils/BUILD
+
+cc_library(
+	name="aocutils",
+	srcs = ["AOCLUtils.so"],
+	hdrs = glob(["*.h"]),
+	visibility=["//visibility:public"],
+)
+
+Second command for build
+
+bazel build --config=opt //tensorflow/tools/pip_package:build_pip_package --copt="-I/home/mater/intelFPGA/17.0/hld/host/include" --verbose_failures  --copt="-L/home/mater/intelFPGA_pro/17.0/hld/board/a10_ref/linux64/lib" --copt="-L/home/mater/intelFPGA_pro/17.0/hld/host/linux64/lib" --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0"
+
+result
+
+ERROR: /home/mater/git/test/tensorflow_opencl/tensorflow/python/BUILD:2908:1: Linking of rule '//tensorflow/python:_pywrap_tensorflow_internal.so' failed (Exit 1): gcc failed: error executing command 
+  (cd /home/mater/.cache/bazel/_bazel_mater/cf4207c477b73da1da7e3336942f640b/execroot/org_tensorflow && \
+  exec env - \
+    PWD=/proc/self/cwd \
+    PYTHON_BIN_PATH=/usr/bin/python \
+    PYTHON_LIB_PATH=/usr/local/lib/python2.7/dist-packages \
+    TF_NEED_CUDA=0 \
+    TF_NEED_OPENCL=0 \
+  /usr/bin/gcc -shared -o bazel-out/local-opt/bin/tensorflow/python/_pywrap_tensorflow_internal.so '-Wl,-rpath,$ORIGIN/../../_solib_k8/_U_S_SAOCLUtils_Caocutils___UAOCLUtils' -Lbazel-out/local-opt/bin/_solib_k8/_U_S_SAOCLUtils_Caocutils___UAOCLUtils -Wl,--version-script tensorflow/tf_version_script.lds -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread -pthread '-fuse-ld=gold' -Wl,-no-as-needed -Wl,-z,relro,-z,now -B/usr/bin -B/usr/bin -pass-exit-codes -Wl,--gc-sections -Wl,@bazel-out/local-opt/bin/tensorflow/python/_pywrap_tensorflow_internal.so-2.params)
+/usr/bin/ld.gold: error: cannot find -lAOCLUtils
+collect2: error: ld returned 1 exit status
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+INFO: Elapsed time: 817.337s, Critical Path: 40.20s
+FAILED: Build did NOT complete successfully
+
+Could someone help me find some suggestion or share information about this? Thanks!!

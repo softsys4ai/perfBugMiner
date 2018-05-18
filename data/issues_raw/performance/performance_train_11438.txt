@@ -1,0 +1,77 @@
+Switching Session to MonitoredTrainingSession Produces Negative Dimension Tensors from Queues
+
+I already posted on StackOverflow, but received no response.
+I've made some changes to my code since posting on StackOverflow, but the problem is still the same: the readers and queues I use without a problem with a vanilla tf.Session() work fine, but if I try to switch to a tf.train.MonitoredTrainingSession, I get the following error:
+InvalidArgumentError (see above for traceback): Shape [15,-1,4] has negative dimensions [[Node: define_inputs/y = Placeholder[dtype=DT_FLOAT, shape=[15,?,4], _device="/job:local/replica:0/task:0/cpu:0"]()]]
+I'm using TensorFlow v1.2.0-5-g435cdfc 1.2.1. Here's my code. This works:
+# fix random seed to permit comparison between training runs
+tf.set_random_seed(seed=0)
+
+# define graph
+model = import_model()
+
+with tf.Session() as monitored_sess:
+
+    monitored_sess.run(tf.global_variables_initializer())
+
+    # create coordinator to handle threading
+    coord = tf.train.Coordinator()
+
+    # start threads to enqueue input minibatches for training
+    threads = tf.train.start_queue_runners(sess=monitored_sess, coord=coord)
+
+    data = monitored_sess.run([training_data])
+    x, y, x_lengths, y_lengths = data[0]
+
+    # when done, ask the threads to stop
+    coord.request_stop()
+
+    # wait for threads to finish
+    coord.join(threads)
+
+But then, this code doesn't work:
+tf.set_random_seed(seed=0)
+
+# define graph
+model = import_model()
+
+# create a one process cluster with an in-process server
+server = tf.train.Server.create_local_server()
+
+# define hooks for writing summaries and model variables to disk
+hooks = construct_training_hooks(model.summary_op, model.loss, train_log_directory)
+
+# create monitored training session to write model variables and summaries to disk
+with tf.train.MonitoredTrainingSession(master=server.target,
+                                       config=tf.ConfigProto(allow_soft_placement=True),
+                                       is_chief=True,
+                                       hooks=hooks) as monitored_sess:
+
+    # create coordinator to handle threading
+    coord = tf.train.Coordinator()
+
+    # start threads to enqueue input minibatches for training
+    threads = tf.train.start_queue_runners(sess=monitored_sess, coord=coord)
+
+    # train
+    data = monitored_sess.run([training_data])
+    x, y, x_lengths, y_lengths = data[0]
+
+    # when done, ask the threads to stop
+    coord.request_stop()
+
+    # wait for threads to finish
+    coord.join(threads)
+
+The function construct_training_hooks is pretty straightforward:
+def construct_training_hooks(summary_op, loss, train_log_directory):
+    hooks = [tf.train.StopAtStepHook(last_step=tf.flags.FLAGS.max_steps),
+             tf.train.CheckpointSaverHook(checkpoint_dir=train_log_directory,
+                                          saver=tf.train.Saver(),
+                                          save_steps=5),
+             tf.train.SummarySaverHook(output_dir=train_log_directory,
+                                       summary_op=summary_op,
+                                       save_steps=1),
+             tf.train.NanTensorHook(loss_tensor=loss)]
+
+    return hooks

@@ -1,0 +1,74 @@
+possible bug - LSTMCell and GRUCell have different variable reuse behavior
+
+tf_env.txt
+System information
+Capture script output is attached.
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes -- see below
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):  OS X 10.12.4
+TensorFlow installed from (source or binary): pip
+TensorFlow version (use command below): 1.1.0
+Bazel version (if compiling from source): NA
+CUDA/cuDNN version: NA
+GPU model and memory:  NA
+Exact command to reproduce:
+
+class ToyModel(object):
+	def __init__(self):
+		x = tf.get_variable("x", shape=[10,32,3], initializer=tf.random_uniform_initializer(), trainable=False)
+		cell = tf.contrib.rnn.LSTMCell(3)
+		self.y, _ = tf.nn.dynamic_rnn(cell, inputs=x, dtype=tf.float32)
+
+graph_context = tf.Graph()
+with graph_context.as_default():
+	with tf.name_scope("Train"):
+		with tf.variable_scope("Model", reuse=None):
+			m1 = ToyModel()
+	with tf.name_scope("Valid"):
+		with tf.variable_scope("Model", reuse=True):
+			m2 = ToyModel()
+
+	tf_init = tf.global_variables_initializer()
+
+	# sv = tf.train.Supervisor(logdir=save_dir)
+	# with sv.managed_session() as session:
+	session = tf.Session(graph=graph_context)
+	with session as sess:
+		sess.run(tf_init)
+		y1 = m1.y.eval()
+
+		y2 = m2.y.eval()
+
+		print(y1 == y2)
+
+Traceback (most recent call last):
+  File "src/minimal_tf.py", line 30, in <module>
+    m2 = ToyModel()
+  File "src/minimal_tf.py", line 21, in __init__
+    self.y, _ = tf.nn.dynamic_rnn(cell, inputs=x, dtype=tf.float32)
+  File "/Users/delkind/Desktop/whd/venv/lib/python3.5/site-packages/tensorflow/python/ops/rnn.py", line 553, in dynamic_rnn
+    dtype=dtype)
+  File "/Users/delkind/Desktop/whd/venv/lib/python3.5/site-packages/tensorflow/python/ops/rnn.py", line 720, in _dynamic_rnn_loop
+    swap_memory=swap_memory)
+  File "/Users/delkind/Desktop/whd/venv/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2623, in while_loop
+    result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/Users/delkind/Desktop/whd/venv/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2456, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/Users/delkind/Desktop/whd/venv/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2406, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/Users/delkind/Desktop/whd/venv/lib/python3.5/site-packages/tensorflow/python/ops/rnn.py", line 705, in _time_step
+    (output, new_state) = call_cell()
+  File "/Users/delkind/Desktop/whd/venv/lib/python3.5/site-packages/tensorflow/python/ops/rnn.py", line 691, in <lambda>
+    call_cell = lambda: cell(input_t, state)
+  File "/Users/delkind/Desktop/whd/venv/lib/python3.5/site-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 398, in __call__
+    reuse=self._reuse) as unit_scope:
+  File "/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/contextlib.py", line 59, in __enter__
+    return next(self.gen)
+  File "/Users/delkind/Desktop/whd/venv/lib/python3.5/site-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 93, in _checked_scope
+    "the argument reuse=True." % (scope_name, type(cell).__name__))
+ValueError: Attempt to have a second RNNCell use the weights of a variable scope that already has weights: 'Model/rnn/lstm_cell'; and the cell was not constructed as LSTMCell(..., reuse=True).  To share the weights of an RNNCell, simply reuse it in your second calculation, or create a new one with the argument reuse=True.
+
+Describe the problem
+When cell is an LSTMCell instance, this code raises the the ValueError above, which I believe to be a bug. My expectation is that invoking the second model in a scope with reuse=True will mean that m2 uses the already-existing variables in m1. The error message indicates that this is not happening, apparently because the LSTMCell is not aware of the reuse flag set in m2's scope.
+By contrast, if you swap the LSTMCell for GRUCell, no errors are raised, and the code completes as expected. Indeed, the outputs of y1 and y2 are equal when the graph is evaluated.
+Likewise, if you use the LSTMCell but skip creating m2 at all, y1 can be evaluated without any errors.

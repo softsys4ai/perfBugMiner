@@ -1,0 +1,49 @@
+Tensorflow fault tolerance
+
+Hello,
+I have been using the following simple code to learn about the behavior of distributed tensorflow (which claims to be fault tolerant):-
+import tensorflow as tf
+cluster = tf.train.ClusterSpec({"local": ["localhost:2222", "localhost:2223","localhost:2224", "localhost:2225"]})
+x = tf.constant(2)
+with tf.device("/job:local/task:1"):
+  y1 = x + 300
+with tf.device("/job:local/task:2"):
+  y2 = x**2
+with tf.device("/job:local/task:3"):
+  y3 = 5*x
+with tf.device("/job:local/task:0"):
+  y0 = x - 66
+  y = y0 + y1 + y2 + y3
+
+model = tf.initialize_all_variables()
+
+with tf.Session("grpc://localhost:2222") as sess:
+  sess.run(model)
+  print(sess.run(y0))
+  print('\n')
+  print(sess.run(y1))
+  print('\n')
+  print(sess.run(y2))
+  print('\n')
+  print(sess.run(y3))
+  print('\n')
+  result = sess.run(y)
+  print(result)
+
+I create workers by running a separate program as given below:-
+#get task number from command line
+import sys
+task_number = int(sys.argv[1])
+
+import tensorflow as tf
+
+cluster = tf.train.ClusterSpec({"local": ["localhost:2222", "localhost:2223", "localhost:2224", "localhost:2225"]})
+server = tf.train.Server(cluster, job_name="local", task_index=task_number)
+
+print("Starting server #{}".format(task_number))
+
+server.start()
+server.join()
+
+
+But when I stop one of the servers(machines), the whole program stops functioning instead of assigning the job to another machine. Is tensorflow fault tolerant when a machine goes down?

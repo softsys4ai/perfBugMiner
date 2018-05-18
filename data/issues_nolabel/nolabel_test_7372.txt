@@ -1,0 +1,109 @@
+`Estimator.evaluate` froze
+
+Environment info
+Operating System:
+Linux 3.13.0-107-generic #154-Ubuntu SMP Tue Dec 20 09:57:27 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+Installed version of CUDA and cuDNN:
+None
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+
+a7338d74be3b07968dd2c2a94167db7b9ae1a9f8
+
+The output of bazel version
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+I implement a customized function for an Estimator class and run fit and evaluate with the Estimator model. The training works fine but it will stops at evaluate with around 220% CPU usage.
+The following is a script to reproduce the similar problem. If you comment the evaluate function, this example script works fine, otherwise it will freeze at that part.
+import tensorflow as tf
+from tensorflow.contrib.layers.python.layers.optimizers import optimize_loss
+from tensorflow.contrib.learn.python.learn.estimators import model_fn
+from tensorflow.contrib.learn.python.learn.estimators.estimator import Estimator
+from tensorflow.python import debug as tf_debug
+from tensorflow.python.framework import ops
+
+
+def main(_):
+    hooks = [tf_debug.LocalCLIDebugHook()]
+
+    def func(features, targets, mode, params):
+        idx = tf.concat([features['a'], features['b']], axis=1)
+
+        embedding = tf.get_variable("embed", [10, 20], dtype=tf.float32)
+
+        pred = tf.reduce_sum(tf.nn.embedding_lookup(embedding, idx))
+
+        train_op = optimize_loss(loss=pred,
+                                 global_step=tf.train.get_global_step(),
+                                 learning_rate=0.001,
+                                 optimizer='Adam',
+                                 variables=tf.trainable_variables(),
+                                 name="training_loss_optimizer")
+
+        eval_metric_dict = dict()
+        eval_metric_dict['metric'] = pred
+
+        return model_fn.ModelFnOps(mode=mode,
+                                   predictions=pred,
+                                   loss=pred,
+                                   train_op=train_op,
+                                   eval_metric_ops=eval_metric_dict)
+
+    model = Estimator(func, params={})
+
+    model.fit(
+        input_fn=lambda: (
+            {'a': ops.convert_to_tensor([[1, 2, 3, 4, 5]]), 'b': ops.convert_to_tensor([[2, 3, 4, 3, 5]])},
+            None), max_steps=10, monitors=hooks)
+    model.evaluate(
+         input_fn=lambda: (
+             {'a': ops.convert_to_tensor([[1, 2, 3, 4, 5]]), 'b': ops.convert_to_tensor([[2, 3, 4, 3, 5]])},
+             None))
+
+
+if __name__ == "__main__":
+    tf.app.run()
+
+Logs or other output that would be helpful
+If I press ctrl + c, the stack info are:
+WARNING:tensorflow:Using temporary folder as model directory: /tmp/tmp5jemyudd
+
+
+1q^CTraceback (most recent call last):
+  File "estimator_test.py", line 48, in <module>
+    tf.app.run()
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/platform/app.py", line 44, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "estimator_test.py", line 42, in main
+    input_fn=lambda: (
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/util/deprecation.py", line 281, in new_func
+    return func(*args, **kwargs)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 507, in evaluate
+    log_progress=log_progress)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 825, in _evaluate_model
+    config=config_pb2.ConfigProto(allow_soft_placement=True))
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/contrib/training/python/training/evaluation.py", line 442, in evaluate_once
+    session.run(eval_ops, feed_dict)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/training/monitored_session.py", line 469, in run
+    run_metadata=run_metadata)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/training/monitored_session.py", line 793, in run
+    run_metadata=run_metadata)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/training/monitored_session.py", line 751, in run
+    return self._sess.run(*args, **kwargs)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/training/monitored_session.py", line 898, in run
+    run_metadata=run_metadata)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/training/monitored_session.py", line 751, in run
+    return self._sess.run(*args, **kwargs)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 1022, in _do_call
+    return fn(*args)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 1004, in _run_fn
+    status, run_metadata)
+KeyboardInterrupt
+^C⏎

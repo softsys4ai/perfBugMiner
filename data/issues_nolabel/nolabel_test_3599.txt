@@ -1,0 +1,59 @@
+Use Retrained categories in Android Camera Demo
+
+GitHub issues are for bugs / installation problems / feature requests.
+For general support from the community, see StackOverflow.
+To make bugs and feature requests more easy to find and organize, we close issues that are deemed
+out of scope for GitHub Issues and point people to StackOverflow.
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+Environment info
+Operating System: Docker on Windows
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+The output of bazel version
+
+Steps to reproduce
+
+Successfully retrain new data with Docker. Get the two retrained files retrained_graph.pb and retrained_labels.txt
+https://codelabs.developers.google.com/codelabs/tensorflow-for-poets/index.html?index=..%2F..%2Findex#5
+Try to install Bazel on windows but failed. But I found an Android Demo which doesn't need Bazel. This one works well on Windows. It can recognize images into 1000 classes provided by ImageNet in an Android real-time camera.
+https://github.com/miyosuda/TensorFlowAndroidDemo
+
+What have you tried?
+Reference； #1269
+Based on the suggestions, I tried the following things:
+1.Find the coded_stream.h in the google/protobuf section of your tensorflow build and modify the 64 to 256 in the following line:
+static const int kDefaultTotalBytesLimit = 64 << 20; // Change the 64 to 256 MB
+2.Modify only the input_size to 299 and the image_mean to 128 in the TensorflowImageListener.java
+3.Go to tensorflow_jni.cc in the android demo and modify as follows:
+  input_tensor_mapped(0, i, j, 0) =
+      (static_cast<float>(src->red) - g_image_mean)/g_image_mean;
+  input_tensor_mapped(0, i, j, 1) =
+      (static_cast<float>(src->green) - g_image_mean)/g_image_mean;
+  input_tensor_mapped(0, i, j, 2) =
+      (static_cast<float>(src->blue) - g_image_mean)/g_image_mean;
+  ++src;
+
+std::vector<std::pair<std::string, tensorflow::Tensor> > input_tensors(
+{{"Mul", input_tensor}});
+std::vectorstd::string output_names({"softmax"});
+4.Do the following changes in TensorflowImageListerner.java:
+private static final String MODEL_FILE = "file:///android_asset/retrained_graph.pb";
+private static final String LABEL_FILE =
+"file:///android_asset/retrained_labels.txt";
+5. Build the android demo
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+08-01 17:36:50.015 14978-15121/org.tensorflow.tensorflowdemo A/native: jni_utils.cc:107 Check failed: message->ParseFromZeroCopyStream(&adaptor)
+08-01 17:36:50.015 14978-15121/org.tensorflow.tensorflowdemo A/libc: Fatal signal 6 (SIGABRT), code -6 in tid 15121 (ImageListener)
+I know this is a problem due to the incompatible variables of Inception v3 and Inception 5h. The Android Demo model I use is Inception 5h, But the model I used to train my new data is Inception 3v.  I've tried to edit the variables mentioned here: #1269.
+But I still get the same errors. Anyone could help me explain how to adapt my new trained data running in the Android Demo?

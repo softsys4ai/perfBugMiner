@@ -1,0 +1,68 @@
+Losing Output Shape information of conv2d_transpose layer when importing from .pbtxt file
+
+This is a custom code
+
+
+ I'm on Mac OSX 10.11.16
+
+
+ TensorFlow version 1.6.0
+
+
+ Bazel version N/A
+
+
+  Tensorflow installed from source
+
+
+ CUDA/cuDNN version N/A
+
+
+ GPU model and memory N/A
+
+
+ Exact command to reproduce
+
+
+The output shape of the node with node. Type Conv2DBackpropInput seems to lose height and width information as in this:
+This is denconv layer definition and conv3 layer after it
+`deconv = tf.layers.conv2d_transpose(pool2 , filters = 32 ,kernel_size = [2,2],strides=(1, 1) , padding = "same")
+conv3 = tf.layers.conv2d(inputs= deconv,filters=64,kernel_size=[1, 1],padding="same", activation=tf.nn.relu)`
+graph = tf.get_default_graph() is built in the notebook
+for node in graph.get_operations():
+  if node.type == "Conv2DBackpropInput":
+    print(node.type,"---->>>>>", "outputsshape ----" , node.outputs[0].get_shape())
+
+Output:
+Conv2DBackpropInput ---->>>>> outputsshape ---- (?, 7, 7, 32)
+
+Same graph converted to .pbtxt by:
+tf.train.write_graph(graph, "graphx/" , "sample_this_1.pbtxt")
+
+Reading it again from .pbtxt
+tf.reset_default_graph()
+gram = tf.get_default_graph()
+gram.get_operations()
+from tensorflow.core.framework import graph_pb2
+from google.protobuf import text_format as pbtf
+
+gdef = graph_pb2.GraphDef()
+
+with open('graphx/sample_this_1.pbtxt', 'r') as f:
+    graph_str = f.read()
+
+pbtf.Merge(graph_str, gdef)
+
+tf.import_graph_def(gdef)
+
+Now doing the same for gram I get,
+for node in gram.get_operations():
+  if node.type == "Conv2DBackpropInput":
+    print(node.type,"---->>>>>", "outputsshape ----" , node.outputs[0].get_shape())
+
+Output:
+Conv2DBackpropInput ---->>>>> outputsshape ---- (?, ?, ?, 32)
+
+So, the outputs --- shape went from (? ,7 ,7 ,32) to (? , ? , ? ,32) after reading from .pbtxt
+Why is that? Is it a bug because output_shape is a part of model definition I guess?
+Thanks.

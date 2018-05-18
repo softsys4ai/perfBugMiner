@@ -1,0 +1,119 @@
+CPU execution of ops after gradient clipping on windows
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows10
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below):1.5.0
+Python version: 3.6
+Bazel version (if compiling from source):N/A
+GCC/Compiler version (if compiling from source):N/A
+CUDA/cuDNN version:CUDA 9.0, cuDNN 7
+GPU model and memory: Titan xp, 12gb
+Exact command to reproduce: Script attached below
+
+Describe the problem
+Adding gradient clipping as follows places certain ops on the CPU greatly increasing training time on windows.
+    grads = tf.gradients(loss, tf.trainable_variables())
+    omnomed_grads, _ = tf.clip_by_global_norm(grads, 0.5)
+    train_op = optimizer.apply_gradients(zip(omnomed_grads,  tf.trainable_variables()))
+I worte a script  to perform a few tests:
+
+
+
+OS
+TF Version
+Gradient clipping
+Average runtime (m:s.ms)
+
+
+
+
+Windows10
+1.6
+True
+2:13.57
+
+
+Windows10
+1.6
+False
+0:16.24
+
+
+Windows10
+1.5
+True
+2:13.46
+
+
+Windows10
+1.5
+False
+0:16.52
+
+
+Windows10
+1.2
+True
+0:24.64
+
+
+Windows10
+1.2
+False
+0:23.80
+
+
+Linux mint 18.1
+1.5
+True
+0:23.45
+
+
+Linux mint 18.1
+1.5
+False
+0:21.29
+
+Curiously the issue isn't present on TF1.2
+Forcing operation placement on the GPU:
+    with tf.device('/gpu:0'):
+        grads = tf.gradients(loss, tf.trainable_variables())
+        omnomed_grads, _ = tf.clip_by_global_norm(grads, 0.5)
+        train_op = optimizer.apply_gradients(zip(omnomed_grads,  tf.trainable_variables()))
+results in the following error on windows:
+Cannot assign a device for operation 'gradients/softmax_cross_entropy_with_logits_grad/LogSoftmax': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+The error generated is similar to #2803 and #3118
+Setting soft device placement in session configuration results in similar runtime.
+Source code / logs
+I have attached the device placement logs of windows 10 running TF 1.6 with and without gradient clipping as well as the device placement logs from Linux mint with gradient clipping
+A few discrepancies with respect to op placement while gradient clipping are highlighted below:
+
+
+
+Windows10
+Linux mint
+
+
+
+
+gradients/softmax_cross_entropy_with_logits_grad/LogSoftmax: (LogSoftmax): /job:localhost/replica:0/task:0/device:CPU:0
+gradients/softmax_cross_entropy_with_logits_grad/LogSoftmax: (LogSoftmax): /job:localhost/replica:0/task:0/device:GPU:0
+
+
+global_norm/L2Loss_6: (L2Loss): /job:localhost/replica:0/task:0/device:CPU:0
+global_norm/L2Loss_6: (L2Loss): /job:localhost/replica:0/task:0/device:GPU:0
+
+
+gradients/conv2d/Conv2D_grad/Conv2DBackpropFilter: (Conv2DBackpropFilter): /job:localhost/replica:0/task:0/device:CPU:0
+gradients/conv2d/Conv2D_grad/Conv2DBackpropFilter: (Conv2DBackpropFilter): /job:localhost/replica:0/task:0/device:GPU:0
+
+
+gradients/conv2d/BiasAdd_grad/BiasAddGrad: (BiasAddGrad): /job:localhost/replica:0/task:0/device:CPU:0
+gradients/conv2d/BiasAdd_grad/BiasAddGrad: (BiasAddGrad): /job:localhost/replica:0/task:0/device:GPU:0
+
+
+clip_by_global_norm/mul_8: (Mul): /job:localhost/replica:0/task:0/device:CPU:0
+clip_by_global_norm/mul_8: (Mul): /job:localhost/replica:0/task:0/device:GPU:0

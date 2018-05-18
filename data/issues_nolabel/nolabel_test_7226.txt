@@ -1,0 +1,85 @@
+conv2d gives NaN gradients with float16 input
+
+Environment info
+Operating System: Ubuntu 16 LTS
+breaks already on CPU
+If installed from binary pip package, provide:
+
+A link to the pip package you installed: recent nightly build
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+>tf.__version__
+'0.12.head'
+>tf.__git_version__
+'0.12.1-2263-g4cc0d1e-dirty'
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+import numpy as np
+
+slim = tf.contrib.slim
+
+dtype = tf.float16
+shape = (4, 16, 16, 3)
+
+inpt = tf.placeholder(dtype, shape, name='input')
+net = slim.conv2d(inpt, 16, [3, 3], scope='conv')
+loss = tf.reduce_mean(net)
+opt = tf.train.AdamOptimizer(1e-3)
+train_op = slim.learning.create_train_op(loss, opt)
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    for i in range(2):
+        val = np.random.randn(*shape)
+        print(sess.run(train_op, feed_dict={inpt: val}))
+So basically it breaks on the second step of SGD because loss is NaN. If I change dtype in float32, it works. It should have nothing to do with CUDA, I tested it on CPU version as well as on GPU with CUDA8, CuDNN5.1.
+What other attempted solutions have you tried?
+I have no idea what to try here. Now I continue with float32.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+-0.00072765
+Traceback (most recent call last):
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1022, in _do_call
+    return fn(*args)
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1004, in _run_fn
+    status, run_metadata)
+  File "/usr/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py", line 469, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: LossTensor is inf or nan : Tensor had NaN values
+         [[Node: train_op/CheckNumerics = CheckNumerics[T=DT_HALF, message="LossTensor is inf or nan", _device="/job:localhost/replica:0/task:0/cpu:0"](control_dependency)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "test_bn.py", line 22, in <module>
+    print(sess.run(train_op, feed_dict={inpt: val}))
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1035, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: LossTensor is inf or nan : Tensor had NaN values
+         [[Node: train_op/CheckNumerics = CheckNumerics[T=DT_HALF, message="LossTensor is inf or nan", _device="/job:localhost/replica:0/task:0/cpu:0"](control_dependency)]]
+
+Caused by op 'train_op/CheckNumerics', defined at:
+  File "test_bn.py", line 16, in <module>
+    train_op = slim.learning.create_train_op(loss, opt)
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/contrib/slim/python/slim/learning.py", line 472, in create_train_op
+    'LossTensor is inf or nan')
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/ops/gen_array_ops.py", line 433, in check_numerics
+    message=message, name=name)
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 768, in apply_op
+    op_def=op_def)
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2402, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/lear/kshmelko/.local/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1264, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): LossTensor is inf or nan : Tensor had NaN values
+         [[Node: train_op/CheckNumerics = CheckNumerics[T=DT_HALF, message="LossTensor is inf or nan", _device="/job:localhost/replica:0/task:0/cpu:0"](control_dependency)]]

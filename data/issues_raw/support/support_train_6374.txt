@@ -1,0 +1,177 @@
+BUG when trainning with multiple ps-server
+
+I post a issue previous #6326
+The original problem is solved by @yaroslavvb  with add sharded=True to Saver's init .
+BUT , One more problem occurs:
+
+when I training with 5 workers and m (m=1) ps-server, then training process works well.
+BUT when training with 5 workers and m (m>1) ps-servers, then training process crash with error NotFoundError (see above for traceback): ./supervisor/model.ckpt-0_temp_994ae96906954e838fc2f3481ce8f296/part-00001-of-00002.data-00000-of-00001
+
+It seems that when have multiple ps-servers , the checkpoint-save has some weird bugs.
+The detail error:
+Traceback (most recent call last):
+  File "distributed_deepcake.py", line 441, in <module>
+    exit(1)
+  File "/home/serving/anaconda2/lib/python2.7/contextlib.py", line 24, in __exit__
+    self.gen.next()
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/supervisor.py", line 974, in managed_session
+    self.stop(close_summary_writer=close_summary_writer)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/supervisor.py", line 802, in stop
+    stop_grace_period_secs=self._stop_grace_secs)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/coordinator.py", line 386, in join
+    six.reraise(*self._exc_info_to_raise)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/coordinator.py", line 296, in stop_on_exception
+    yield
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/coordinator.py", line 487, in run
+    self.run_loop()
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/supervisor.py", line 1069, in run_loop
+    global_step=self._sv.global_step)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1323, in save
+    {self.saver_def.filename_tensor_name: checkpoint_file})
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 766, in run
+    run_metadata_ptr)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 964, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+    target_list, options, run_metadata)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.NotFoundError: ./supervisor/distributed_img0_uid_extra-ftrl-lr0.01-fs30000000-b1000-u63.31.31.15/model.ckpt-0_temp_cde50a9b175b4ca596e757677ce5d86c/part-00004-of-00006.data-00000-of-00001
+         [[Node: save/SaveV2_4 = SaveV2[dtypes=[DT_INT32], _device="/job:ps/replica:0/task:2/cpu:0"](save/ShardedFilename_4, save/SaveV2_4/tensor_names, save/SaveV2_4/shape_and_slices, global_step)]]
+         [[Node: save/Identity_S197 = _Recv[client_terminated=false, recv_device="/job:worker/replica:0/task:0/cpu:0", send_device="/job:ps/replica:0/task:2/cpu:0", send_device_incarnation=-6527834651342755590, tensor_name="edge_107_save/Identity", tensor_type=DT_STRING, _device="/job:worker/replica:0/task:0/cpu:0"]()]]
+
+Caused by op u'save/SaveV2_4', defined at:
+  File "distributed_deepcake.py", line 293, in <module>
+    saver = tf.train.Saver(max_to_keep = 2, sharded=True)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1000, in __init__
+    self.build()
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1030, in build
+    restore_sequentially=self._restore_sequentially)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 618, in build
+    save_tensor = self._AddShardedSaveOps(filename_tensor, per_device)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 314, in _AddShardedSaveOps
+    return self._AddShardedSaveOpsForV2(filename_tensor, per_device)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 288, in _AddShardedSaveOpsForV2
+    sharded_saves.append(self._AddSaveOps(sharded_filename, saveables))
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 229, in _AddSaveOps
+    save = self.save_op(filename_tensor, saveables)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 172, in save_op
+    tensors)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/ops/gen_io_ops.py", line 552, in save_v2
+    tensors=tensors, name=name)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 759, in apply_op
+    op_def=op_def)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2240, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/serving/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1128, in __init__
+    self._traceback = _extract_stack()
+
+NotFoundError (see above for traceback): ./supervisor/distributed_img0_uid_extra-ftrl-lr0.01-fs30000000-b1000-u63.31.31.15/model.ckpt-0_temp_cde50a9b175b4ca596e757677ce5d86c/part-00004-of-00006.data-00000-of-00001
+         [[Node: save/SaveV2_4 = SaveV2[dtypes=[DT_INT32], _device="/job:ps/replica:0/task:2/cpu:0"](save/ShardedFilename_4, save/SaveV2_4/tensor_names, save/SaveV2_4/shape_and_slices, global_step)]]
+         [[Node: save/Identity_S197 = _Recv[client_terminated=false, recv_device="/job:worker/replica:0/task:0/cpu:0", send_device="/job:ps/replica:0/task:2/cpu:0", send_device_incarnation=-6527834651342755590, tensor_name="edge_107_save/Identity", tensor_type=DT_STRING, _device="/job:worker/replica:0/task:0/cpu:0"]()]]
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Only find one issue and it's myself . #6326
+Environment info
+Operating System:
+centos 6.5 ,glibc 2.17, gcc6.2, Python 2.7.12, tensorflow newest version 0.12rc1 with cpu
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+with tf.device(tf.train.replica_device_setter(
+        worker_device="/job:worker/task:%d" % FLAGS.task_index,
+        cluster=cluster)):
+    # Read TFRecords files for training
+    filename_queue = tf.train.string_input_producer(
+        tf.train.match_filenames_once(FLAGS.train),
+        num_epochs=epoch_number)
+    serialized_example = read_and_decode(filename_queue)
+    batch_serialized_example = tf.train.shuffle_batch(
+        [serialized_example],
+        batch_size=batch_size,
+        num_threads=thread_number,
+        capacity=capacity,
+        min_after_dequeue=min_after_dequeue)
+    features = tf.parse_example(
+        batch_serialized_example,
+        features={
+            "label": tf.FixedLenFeature([], tf.float32),
+            "ids": tf.VarLenFeature(tf.int64),
+            "values": tf.VarLenFeature(tf.float32),
+        })
+    batch_labels = features["label"]
+    batch_ids = features["ids"]
+    batch_values = features["values"]
+
+    # Read TFRecords file for validatioin
+    validate_filename_queue = tf.train.string_input_producer(
+        tf.train.match_filenames_once(FLAGS.eval),
+        num_epochs=epoch_number)
+    validate_serialized_example = read_and_decode(validate_filename_queue)
+    validate_batch_serialized_example = tf.train.shuffle_batch(
+        [validate_serialized_example],
+        batch_size=validate_batch_size,
+        num_threads=thread_number,
+        capacity=capacity,
+        min_after_dequeue=min_after_dequeue)
+    validate_features = tf.parse_example(
+        validate_batch_serialized_example,
+        features={
+            "label": tf.FixedLenFeature([], tf.float32),
+            "ids": tf.VarLenFeature(tf.int64),
+            "values": tf.VarLenFeature(tf.float32),
+        })
+    validate_batch_labels = features["label"]
+    validate_batch_ids = features["ids"]
+    validate_batch_values = features["values"]
+    logits = inference(batch_ids, batch_values)
+    batch_labels = tf.to_int64(batch_labels)
+    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits,
+                                                                   batch_labels)
+    loss = tf.reduce_mean(cross_entropy, name='loss')
+
+    print("Use the optimizer: {}".format(FLAGS.optimizer))
+
+    optimizer = tf.train.FtrlOptimizer(learning_rate)
+
+    global_step = tf.Variable(0, name='global_step', trainable=False)
+    train_op = optimizer.minimize(loss, global_step=global_step)
+
+    # Initialize saver and summary
+    steps_to_validate = FLAGS.steps_to_validate
+    init_op = tf.initialize_all_variables()
+
+    saver = tf.train.Saver(max_to_keep = 2)
+    keys_placeholder = tf.placeholder("float")
+    keys = tf.identity(keys_placeholder)
+    tf.add_to_collection("inputs", json.dumps({'key': keys_placeholder.name}))
+    tf.add_to_collection("outputs", json.dumps({'key': keys.name,
+                                                'softmax': inference_softmax.name,
+                                                'prediction': inference_op.name}))
+
+    summary_op = tf.merge_all_summaries()
+
+
+sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
+                         logdir="./supervisor/",
+                         init_op=init_op,
+                         summary_op=summary_op,
+                         saver=saver,
+                         global_step=global_step,
+                         save_model_secs=60)
+
+with sv.managed_session(server.target) as sess:
+
+    while not sv.should_stop():
+        # Get coordinator and run queues to read data
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(coord=coord, sess=sess)
+
+        try:
+            while not coord.should_stop():
+                _, loss_value, step = sess.run([train_op, loss, global_step])
+
+        except tf.errors.OutOfRangeError:
+            print("Done training after reading all data")
+        finally:
+            coord.request_stop()
+
+        coord.join(threads)

@@ -1,0 +1,97 @@
+gradient not working with aggregation on TensorArray in tf.while_loop
+
+Problem description
+I am trying to compute gradient of an aggregation on the currently available elements in tf.TensorArray in a tf.while_loop, but got an InvalidArgumentError: TensorArray TensorArray_4_21@while_63/gradients: Could not write to TensorArray index 0 because it has already been read.
+Minimum code to reproduce the error
+def make_loop_test():
+
+    def _cond(i, *_):
+        return i < 3
+
+    def _body(i, var, var_hist):
+        # write current element
+        var_hist = var_hist.write(i, var)
+
+        # retrieve all current previous elements as well as the one appended just now, and compute the sum
+        util = tf.reduce_sum(var_hist.gather(tf.range(0, i+1))) * 2.0 + 1.0
+
+        # take gradient, where I think the problem comes from
+        grad = tf.gradients(util, [var])[0]
+
+        return i + 1, var - grad * 0.1, var_hist
+
+    _init_state = (0, 2e3, tf.TensorArray(dtype=tf.float32, size=3, clear_after_read=False))
+
+    loop_i, loop_var, loop_var_hist = tf.while_loop(_cond, _body, _init_state, parallel_iterations=1)
+
+    return loop_i, loop_var, loop_var_hist.stack()
+
+with tf.Session() as sess:
+    print(sess.run(make_loop_test()))
+I used to add a bunch of tf.Print statements and found the error was coming from gradient statement in the second iteration. The error message looks weird to me since I am not writing to index 0 at that time.
+Complete logs
+File "<ipython-input-132-3da3dc3dd8f4>", line 18, in <module>
+  print(sess.run(make_loop_test()))
+File "<ipython-input-132-3da3dc3dd8f4>", line 13, in make_loop_test
+  loop_i, loop_var, loop_var_hist = tf.while_loop(_cond, _body, _init_state, parallel_iterations=1)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2775, in while_loop
+  result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2604, in BuildLoop
+  pred, body, original_loop_vars, loop_vars, shape_invariants)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2554, in _BuildLoop
+  body_result = body(*packed_vars_for_body)
+File "<ipython-input-132-3da3dc3dd8f4>", line 8, in _body
+  grad = tf.gradients(util, [var])[0]
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/gradients_impl.py", line 542, in gradients
+  grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/gradients_impl.py", line 348, in _MaybeCompile
+  return grad_fn()  # Exit early
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/gradients_impl.py", line 542, in <lambda>
+  grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/tensor_array_grad.py", line 162, in _TensorArrayGatherGrad
+  u_g = g.scatter(indices, grad)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/util/tf_should_use.py", line 175, in wrapped
+  return _add_should_use_warning(fn(*args, **kwargs))
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 441, in scatter
+  name=name)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 2649, in _tensor_array_scatter_v3
+  name=name)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+  op_def=op_def)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2630, in create_op
+  original_op=self._default_original_op, op_def=op_def)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1204, in __init__
+  self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+...which was originally created as op 'while_62/TensorArrayGatherV3', defined at:
+File "/home/ecsark/envs/conda/lib/python3.5/runpy.py", line 193, in _run_module_as_main
+  "__main__", mod_spec)
+[elided 23 identical lines from previous traceback]
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2554, in _BuildLoop
+  body_result = body(*packed_vars_for_body)
+File "<ipython-input-132-3da3dc3dd8f4>", line 7, in _body
+  util = tf.reduce_sum(var_hist.gather(tf.range(0, i+1))) * 2.0 + 1.0
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/util/tf_should_use.py", line 93, in fn
+  return method(self, *args, **kwargs)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 360, in gather
+  element_shape=element_shape)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 2401, in _tensor_array_gather_v3
+  element_shape=element_shape, name=name)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+  op_def=op_def)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2630, in create_op
+  original_op=self._default_original_op, op_def=op_def)
+File "/home/ecsark/envs/conda/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1204, in __init__
+  self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+InvalidArgumentError (see above for traceback): TensorArray TensorArray_3_20@while_62/gradients: Could not write to TensorArray index 0 because it has already been read.
+ [[Node: while_62/gradients/while_62/TensorArrayGatherV3_grad/TensorArrayScatter/TensorArrayScatterV3 = TensorArrayScatterV3[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"](while_62/gradients/while_62/TensorArrayGatherV3_grad/TensorArrayGrad/TensorArrayGradV3, while_62/range, while_62/gradients/while_62/Sum_grad/Tile, while_62/gradients/while_62/TensorArrayGatherV3_grad/TensorArrayGrad/gradient_flow)]]
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Debian GNU/Linux 7.11 (wheezy)
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.3.1-0-g48c54ee 1.3.1
+Python version:  3.5.4
+Bazel version (if compiling from source):
+CUDA/cuDNN version: NA
+GPU model and memory: NA

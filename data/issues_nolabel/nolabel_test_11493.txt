@@ -1,0 +1,117 @@
+Using TF-slim DatasetDataProvider generate batch data, but get an error
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):macOS
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below):1.2.1
+Python version: 3.5.0
+
+In the StackOverflow I find similar problems but no one answered.
+Please give me some advice. Thanks.
+def read_and_decode():
+    file_pattern = './voc*.tfrecord'
+    keys_to_features = {
+        'image/encoded': tf.FixedLenFeature((), tf.string, default_value=''),
+        'image/format': tf.FixedLenFeature((), tf.string, default_value='jpeg'),
+        'image/height': tf.FixedLenFeature([1], tf.int64),
+        'image/width': tf.FixedLenFeature([1], tf.int64),
+        'image/channels': tf.FixedLenFeature([1], tf.int64),
+        'image/shape': tf.FixedLenFeature([3], tf.int64),
+        'image/object/bbox/xmin': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/ymin': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/xmax': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/ymax': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/label': tf.VarLenFeature(dtype=tf.int64),
+        'image/object/bbox/difficult': tf.VarLenFeature(dtype=tf.int64),
+        'image/object/bbox/truncated': tf.VarLenFeature(dtype=tf.int64),
+    }
+    items_to_handlers = {
+        'image': slim.tfexample_decoder.Image('image/encoded', 'image/format'),
+        'shape': slim.tfexample_decoder.Tensor('image/shape'),
+        'object/bbox': slim.tfexample_decoder.BoundingBox(
+            ['ymin', 'xmin', 'ymax', 'xmax'], 'image/object/bbox/'),
+        'object/label': slim.tfexample_decoder.Tensor('image/object/bbox/label'),
+        'object/difficult': slim.tfexample_decoder.Tensor('image/object/bbox/difficult'),
+        'object/truncated': slim.tfexample_decoder.Tensor('image/object/bbox/truncated'),
+    }
+    decoder = slim.tfexample_decoder.TFExampleDecoder(keys_to_features, items_to_handlers)
+    return slim.dataset.Dataset(
+        data_sources=file_pattern,
+        reader=tf.TFRecordReader,
+        num_samples=1,
+        decoder=decoder,
+        items_to_descriptions={},
+        num_classes=21)
+
+
+slim = tf.contrib.slim
+dataset = read_and_decode()
+provider = slim.dataset_data_provider.DatasetDataProvider(dataset, num_readers=3, shuffle=False)
+
+[image, shape, glabels, gbboxes] = provider.get(['image', 'shape', 'object/label', 'object/bbox'])
+image = tf.expand_dims(image, 0)
+image = tf.image.resize_images(image, [224,224],tf.image.ResizeMethod.BILINEAR)
+glabels.set_shape([1])
+
+img_batch, label_batch = tf.train.batch([image, glabels], 64, capacity=2000)
+with tf.Session() as sess:
+    ini_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+    sess.run(ini_op)
+    coord = tf.train.Coordinator()
+    thread = tf.train.start_queue_runners(sess=sess,coord=coord)
+    for i in range(2):
+        cur_example_batch,cur_label_batch = sess.run([img_batch,label_batch])
+        print(cur_example_batch.shape)
+    coord.request_stop()
+    coord.join(thread)
+
+The error infomation:
+Traceback (most recent call last):
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1139, in _do_call
+    return fn(*args)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1121, in _run_fn
+    status, run_metadata)
+  File "/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.OutOfRangeError: FIFOQueue '_3_batch/fifo_queue' is closed and has insufficient elements (requested 64, current size 0)
+	 [[Node: batch = QueueDequeueManyV2[component_types=[DT_FLOAT, DT_INT64], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](batch/fifo_queue, batch/n)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/szp/Documents/github/RCNN/RCNN.py", line 140, in <module>
+    cur_example_batch,cur_label_batch = sess.run([img_batch,label_batch])
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 789, in run
+    run_metadata_ptr)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 997, in _run
+    feed_dict_string, options, run_metadata)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1132, in _do_run
+    target_list, options, run_metadata)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1152, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.OutOfRangeError: FIFOQueue '_3_batch/fifo_queue' is closed and has insufficient elements (requested 64, current size 0)
+	 [[Node: batch = QueueDequeueManyV2[component_types=[DT_FLOAT, DT_INT64], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](batch/fifo_queue, batch/n)]]
+
+Caused by op 'batch', defined at:
+  File "/Users/szp/Documents/github/RCNN/RCNN.py", line 133, in <module>
+    img_batch, label_batch = tf.train.batch([image, glabels], 64, capacity=2000)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/training/input.py", line 919, in batch
+    name=name)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/training/input.py", line 716, in _batch
+    dequeued = queue.dequeue_many(batch_size, name=name)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/ops/data_flow_ops.py", line 457, in dequeue_many
+    self._queue_ref, n=n, component_types=self._dtypes, name=name)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 946, in _queue_dequeue_many_v2
+    timeout_ms=timeout_ms, name=name)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2506, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/Users/szp/Documents/github/Tianchi_MedicalAI/venv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1269, in __init__
+    self._traceback = _extract_stack()
+
+OutOfRangeError (see above for traceback): FIFOQueue '_3_batch/fifo_queue' is closed and has insufficient elements (requested 64, current size 0)
+	 [[Node: batch = QueueDequeueManyV2[component_types=[DT_FLOAT, DT_INT64], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](batch/fifo_queue, batch/n)]]

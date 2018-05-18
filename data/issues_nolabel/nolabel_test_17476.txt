@@ -1,0 +1,101 @@
+SVD gradient is unstable for non-unique singular values
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 14.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): ('v1.5.0-10-g5b10b34', '1.5.0')
+Python version: Python 2.7.6
+Bazel version (if compiling from source): 0.11.0
+GCC/Compiler version (if compiling from source): 4.8.5
+CUDA/cuDNN version: 8.0 / 6.0
+GPU model and memory: GeForce GTX 970 4GB
+Exact command to reproduce:
+
+Describe the problem
+The gradient of SVD becomes nan when singular values are not unique.
+From the code
+
+  
+    
+      tensorflow/tensorflow/python/ops/linalg_grad.py
+    
+    
+        Lines 332 to 342
+      in
+      c6a12c7
+    
+    
+    
+    
+
+        
+          
+           # NOTICE: Because of the term involving f, the gradient becomes 
+        
+
+        
+          
+           # infinite (or NaN in practice) when singular values are not unique. 
+        
+
+        
+          
+           # Mathematically this should not be surprising, since for (k-fold) 
+        
+
+        
+          
+           # degenerate singular values, the corresponding singular vectors are 
+        
+
+        
+          
+           # only defined up a (k-dimensional) subspace. In practice, this can 
+        
+
+        
+          
+           # lead to numerical instability when singular values are close but not 
+        
+
+        
+          
+           # exactly equal. 
+        
+
+        
+          
+           f = array_ops.matrix_set_diag( 
+        
+
+        
+          
+               math_ops.reciprocal( 
+        
+
+        
+          
+                   array_ops.expand_dims(s2, -2) - array_ops.expand_dims(s2, -1)), 
+        
+
+        
+          
+               array_ops.zeros_like(s)) 
+        
+    
+  
+
+
+it is clearly visible that f becomes inf for equal singular values.
+I briefly skimmed through the paper https://arxiv.org/abs/1509.07838 but couldn't find an explanation for this behaviour. Can someone give an intuitive example why the gradient for similar singular values should not be defined?
+Similar singular values commonly appear for estimation of rotation matrices (all singular values become 1). At the moment it is impossible to use SVD for such a case.
+Alternative implementations of the SVD gradients based on the same paper are:
+
+https://github.com/InhaDeeplearningGroup/Academic_research/blob/master/LSH/tensorflow_slim/svdGradients.py
+https://gist.github.com/psycharo/60f58d5435281bdea8b9d4ee4f6e895b
+
+which circumvent this problem by simply replacing the nans or effectively setting them to 0.
+Could this be used alternatively to the current implementation that just divides by 0? Or alternatively just add a small epsilon to the difference of singular values.
+Btw, I think that no gradient computation in TensorFlow should ever return faulty gradients but raise an error message to simplify debugging. I don't see the point of using nan or inf gradients.

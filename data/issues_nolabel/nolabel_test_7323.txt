@@ -1,0 +1,93 @@
+convert_variables_to_constants doesn't preserve output shape
+
+NOTE: Only file GitHub issues for bugs and feature requests.  All other topics will be closed.
+For general support from the community, see StackOverflow.
+To make bugs and feature requests more easy to find and organize, we close issues that are deemed
+out of scope for GitHub Issues and point people to StackOverflow.
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Environment info
+Operating System: Ubuntu 16.04
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+$ ls -l /usr/local/cuda-8.0/lib64/libcud*
+-rw-r--r-- 1 root root   558720 Sep 30 15:48 /usr/local/cuda-8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Sep 30 15:48 /usr/local/cuda-8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root       19 Sep 30 15:48 /usr/local/cuda-8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rwxr-xr-x 1 root root   415432 Sep 30 15:48 /usr/local/cuda-8.0/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root   775162 Sep 30 15:48 /usr/local/cuda-8.0/lib64/libcudart_static.a
+lrwxrwxrwx 1 root root       13 Sep 30 15:50 /usr/local/cuda-8.0/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 root root       17 Sep 30 15:50 /usr/local/cuda-8.0/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+-rwxr-xr-x 1 root root 79337624 Sep 30 15:50 /usr/local/cuda-8.0/lib64/libcudnn.so.5.1.5
+-rw-r--r-- 1 root root 69756172 Sep 30 15:50 /usr/local/cuda-8.0/lib64/libcudnn_static.a
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+The output of bazel version
+Tensorflow Version: '0.12.1-3-g45ab528-dirty'
+Bazel Version: 0.4.4
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+#!/usr/bin/python3
+import tensorflow as tf
+from tensorflow.python.framework import graph_util
+import difflib
+
+graph_1 = tf.Graph()
+with graph_1.as_default():
+    input_batch = tf.placeholder(shape=(None, 100), dtype=tf.float32, name="Placeholder")
+
+graph_1_pb = graph_1.as_graph_def(add_shapes=True)
+session = tf.Session(graph=graph_1)
+graph_2_pb = graph_util.convert_variables_to_constants(session, session.graph.as_graph_def(), ["Placeholder"])
+
+print("\n".join(difflib.unified_diff(str(graph_1_pb).split("\n"), str(graph_2_pb).split("\n"))))
+I expected it will return no diff or have a little diff, but it has noticeable diffs.
+--- 
+
++++ 
+
+@@ -1,21 +1,6 @@
+
+ node {
+   name: "Placeholder"
+   op: "Placeholder"
+-  attr {
+-    key: "_output_shapes"
+-    value {
+-      list {
+-        shape {
+-          dim {
+-            size: -1
+-          }
+-          dim {
+-            size: 100
+-          }
+-        }
+-      }
+-    }
+-  }
+   attr {
+     key: "dtype"
+     value {
+@@ -30,7 +15,4 @@
+
+     }
+   }
+ }
+-versions {
+-  producer: 17
+-}
+
+Preserving _output_shapes attribute is somewhat important for me, so we have add_shapes=True on tf.Graph.as_graph_def function.
+seems like other graph utils  copying _output_shapes attributes.
+What other attempted solutions have you tried?
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).

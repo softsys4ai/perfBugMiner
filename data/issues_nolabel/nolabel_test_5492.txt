@@ -1,0 +1,71 @@
+tf.assign does not update variable shape if tf.Variable(..., validate_shape=True) initially
+
+Unless the variable is initially created with tf.Variable(..., validate_shape=False), updating a variable using tf.assign(..., validate_shape=False) does not update the variable shape.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+None
+Environment info
+Operating System: Ubuntu 16.04
+Installed version of CUDA and cuDNN: CUDA 8.0 and cuDNN 5.1
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+$ ls -l /usr/local/cuda-8.0/lib64/libcud*
+-rw-r--r-- 1 root root 558720 Sep 15 01:02 /usr/local/cuda-8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Sep 15 01:05 /usr/local/cuda-8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root     19 Sep 15 01:05 /usr/local/cuda-8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rw-r--r-- 1 root root 415432 Sep 15 01:02 /usr/local/cuda-8.0/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root 775162 Sep 15 01:02 /usr/local/cuda-8.0/lib64/libcudart_static.a
+$ ls -l /usr/local/cudnn-5.1-cuda-8.0/lib64/
+total 145608
+lrwxrwxrwx 1 root root       13 Oct 28 10:07 libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 root root       17 Oct 28 10:07 libcudnn.so.5 -> libcudnn.so.5.1.5
+-rwxr-xr-x 1 root root 79337624 Oct 28 10:07 libcudnn.so.5.1.5
+-rw-r--r-- 1 root root 69756172 Oct 28 10:07 libcudnn_static.a
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+
+https://github.com/tensorflow/tensorflow/blob/master/tensorflow/g3doc/get_started/os_setup.md#pip-installation
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+$ python -c "import tensorflow; print(tensorflow.__version__)"
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcurand.so locally
+0.11.0rc2
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+The output of bazel version
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+In the following script, if var is created with validate_shape=True, subsequent tf.assign operations don't update the shape (they remain as [1]), but they do update the data.
+However, if the var is created with validate_shape=False, subsequent tf.assign operations do update both data and the shape,  setting the shape to [1], [10], and [20] respectively.
+import numpy as np
+import tensorflow as tf
+
+dtype = np.float64
+shape = (10, )
+
+ph = tf.placeholder(dtype=dtype)
+var = tf.Variable(tf.ones(shape=(1,), dtype=dtype), validate_shape=True)
+op = tf.assign(var, ph, validate_shape=False)
+
+init_op = tf.initialize_all_variables()
+
+with tf.Session() as S:
+    S.run(init_op)
+    print S.run(tf.shape(var)) # [1]
+    print S.run(var)           # [1.]
+    S.run(op, feed_dict={ph: np.ones(shape=(10,), dtype=dtype)})
+    print S.run(tf.shape(var)) # [1], should be [10]
+    print S.run(var)           # [ 1.  1.  1.  1.  1.  1.  1.  1.  1.  1.]
+
+    S.run(op, feed_dict={ph: np.ones(shape=(20,), dtype=dtype)})
+    print S.run(tf.shape(var)) # [1], should be [20]
+    print S.run(var)           # [ 1.  1.  1.  1.  1.  1.  1.  1.  1.  1.  1.  1.  1.  1.  1.  1.  1.  1.
+  1.  1.]
+What other attempted solutions have you tried?
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).

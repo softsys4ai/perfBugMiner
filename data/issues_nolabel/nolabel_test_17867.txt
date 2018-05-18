@@ -1,0 +1,53 @@
+Tensorflow Projector - nearest points in original space
+
+In Tensorflow Projector, the cosine and euclidean distance, and the ranking based on that seems to be incorrect when the number of dimensions for the points is 50 or more.  It is fine when the number of dimensions is 49 or less.  Here's some code to test
+import numpy as np
+from sklearn.metrics.pairwise import cosine_distances, euclidean_distances
+
+npoints,ndims = 4,49
+nclose = npoints-1
+func = cosine_distances
+
+np.random.seed(seed=123456)
+embed = np.random.uniform(size=npoints*ndims).reshape((npoints,ndims))
+labels = np.array(['pt%03d'%n for n in range(1,npoints+1)])
+
+np.savetxt('embed-%d-%d.tsv'%(npoints,ndims), embed, delimiter='\t', fmt='%.6f')
+np.savetxt('labels-%d.tsv'%(npoints), labels, fmt='%s')
+
+dist = func(embed)
+ind = np.argsort(dist)[:,1:nclose+1]
+
+names = labels[ind]
+dist = dist[np.arange(labels.shape[0])[:,None],ind]
+
+np.concatenate((labels[:,None],
+                np.dstack((names,np.around(dist,4))).reshape((dist.shape[0],-1))), axis=1)
+
+The output of the above code is shown below.  For pt001, the closest is pt004 with cosine distance 0.1695, etc.
+array([['pt001', 'pt004', '0.1695', 'pt003', '0.2716', 'pt002', '0.2897'],
+       ['pt002', 'pt003', '0.2345', 'pt004', '0.2365', 'pt001', '0.2897'],
+       ['pt003', 'pt004', '0.2099', 'pt002', '0.2345', 'pt001', '0.2716'],
+       ['pt004', 'pt001', '0.1695', 'pt003', '0.2099', 'pt002', '0.2365']],
+      dtype='<U32')
+
+The above code also generates files which can be uploaded to the projector website for confirmation.  The output there is:
+Nearest points in the original space:
+pt004 0.169
+pt003 0.272
+pt002 0.290
+
+Now change ndims to 50 in the above code and re-run.  The output is
+array([['pt001', 'pt002', '0.1675', 'pt004', '0.1968', 'pt003', '0.2571'],
+       ['pt002', 'pt001', '0.1675', 'pt004', '0.2444', 'pt003', '0.246'],
+       ['pt003', 'pt004', '0.1943', 'pt002', '0.246', 'pt001', '0.2571'],
+       ['pt004', 'pt003', '0.1943', 'pt001', '0.1968', 'pt002', '0.2444']],
+      dtype='<U32')
+
+Once the new files are loaded, the output from the website is:
+Nearest points in the original space: 
+pt002 1.040
+pt004 1.304
+pt003 1.538
+
+The website does report the number of dimensions correctly at the top (first 49 and then 50).  Also, Spherize Data was turned on and off that makes a very slight difference.

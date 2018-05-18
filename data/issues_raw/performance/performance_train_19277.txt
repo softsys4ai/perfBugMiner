@@ -1,0 +1,88 @@
+SSD mobilenet inference is slower w/ MKL
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+No.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):
+Source
+TensorFlow version (use command below):
+1.8.0 (could repro the same problem from head too)
+Python version:
+N/A
+Bazel version (if compiling from source):
+0.13.0
+GCC/Compiler version (if compiling from source):
+5.4.0
+CUDA/cuDNN version:
+N/A
+GPU model and memory:
+N/A
+Exact command to reproduce:
+OMP_NUM_THREADS=1 bazel run --config=mkl --config=opt --config=monolithic //tensorflow/tools/benchmark:benchmark_model -- --graph=ssd_mobilenet_v2_coco_2018_03_29_frozen.pb --show_flops --input_layer=image_tensor --input_layer_type=uint8 --input_layer_shape=1,1920,1080,3 --output_layer=num_detections,detection_classes,detection_scores,detection_boxes --num_threads=1
+
+Describe the problem
+w/ MKL, benchmark_model got 18.98B FLOPs/second, w/o MKL, it got 25.61B.
+From the benchmark_model results, we could see that _MklConv2DWithBias is the culprit.
+I am using MKL 2018.2.199 and mkldnn 0.14 on a i7-5557U CPU.
+A unrelated question: @agramesh1 I filed the same bug on mkldnn. They told me you have some plan to implement MKL version of DepthwiseConv2dNative. Do you have a timeline for it? I am eager to try it..
+benchmark_model results:
+w/ MKL
+         [Node type]  [count]  [avg ms]    [avg %]    [cdf %]  [mem KB][times called]
+   _MklConv2DWithBias       12   143.936    42.710%    42.710% 56555.531       12
+           _MklConv2D       43    48.872    14.502%    57.212% 43206.305       43
+  DepthwiseConv2dNative       21    27.330     8.110%    65.321% 17180.992       21
+              _MklMul       43    12.751     3.784%    69.105% 32070.080       43
+              _MklAdd       53    12.137     3.601%    72.706% 33662.238       53
+                 Cast      183    11.584     3.437%    76.143% 24883.217      183
+    _MklInputConversion       96    10.990     3.261%    79.404% 32261.969       96
+                Const     1602    10.360     3.074%    82.479%     0.000     1602
+                  Mul      127     7.063     2.096%    84.574%     0.004      127
+                  Add      119     6.541     1.941%    86.515%    15.344      119
+                Relu6       47     3.715     1.102%    87.618%     0.000       47
+              Minimum      451     3.680     1.092%    88.709%     0.000      451
+               Gather      546     3.607     1.070%    89.780%     0.000      546
+                Slice       93     3.543     1.051%    90.831%  1380.240       93
+   TensorArrayScatterV3        5     3.261     0.968%    91.799% 25604.012        5
+          _MklReshape      107     3.183     0.944%    92.743%   810.972      107
+                Where      180     2.560     0.760%    93.503%     1.440      180
+         _MklConcatV2       98     2.260     0.671%    94.173%   782.604       98
+              Greater      183     2.183     0.648%    94.821%   172.533      183
+
+w/o MKL
+          [Node type]  [count]  [avg ms]    [avg %]    [cdf %]  [mem KB][times called]
+               Conv2D       55   108.692    47.515%    47.515% 32798.539       55
+DepthwiseConv2dNative       21    28.022    12.250%    59.765% 17180.992       21
+                  Mul      170    18.866     8.247%    68.012%     0.008      170
+                  Add      172    18.460     8.070%    76.082%    15.344      172
+                 Cast      183    12.116     5.297%    81.378% 24883.217      183
+               Gather      546     4.815     2.105%    83.483%     0.000      546
+ TensorArrayScatterV3        5     3.971     1.736%    85.219% 25604.012        5
+                Relu6       47     3.619     1.582%    86.801%     0.000       47
+                Slice       93     2.915     1.274%    88.075%  1380.240       93
+              Minimum      451     2.877     1.258%    89.333%     0.000      451
+                Const      476     2.802     1.225%    90.558%     0.000      476
+              Maximum      360     2.761     1.207%    91.765%     0.000      360
+              Reshape      287     2.318     1.013%    92.778%     0.000      287
+                Where      180     1.793     0.784%    93.562%     1.440      180
+                  Sub      190     1.749     0.765%    94.327%     0.008      190
+                Split      180     1.749     0.765%    95.091%     0.000      180
+              Greater      183     1.220     0.533%    95.625%   172.533      183
+             ConcatV2       99     1.057     0.462%    96.087%   730.868       99
+                Shape      112     1.001     0.438%    96.524%     0.952      112
+              Squeeze       92     0.978     0.428%    96.952%     0.000       92
+       ResizeBilinear        1     0.885     0.387%    97.339%  1080.000        1
+         StridedSlice      113     0.878     0.384%    97.722%     0.432      113
+  NonMaxSuppressionV2       90     0.820     0.358%    98.081%     0.000       90
+            Transpose        3     0.706     0.309%    98.390%    92.016        3
+                Enter       26     0.434     0.190%    98.579%     0.000       26
+                 Pack       19     0.433     0.189%    98.769%    30.908       19
+            ZerosLike       92     0.362     0.158%    98.927%     0.004       92
+              BiasAdd       12     0.326     0.143%    99.069%     0.000       12
+        NextIteration        8     0.308     0.135%    99.204%     0.000        8
+
+Source code / logs
+I run benchmark_model with MKLDDN_VERBOSE=1 and got this log.
+https://drive.google.com/file/d/12ClzFKiOryge6So-trXrvEyEk6ycOheY/view?usp=sharing

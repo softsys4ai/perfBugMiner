@@ -1,0 +1,76 @@
+Clarify RNNCell documentation on state_size and zero_state
+
+TF Version
+Documentation of current head r1.5
+Describe the problem
+In the RNNCell documentation for zero_state it is unclear if the state returned from an RNNCell should always be a 1-D Tensor or if it can be an N-D Tensor. The second is actually the case.
+The current documentation says
+
+If state_size is an int or TensorShape, then the return value is a N-D tensor of shape [batch_size, state_size] filled with zeros.
+
+This is mostly true, however if Rank(TensorShape) is > 1 then it should say [batch_size] + state_size.shape.as_list() or some variant, to properly inform the user that arbitrary dimensioned Tensors can be passed through.
+This is contradicted in the next sentence with:
+
+If state_size is a nested list or tuple, then the return value is a nested list or tuple (of the same structure) of 2-D tensors with the shapes [batch_size, s] for each s in state_size.
+
+Here 2-D tensors should be N-D tensors and [batch_size, s]  should be [batch_size] + s.shape.as_list().
+Failure to understand that N-D states can be passed back might force some users to flatten and then reshape states, which will result in performance penalties. An example where such N-D states are required might be for RNNCell's with external memory devices (like the DNC from Deepmind).
+The documentation for state_size is adequate but could be made to explicitly mention N-D states are allowed.
+Proof
+Example RNNCell with structure state tuple containing N-D state
+import tensorflow as tf
+import numpy as np
+from tensorflow.python.ops import rnn_cell_impl
+
+class NDState(rnn_cell_impl.RNNCell):
+    def __init__(self,
+            output_size):
+        self._output_size=output_size
+
+    @property
+    def state_size(self):
+       return (1, (tf.TensorShape([4,4]), 2) )
+    @property
+    def output_size(self):
+        return self._output_size
+
+
+    
+    def __call__(self, inputs, state):
+        """
+        inputs : batch_size x input_size
+        state : tuple of 2D [batch_size x s]
+        """
+        print("State:",state)
+
+        return tf.layers.dense(inputs,self.output_size), state
+        
+
+
+def test():
+    test_kwargs = { 'output_size':1}
+
+    inputs = tf.random_normal(shape=(100,10,2),dtype=tf.float32)
+    cell = NDState(**test_kwargs)
+    zero_state = cell.zero_state(10, tf.float32)
+    print("Zero_state:",zero_state)
+    output,state = tf.nn.dynamic_rnn(cell,inputs, time_major=True,dtype=tf.float32)
+    
+
+    
+if __name__ == "__main__":
+    test()
+
+Prints:
+Zero_state: (<tf.Tensor 'NDStateZeroState/zeros:0' shape=(10, 1) dtype=float32>, (<tf.Tensor 'NDStateZeroState/zeros_1:0' shape=(10, 4, 4) dtype=float32>, <tf.Tensor 'NDStateZeroState/zeros_2:0' shape=(10, 2) dtype=float32>))
+State: (<tf.Tensor 'rnn/while/Identity_3:0' shape=(10, 1) dtype=float32>, (<tf.Tensor 'rnn/while/Identity_4:0' shape=(10, 4, 4) dtype=float32>, <tf.Tensor 'rnn/while/Identity_5:0' shape=(10, 2) dtype=float32>))
+
+Template
+Have I written custom code: N/A
+OS Platform and Distribution: N/A
+TensorFlow installed from: git master
+TensorFlow version: r1.5 and previous
+Bazel version: N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A

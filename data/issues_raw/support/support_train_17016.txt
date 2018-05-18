@@ -1,0 +1,91 @@
+Error in `tfe.implicit_gradients(loss)` in eager mode
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary):
+TensorFlow version (use command below): 1.5.0
+Python version: 3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source): 7.2.0
+CUDA/cuDNN version: -
+GPU model and memory: -
+Exact command to reproduce:
+
+
+I was trying to run MNIST model in Eager mode on Kaggle Kernels but as I am passing data to my model, the optimizer is throwing this particular error :
+ValueError: No trainable variables were accessed while the function was being computed. I can confirm that the data being passed to the model are non-zero and are in the correct shape. I don't understand why is the model is throwing the error then. Here is my code:
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+
+tfe.enable_eager_execution()
+
+class MNIST(object):
+    def __init__(self, data_format):
+        # Set the input shape according to the availability of GPU 
+        if data_format == 'channels_first':
+            self._input_shape = [-1, 1, 28, 28]
+        else:
+            self._input_shape = [-1, 28, 28, 1]
+        
+        self.conv1 = tf.layers.Conv2D(32, 3, 
+                                      activation=tf.nn.relu, 
+                                      padding='same', 
+                                      data_format=data_format)
+        
+        self.maxpool = tf.layers.MaxPooling2D((2,2), (2,2), 
+                                            padding='same', 
+                                            data_format=data_format)
+        
+        self.conv2 = tf.layers.Conv2D(64, 3, 
+                                      activation=tf.nn.relu, 
+                                      padding='same', 
+                                      data_format=data_format)
+        
+        self.dense1 = tf.layers.Dense(1024, activation=tf.nn.relu)
+        self.dropout = tf.layers.Dropout(0.5)
+        self.dense2 = tf.layers.Dense(10)
+        
+        
+ 
+    def predict(self, inputs):
+        x = tf.reshape(inputs, self._input_shape)
+        x = self.conv1(x)
+        x = self.maxpool(x)
+        x = self.conv2(x)
+        x = self.maxpool(x)
+        x = tf.layers.flatten(x)
+        x = self.dense1(x)
+        x = self.dropout(x) #enable at training and disable at testing
+        x = self.dense2(x)
+        return x
+
+# Define loss functions
+def loss(model, inputs, targets):
+    return tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+                          logits=model.predict(inputs), labels=targets))
+
+# Calculate accuracy
+def compute_accuracy(predictions, labels):
+    model_pred = tf.argmax(predictions, axis=1,output_type=tf.int64)
+    actual_labels = tf.argmax(labels, axis=1, output_type=tf.int64)
+    return tf.reduce_sum(tf.cast(tf.equal(model_pred, actual_labels)),dtype=tf.float32) / float(predictions.shape[0].value)
+
+device = "gpu:0" if tfe.num_gpus() else "cpu:0"
+model = MNIST('channels_first' if tfe.num_gpus() else 'channels_last')
+optimizer = tf.train.AdamOptimizer(learning_rate=1e-4)
+grad = tfe.implicit_gradients(loss)
+
+batch_size = 8
+train_batches = len(X_train) // batch_size
+valid_batches = len(X_valid) // batch_size
+nb_epochs = 5
+
+for i in range(nb_epochs):
+    with tf.device(device):
+        for j in range(train_batches):
+            inputs, targets = next(train_data_gen)
+            optimizer.apply_gradients(grad(model, inputs, targets))
+            if j % 10 == 0:
+                print("Step %d: Loss on training set : %f" %(i, loss(model, inputs, targets).numpy()))

@@ -1,0 +1,92 @@
+[Feature request] Improve syntax for accessing Python objects in dataset pipelines
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4.0
+Python version: 3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+Hey, I have a python database class
+class MyDatabase:
+    def __len__(self): return ...
+    def __getitem__(self, item): return ...  # slow code without gitlock, i.e. io and numpy
+that supports indexing and returns a dict. The loading of the data is longer than a NN iteration, therefore it would be nice when tensorflow loads the data in parallel. When I use tf.data.Dataset.from_generator I have to convert my Database to a generator
+def generator():
+    db = MyDatabase()
+    yield from [db[i] for i in range(len(db))]
+from_generator has no argument num_parallel_calls, therefore the loading is serial.
+I am not sure how difficult it is to add such an argument.
+But in the case that MyDatabase has above structure it is possible to combine tf.data.Dataset.range with tf.data.Dataset.map and tf.py_func to get a parallel load.
+In my mind, it could be easier to implement a parallel load for an indexable object.
+Further point the interface of tf.py_func has more constraints than tf.data.Dataset.from_generator (dict's are not allowed and it hat no output_shape argument).
+Since I am new to tensorflow and have problems to understand the tf.data.Dataset code, here my feature request for a num_parallel_calls argument in tf.data.Dataset.from_generator or a new function tf.data.Dataset.from_generator with a num_parallel_calls argument.
+Source code / logs
+Here a toy example, that demonstrate the non-parallel from_generator
+import time
+
+start = time.perf_counter()
+    
+def body(i):
+    global start
+    if i == 0:
+        start = time.perf_counter()
+    time.sleep(0.2)
+    return np.array([float(i), time.perf_counter() - start])
+
+def gen():
+    for i in range(5):
+        yield body(i)
+        
+ds = tf.data.Dataset.from_generator(gen, tf.float64)
+ds = ds.prefetch(5)
+iterator = ds.make_one_shot_iterator()
+
+entry = iterator.get_next()
+
+with tf.Session() as sess:
+    
+    try:
+        while True:
+            print(sess.run(entry))
+    except tf.errors.OutOfRangeError:
+        pass
+# Serial execution:  [index, time from start of first load to return of current load]
+# [ 0.          0.20034038]
+# [ 1.          0.40189139]
+# [ 2.          0.60322792]
+# [ 3.          0.80472201]
+# [ 4.          1.00612245]
+and here the parallel version (Less nice code and does not generalise so good as from_generator, e.g. no return dict support)
+ds = tf.data.Dataset.range(5)
+
+def map_func(i):
+    return tf.py_func(body, [i], tf.float64, stateful=False)
+
+ds = ds.map(map_func, num_parallel_calls=4)
+ds = ds.prefetch(1)
+iterator = ds.make_one_shot_iterator()
+
+entry = iterator.get_next()
+
+with tf.Session() as sess:
+    
+    try:
+        while True:
+            print(sess.run(entry))
+    except tf.errors.OutOfRangeError:
+        pass
+
+# Parallel execution:  [index, time from start of first load to return of current load]
+# [ 0.          0.20026697]
+# [ 1.          0.20084557]
+# [ 2.          0.20095535]
+# [ 3.          0.20048737]
+# [ 4.          0.40154806]

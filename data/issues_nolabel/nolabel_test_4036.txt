@@ -1,0 +1,78 @@
+distributed tensorflow “socket error, connection refused”
+
+When I run the following  distributed tensorflow code.  It always show the error:  "socket error: connection refused."
+import tensorflow as tf
+import input_data
+def weight_variable(shape):
+initial = tf.truncated_normal(shape, stddev=0.1)
+return tf.Variable(initial)
+def bias_variable(shape):
+initial = tf.constant(0.1, shape=shape)
+return tf.Variable(initial)
+tf.app.flags.DEFINE_string("ps_hosts", "",
+"Comma-separated list of hostname:port pairs")
+tf.app.flags.DEFINE_string("worker_hosts", "",
+"Comma-separated list of hostname:port pairs")
+tf.app.flags.DEFINE_string("job_name", "", "One of 'ps', 'worker'")
+tf.app.flags.DEFINE_integer("task_index", 0, "Index of task within the job")
+FLAGS = tf.app.flags.FLAGS
+def main(_):
+ps_hosts = FLAGS.ps_hosts.split(",")
+worker_hosts = FLAGS.worker_hosts.split(",")
+cluster = tf.train.ClusterSpec({"ps": ps_hosts, "worker": worker_hosts})
+server = tf.train.Server(cluster.as_cluster_def(),
+job_name=FLAGS.job_name,
+task_index=FLAGS.task_index)
+if FLAGS.job_name == "ps" :
+server.join()
+elif FLAGS.job_name == "worker":
+with tf.device(tf.train.replica_device_setter(
+worker_device="/job:worker/task:%d" % FLAGS.task_index,
+cluster=cluster)):
+x = tf.placeholder(tf.float32, [None, 28_28])
+y_ = tf.placeholder(tf.float32, [None, 10])
+W_h1 = weight_variable([28_28, 512])
+b_h1 = bias_variable([512])
+h1 = tf.nn.sigmoid(tf.matmul(x, W_h1) + b_h1)
+W_out = weight_variable([512, 10])
+b_out = bias_variable([10])
+y = tf.nn.softmax(tf.matmul(h1, W_out) + b_out)
+  loss = tf.reduce_mean(-tf.reduce_sum(y_*tf.log(y)))
+  global_step = tf.Variable(0)
+  train_op = tf.train.AdagradOptimizer(0.01).minimize(
+      loss, global_step=global_step)
+  correct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
+  accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
+  saver = tf.train.Saver()
+  summary_op = tf.merge_all_summaries()
+  init_op = tf.initialize_all_variables()
+
+sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),
+                         logdir="./train_logs",
+                         init_op=init_op,
+                         summary_op=summary_op,
+                         saver=saver,
+                         global_step=global_step,
+                         save_model_secs=600)
+
+sess = sv.prepare_or_wait_for_session(server.target)
+
+sv.start_queue_runners(sess)
+
+mnist = input_data.read_data_sets("./MNIST_data/", one_hot=True)
+step = 0
+while not sv.should_stop() and step < 20000:
+  batch_xs, batch_ys = mnist.train.next_batch(50)
+  if step % 100 == 0:
+    print "job : %s/%s" % (FLAGS.job_name,FLAGS.task_index), "step : ", step, ",training accuracy :", sess.run(accuracy, feed_dict={x: batch_xs, y_: batch_ys})
+  _, step = sess.run([train_op, global_step], feed_dict={x: batch_xs, y_: batch_ys})
+
+saver.save(sess, "./train_logs/mlp.ckpt")
+
+if name == "main":
+tf.app.run()
+Here is a worker log:
+I0825 17:17:56.155537454 42583 socket_utils_common_posix.c:170] Disabling AF_INET6 sockets because ::1 is not available. I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job ps -> {10.51.145.204:30125, 10.51.147.155:30145, 10.51.147.206:30133, 10.51.81.205:30109, 10.51.145.207:30131, 10.51.148.205:30132, 10.50.85.231:30133, 10.51.147.208:30103, 10.51.147.195:30130, 10.51.150.71:30121} I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:206] Initialize HostPortsGrpcChannelCache for job worker -> {localhost:30129, 10.51.145.204:30109, 10.51.150.8:30138, 10.51.81.205:30121, 10.51.151.134:30111, 10.51.148.143:30135, 10.51.148.148:30103, 10.51.150.205:30140, 10.51.150.9:30113, 10.51.145.131:30116, 10.51.145.200:30105, 10.51.147.144:30138, 10.51.147.155:30102, 10.50.216.39:30147, 10.51.145.198:30111, 10.51.151.135:30133, 10.50.145.197:30130, 10.51.147.143:30135, 10.50.146.231:30143, 10.50.146.221:30100} I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:202] Started server with target: grpc://localhost:30129 E0825 17:17:56.489036676 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.145.204:30125': socket error: connection refused E0825 17:17:56.489142227 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.147.155:30145': socket error: connection refused E0825 17:17:56.489182927 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.147.206:30133': socket error: connection refused E0825 17:17:56.489211389 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.81.205:30109': socket error: connection refused E0825 17:17:56.489271981 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.145.207:30131': socket error: connection refused E0825 17:17:56.489308098 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.148.205:30132': socket error: connection refused E0825 17:17:56.489330266 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.50.85.231:30133': socket error: connection refused E0825 17:17:56.489361511 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.147.208:30103': socket error: connection refused E0825 17:17:56.489796035 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.150.71:30121': socket error: connection refused E0825 17:17:56.489996076 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.151.134:30111': socket error: connection refused E0825 17:17:56.490013575 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.148.143:30135': socket error: connection refused E0825 17:17:56.490021842 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.150.205:30140': socket error: connection refused E0825 17:17:56.490028295 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.148.148:30103': socket error: connection refused E0825 17:17:56.490035855 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.150.9:30113': socket error: connection refused E0825 17:17:56.490275270 42954 tcp_client_posix.c:173] failed to connect to 'ipv4:10.51.145.131:30116': socket error: connection refused
+All the workers are seemed to be connected to each other.  It makes me confused.
+Anyone can help with this? Thank you!

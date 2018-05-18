@@ -1,0 +1,265 @@
+While loop gradient descent error
+
+Environment info
+Operating System: Centos 7
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+CPU version
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+The output from python -c "import tensorflow; print(tensorflow.version)".
+
+0.8.0
+Steps to reproduce
+Example 1 for Tensorflow 0.8
+import tensorflow as tf
+import numpy as np
+from tensorflow.python.ops import rnn
+
+class model(object):
+    def __init__(self):
+        error_position = 1
+        vocab_size = 20
+        embedding_size = 5
+        # Word2vec
+        W = tf.Variable(tf.random_normal([vocab_size, embedding_size]),
+            trainable=False, name="W")
+        self.story = []
+        story_embedded = []
+        # Embedding
+        for i in range(4):
+            self.story.append(tf.placeholder(tf.int32, shape=[None]))
+            story_embedded.append(tf.nn.embedding_lookup(W, self.story[i]))
+
+        self.answer = tf.constant(3, tf.int64)
+        answer_weights = tf.Variable(tf.truncated_normal([embedding_size, vocab_size], -0.1, 0.1), name="answer_weights")
+        # w2v to sentence2vec for story and question
+        scell = tf.nn.rnn_cell.GRUCell(embedding_size)
+        story_state_array = []
+
+        for i in range(0,4):
+            with tf.variable_scope("tt", reuse=True if i > 0 else None):
+                _, story_state = rnn.rnn(scell, tf.unpack(tf.reshape(story_embedded[i],[4,1,5]), 4), dtype=tf.float32)
+                story_state_array.append(story_state)
+        storys = tf.concat(0,story_state_array)
+
+
+        mem_weights = tf.get_variable("mem_weights", [embedding_size, embedding_size], initializer=tf.random_normal_initializer())
+        l1_weights = tf.get_variable("l1_weights", [embedding_size, 1], initializer=tf.random_normal_initializer())
+
+        episodic_gate_unpacked = []
+        def body(mem_state_previous, hops):
+            mem_state_current = tf.nn.relu(tf.matmul(mem_state_previous, mem_weights))
+            hops = tf.add(hops,1)
+            return  mem_state_current, hops
+        def condition(mem_state_previous, hops):
+            z = tf.mul(storys, mem_state_previous)
+            e_reshaped = tf.reshape(tf.matmul(z , l1_weights) , [1,-1], name="e_reshaped")
+            e_gate = tf.nn.softmax(e_reshaped)
+            e_unpacked = tf.unpack( tf.reshape(e_gate, [4,1]))
+            argmax_e = tf.to_int32(tf.argmax(e_gate, 1)) #should be 1
+            return tf.logical_and(tf.less(argmax_e[0], error_position),tf.less(hops,5))
+
+        init_state = tf.constant([[1.0,1.0,1.0,1.0,1.0,]])
+        initial_hops = tf.constant(0)
+        a_state, _ = tf.while_loop(condition,body,[init_state, initial_hops], back_prop=True)
+
+        # answer
+        predicted_answer = tf.matmul(a_state, answer_weights)
+        answer = tf.reshape(tf.one_hot(self.answer, vocab_size, 1.0, 0.0), [1,vocab_size])
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(predicted_answer, answer), name='loss')
+
+        # gradient
+        params = tf.trainable_variables()
+        self.gradient_norms = []
+        self.updates = []
+        optimizer = tf.train.AdamOptimizer(0.05)
+        gradients = tf.gradients(self.loss, params)
+        self.updates = optimizer.apply_gradients(
+            zip(gradients, params))
+        self.saver = tf.train.Saver(tf.all_variables())
+
+    def step(self,sess):
+        feed ={}
+        feed[self.story[0].name] = [1,2,3,4]
+        feed[self.story[1].name] = [4,5,6,5]
+        feed[self.story[2].name] = [7,8,9,8]
+        feed[self.story[3].name] = [0,2,3,5]
+
+        print sess.run([self.loss,self.updates],feed)
+with tf.Graph().as_default():
+    with tf.Session() as sess:
+        test_model = model()
+        sess.run(tf.initialize_all_variables())
+        test_model.step(sess)
+
+Example 2 for Tensorflow 0.9
+import tensorflow as tf
+import numpy as np
+from tensorflow.python.ops import rnn
+
+class model(object):
+    def __init__(self):
+        error_position = 2
+        vocab_size = 20
+        embedding_size = 5
+        # Word2vec
+        W = tf.Variable(tf.random_normal([vocab_size, embedding_size]),
+                trainable=False, name="W")
+        self.story = []
+        story_embedded = []
+        # Embedding
+        for i in range(4):
+            self.story.append(tf.placeholder(tf.int32, shape=[None,None]))
+            story_embedded.append(tf.nn.embedding_lookup(W, self.story[i]))
+
+        self.question = tf.placeholder(tf.int32, shape=[None,None], name="Question")
+        question_embedded = tf.nn.embedding_lookup(W, self.question)
+
+        self.answer = tf.constant(3, tf.int64)
+        answer_weights = tf.Variable(tf.truncated_normal([embedding_size, vocab_size], -0.1, 0.1), name="answer_weights")   
+        # w2v to sentence2vec for story and question
+        scell = tf.nn.rnn_cell.GRUCell(embedding_size)
+        story_state_array = []
+
+        q_cell = tf.nn.rnn_cell.GRUCell(embedding_size)
+        _, question_state = tf.nn.rnn(q_cell, tf.unpack(question_embedded, 4), dtype=tf.float32)
+
+        for i in range(0,4):
+            with tf.variable_scope("tt", reuse=True if i > 0 else None):
+                _, story_state = tf.nn.rnn(scell, tf.unpack(story_embedded[i], 4), dtype=tf.float32)
+                story_state_array.append(story_state)   
+
+        stories = tf.concat(0,story_state_array)
+
+
+        mem_weights = tf.get_variable("mem_weights", [embedding_size * 2, embedding_size], initializer=tf.random_normal_initializer())
+        l1_weights = tf.get_variable("l1_weights", [embedding_size, 1], initializer=tf.random_normal_initializer())
+
+        e_unpacked = [] 
+        def body(mem_state_previous, hops):
+            # context = MGRU(facts_, e_unpacked)
+            mem_state_current = tf.nn.relu(tf.matmul(tf.concat(1,[mem_state_previous, question_state]), mem_weights))
+
+            hops = tf.add(hops,1)
+            return  mem_state_current, hops
+        def condition(mem_state_previous, hops):    
+            z = tf.mul(stories, mem_state_previous)
+            e_reshaped = tf.reshape(tf.matmul(z , l1_weights) , [1,-1], name="e_reshaped")
+            e_gate = tf.nn.softmax(e_reshaped)
+            e_unpacked = tf.unpack( tf.reshape(e_gate, [4,1]))  
+            argmax_e = tf.to_int32(tf.argmax(e_gate, 1)) #should be 1
+            return tf.logical_and(tf.less(argmax_e[0], error_position),tf.less(hops,5))
+
+
+        initial_hops = tf.constant(0)
+        a_state, _ = tf.while_loop(condition,body,[question_state, initial_hops], back_prop=True)   
+
+        # answer
+        predicted_answer = tf.matmul(a_state, answer_weights)
+        answer = tf.reshape(tf.one_hot(self.answer, vocab_size, 1.0, 0.0), [1,vocab_size])
+        self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(predicted_answer, answer), name='loss')
+
+        # gradient
+        params = tf.trainable_variables()   
+        self.gradient_norms = []
+        self.updates = []
+        optimizer = tf.train.AdamOptimizer(0.05)
+        gradients = tf.gradients(self.loss, params) 
+        self.updates = optimizer.apply_gradients(
+            zip(gradients, params))
+        self.saver = tf.train.Saver(tf.all_variables())
+
+    def step(self,sess):    
+        feed ={}
+        feed[self.story[0].name] = [[1],[2],[3],[4]]
+        feed[self.story[1].name] = [[4],[5],[6],[5]]
+        feed[self.story[2].name] = [[7],[8],[9],[8]]
+        feed[self.story[3].name] = [[0],[2],[3],[5]]
+        feed[self.question.name] = [[1],[4],[5],[5]]
+
+        print sess.run([self.loss,self.updates],feed)
+with tf.Graph().as_default():
+    with tf.Session() as sess:
+        test_model = model()
+        sess.run(tf.initialize_all_variables())
+        test_model.step(sess)
+
+What have you tried?
+In my tf.while_loop(), it calculates attention in each loop. If the attention is beyond certain threshold, it would terminate the while_loop. But it does not work as I expected.
+In this two situations, it works
+
+If I turn back_prop=False in while_loop, it works.
+If argmax_ep_gate[0] always < error_position, it works.
+
+Hence, the error might appear after several trails
+Also, we found that in z = tf.mul(storys, mem_state_previous), if storys does not generated after tf.concat(0, story_state_array) such as a single sentence2vec from _, story_state = rnn.dynamic_rnn(scell, story_embedded[i], dtype=tf.float32), it works.
+Logs or other output that would be helpful
+Below log is generated before shrinking the example for both Tensorflow 0.8 and 0.9
+Traceback (most recent call last):
+  File "github_issue.py", line 111, in <module>
+    test_model.step(sess)
+  File "github_issue.py", line 106, in step
+    print sess.run([self.loss, self.gradient_norms],feed)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 340, in run
+    run_metadata_ptr)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 564, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 637, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 659, in _do_call
+    e.code)
+tensorflow.python.framework.errors.InvalidArgumentError: Inputs to operation gradients/AddN of type AddN must have the same size and shape.  Input 0: [1,5] != input 1: []
+     [[Node: gradients/AddN = AddN[N=2, T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"](gradients/while/Enter_grad/Exit, gradients/while/Mul/Enter_1_grad/b_acc_3)]]
+Caused by op u'gradients/AddN', defined at:
+  File "github_issue.py", line 109, in <module>
+    test_model = model()
+  File "github_issue.py", line 89, in __init__
+    gradients = tf.gradients(self.loss, params)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/ops/gradients.py", line 431, in gradients
+    out_grads = _AggregatedGrads(grads, op, loop_state, aggregation_method)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/ops/gradients.py", line 676, in _AggregatedGrads
+    out_grads[i] = math_ops.add_n(out_grad)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/ops/gen_math_ops.py", line 58, in add_n
+    return _op_def_lib.apply_op("AddN", inputs=inputs, name=name)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/ops/op_def_library.py", line 655, in apply_op
+    op_def=op_def)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2154, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1154, in __init__
+    self._traceback = _extract_stack()
+
+Below log is generated after shrinking the example, fixed after 0.9
+Traceback (most recent call last):
+  File "github_issue.py", line 82, in <module>
+    test_model.step(sess)
+  File "github_issue.py", line 77, in step
+    print sess.run([self.loss,self.updates],feed)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 340, in run
+    run_metadata_ptr)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 564, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 637, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 659, in _do_call
+    e.code)
+tensorflow.python.framework.errors.InvalidArgumentError: var and grad do not have the same shape[5,5] []
+     [[Node: Adam/update_mem_weights/ApplyAdam = ApplyAdam[T=DT_FLOAT, _class=["loc:@mem_weights"], use_locking=false, _device="/job:localhost/replica:0/task:0/cpu:0"](mem_weights, mem_weights/Adam, mem_weights/Adam_1, beta1_power/read, beta2_power/read, Adam/learning_rate, Adam/beta1, Adam/beta2, Adam/epsilon, gradients/while/MatMul_1/Enter_grad/b_acc_3)]]
+Caused by op u'Adam/update_mem_weights/ApplyAdam', defined at:
+  File "github_issue.py", line 80, in <module>
+    test_model = model()
+  File "github_issue.py", line 67, in __init__
+    zip(gradients, params))
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 299, in apply_gradients
+    update_ops.append(self._apply_dense(grad, var))
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/training/adam.py", line 129, in _apply_dense
+    self._epsilon_t, grad, use_locking=self._use_locking).op
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/training/gen_training_ops.py", line 120, in apply_adam
+    use_locking=use_locking, name=name)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/ops/op_def_library.py", line 655, in apply_op
+    op_def=op_def)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2154, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1154, in __init__
+    self._traceback = _extract_stack()

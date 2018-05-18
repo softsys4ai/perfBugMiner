@@ -1,0 +1,57 @@
+GPU ran-out-of-memory problem
+
+I've got a GPU ran-out-of-memory problem.
+My single GPU Card has about 11GB memory. As the nvidia-smi shows below:
+N/A   48C    P0   129W / 235W |  10985MiB / 11519MiB |     99%      Default
+I define a big CNN models, it is like this:
+My CNN Models Start...
+Layer 1.
+input: one batch 35 pics, with 1024x1024x3:
+(35,1024,1024,3)
+Layer 2.
+2D conv-layer and 2D max-pool layer:
+conv-kernel (3,3,3), 16 feature maps, stride=1, and using "SAME" padding,
+max-pool-kernel (2,2), stride=2, so the output should be
+(35,512,512,16)
+and the parameters of the layer should be:
+W: 3x3x3x16+b: 16=448
+Layer3, 4, 5, 6:
+The same as Layer2, 2D Conv and 2D Max Pool,
+conv-kernel (3,3,16), 16 feature maps, stride=1, and using "SAME" padding,
+max-pool-kernel (2,2), strides=2,
+the output of the layers is:
+(35,256,256,16)
+(35,128,128,16)
+(35,64,64,16)
+(35,32,32,16)
+The total parameters is:
+4x(3x3x16x16)+4x16=9280
+Layer7:
+dense layer with 2048 hidden nodes,
+the parameters:
+32x32x16x2048+2048=33556480
+Layer8:
+dense layer with 600 hidden nodes,
+the parameters:
+600x2048+600=1229400
+END.
+So all together, the model has 448+9280+33556480+1229400=34795608 float32 parameters, it is  34795608x4/1024/1024=132MB parameters.
+Maybe I should also add the memory cost by the outputs, so it is
+(35x1024x1024x3)+(35x512x512x16)+(35x256x256x16)+(35x128x128x16)+(35x64x64x16)+(35x32x32x16)=305643520 float32
+=305643520x4/1024/1024=1164MB
+All together, no more than 2GB. Far from 11GB.
+But I got the following:
+Ran out of memory trying to allocate 512.00MiB.  See logs for memory state
+However,  once I changed the number of output feature-maps for each layer from 16 to 8 (or less), the model just trained well.
+I use the latest tensor-flow codes (20151202), the following session configs:
+Code start
+### start session
+config=tf.ConfigProto()
+# config.gpu_options.per_process_gpu_memory_fraction=0.98
+config.gpu_options.allocator_type="BFC"
+config.log_device_placement=True
+sess=tf.Session(config=config)
+
+Code end
+But it doesn't solve my problems.
+So, help....

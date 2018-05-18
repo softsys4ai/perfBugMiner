@@ -1,0 +1,86 @@
+dynamic_rnn is much slower then manually using while_loop
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.6.0-rc1
+Python version: 3.5.2
+Bazel version (if compiling from source): 0.11.1
+GCC/Compiler version (if compiling from source): 5.4.0
+CUDA/cuDNN version: 9.0/
+GPU model and memory: NVIDIA 1080 TI
+Exact command to reproduce: (see below)
+
+python benchmark_lstm.py -d 512 -b 60 -t 380 -n 512 -w 20 -i 40
+Describe the problem
+Tensorflow dynamic_rnn is over twice as slow as static_rnn and using a simple application of tf.while_loop.
+I noticed while doing some profiling that dynamic_rnn was much slower than static_rnn. At first I assumed this was because of something inherently slow about using dynamic length, but then I also noticed naively using tf.while_loop with rnn cell was also much faster and performed comparably to static_rnn.
+I am not sure if there is some special cases dynamic_rnn needs to handle that causes it to be slower, or if there something not equivalent between my while_loop and the dynamic_rnn that I am missing. However a 2x performance change is a big deal and I wanted to report this just in case it points to a possible implementation improvement.
+Source code / logs
+Benchmark used:
+import tensorflow as tf
+import argparse
+import numpy as np
+
+from tqdm import tqdm
+
+
+def while_loop_rnn(rnn_cell, x):
+    initial_state = rnn_cell.zero_state(tf.shape(x)[0], tf.float32)
+    x_t = tf.transpose(x, [1, 0, 2])
+
+    def compute(i, cur_state, out):
+        output, cur_state = rnn_cell(x_t[i], cur_state)
+        return i+1, cur_state, out.write(i, output)
+
+    time = tf.shape(x_t)[0]
+
+    _, cur_state, out = tf.while_loop(
+        lambda a, b, c: a < time,
+        compute,
+        (0, initial_state, tf.TensorArray(tf.float32, time))
+    )
+    return tf.transpose(out.stack(), [1, 0, 2]), cur_state
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-d", "--dim", required=True, type=int)
+    parser.add_argument("-b", "--batch", required=True, type=int)
+    parser.add_argument("-t", "--time", required=True, type=int)
+    parser.add_argument("-n", "--hidden", required=True, type=int)
+    parser.add_argument("-w", "--warm_up", type=int, default=20)
+    parser.add_argument("-i", "--iterations", type=int, default=20)
+    args = parser.parse_args()
+
+    cell = tf.nn.rnn_cell.LSTMCell(args.hidden)
+    x = tf.constant(np.random.normal(scale=2, size=(args.batch, args.time, args.dim)).astype(np.float32))
+
+    dynamic = tf.nn.dynamic_rnn(cell, x, dtype=tf.float32)[0]
+    static = tf.stack(tf.nn.static_rnn(cell, tf.unstack(x, args.time, axis=1), dtype=tf.float32)[0], axis=1)
+    while_loop = while_loop_rnn(cell, x)[0]
+
+    sess = tf.Session()
+    sess.run(tf.global_variables_initializer())
+
+    print("Checking equivalence...")
+    dynamic_out, static_out, while_out = sess.run([dynamic, static, while_loop])
+
+    if not np.allclose(dynamic_out, static_out):
+        raise RuntimeError()
+    if not np.allclose(dynamic_out, while_out):
+        raise RuntimeError()
+
+    for name, op in zip(["dynamic", "static", "while"], [dynamic, static, while_loop]):
+        print("Testing %s" % name)
+        print("Warming up...")
+        for _ in range(args.warm_up):
+            sess.run(op)
+
+        for _ in tqdm(range(args.iterations), "run", ncols=80):
+            sess.run(op)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,23 @@
+Memory leak in zeros_like/Tile
+
+So I'm trying to figure out why my resnets are running out of memory, and it seems that there's a memory leak in Tile and zeros_like operations.
+Those ops have memory allocated during each session run but there's no __LOG_MEMORY__ deallocation messages corresponding to them. The sum of missing deallocations matches the amount of memory leaked as reported by allocator as max_bytes_in_use (accessed through tf.contrib.memory_stats.MaxBytesInUse op)
+Here's a simplified repro, at each sess.run, the memory grows by 1.15 GB until it crashes with OOM
+https://github.com/yaroslavvb/stuff/blob/master/resnet_leak_report2.py
+When I run it, I see
+Run 0, GBs in use 2.30
+Run 1, GBs in use 3.60
+Run 2, GBs in use 4.75
+Run 3, GBs in use 5.90
+2017-09-21 14:56:31.994302: W tensorflow/core/common_runtime/bfc_allocator.cc:273] Allocator (GPU_0_bfc) ran out of memory trying to allocate 137.33MiB.  Current allocation summary follows....
+
+Offending ops:
+gradients/leaky_relu_grad/zeros_like 576MB
+gradients/Sum_grad/Tile  576MB
+
+Version:
+Ubuntu 16:04
+official TensorFlow Linux GPU Python 3.5 nightly wheel from today
+version: 1.4.0-dev20170921
+__git_version__: v1.3.0-rc1-2408-ge9d5ee1
+Commit https://github.com/tensorflow/tensorflow/commit/e9d5ee1

@@ -1,0 +1,182 @@
+Estimator does not catch OutOfRange error
+
+I created a [4, 1, 5] tensor and use
+feature_a = tf.train.limit_epochs(testing_data_a, num_epochs=1, name="feature_a_limit")
+tf.train.batch([feature_a], batch_size=2, enqueue_many=True,
+                                                                allow_smaller_final_batch=True, name="feature_a_batch")
+
+to create a batch queue that produces the tensor only once, and I then use this in the input_fn function of model.evaluate with steps=2. Because the batch size is 2 and the steps is 2, I expect this could use up the batch queue without an OutOfRange error (or the Estimator will catch this error and use it as an indicator to stop the evaluation), however the Estimator does not catch it and the program ends.
+Is this an expected behavior? If I remember correctly Estimator used to catch such error. Another question is, why the FIFO queue still throw the OutOfRange even if I just request the exact number of elements in the queue?
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+http://stackoverflow.com/questions/42127447/tensorflows-estimator-can-only-get-n-1-batches-from-tf-train-limit-epochs
+Environment info
+Operating System:
+Linux DOMAIN 3.13.0-107-generic #154-Ubuntu SMP Tue Dec 20 09:57:27 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+
+
+The commit hash (git rev-parse HEAD)
+
+1536a84f32f1fe77efd3fee6e5933a1dfe4e10bb
+
+
+The output of bazel version
+
+Build label: 0.4.3
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Dec 22 12:31:25 2016 (1482409885)
+Build timestamp: 1482409885
+Build timestamp as int: 1482409885
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+from tensorflow.contrib.layers.python.layers.optimizers import optimize_loss
+from tensorflow.contrib.learn.python.learn.estimators import model_fn
+from tensorflow.contrib.learn.python.learn.estimators.estimator import Estimator
+from tensorflow.python import debug as tf_debug
+from tensorflow.python.framework import ops
+
+
+def main(_):
+    hooks = [tf_debug.LocalCLIDebugHook()]
+
+    def func(features, targets, mode, params):
+        idx = tf.concat([features['a'], features['b']], axis=1)
+
+        embedding = tf.get_variable("embed", [10, 20], dtype=tf.float32)
+
+        pred = tf.reduce_sum(tf.nn.embedding_lookup(embedding, idx))
+
+        train_op = optimize_loss(loss=pred,
+                                 global_step=tf.train.get_global_step(),
+                                 learning_rate=0.001,
+                                 optimizer='Adam',
+                                 variables=tf.trainable_variables(),
+                                 name="training_loss_optimizer")
+
+        eval_metric_dict = dict()
+        eval_metric_dict['metric'] = pred
+
+        return model_fn.ModelFnOps(mode=mode,
+                                   predictions=pred,
+                                   loss=pred,
+                                   train_op=train_op,
+                                   eval_metric_ops=eval_metric_dict)
+
+    model = Estimator(func, params={})
+
+    model.fit(
+        input_fn=lambda: (
+            {'a': ops.convert_to_tensor([[1, 2, 3, 4, 5]]), 'b': ops.convert_to_tensor([[2, 3, 4, 3, 5]])},
+            None), max_steps=10)
+
+    testing_data_a = [[1, 2, 3, 4, 5], [1, 2, 3, 4, 5] , [1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]
+    testing_data_b = [[2, 3, 4, 3, 5], [2, 3, 4, 3, 5] , [2, 3, 4, 3, 5], [2, 3, 4, 3, 5]]
+
+    def test_input_fn():
+        print("test_input_fn entered")
+        feature_a = tf.train.limit_epochs(testing_data_a, num_epochs=1, name="feature_a_limit")
+        feature_b = tf.train.limit_epochs(testing_data_b, num_epochs=1, name="feature_b_limit")
+
+        feature_a_producer, feature_b_producer = tf.train.batch([feature_a, feature_b], batch_size=2, enqueue_many=True,
+                                                                allow_smaller_final_batch=True, name="feature_a_batch")
+
+        print("test_input_fn exit")
+        return {'a': feature_a_producer, 'b': feature_b_producer}, None
+
+    for i in range(10):
+        print(model.evaluate(input_fn=test_input_fn, steps=2))
+        print("one iteration done")
+
+
+if __name__ == "__main__":
+    tf.app.run()
+What other attempted solutions have you tried?
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+ssh://bshi@dsg1.crc.nd.edu:22/data/bshi/py3env/bin/python -u /data/bshi/ProjC/estimator_test.py --debug
+WARNING:tensorflow:Using temporary folder as model directory: /tmp/tmpxtkow_oq
+test_input_fn entered
+test_input_fn exit
+W tensorflow/core/framework/op_kernel.cc:993] Out of range: FIFOQueue '_0_feature_a_batch/fifo_queue' is closed and has insufficient elements (requested 2, current size 0)
+	 [[Node: feature_a_batch = QueueDequeueUpToV2[component_types=[DT_INT32, DT_INT32], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](feature_a_batch/fifo_queue, feature_a_batch/n)]]
+Traceback (most recent call last):
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 1022, in _do_call
+    return fn(*args)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 1004, in _run_fn
+    status, run_metadata)
+  File "/usr/lib/python3.4/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/framework/errors_impl.py", line 469, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.OutOfRangeError: FIFOQueue '_0_feature_a_batch/fifo_queue' is closed and has insufficient elements (requested 2, current size 0)
+	 [[Node: feature_a_batch = QueueDequeueUpToV2[component_types=[DT_INT32, DT_INT32], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](feature_a_batch/fifo_queue, feature_a_batch/n)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/data/bshi/ProjC/estimator_test.py", line 62, in <module>
+    tf.app.run()
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/platform/app.py", line 44, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "/data/bshi/ProjC/estimator_test.py", line 57, in main
+    print(model.evaluate(input_fn=test_input_fn, steps=2))
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/util/deprecation.py", line 280, in new_func
+    return func(*args, **kwargs)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 514, in evaluate
+    log_progress=log_progress)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 836, in _evaluate_model
+    hooks=hooks)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/contrib/training/python/training/evaluation.py", line 430, in evaluate_once
+    session.run(eval_ops, feed_dict)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/training/monitored_session.py", line 478, in __exit__
+    self._close_internal(exception_type)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/training/monitored_session.py", line 508, in _close_internal
+    h.end(self._coordinated_creator.tf_sess)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/training/basic_session_run_hooks.py", line 647, in end
+    feed_dict=self._final_ops_feed_dict)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/client/session.py", line 1035, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.OutOfRangeError: FIFOQueue '_0_feature_a_batch/fifo_queue' is closed and has insufficient elements (requested 2, current size 0)
+	 [[Node: feature_a_batch = QueueDequeueUpToV2[component_types=[DT_INT32, DT_INT32], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](feature_a_batch/fifo_queue, feature_a_batch/n)]]
+
+Caused by op 'feature_a_batch', defined at:
+  File "/data/bshi/ProjC/estimator_test.py", line 62, in <module>
+    tf.app.run()
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/platform/app.py", line 44, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "/data/bshi/ProjC/estimator_test.py", line 57, in main
+    print(model.evaluate(input_fn=test_input_fn, steps=2))
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/util/deprecation.py", line 280, in new_func
+    return func(*args, **kwargs)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 514, in evaluate
+    log_progress=log_progress)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 800, in _evaluate_model
+    features, labels = input_fn()
+  File "/data/bshi/ProjC/estimator_test.py", line 51, in test_input_fn
+    allow_smaller_final_batch=True, name="feature_a_batch")
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/training/input.py", line 872, in batch
+    name=name)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/training/input.py", line 665, in _batch
+    dequeued = queue.dequeue_up_to(batch_size, name=name)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/ops/data_flow_ops.py", line 510, in dequeue_up_to
+    self._queue_ref, n=n, component_types=self._dtypes, name=name)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 1402, in _queue_dequeue_up_to_v2
+    timeout_ms=timeout_ms, name=name)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/framework/op_def_library.py", line 763, in apply_op
+    op_def=op_def)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 2395, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/data/bshi/py3env/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 1264, in __init__
+    self._traceback = _extract_stack()
+
+OutOfRangeError (see above for traceback): FIFOQueue '_0_feature_a_batch/fifo_queue' is closed and has insufficient elements (requested 2, current size 0)
+	 [[Node: feature_a_batch = QueueDequeueUpToV2[component_types=[DT_INT32, DT_INT32], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](feature_a_batch/fifo_queue, feature_a_batch/n)]]
+
+
+Process finished with exit code 1

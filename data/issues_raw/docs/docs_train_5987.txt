@@ -1,0 +1,54 @@
+Request for documentation on recommended flow in slim for train, validation, and test sets
+
+The examples in the slim README.md give basic documentation for training and evaluating models when used separately; however, there is guidance missing on how to do the classic cycle of mini-batch gradient descent using shuffled subsets of the training set, periodically evaluating validation set, and then evaluating on the test set post-training.
+Using the MNIST tutorial and this tutorial for reference, the best I came up with was something like this where I'm effectively monkey-patching the train_step_fn to periodically output accuracies:
+from tensorflow.contrib.slim.python.slim.learning import train_step
+
+graph = tf.Graph()
+with graph.as_default():
+  image, label = input('train', FLAGS.dataset_dir)
+  images, labels = tf.train.shuffle_batch([image, label], batch_size=FLAGS.batch_size, capacity=1000 + 3 * FLAGS.batch_size, min_after_dequeue=1000)
+  images_validation, labels_validation = inputs('validation', FLAGS.dataset_dir, 5000)
+  images_test, labels_test = inputs('test', FLAGS.dataset_dir, 10000)
+ 
+  with tf.variable_scope("model") as scope:
+    predictions = model(images, FLAGS)
+    scope.reuse_variables()
+    predictions_validation = model(images_validation, FLAGS)
+    predictions_test = model(images_test, FLAGS)
+    
+  slim.losses.softmax_cross_entropy(predictions, labels)
+  optimizer = tf.train.AdamOptimizer(FLAGS.learning_rate)
+  train_op = slim.learning.create_train_op(slim.losses.get_total_loss(), optimizer)
+
+  accuracy_validation = slim.metrics.accuracy(tf.to_int32(tf.argmax(predictions_validation, 1)), tf.to_int32(tf.argmax(labels_validation, 1)))
+  accuracy_test = slim.metrics.accuracy(tf.to_int32(tf.argmax(predictions_test, 1)), tf.to_int32(tf.argmax(labels_test, 1)))
+    
+def train_step_fn(session, *args, **kwargs):
+  total_loss, should_stop = train_step(session, *args, **kwargs)
+
+  if train_step_fn.step % FLAGS.validation_check == 0:
+    accuracy = session.run(train_step_fn.accuracy_validation)
+    print('Step %s - Loss: %.2f Accuracy: %.2f%%' % (str(train_step_fn.step).rjust(6, '0'), total_loss, accuracy * 100))
+
+  if train_step_fn.step == (FLAGS.max_steps - 1):
+    accuracy = session.run(accuracy_test)
+    print('%s - Loss: %.2f Accuracy: %.2f%%' % ('FINAL TEST', total_loss, accuracy * 100))
+    
+  train_step_fn.step += 1
+  return [total_loss, should_stop]
+
+train_step_fn.step = 0
+train_step_fn.accuracy_validation = accuracy_validation
+
+slim.learning.train(
+  train_op,
+  FLAGS.logs_dir,
+  train_step_fn=train_step_fn,
+  graph=graph,
+  number_of_steps=FLAGS.max_steps
+)
+
+Note: one problem with this implementation is that the final test set is not guaranteed to be run in the case of early exit.
+I've posted in the slack channel and Googled around, but haven't been able to find any examples for this basic use case. Accordingly, I would like to propose that an example providing the best practice to periodically evaluate batch trained models using the validate set and the trained model against the test set to be added to the slim README.md.
+I think it would really help the community to have a clearer idea on the intentions of the slim team on how the batch training and evaluation paths were designed to be used together during and after training.

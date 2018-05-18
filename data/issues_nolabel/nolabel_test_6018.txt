@@ -1,0 +1,25 @@
+Unecessary messages in queue handling
+
+Suppose you want to have one or multiple threads to preload/preprocess images and push them into an image queue that is going to be consumed by your main process, running on the GPU. A simple way of doing so would be:
+def load_image(session, image_list, enqueue_op, image_data_placeholder, coord):
+  index = 0
+  while not coord.should_stop():
+    idata = image_list[index]
+    session.run(enqueue_op, feed_dict={image_data_placeholder: idata})
+    index = (index + 1) % len(image_list)
+
+Eventually, your optimization is finished and you want all threads to end, but if you have threads feeding your queue, they are most likely blocked at the enqueue_op, waiting for an image to be consumed, so they can finally insert theirs in the queue.
+Since closing the queue doesn't unblock them (surprisingly), your most evident choice is to use the timeout option to limit how long the enqueue_op can block your thread, with something like this:
+def load_image(session, image_list, enqueue_op, image_data_placeholder, coord):
+  index = 0
+  while not coord.should_stop():
+    idata = image_list[index]
+    try:
+      session.run(enqueue_op, feed_dict={image_data_placeholder: idata}, options=tf.RunOptions(timeout_in_ms=1000))
+      index = (index + 1) % len(name_list)
+    except:
+      pass
+
+And it does work: the thread will continue trying to push the same image until either it succeeds (and moves on to the next one) or coordinator says it should stop everything and finish.
+The problem is that the timeout not only throws an exception saying that the time has been exceeded, but TF also "manually" prints a warning message. Bad news, you have 3 options: (1) manually edit TryAttemptLocked in queue_base.cc to remove the message from your tensorflow copy, (2) accept that this pesky message is going to flood your logs with useless information or (3) force TF_CPP_MIN_LOG_LEVEL to be at level 2, suppressing all information messages and warnings that could be important, only to get rid of this one message. There is also a 4th option: open an issue here in hope there is a better way of handling this, or that some dev changes this behavior — the exception should be enough for any situation, the forced message doesn't seem to do any good. :-)
+Disclaimer: I know it's far from optimal to pass a list of features (image_list) to be enqueued. This is just for the sake of simplicity in this example.

@@ -1,0 +1,79 @@
+Variable validate_shape not honored
+
+A Variable with validate_shape=True does not seem to be honored and throws a error.  I am using two Variables to store the contents of a SparseTensor and the assign fails because the sizes do not match on one, but not the other Variable.
+Platform:  Ubuntu 14.04
+Code:  Both build from source and binary release
+Version: 1.1.0
+2017-05-10 14:36:12.973654: W tensorflow/core/framework/op_kernel.cc:1152] Invalid argument: Assign requires shapes of both tensors to match. lhs shape= [1] rhs shape= [10]
+[[Node: Assign = Assign[T=DT_INT32, _class=["loc:@Variable_1"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/cpu:0"](Variable_1, SparseAdd:1)]]
+2017-05-10 14:36:12.973661: W tensorflow/core/framework/op_kernel.cc:1152] Invalid argument: Assign requires shapes of both tensors to match. lhs shape= [1] rhs shape= [10]
+[[Node: Assign = Assign[T=DT_INT32, _class=["loc:@Variable_1"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/cpu:0"](Variable_1, SparseAdd:1)]]
+2017-05-10 14:36:12.973657: W tensorflow/core/framework/op_kernel.cc:1152] Invalid argument: Assign requires shapes of both tensors to match. lhs shape= [1] rhs shape= [10]
+[[Node: Assign = Assign[T=DT_INT32, _class=["loc:@Variable_1"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/cpu:0"](Variable_1, SparseAdd:1)]]
+done
+Traceback (most recent call last):
+File "parse.py", line 52, in 
+print(sess.run([st2, asop2]))
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 778, in run
+run_metadata_ptr)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 982, in _run
+feed_dict_string, options, run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1032, in _do_run
+target_list, options, run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1052, in _do_call
+raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Assign requires shapes of both tensors to match. lhs shape= [1] rhs shape= [10]
+[[Node: Assign = Assign[T=DT_INT32, _class=["loc:@Variable_1"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/cpu:0"](Variable_1, SparseAdd:1)]]
+Caused by op u'Assign', defined at:
+File "parse.py", line 39, in 
+asop2 = tf.assign(var_feature_count_cnt, st2.values)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/state_ops.py", line 270, in assign
+validate_shape=validate_shape)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_state_ops.py", line 47, in assign
+use_locking=use_locking, name=name)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 768, in apply_op
+op_def=op_def)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2336, in create_op
+original_op=self._default_original_op, op_def=op_def)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1228, in init
+self._traceback = _extract_stack()
+InvalidArgumentError (see above for traceback): Assign requires shapes of both tensors to match. lhs shape= [1] rhs shape= [10]
+[[Node: Assign = Assign[T=DT_INT32, _class=["loc:@Variable_1"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/cpu:0"](Variable_1, SparseAdd:1)]]
+Code:
+import tensorflow as tf
+parse logic
+start with example feature list
+parse into distinct tokens
+collect counts
+file_queue = tf.FIFOQueue(100, [tf.string])
+the feature count that we maintain between batches
+must be kept in a variable, but variables dont support sparse tensors
+so we have to keep the source index and value arrays
+var_feature_count_idx = tf.Variable(tf.zeros([1,1],dtype=tf.int64), validate_shape=False)
+var_feature_count_cnt = tf.Variable(tf.zeros([1],dtype=tf.int32), validate_shape=False)
+#read a chunk of features
+reader = tf.TextLineReader()
+_, line = reader.read_up_to(file_queue, 1000)
+#parse into tokens
+tokens = tf.string_split(line,delimiter='\t')
+vals = tf.string_to_hash_bucket_fast(tokens.values, 1024) # hash
+y, idx, count = tf.unique_with_counts(vals)  # get distinct
+y2 = tf.expand_dims(y,1)
+now create a sparse array with the hashbucket of as the index
+fcount = tf.SparseTensor(indices=y2,values=count,dense_shape=[1024]) # running count of features
+update the global count
+st = tf.SparseTensor(indices=var_feature_count_idx, values=tf.identity(var_feature_count_cnt), dense_shape=[1024])
+st2 = tf.sparse_add(st, fcount)
+#asop1 = tf.assign(var_feature_count_idx, st2.indices)
+asop2 = tf.assign(var_feature_count_cnt, st2.values)
+with tf.Session() as sess:
+sess.run(tf.global_variables_initializer())
+sess.run(file_queue.enqueue_many((['features.txt'],)))
+sess.run(file_queue.close())
+try:
+while True:
+print(sess.run([st2, asop2]))
+except tf.errors.OutOfRangeError:
+print 'load finished!'
+finally:
+print 'done'

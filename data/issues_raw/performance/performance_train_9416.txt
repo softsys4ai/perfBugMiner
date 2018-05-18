@@ -1,0 +1,58 @@
+Android Demo: Rotation on some devices broken.
+
+System information
+
+Android:
+TensorFlow installed from source:
+TensorFlow version 1.0.0:
+N/A
+
+Describe the problem
+The Android Demo code seems to be a bit buggy on our Pixel C. I wanted to confirm that this isn't an issue with the TF code but it's a strange one.
+The Rotation in the demo apps on our Pixel C didn't seem to work correctly. It would give the value of 3 when it should have read 90. This meant that the input was basically on it's side. I found that for it to work that this line needed to be set to 0.
+sensorOrientation = rotation + screenOrientation; needed to be
+sensorOrientation = 0;
+However, when used in landscape mode this didn't crop around the centre of the preview image but instead it created a square from the left edge.
+|------------------| ---------|                         
+|                  |          |
+|       CROP       |          |
+|     SQUARE       |          |
+|__________________|__________|
+
+When set to 0.
+The solution seemed to be to set the Orientation to 360.
+|-----|------------------|----|                         
+|     |                  |    |
+|     |        CROP      |    |
+|     |      SQUARE      |    |
+|_____|__________________|____|
+
+When set to 360.
+At the time (a couple of weeks ago) I recalled that it forced some code to run that would centre it as required for some other operations however going through the code to find it I can't. I think it was related to this but it doesn't make sense as to why 360 solved the issue.
+private void configureTransform(final int viewWidth, final int viewHeight) {
+    final Activity activity = getActivity();
+    if (null == textureView || null == previewSize || null == activity) {
+      return;
+    }
+    final int rotation = activity.getWindowManager().getDefaultDisplay().getRotation();
+    final Matrix matrix = new Matrix();
+    final RectF viewRect = new RectF(0, 0, viewWidth, viewHeight);
+    final RectF bufferRect = new RectF(0, 0, previewSize.getHeight(), previewSize.getWidth());
+    final float centerX = viewRect.centerX();
+    final float centerY = viewRect.centerY();
+    if (Surface.ROTATION_90 == rotation || Surface.ROTATION_270 == rotation) {
+      bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
+      matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
+      final float scale =
+          Math.max(
+              (float) viewHeight / previewSize.getHeight(),
+              (float) viewWidth / previewSize.getWidth());
+      matrix.postScale(scale, scale, centerX, centerY);
+      matrix.postRotate(90 * (rotation - 2), centerX, centerY);
+    } else if (Surface.ROTATION_180 == rotation) {
+      matrix.postRotate(180, centerX, centerY);
+    }
+    textureView.setTransform(matrix);
+  }
+
+So I guess the question is that is this happening due to some strange hardware bug with the Pixel C or some coding error. I'm leaning towards the former as this is too bizarre to be caused by code but thought i'd open the discussion out as others trying to run the app in landscape may face similar issues.

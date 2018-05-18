@@ -1,0 +1,99 @@
+Parsing TFRecords bug in TensorFlow v1.2
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS High Sierra 10.13
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): ('v1.2.0-rc2-21-g12f033d', '1.2.0')
+Python version: 2.7.10
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: See below
+
+Describe the problem
+I believe there's a bug in TensorFlow v1.2. The code below runs fine in v1.4, while erroring out in v1.2. Here's the code:
+filenames = ["gs://bucket/file.tfrecords"]
+dataset = tf.contrib.data.TFRecordDataset(filenames)
+parse_fn = lambda r: tf.parse_single_example(r, {"f1": tf.VarLenFeature(tf.int64)})
+dataset.map(parse_fn)
+Here's the stacktrace that I get:
+TypeError                                 Traceback (most recent call last)
+<ipython-input-42-0473d32d7931> in <module>()
+----> 1 dataset.map(parser)
+
+/Users/stypka/env/tf-1.2/lib/python2.7/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.pyc in map(self, map_func, num_threads, output_buffer_size)
+    811       A `Dataset`.
+    812     """
+--> 813     return MapDataset(self, map_func, num_threads, output_buffer_size)
+    814
+    815   def flat_map(self, map_func):
+
+/Users/stypka/env/tf-1.2/lib/python2.7/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.pyc in __init__(self, input_dataset, map_func, num_threads, output_buffer_size)
+   1434
+   1435     self._map_func = tf_map_func
+-> 1436     self._map_func.add_to_graph(ops.get_default_graph())
+   1437     if num_threads is not None:
+   1438       self._num_threads = ops.convert_to_tensor(
+
+/Users/stypka/env/tf-1.2/lib/python2.7/site-packages/tensorflow/python/framework/function.pyc in add_to_graph(self, g)
+    617   def add_to_graph(self, g):
+    618     """Adds this function into the graph g."""
+--> 619     self._create_definition_if_needed()
+    620
+    621     # pylint: disable=protected-access
+
+/Users/stypka/env/tf-1.2/lib/python2.7/site-packages/tensorflow/contrib/data/python/framework/function.pyc in _create_definition_if_needed(self)
+    165       # Call func and gather the output tensors.
+    166       with vs.variable_scope("", custom_getter=temp_graph.getvar):
+--> 167         outputs = self._func(*inputs)
+    168       # If func only returned one value, make it a tuple.
+    169       if not isinstance(outputs, (list, tuple)):
+
+/Users/stypka/env/tf-1.2/lib/python2.7/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.pyc in tf_map_func(*args)
+   1425
+   1426       # Extract shape information from the returned values.
+-> 1427       flattened_ret = [ops.convert_to_tensor(t) for t in nest.flatten(ret)]
+   1428       self._output_shapes = nest.pack_sequence_as(
+   1429           ret, [t.get_shape() for t in flattened_ret])
+
+/Users/stypka/env/tf-1.2/lib/python2.7/site-packages/tensorflow/python/framework/ops.pyc in convert_to_tensor(value, dtype, name, preferred_dtype)
+    674       name=name,
+    675       preferred_dtype=preferred_dtype,
+--> 676       as_ref=False)
+    677
+    678
+
+/Users/stypka/env/tf-1.2/lib/python2.7/site-packages/tensorflow/python/framework/ops.pyc in internal_convert_to_tensor(value, dtype, name, as_ref, preferred_dtype)
+    739
+    740         if ret is None:
+--> 741           ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+    742
+    743         if ret is NotImplemented:
+
+/Users/stypka/env/tf-1.2/lib/python2.7/site-packages/tensorflow/python/framework/constant_op.pyc in _constant_tensor_conversion_function(v, dtype, name, as_ref)
+    111                                          as_ref=False):
+    112   _ = as_ref
+--> 113   return constant(v, dtype=dtype, name=name)
+    114
+    115
+
+/Users/stypka/env/tf-1.2/lib/python2.7/site-packages/tensorflow/python/framework/constant_op.pyc in constant(value, dtype, shape, name, verify_shape)
+    100   tensor_value = attr_value_pb2.AttrValue()
+    101   tensor_value.tensor.CopyFrom(
+--> 102       tensor_util.make_tensor_proto(value, dtype=dtype, shape=shape, verify_shape=verify_shape))
+    103   dtype_value = attr_value_pb2.AttrValue(type=tensor_value.tensor.dtype)
+    104   const_tensor = g.create_op(
+
+/Users/stypka/env/tf-1.2/lib/python2.7/site-packages/tensorflow/python/framework/tensor_util.pyc in make_tensor_proto(values, dtype, shape, verify_shape)
+    460       raise TypeError("Failed to convert object of type %s to Tensor. "
+    461                       "Contents: %s. Consider casting elements to a "
+--> 462                       "supported type." % (type(values), values))
+    463     tensor_proto.string_val.extend(str_values)
+    464     return tensor_proto
+
+TypeError: Failed to convert object of type <type 'dict'> to Tensor. Contents: {'f1': <tensorflow.python.framework.sparse_tensor.SparseTensor object at 0x117918410>}. Consider casting elements to a supported type.
+
+And again, this works fine in TensorFlow v1.4.0rc0 that I tested.
+Let me know if I should provide any more info!

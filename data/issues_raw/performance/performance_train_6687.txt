@@ -1,0 +1,73 @@
+Cannot run a distributed training example with tensorflow v0.12.1
+
+Hi,
+I was trying to run a distributed tensorflow example in the official repository with v0.12.1 (current latest release).
+I can run asynchronous version without problems, but when I turned on sync_replicas tag, some errors occurred.
+(Please check the following logs in details)
+This example code can be ran successfully with v0.12.0, so I guess there might be some modification from 0.12.0 to 0.12.1?
+Could someone check if that's the case? Thanks.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+I haven't found others reported this issue as tensorflow v0.12.1 just released,
+Environment info
+Operating System:
+Ubuntu 14.04
+Installed version of CUDA and cuDNN:
+CUDA 7.5, cuDNN 5.1
+> ls -l /usr/local/cuda/lib/libcud*
+-rw-r--r-- 1 root root 189170 Oct 25 22:51 /usr/local/cuda/lib/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Oct 25 22:51 /usr/local/cuda/lib/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 Oct 25 22:51 /usr/local/cuda/lib/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 311596 Oct 25 22:51 /usr/local/cuda/lib/libcudart.so.7.5.18
+-rw-r--r-- 1 root root 558020 Oct 25 22:51 /usr/local/cuda/lib/libcudart_static.a
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+4d924e7 (Release 0.12.1)
+The output of bazel version
+
+Build label: 0.4.2
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Dec 7 18:47:11 2016 (1481136431)
+Build timestamp: 1481136431
+Build timestamp as int: 1481136431
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+I simply used this example mnist_replica.py in tensorflow repository.
+Logs or other output that would be helpful
+First I launched the parameter server
+export CUDA_VISIBLE_DEVICES=0; python mnist_replica.py --ps_hosts="localhost:50000" --worker_hosts="localhost:50001" --job_name="ps" --task_index=0 --num_gpus=1 --sync_replicas=True
+
+and then launched the worker with sync_replicas=True tag
+export CUDA_VISIBLE_DEVICES=1; python mnist_replica.py --ps_hosts="localhost:50000" --worker_hosts="localhost:50001" --job_name="worker" --task_index=0 --num_gpus=2 --train_steps=100 --sync_replicas=True
+
+but I got some errors here
+...
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla K40m, pci bus id: 0000:2b:00.0)
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:197] Initialize GrpcChannelCache for job ps -> {0 -> localhost:50000}
+I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:197] Initialize GrpcChannelCache for job worker -> {0 -> localhost:50001, 1 -> localhost:50002}
+I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:211] Started server with target: grpc://localhost:50002
+Traceback (most recent call last):
+  File "mnist_replica.py", line 281, in <module>
+    tf.app.run()
+  File "local/lib/python2.7/site-packages/tensorflow/python/platform/app.py", line 43, in run
+    sys.exit(main(sys.argv[:1] + flags_passthrough))
+  File "mnist_replica.py", line 186, in main
+    train_step = opt.minimize(cross_entropy, global_step=global_step)
+  File "local/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 279, in minimize
+    name=name)
+  File "local/lib/python2.7/site-packages/tensorflow/python/training/sync_replicas_optimizer.py", line 751, in apply_gradients
+    array_ops.reshape(self._replica_id, (1,)),
+  File "local/lib/python2.7/site-packages/tensorflow/python/ops/gen_array_ops.py", line 2448, in reshape
+    name=name)
+  File "local/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 503, in apply_op
+    as_ref=input_arg.is_ref).dtype.name
+  File "local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 669, in convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "local/lib/python2.7/site-packages/tensorflow/python/framework/constant_op.py", line 176, in _constant_tensor_conversion_function
+    return constant(v, dtype=dtype, name=name)
+  File "local/lib/python2.7/site-packages/tensorflow/python/framework/constant_op.py", line 165, in constant
+    tensor_util.make_tensor_proto(value, dtype=dtype, shape=shape, verify_shape=verify_shape))
+  File "local/lib/python2.7/site-packages/tensorflow/python/framework/tensor_util.py", line 360, in make_tensor_proto
+    raise ValueError("None values not supported.")
+ValueError: None values not supported.

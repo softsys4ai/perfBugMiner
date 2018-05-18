@@ -1,0 +1,50 @@
+Fix the error of erase session variables (Android JNI)
+
+When calling the tensorflow_inference_jni.cc of TENSORFLOW_METHOD(close) function, the session variables is not erased from the map of session variables according its id.(at tensorflow_inference_jni.cc line 217)
+This bug reason is assign large data type to the small data type (at tensorflow_inference_jni.cc line 84) that causes some bytes missing.
+Illustrate
+# tensorflow_inference_jni.cc file
+
+...
+ 49 struct SessionVariables {
+ 50   std::unique_ptr<tensorflow::Session> session; 
+
+ 52   long id = -1;
+       ...
+     };
+
+...
+ 69 inline static SessionVariables* GetSessionVars(JNIEnv* env, jobject thiz) {
+       ...
+ 72   jfieldID fid = env->GetFieldID(clazz, "id", "J");
+ 73   assert(fid != nullptr);
+ 74   const int64 id = env->GetLongField(thiz, fid);
+        ...
+ 80   std::map<int64, SessionVariables*>& sessions = *GetSessionsSingleton();
+ 81   if (sessions.find(id) == sessions.end()) {
+ 82     LOG(INFO) << "Creating new session variables for " << std::hex << id;
+ 83     SessionVariables* vars = new SessionVariables;
+ 84     vars->id = id; // Bug assign int64 to long
+ 85     sessions[id] = vars;
+         ...
+256 JNIEXPORT jint JNICALL TENSORFLOW_METHOD(close)(JNIEnv* env, jobject thiz) {
+       ...
+267   std::map<int64, SessionVariables*>& sessions = *GetSessionsSingleton();
+268   sessions.erase(vars->id);
+       ...
+
+The GetSessionVars function line 72~74 that get the long type id from java and assign to const int64 variable. At the line 84 that assigns int64 id variable to the id of SessionVariables, but the type of the id of SessionVariables struct is long. Assign large type to small type that causes some bytes missing.
+At the line 85, using the int64 type of id to set the key of the SessionVariables map, so  TENSORFLOW_METHOD(close) function erases the session variables according to vars->id that the vars->id will never be found and erased from map.
+Fix
+I change the type of the id of SessionVariables struct to int64.
+ struct SessionVariables {
+   std::unique_ptr<tensorflow::Session> session;
+
+   int64 id = -1;  // Change data type
+   int num_runs = 0;
+   int64 timing_total_us = 0;
+ 
+   InputMap input_tensors;
+   std::vector<std::string> output_tensor_names;
+   std::vector<tensorflow::Tensor> output_tensors;
+ };

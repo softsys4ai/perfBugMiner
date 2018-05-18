@@ -1,0 +1,107 @@
+Using an LSTM-CTC Tensorflow Model in Android
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 8.1
+TensorFlow installed from (source or binary):
+Anaconda Install. Prebuilt libraries were used for Tensorflow Android.
+TensorFlow version (use command below):
+1.2.1
+Python version:
+Python 3.5.3 :: Anaconda custom (64-bit)
+Bazel version (if compiling from source):
+N/A
+CUDA/cuDNN version:
+N/A
+GPU model and memory:
+N/A
+
+Describe the problem
+I have succeeded in training my bi-lstm-ctc tensorflow model and now I want to use it for my handwriting recognition android application. Here's the part of the code that defines the graph I used:
+self.inputs = tf.placeholder(tf.float32, [None, None, network_config.num_features], name="input")
+self.labels = tf.sparse_placeholder(tf.int32, name="label")
+self.seq_len = tf.placeholder(tf.int32, [None], name="seq_len_input")
+
+logits = self._bidirectional_lstm_layers(
+   network_config.num_hidden_units,
+   network_config.num_layers,
+   network_config.num_classes
+)
+
+self.global_step = tf.Variable(0, trainable=False)
+self.loss = tf.nn.ctc_loss(labels=self.labels, inputs=logits, sequence_length=self.seq_len)
+self.cost = tf.reduce_mean(self.loss)
+
+self.optimizer = tf.train.AdamOptimizer(network_config.learning_rate).minimize(self.cost)
+self.decoded, self.log_prob = tf.nn.ctc_beam_search_decoder(inputs=logits, sequence_length=self.seq_len, merge_repeated=False)
+self.dense_decoded = tf.sparse_tensor_to_dense(self.decoded[0], default_value=-1, name="output")
+
+
+I also succeeded in freezing and optimizing the graph using this code:
+def freeze(input_graph_path, checkpoint_path, output_node_names, input_saver_def_path="", input_binary=False,
+           restore_op_name="save/restore_all", filename_tensor_name="save/Const:0",
+           output_frozen_graph_name="frozen_output.pb",
+           clear_devices=True):
+    freeze_graph.freeze_graph(input_graph_path, input_saver_def_path, input_binary,
+                              checkpoint_path, output_node_names, restore_op_name, filename_tensor_name,
+                              output_frozen_graph_name, clear_devices, "")
+
+
+def optimize_graph(graph_path, input_nodes, output_nodes):
+    input_graph_def = tf.GraphDef()
+    with tf.gfile.Open(graph_path, "rb") as f:
+        data = f.read()
+        input_graph_def.ParseFromString(data)
+
+    output_graph_def = optimize_for_inference_lib.optimize_for_inference(
+        input_graph_def,
+        input_nodes,
+        output_nodes,
+        tf.float32.as_datatype_enum
+    )
+
+    f = tf.gfile.FastGFile("optimized_" + graph_path, "w")
+    f.write(output_graph_def.SerializeToString())
+
+And here's the part of the android code that is supposed to run the model:
+bitmap = Bitmap.createScaledBitmap(bitmap, 1024, 128, true);
+int[] intValues = new int[bitmap.getWidth() * bitmap.getHeight()];
+bitmap.getPixels(intValues, 0, bitmap.getWidth(), 0, 0, bitmap.getWidth(), bitmap.getHeight());
+float[] floatValues = new float[bitmap.getWidth() * bitmap.getHeight()];
+for (int i = 0; i < intValues.length; ++i) {
+    final int val = intValues[i];
+    floatValues[i] = (((val >> 16) & 0xFF));
+}
+float[] result = new float[80];
+long[] INPUT_SIZE = new long[]{1, bitmap.getHeight(), bitmap.getWidth()};
+inferenceInterface.feed(config.getInputName(), floatValues, INPUT_SIZE);
+inferenceInterface.feed("seq_len_input", new int[]{bitmap.getWidth()}, 1);
+inferenceInterface.run(config.getOutputNames());
+inferenceInterface.fetch(config.getOutputNames()[0], result);
+
+return result.toString();
+
+However, I encounter these problems depending on the model I use. If I use the frozen graph, I encounter this error:
+Caused by: java.lang.IllegalArgumentException: No OpKernel was registered to support
+Op 'SparseToDense' with these attrs.  Registered devices: [CPU], Registered kernels:
+device='CPU'; T in [DT_STRING]; Tindices in [DT_INT64]
+device='CPU'; T in [DT_STRING]; Tindices in [DT_INT32]
+device='CPU'; T in [DT_BOOL]; Tindices in [DT_INT64]
+device='CPU'; T in [DT_BOOL]; Tindices in [DT_INT32]
+device='CPU'; T in [DT_FLOAT]; Tindices in [DT_INT64]
+device='CPU'; T in [DT_FLOAT]; Tindices in [DT_INT32]
+device='CPU'; T in [DT_INT32]; Tindices in [DT_INT64]
+device='CPU'; T in [DT_INT32]; Tindices in [DT_INT32]
+                                                                                            
+[[Node: output = SparseToDense[T=DT_INT64, Tindices=DT_INT64, validate_indices=true](CTCBeamSearchDecoder, CTCBeamSearchDecoder:2, CTCBeamSearchDecoder:1, output/default_value)]]
+
+If I use the optimized frozen graph, I encounter this error:
+java.io.IOException: Not a valid TensorFlow Graph serialization: NodeDef expected inputs '' do not match 1 inputs 
+specified; Op<name=Const; signature= -> output:dtype; attr=value:tensor; attr=dtype:type>; 
+NodeDef: stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/bw/while/add/y = Const[dtype=DT_INT32, 
+value=Tensor<type: int32 shape: [] values: 1>](stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/bw/while/Switch:1)
+
+I have no ideas on what these error messages tell me nor how to resolve these.

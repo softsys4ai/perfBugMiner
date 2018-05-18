@@ -1,0 +1,96 @@
+tf.train.string_input_producer breaks when num_epochs is set
+
+I'm using a tf.train.string_input_producer to read in data from a file.  when I set num_epochs=1 instead of None it breaks and I get the following error.  My code is below as well.
+Any suggestions for why this is occuring?
+I tensorflow/core/common_runtime/local_device.cc:40] Local device intra op parallelism threads: 8
+I tensorflow/core/common_runtime/direct_session.cc:58] Direct session inter op parallelism threads: 8
+W tensorflow/core/common_runtime/executor.cc:1076] 0x7fdc4ba6b0f0 Compute status: Out of range: RandomShuffleQueue '_2_shuffle_batch/random_shuffle_queue' is closed and has insufficient elements (requested 10, current size 0)
+     [[Node: shuffle_batch = QueueDequeueMany[component_types=[DT_FLOAT, DT_FLOAT], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](shuffle_batch/random_shuffle_queue, shuffle_batch/n)]]
+W tensorflow/core/common_runtime/executor.cc:1076] 0x7fdc48da9170 Compute status: Out of range: FIFOQueue '_0_file_queue' is closed and has insufficient elements (requested 1, current size 0)
+     [[Node: ReaderRead = ReaderRead[_device="/job:localhost/replica:0/task:0/cpu:0"](TFRecordReader, file_queue)]]
+W tensorflow/core/common_runtime/executor.cc:1076] 0x7fdc4b8dbe20 Compute status: Aborted: Queue '_2_shuffle_batch/random_shuffle_queue' is already closed.
+     [[Node: shuffle_batch/random_shuffle_queue_Close = QueueClose[cancel_pending_enqueues=false, _device="/job:localhost/replica:0/task:0/cpu:0"](shuffle_batch/random_shuffle_queue)]]
+Traceback (most recent call last):
+  File "tensorflow_test.py", line 51, in <module>
+    coord.join(threads)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/training/coordinator.py", line 205, in join
+    six.reraise(*self._exc_info_to_raise)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/training/queue_runner.py", line 112, in _run
+    sess.run(enqueue_op)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 368, in run
+    results = self._do_run(target_list, unique_fetch_targets, feed_dict_string)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 444, in _do_run
+    e.code)
+tensorflow.python.framework.errors.FailedPreconditionError: Attempting to use uninitialized value file_queue/limit_epochs/epochs
+     [[Node: file_queue/limit_epochs/CountUpTo = CountUpTo[T=DT_INT64, limit=2, _device="/job:localhost/replica:0/task:0/cpu:0"](file_queue/limit_epochs/epochs)]]
+Caused by op u'file_queue/limit_epochs/CountUpTo', defined at:
+  File "tensorflow_test.py", line 6, in <module>
+    filename_queue = tf.train.string_input_producer(["datasets_top_10_50k/VALIDATION_testset/part-00000..tf"], num_epochs=2,capacity=10000, name="file_queue")
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/training/input.py", line 135, in string_input_producer
+    "fraction_of_%d_full" % capacity)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/training/input.py", line 86, in _input_producer
+    input_tensor = limit_epochs(input_tensor, num_epochs)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/training/input.py", line 77, in limit_epochs
+    counter = epochs.count_up_to(num_epochs)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/ops/variables.py", line 414, in count_up_to
+    return state_ops.count_up_to(self._variable, limit=limit)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/ops/gen_state_ops.py", line 110, in count_up_to
+    return _op_def_lib.apply_op("CountUpTo", ref=ref, limit=limit, name=name)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/ops/op_def_library.py", line 664, in apply_op
+    op_def=op_def)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1834, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/Users/blakec/virtual_envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1043, in __init__
+    self._traceback = _extract_stack()
+
+Code:
+import tensorflow as tf
+import time
+
+filename_queue = tf.train.string_input_producer(["datasets_top_10_50k/VALIDATION_testset/part-00000..tf"], num_epochs=2,capacity=10000, name="file_queue")
+reader = tf.TFRecordReader()
+_, serialized_example = reader.read(filename_queue)
+
+data = tf.parse_single_example(
+      serialized_example,
+      dense_keys=["features","labels"],
+      dense_types=[tf.float32, tf.float32],
+      dense_shapes=[(4096),(10)])
+
+features = data["features"]
+labels = data["labels"]
+
+batch_size=10
+capacity=1000
+min_after_dequeue=100
+example_batch, label_batch = tf.train.shuffle_batch(
+      [features, labels], 
+      batch_size=batch_size, 
+      capacity=capacity,
+      min_after_dequeue=min_after_dequeue)
+num_examples = 0
+with tf.Session() as sess:
+    # Start populating the filename queue.
+    coord = tf.train.Coordinator()  
+    threads = tf.train.start_queue_runners(coord=coord, sess=sess)
+
+    try:
+        step = 0
+        while not coord.should_stop():
+            start_time = time.time()
+            e, l = sess.run([example_batch, label_batch])
+            print "grabbing"
+            e, l = sess.run([example_batch, label_batch])
+            num_examples = num_examples + e.shape[0]
+            print "num_examples = " + str(num_examples)
+            duration = time.time() - start_time
+
+    except tf.errors.OutOfRangeError:
+        print('Done training for %d epochs, %d steps.' % (FLAGS.num_epochs, step))
+    finally:
+        # When done, ask the threads to stop.
+        coord.request_stop()
+
+        # Wait for threads to finish.
+        coord.join(threads)
+        sess.close()

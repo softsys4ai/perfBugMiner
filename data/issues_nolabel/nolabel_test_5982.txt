@@ -1,0 +1,114 @@
+tf.dynamic_rnn causes rnn state vector to have an undefined batch size
+
+Minimal example:
+import tensorflow as tf
+
+sess = tf.Session()
+inputs = tf.zeros([4, 10, 12], tf.float32)
+cell = tf.nn.rnn_cell.BasicLSTMCell(20)
+multicell = tf.nn.rnn_cell.MultiRNNCell([cell] * 2)
+output, state = tf.nn.dynamic_rnn(cell, inputs, dtype=tf.float32)
+print state, '\n', output
+# LSTMStateTuple(c=<tf.Tensor 'RNN/while/Exit_2:0' shape=(?, 20) dtype=float32>, h=<tf.Tensor 'RNN/while/Exit_3:0' shape=(?, 20) dtype=float32>) 
+# Tensor("RNN/transpose:0", shape=(4, 10, 20), dtype=float32)
+This code seems to be the the where the problem is being caused:
+    input_shape = tuple(array_ops.shape(input_) for input_ in flat_input)
+    batch_size = input_shape[0][1]
+
+    for input_ in input_shape:
+      if input_[1].get_shape() != batch_size.get_shape():
+        raise ValueError("All inputs should have the same batch size")
+From what I understand:
+
+flat_input is a tuple of tensors
+thus input_shape is a tuple of 1D tensors
+batch_size gets the 2nd element of the 1st input_shape tensor, which is a 0D tensor
+input_[1] is the shape of the 1st element of the 1D input_shape tensor which is a 0D tensor
+=> input_[1].get_shape() == batch_size.get_shape() == TensorShape([]) for all flat_input
+
+Thus regardless of the content of flat_input, the ValueError will never be raised and batch_size will always be a 0D tensor, unknown until it is evaluated, as opposed to a number.
+Rewriting the above code to something that makes more sense to me (below) causes the tests to fail when dynamic_rnn is instantiated with variable batch size.
+    input_shape = tuple(input_.get_shape() for input_ in flat_input)
+    batch_size = input_shape[0][1]
+ 
+    for shape in input_shape:
+      if shape[1] != batch_size:
+        raise ValueError("All inputs should have the same batch size")
+I suppose the question I'm asking is whether it is intended behaviour to throw away the batch size information when it is fixed? If it isn't, I'm happy to write a fix.
+This was brought to my attention by a subtle bug found when implementing a custom LSTM cell:
+class VariationalLSTMCell(tf.nn.rnn_cell.BasicLSTMCell):
+	"""
+	Long short-term memory unit (LSTM) recurrent network cell based on:
+
+	http://arxiv.org/pdf/1512.05287v3.pdf
+
+	Yarin Gal
+	"A theoretically grounded application of dropout in recurrent neural networks"
+	"""
+	def __init__(self, num_units, keep_prob_w, keep_prob_u=None, **kwargs):
+		super(VariationalLSTMCell, self).__init__(num_units, **kwargs)
+		self._keep_prob_w = keep_prob_w
+		self._keep_prob_u = keep_prob_u if keep_prob_u is not None else keep_prob_w
+		self._t0_cell = False
+
+	def __call__(self, inputs, state, scope=None):
+		"""Long short-term memory cell (LSTM)."""
+		with tf.variable_scope(scope or type(self).__name__) as scope:	# "VariationalLSTMCell"
+			if not scope.reuse:
+				self._t0_cell = True
+
+			if self._state_is_tuple:
+				c, h = state
+			else:
+				c, h = tf.split(1, 2, state)
+
+			dtype = inputs.dtype
+			batch_size, input_size = inputs.get_shape().with_rank(2)
+			if input_size.value is None:
+				raise ValueError("Could not infer input size from inputs.get_shape()[-1]")
+			(w_i, w_g, w_f, w_o), (u_i, u_g, u_f, u_o) = self.get_weights(input_size, dtype)
+			b_i, b_g, b_f, b_o = self.get_biases(dtype)
+			(m_wi, m_wg, m_wf, m_wo), (m_ui, m_ug, m_uf, m_uo) = self.get_dropout_masks(batch_size, input_size)
+
+			# i = input_gate, g = new_input, f = forget_gate, o = output_gate
+			i = tf.matmul(inputs * m_wi, w_i) + tf.matmul(h * m_ui, u_i) + b_i
+			g = tf.matmul(inputs * m_wg, w_g) + tf.matmul(h * m_ug, u_g) + b_g
+			f = tf.matmul(inputs * m_wf, w_f) + tf.matmul(h * m_uf, u_f) + b_f
+			o = tf.matmul(inputs * m_wo, w_o) + tf.matmul(h * m_uo, u_o) + b_o
+
+			new_c = (c * tf.sigmoid(f + self._forget_bias) + tf.sigmoid(i) * self._activation(g))
+			new_h = self._activation(new_c) * tf.sigmoid(o)
+
+			if self._state_is_tuple:
+				new_state = tf.nn.rnn_cell.LSTMStateTuple(new_c, new_h)
+			else:
+				new_state = tf.concat(1, [new_c, new_h])
+		return new_h, new_state
+
+	def get_dropout_masks(self, batch_size, input_size):
+		with tf.variable_scope('dropout'):
+			w_mask = tf.get_variable('w_mask', [4, batch_size.value, input_size.value], tf.float32, tf.ones_initializer, trainable=False)
+			u_mask = tf.get_variable('u_mask', [4, batch_size.value, self._num_units], tf.float32, tf.ones_initializer, trainable=False)
+			if self._t0_cell:
+				w_mask = w_mask.assign(tf.random_uniform([4, batch_size.value, input_size.value], dtype=tf.float32))
+				u_mask = u_mask.assign(tf.random_uniform([4, batch_size.value, self._num_units], dtype=tf.float32))
+			w_mask = tf.maximum(tf.sign(self._keep_prob_w - w_mask), 0) / self._keep_prob_w
+			u_mask = tf.maximum(tf.sign(self._keep_prob_u - u_mask), 0) / self._keep_prob_u
+			w_masks, u_masks = [tf.unpack(mask) for mask in [w_mask, u_mask]]
+			return w_masks, u_masks
+
+	def get_weights(self, input_size, dtype):
+		w_weights = tf.get_variable('w_weights', [4, input_size.value, self._num_units], dtype)
+		u_weights = tf.get_variable('u_weights', [4, self._num_units, self._num_units], dtype)
+		tf.add_to_collection('weights', w_weights)
+		tf.add_to_collection('weights', u_weights)
+		w_weights, u_weights = [tf.unpack(weights) for weights in [w_weights, u_weights]]
+		return w_weights, u_weights
+
+	def get_biases(self, dtype):
+		biases = tf.get_variable('biases', [4, self._num_units], dtype, tf.zeros_initializer)
+		tf.add_to_collection('biases', biases)
+		return tf.unpack(biases)
+When batch_size > 1 this works fine, but when batch_size == 1 due to the potential to be broadcast, the dimensions of new_h and new_c cannot be inferred, leading to crashes in higher layers in get_dropout_masks. This works fine however with the change to dynamic_rnn I mentioned above.
+I'm mainly working in r0.11, but I have also observed the issue in master (5657d0d) and 0.12.0-rc0
+Please let me know if any more information would be helpful.

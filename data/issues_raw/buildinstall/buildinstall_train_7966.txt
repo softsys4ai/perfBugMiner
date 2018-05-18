@@ -1,0 +1,33 @@
+Compile TensorFlow 1.0 on Windows 10 for Python 3.6 (Anaconda) cause compile issues
+
+As per agreement in #6999 specific comment, I'm creating a new issue for compilation errors for TF 1.0 under Windows for Python 3.6
+Pre-requisites:
+Windows 10 v.14986
+Python 3.6 64 bit (Anaconda 4.3)
+git version 2.11.0.windows.1
+Visual Studio Build Tools (called "Build Tools for Visual Studio 2017 RC" in the download section)
+cmake-3.8.0-rc1 and swigwin-3.0.12 (just downloaded latest version at that moment)
+TensorFlow 1.0.0 from source (master branch from github)
+Reproduction. I followed instruction for CMake just running two commands - CMake first and MSBuild second.
+To compile, I made two changes in sources. I found them based on compilation errors.
+One was adding #include <intrin.h> to tensorflow\core\platform\windows\cpu_info.h inside of #ifndef block because of the following error:
+
+error C3861: '__cpuidex': identifier not found
+
+I found commit introduced usage of __cpuidex function. Based on this MSDN link, I discovered that Header file <intrin.h> has to be included.  That's why I put it inside cpu_info.h (not sure if it's exactly perfect place).
+Second issue was commenting out procedures _mm256_extract_epi32 and _mm256_insert_epi32 in tensorflow\core\platform\windows\intrinsics_port.h due to error
+
+error C2169: '_mm256_extract_epi32': intrinsic function, cannot be defined
+
+The second issue with _mm256_extract_epi32 may be connected with the same reason, I don't know.
+In the meantime, platform/windows/intrinsics_port.h references immintrin.h, but I don't see it's actually included anywhere. I assume it may correlate with instrih.h inclusion (based on this link). Meanwhile, _mm256_extract_epi32can be found in avxintrin.h which may be is included by immintrin.h.
+
+// the following avx intrinsics are not defined on windows
+// in immintrin.h so we define them here.
+
+After fixing those two issues, that, I was able to successfully run
+
+MSBuild /p:Configuration=Release tf_python_build_pip_package.vcxproj
+
+Which gave me tensorflow-1.0.0-cp36-cp36m-win_amd64.whl, that I successfully installed into Python using pip. It seems to be working - I was able to run couple of jupyter notebooks, including udacity assignments.
+BTW, compilation took about 2-3 hours on my week laptop (i5-4200U).

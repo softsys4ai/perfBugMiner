@@ -1,0 +1,38 @@
+Bug: StagingArea.size() always return 0 when placed on a different device
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): ubuntu 14.04
+TensorFlow installed from (source or binary):source
+TensorFlow version (use command below):b'v1.3.0-rc1-6044-g0b80606' 1.4.0
+Python version:  3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:9.0/7.0
+GPU model and memory:
+Exact command to reproduce:
+
+import tensorflow as tf
+from tensorflow.python.ops.data_flow_ops import StagingArea
+
+areas = []
+stage_ops = []
+sizes = []
+for idx, d in enumerate(['/gpu:0', '/gpu:1']):
+    with tf.device(d):
+        inputs = [tf.constant(1.0), tf.constant(2, dtype=tf.uint8)]
+        dtypes = [k.dtype for k in inputs]
+        stage = StagingArea(dtypes, shapes=None)
+        stage_ops.append(stage.put(inputs))
+        areas.append(stage)
+        # sizes.append(stage.size())   # this gives correct result
+
+sizes = [k.size() for k in areas]    # this gives wrong result
+with tf.Session() as sess:
+    print(sess.run(sizes))    # [0, 0]
+    sess.run(stage_ops[0])
+    sess.run(stage_ops[1])
+    sess.run(stage_ops[0])
+    sess.run(stage_ops[1])
+    print(sess.run(sizes))  # expected: [2,2]; actual: [2,0]

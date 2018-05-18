@@ -1,0 +1,72 @@
+Bug report : tf.contrib.learn.train API has a problem
+
+Hi, everyone
+First, please understand that I cannot speak English well
+I tried to use high-level API(tf.contrib) for code simplicity.
+When I use tf.contrib.learn.train API, I find a problem that execution time per batch increases
+An example code is described as below
+tf.conbrib.learn.train(defualt_graph, FLAGS.train_dir, train_op, loss, global_step, max_steps=300,
+                                            supervisor_save_summaries_steps = 100)
+
+when I run above code, execution time per batch increases after step 100.
+So, I analyzed tf.contrib.learn.train API
+In graph_actions.py file, there is train function and this function calls _train_internal function in the same file
+In _train_internal function, _run_with_monitors function is called for execution of train_op and monitor
+_run_with_monitors function is described as below
+  for monitor in monitors:
+    tensors +=  monitor.step_begin(step)
+  tensors = list(set(tensors))
+
+  outputs = session.run(tensors, feed_dict=feed_dict)
+  outputs = dict(zip(
+      [t.name if isinstance(t, ops.Tensor) else t for t in tensors],
+      outputs))
+
+  should_stop = False
+  for monitor in monitors:
+    induce_stop = monitor.step_end(step, outputs)
+    should_stop = should_stop or induce_stop
+  return outputs, should_stop
+
+In this function, I examined two functions in class EveryN(monitors.py) : monitor.step_begin,  monitor.step_end
+In monitor.step_begin function, monitor is executed when the following conditions are fulfilled
+    if (step <= self._first_n_steps or
+        step >= (self._every_n_steps + self._last_active_step) or
+        step == self._max_steps):  # Note: max_steps can be None here.
+      self._every_n_step_begin_called = True
+      return self.every_n_step_begin(step)
+
+and monitor.step_end function is described as follows
+  def step_end(self, step, output):
+    super(EveryN, self).step_end(step, output)
+    if self._every_n_step_begin_called:
+      return self.every_n_step_end(step, output)
+    return False
+
+In these codes, I find self._last_active_step variable is not updated.
+So, I add the monitor.post_step function in _run_with_monitors function as follows
+  for monitor in monitors:
+    tensors += monitor.step_begin(step)
+  tensors = list(set(tensors))
+
+  outputs = session.run(tensors, feed_dict=feed_dict)
+  outputs = dict(zip(
+      [t.name if isinstance(t, ops.Tensor) else t for t in tensors],
+      outputs))
+
+  should_stop = False
+  for monitor in monitors:
+    induce_stop = monitor.step_end(step, outputs)
+    monitor.post_step(step, session=session)
+    should_stop = should_stop or induce_stop
+  return outputs, should_stop
+
+monitor.post_step function performs _last_active_step variable update as follows
+  def post_step(self, step, session):
+    super(EveryN, self).post_step(step, session)
+    if self._every_n_step_begin_called:
+      self.every_n_post_step(step, session)
+      self._last_active_step = step
+    self._last_successful_step = step
+
+When the code is revised above, tf.contrib.learn.train function is well operated.

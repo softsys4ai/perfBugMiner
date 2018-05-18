@@ -1,0 +1,117 @@
+Documentation on build from source is unclear
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug or a feature request.
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+TensorFlow installed from (source or binary):
+TensorFlow version (use command below):
+Python version:
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+('v1.4.1-7-gaa03bfc', '1.4.1')
+built and installed from source with
+git checkout r1.4
+bazel build -c opt --copt=-march="haswell" --config=cuda --verbose_failures --incompatible_load_argument_is_label=false //tensorflow/tools/pip_package:build_pip_package >pip_package_build2.log 2>&1
+note: incompatible path flag is required with R1.4 at this time per #15492
+ubuntu 16.04
+Cuda 9.1, cudnn 7.0.4
+gcc --version
+gcc (Ubuntu 5.4.0-6ubuntu1~16.04.5) 5.4.0 20160609
+uname -r
+4.4.0-104-generic
+Bazel 0.9
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+It is unclear how to build and install the entire package purely from source
+I will attempt to log what I have done so far
+clone and build TF R1.4 for cuda
+install wheel into local directory  (sudo pip install /tmp/tensorflow-pkg/tensorflow*.whl -t /mytf_r1.4_c9.1
+export PYTHONPATH=/mytf_r1.4_c9.1
+move tensorflow directory
+install common_voice files to ~/Common_voice
+per native client build from source instructions: https://github.com/mozilla/DeepSpeech/blob/master/native_client/README.md
+git clone tensorflow
+cd tensorflow
+git checkout r1.4
+ln -s ../DeepSpeech/native_client ./
+./configure
+edit native_client/BUILD
+comment out the following:
+tfcompile_flags = select({
+"//tensorflow:rpi3": str('--target_triple="armv6-linux-gnueabihf" --target_cpu="cortex-a53" --target_features="+neon-fp-armv8"'),
+"//conditions:default": str('')
+}),
+bazel build -c opt --copt=-O3 --incompatible_load_argument_is_label=false //tensorflow:libtensorflow_cc.so //tensorflow:libtensorflow_framework.so //native_client:deepspeech //native_client:deepspeech_utils //native_client:libctc_decoder_with_kenlm.so //native_client:generate_trie
+at this point all the native client binaries are in
+/tensorflow/bazel-bin/native_client
+levinth@zt-gpu-lin:/DeepSpeech/native_client$ ls ~/tensorflow/bazel-bin/native_client/
+generate_trie
+generate_trie-2.params
+generate_trie.runfiles
+generate_trie.runfiles_manifest
+libctc_decoder_with_kenlm.so
+libctc_decoder_with_kenlm.so-2.params
+libctc_decoder_with_kenlm.so.runfiles
+libctc_decoder_with_kenlm.so.runfiles_manifest
+libdeepspeech.a
+libdeepspeech.a-2.params
+libdeepspeech.pic.a
+libdeepspeech.pic.a-2.params
+libdeepspeech.so
+libdeepspeech.so-2.params
+libdeepspeech_utils.a
+libdeepspeech_utils.a-2.params
+libdeepspeech_utils.pic.a
+libdeepspeech_utils.pic.a-2.params
+libdeepspeech_utils.so
+libdeepspeech_utils.so-2.params
+_objs
+cd ../Deepspeech/native_client
+export TFDIR ~/tensorflow
+make deepspeech
+at this point however the native client shared objects are still in bazel-bin/native client and have not been installed. the invocation of Deepspeech.py fails as it cannot find the shared objects
+python DeepSpeech.py --train_files ../Common_voice/cv-valid-train.csv,../Common_voice/cv-other-train.csv --dev_files ../Common_voice/cv-valid-dev.csv --test_files ../Common_voice/cv-valid-test.csv >deepspeech_1.log 2>&1
+tensorflow.python.framework.errors_impl.NotFoundError: native_client/libctc_decoder_with_kenlm.so: cannot open shared object file: No such file or directory
+the native_client/Makefile has sections for bindings and install..so try
+sudo make install
+and this still generates the error as install does not put
+~/tensorflow/bazel-bin/native_client/libctc_decoder_with_kenlm.so
+into /usr/local/lib
+though deepspeech.so and deepspeech_utils.so are installed there.
+manually copy /tensorflow/bazel-bin/native_client/libctc_decoder_with_kenlm.so to ~/DeepSpeech/native_client and set permissions
+at this point the invocation now starts running but complains about
+WARNING: libdeepspeech failed to load, resorting to deprecated code
+Refer to README.md for instructions on installing libdeepspeech
+even though /usr/local/lib is in the $LD_LIBRARY_PATH
+invoking
+python DeepSpeech.py --train_files ../Common_voice/cv-valid-train.csv,../Common_voice/cv-other-train.csv --dev_files ../Common_voice/cv-valid-dev.csv --test_files ../Common_voice/cv-valid-test.csv --display_step 1 --validation_step 10
+
+WARNING: libdeepspeech failed to load, resorting to deprecated code
+Refer to README.md for instructions on installing libdeepspeech
+I STARTING Optimization
+Loading the LM will be faster if you build a binary file.
+Reading data/lm/lm.binary
+----5---10---15---20---25---30---35---40---45---50---55---60---65---70---75---80---85---90---95--100
+terminate called after throwing an instance of 'lm::FormatLoadException'
+what():  native_client/kenlm/lm/read_arpa.cc:65 in void lm::ReadARPACounts(util::FilePiece&, std::vector&) threw FormatLoadException.
+first non-empty line was "version https://git-lfs.github.com/spec/v1" not \data. Byte: 43
+I clearly have not figured this out
+:-)

@@ -1,0 +1,48 @@
+Feature request: sparse_tensor_dense_matmul optimization on GPU
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Debian GNU/Linux 8 (jessie)
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): ('v1.3.0-rc2-0-g2784b1c', '1.3.0-rc2')
+Python version: 2.7.9
+Bazel version (if compiling from source): 0.5.3
+CUDA/cuDNN version: 8.0 / 5.0
+GPU model and memory: Nvidia GeForce GTX TITAN X
+Exact command to reproduce:
+
+I would like to optimize sparse_tensor_dense_matmul operation on GPU to process sparse input completely on GPU. Now code like this:
+import tensorflow as tf
+
+with tf.device('/gpu:0'):
+    st = tf.SparseTensor(
+        tf.constant([[0, 0], [1, 1]], dtype=tf.int64),
+        tf.constant([1.2, 3.4], dtype=tf.float32),
+        tf.constant([2, 2], dtype=tf.int64)
+    ) 
+    v = tf.Variable([[1.0, 0.0], [0.0, 1.0]], dtype=tf.float32)
+    st = tf.sparse_tensor_dense_matmul(st, v)
+    st = tf.reduce_min(st)
+    optimizer = tf.train.AdamOptimizer()
+    trainer = optimizer.minimize(st)
+
+with tf.Session() as sess:
+    print(sess.run(trainer))
+
+Fails with error:
+Traceback (most recent call last):
+  File "test_tf3.py", line 18, in <module>
+    print(sess.run(trainer))
+  File "/media/awork/home/astepochkin/drecs/repo/env/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 895, in run
+    run_metadata_ptr)
+  File "/media/awork/home/astepochkin/drecs/repo/env/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1124, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/media/awork/home/astepochkin/drecs/repo/env/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1321, in _do_run
+    options, run_metadata)
+  File "/media/awork/home/astepochkin/drecs/repo/env/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1340, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Cannot assign a device for operation 'gradients/SparseTensorDenseMatMul/SparseTensorDenseMatMul_grad/strided_slice_1': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+     [[Node: gradients/SparseTensorDenseMatMul/SparseTensorDenseMatMul_grad/strided_slice_1 = StridedSlice[Index=DT_INT32, T=DT_INT64, begin_mask=1, ellipsis_mask=0, end_mask=1, new_axis_mask=0, shrink_axis_mask=2, _device="/device:GPU:0"](Const, gradients/SparseTensorDenseMatMul/SparseTensorDenseMatMul_grad/strided_slice_1/stack, gradients/SparseTensorDenseMatMul/SparseTensorDenseMatMul_grad/strided_slice_1/stack_1, gradients/SparseTensorDenseMatMul/SparseTensorDenseMatMul_grad/strided_slice_1/stack_2)]]
+
+It looks like it requires "int64 strided slice" to be executed on GPU. So maybe it just needs to enable int64 strided slice on GPU.

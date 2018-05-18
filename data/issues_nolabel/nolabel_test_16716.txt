@@ -1,0 +1,79 @@
+Linker Tools Error encountered when use StepStats
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 10.0.16299
+TensorFlow installed from (source or binary):
+source
+TensorFlow version (use command below):
+1.5 release
+Python version:
+3.5.3
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:
+
+Describe the problem
+Encounter link error when build the program (source code attached). Build went through well with TF 1.4 release
+Error	LNK2001	unresolved external symbol "class tensorflow::StepStatsDefaultTypeInternal tensorflow::StepStats_default_instance" (?StepStats_default_instance@tensorflow@@3vstepstatsdefaulttypeinternal@1@A)	ReprBug	c:\Users\xx\documents\visual studio 2015\Projects\ReprBug\ReprBug\Source.obj
+Source code / logs
+#include "tensorflow/cc/saved_model/tag_constants.h"
+#include "tensorflow/core/public/session_options.h"
+#include "tensorflow/core/util/stat_summarizer.h"
+#include "tensorflow/contrib/session_bundle/bundle_shim.h"
+
+class SynchronizedStatSummarizer
+{
+public:
+	SynchronizedStatSummarizer(const tensorflow::StatSummarizerOptions& options)
+		: m_statSummarizer{ options }, m_mutex{}
+	{
+	}
+
+	void AddStepStats(const tensorflow::StepStats& stepStats)
+	{
+		std::lock_guard<std::mutex> guard{ m_mutex };
+		m_statSummarizer.ProcessStepStats(stepStats);
+	}
+
+private:
+	// The TF stat summarizer.
+	tensorflow::StatSummarizer m_statSummarizer;
+
+	// Synchronizes access to m_statSummarizer.
+	mutable std::mutex m_mutex;
+};
+
+int main() {
+
+	tensorflow::SessionOptions sessionOptions;
+	tensorflow::RunOptions runOptions{};
+	tensorflow::ConfigProto& config = sessionOptions.config;
+	
+	std::unique_ptr<tensorflow::SavedModelBundle> m_bundle (new tensorflow::SavedModelBundle());
+
+	const std::string path = "somepath";
+	tensorflow::Status status = tensorflow::serving::LoadSessionBundleOrSavedModelBundle(
+		sessionOptions, runOptions, path, { tensorflow::kSavedModelTagServe }, m_bundle.get());
+
+	std::vector<std::pair<std::string, tensorflow::Tensor>> modifiedInputs;
+	std::vector<std::string> modifiedOutputNames;
+	std::vector<tensorflow::Tensor> tensorOutputs;
+	tensorflow::RunMetadata runMetadata{};
+
+	tensorflow::Status run_status = m_bundle->session->Run(
+		runOptions, modifiedInputs, modifiedOutputNames, {}, &tensorOutputs, &runMetadata);
+
+	std::unique_ptr<SynchronizedStatSummarizer> m_runTracingStats;
+
+	if (run_status.ok())
+	{
+		m_runTracingStats->AddStepStats(runMetadata.step_stats());
+	}
+
+}

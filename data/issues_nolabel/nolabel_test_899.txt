@@ -1,0 +1,27 @@
+MatMul "flops" statistic looks incorrect
+
+I think the flops estimate for MatMul is incorrect. In a vanilla matrix multiply AB=C with dimensions shape_A=(i,j), shape_B=(j,k), and shape_C=(i,k), we should get ~ 2*i*j*k. It appears _calc_mat_mul_flops is giving shape_A[0] * prod(shape_C), or 2*i*i*k for an un-transposed multiply, ignoring the internal dimensions. I believe you meant shape_A[0] * prod(shape_B). Or if it helps,
+weights_shape = graph_util.tensor_shape_from_node_def_name(graph,node.input[1])
+weights_shape.assert_is_fully_defined()
+weight_count = np.prod(weight_shape.as_list())
+return ops.OpStats("flops", (k * weight_count * 2))
+
+Also, here's a minimum working example that demonstrates the problem.
+import tensorflow as tf
+import tensorflow.python.framework.ops as ops 
+g = tf.Graph()
+with g.as_default():
+  A = tf.Variable(tf.random_normal( [25,16] ))
+  B = tf.Variable(tf.random_normal( [16,9] ))
+  C = tf.matmul(A,B) # shape=[25,9]
+for op in g.get_operations():
+  flops = ops.get_stats_for_node_def(g, op.node_def, 'flops').value
+  if flops is not None:
+    print 'Flops should be ~',2*25*16*9
+    print '25 x 25 x 9 would be',2*25*25*9 # ignores internal dim, repeats first
+    print 'TF stats gives',flops
+
+And it's output:
+Flops should be ~ 7200
+25 x 25 x 9 would be 11250
+TF stats gives 11250

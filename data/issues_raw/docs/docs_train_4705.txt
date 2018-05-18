@@ -1,0 +1,155 @@
+Error building with cuda after bazel server dies
+
+This is effectively reopening #4105 as this is another way to reproduce the issue that I am seeing repeatedly. The fix for #4105 was to make sure after running configure clean+fetch is run.
+I see this issue almost every day so I'm not sure if bazel flushes some caches or the daemon is dying, but the issue reliably reproduces by killing the bazel daemon. Having to re-run configure and restart the build from scratch is unreasonable, since there is a workaround that avoids a rebuild so this looks very much like a bug.
+$ bazel version 
+.
+Build label: 0.3.1
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Fri Jul 29 09:09:52 2016 (1469783392)
+Build timestamp: 1469783392
+Build timestamp as int: 1469783392
+
+Steps to reproduce and "fix":
+NB: $bazel_build_dir is something like ~/.cache/bazel/_bazel_foo/6e3dd6b174494dc75d93de11da03e7e7
+# Run ./configure, enabling GPU support.
+
+# The crosstool BUILD file looks good now and building with --config=cuda works
+tensorflow$ cat $bazel_build_dir/external/local_config_cuda/crosstool/BUILD
+licenses(["restricted"])```
+
+package(default_visibility = ["//visibility:public"])
+
+cc_toolchain_suite(
+    name = "toolchain",
+    toolchains = {
+        "local|compiler": ":cc-compiler-local",
+        "darwin|compiler": ":cc-compiler-darwin",
+    },
+)
+
+cc_toolchain(
+    name = "cc-compiler-local",
+    all_files = ":empty",
+    compiler_files = ":empty",
+    cpu = "local",
+    dwp_files = ":empty",
+    dynamic_runtime_libs = [":empty"],
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    static_runtime_libs = [":empty"],
+    strip_files = ":empty",
+    supports_param_files = 0,
+)
+
+cc_toolchain(
+    name = "cc-compiler-darwin",
+    all_files = ":empty",
+    compiler_files = ":empty",
+    cpu = "darwin",
+    dwp_files = ":empty",
+    dynamic_runtime_libs = [":empty"],
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    static_runtime_libs = [":empty"],
+    strip_files = ":empty",
+    supports_param_files = 0,
+)
+
+filegroup(
+    name = "empty",
+    srcs = [],
+)
+
+# Backup the crosstool directory so it can be restored later
+mkdir -p /tmp/crosstool
+cp -aR $bazel_build_dir/external/local_config_cuda/crosstool/* /tmp/crosstool/
+
+# Kill bazel server.
+kill $(ps aux | awk '/baze[l]/ {print $2; exit}')
+tensorflow$ bazel build -c opt --config=cuda //tensorflow/tools/...
+.
+ERROR: $bazel_build_dir/external/local_config_cuda/crosstool/BUILD:4:1: Traceback (most recent call last):
+    File "$bazel_build_dir/external/local_config_cuda/crosstool/BUILD", line 4
+        error_gpu_disabled()
+    File "$bazel_build_dir/external/local_config_cuda/crosstool/error_gpu_disabled.bzl", line 3, in error_gpu_disabled
+        fail("ERROR: Building with --config=c...")
+ERROR: Building with --config=cuda but TensorFlow is not configured to build with GPU support. Please re-run ./configure and enter 'Y' at the prompt to build with GPU support.
+Unhandled exception thrown during build; message: Unrecoverable error while evaluating node 'CONFIGURATION_FRAGMENT:com.google.devtools.build.lib.skyframe.ConfigurationFragmentValue$ConfigurationFragmentKey@808aaea9' (requested by nodes 'CONFIGURATION_COLLECTION:com.google.devtools.build.lib.skyframe.ConfigurationCollectionValue$ConfigurationCollectionKey@9a9c82e5', 'CONFIGURATION_FRAGMENT:com.google.devtools.build.lib.skyframe.ConfigurationFragmentValue$ConfigurationFragmentKey@66ba3b8e', 'CONFIGURATION_FRAGMENT:com.google.devtools.build.lib.skyframe.ConfigurationFragmentValue$ConfigurationFragmentKey@97095481')
+INFO: Elapsed time: 0.543s
+java.lang.RuntimeException: Unrecoverable error while evaluating node 'CONFIGURATION_FRAGMENT:com.google.devtools.build.lib.skyframe.ConfigurationFragmentValue$ConfigurationFragmentKey@808aaea9' (requested by nodes 'CONFIGURATION_COLLECTION:com.google.devtools.build.lib.skyframe.ConfigurationCollectionValue$ConfigurationCollectionKey@9a9c82e5', 'CONFIGURATION_FRAGMENT:com.google.devtools.build.lib.skyframe.ConfigurationFragmentValue$ConfigurationFragmentKey@66ba3b8e', 'CONFIGURATION_FRAGMENT:com.google.devtools.build.lib.skyframe.ConfigurationFragmentValue$ConfigurationFragmentKey@97095481')
+    at com.google.devtools.build.skyframe.ParallelEvaluator$Evaluate.run(ParallelEvaluator.java:1070)
+    at com.google.devtools.build.lib.concurrent.AbstractQueueVisitor$WrappedRunnable.run(AbstractQueueVisitor.java:474)
+    at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1142)
+    at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:617)
+    at java.lang.Thread.run(Thread.java:745)
+Caused by: java.lang.IllegalStateException: com.google.devtools.build.lib.packages.NoSuchTargetException: no such target '@local_config_cuda//crosstool:toolchain': target 'toolchain' not declared in package 'crosstool' defined by $bazel_build_dir/external/local_config_cuda/crosstool/BUILD
+    at com.google.devtools.build.lib.rules.cpp.CrosstoolConfigurationLoader.getCrosstoolProtofromBuildFile(CrosstoolConfigurationLoader.java:179)
+    at com.google.devtools.build.lib.rules.cpp.CrosstoolConfigurationLoader.findCrosstoolConfiguration(CrosstoolConfigurationLoader.java:239)
+    at com.google.devtools.build.lib.rules.cpp.CrosstoolConfigurationLoader.readCrosstool(CrosstoolConfigurationLoader.java:281)
+    at com.google.devtools.build.lib.rules.cpp.CppConfigurationLoader.createParameters(CppConfigurationLoader.java:128)
+    at com.google.devtools.build.lib.rules.cpp.CppConfigurationLoader.create(CppConfigurationLoader.java:73)
+    at com.google.devtools.build.lib.rules.cpp.CppConfigurationLoader.create(CppConfigurationLoader.java:48)
+    at com.google.devtools.build.lib.skyframe.ConfigurationFragmentFunction.compute(ConfigurationFragmentFunction.java:78)
+    at com.google.devtools.build.skyframe.ParallelEvaluator$Evaluate.run(ParallelEvaluator.java:1016)
+    ... 4 more
+Caused by: com.google.devtools.build.lib.packages.NoSuchTargetException: no such target '@local_config_cuda//crosstool:toolchain': target 'toolchain' not declared in package 'crosstool' defined by $bazel_build_dir/external/local_config_cuda/crosstool/BUILD
+    at com.google.devtools.build.lib.packages.Package.makeNoSuchTargetException(Package.java:559)
+    at com.google.devtools.build.lib.packages.Package.getTarget(Package.java:543)
+    at com.google.devtools.build.lib.skyframe.SkyframePackageLoaderWithValueEnvironment.getTarget(SkyframePackageLoaderWithValueEnvironment.java:71)
+    at com.google.devtools.build.lib.skyframe.ConfigurationFragmentFunction$ConfigurationBuilderEnvironment.getTarget(ConfigurationFragmentFunction.java:193)
+    at com.google.devtools.build.lib.rules.cpp.CrosstoolConfigurationLoader.getCrosstoolProtofromBuildFile(CrosstoolConfigurationLoader.java:177)
+    ... 11 more
+java.lang.RuntimeException: Unrecoverable error while evaluating node 'CONFIGURATION_FRAGMENT:com.google.devtools.build.lib.skyframe.ConfigurationFragmentValue$ConfigurationFragmentKey@808aaea9' (requested by nodes 'CONFIGURATION_COLLECTION:com.google.devtools.build.lib.skyframe.ConfigurationCollectionValue$ConfigurationCollectionKey@9a9c82e5', 'CONFIGURATION_FRAGMENT:com.google.devtools.build.lib.skyframe.ConfigurationFragmentValue$ConfigurationFragmentKey@66ba3b8e', 'CONFIGURATION_FRAGMENT:com.google.devtools.build.lib.skyframe.ConfigurationFragmentValue$ConfigurationFragmentKey@97095481')
+    at com.google.devtools.build.skyframe.ParallelEvaluator$Evaluate.run(ParallelEvaluator.java:1070)
+    at com.google.devtools.build.lib.concurrent.AbstractQueueVisitor$WrappedRunnable.run(AbstractQueueVisitor.java:474)
+    at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1142)
+    at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:617)
+    at java.lang.Thread.run(Thread.java:745)
+Caused by: java.lang.IllegalStateException: com.google.devtools.build.lib.packages.NoSuchTargetException: no such target '@local_config_cuda//crosstool:toolchain': target 'toolchain' not declared in package 'crosstool' defined by $bazel_build_dir/external/local_config_cuda/crosstool/BUILD
+    at com.google.devtools.build.lib.rules.cpp.CrosstoolConfigurationLoader.getCrosstoolProtofromBuildFile(CrosstoolConfigurationLoader.java:179)
+    at com.google.devtools.build.lib.rules.cpp.CrosstoolConfigurationLoader.findCrosstoolConfiguration(CrosstoolConfigurationLoader.java:239)
+    at com.google.devtools.build.lib.rules.cpp.CrosstoolConfigurationLoader.readCrosstool(CrosstoolConfigurationLoader.java:281)
+    at com.google.devtools.build.lib.rules.cpp.CppConfigurationLoader.createParameters(CppConfigurationLoader.java:128)
+    at com.google.devtools.build.lib.rules.cpp.CppConfigurationLoader.create(CppConfigurationLoader.java:73)
+    at com.google.devtools.build.lib.rules.cpp.CppConfigurationLoader.create(CppConfigurationLoader.java:48)
+    at com.google.devtools.build.lib.skyframe.ConfigurationFragmentFunction.compute(ConfigurationFragmentFunction.java:78)
+    at com.google.devtools.build.skyframe.ParallelEvaluator$Evaluate.run(ParallelEvaluator.java:1016)
+    ... 4 more
+Caused by: com.google.devtools.build.lib.packages.NoSuchTargetException: no such target '@local_config_cuda//crosstool:toolchain': target 'toolchain' not declared in package 'crosstool' defined by $bazel_build_dir/external/local_config_cuda/crosstool/BUILD
+    at com.google.devtools.build.lib.packages.Package.makeNoSuchTargetException(Package.java:559)
+    at com.google.devtools.build.lib.packages.Package.getTarget(Package.java:543)
+    at com.google.devtools.build.lib.skyframe.SkyframePackageLoaderWithValueEnvironment.getTarget(SkyframePackageLoaderWithValueEnvironment.java:71)
+    at com.google.devtools.build.lib.skyframe.ConfigurationFragmentFunction$ConfigurationBuilderEnvironment.getTarget(ConfigurationFragmentFunction.java:193)
+    at com.google.devtools.build.lib.rules.cpp.CrosstoolConfigurationLoader.getCrosstoolProtofromBuildFile(CrosstoolConfigurationLoader.java:177)
+    ... 11 more
+
+# So now the crosstool dir has been trashed
+tensorflow$ cat $bazel_build_dir/external/local_config_cuda/crosstool/BUILD
+
+load("//crosstool:error_gpu_disabled.bzl", "error_gpu_disabled")
+
+error_gpu_disabled()
+
+# Eh? I didn't disable it! Bazel just died...
+# Let's restore from backup
+cp -aR /tmp/crosstool/* $bazel_build_dir/external/local_config_cuda/crosstool/
+# And restart the bazel server... Almost... Just doing "bazel version" isn't enough; the server restarts but at the next build, the same issue occurs and we need to restore the crosstool directory again.
+# Running this seems to do the trick:
+tensorflow$ bazel fetch //tensorflow/...
+# But the crosstool directory has been trashed again
+tensorflow$ cat $bazel_build_dir/external/local_config_cuda/crosstool/BUILD
+
+load("//crosstool:error_gpu_disabled.bzl", "error_gpu_disabled")
+
+error_gpu_disabled()
+
+# Restore once more again
+cp -aR /tmp/crosstool/* $bazel_build_dir/external/local_config_cuda/crosstool/
+# Now we can build fine!
+
+In short, the workaround whenever the bazel server dies is, assuming you've backed up your crosstool directory in /tmp/crosstool/:
+bazel fetch //tensorflow/...
+cp -aR /tmp/crosstool/* $bazel_build_dir/external/local_config_cuda/crosstool/
+
+This looks like a bug to me and the resolution of #4105 just doesn't seem related to this, it just coincidentally fixes it.

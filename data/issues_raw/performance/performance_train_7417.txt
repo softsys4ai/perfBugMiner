@@ -1,0 +1,64 @@
+Crashes in tf.sparse_tensor_dense_matmul
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Possibly related to #4282?
+Also, SO seems to suggest that "abort trap 6" is related to accessing memory that TF doesn't own.
+Both problems boil down to bounds errors crashing the Python session instead of throwing an error.
+Environment info
+Operating System: macOS Sierra 10.12.3
+TF version 0.12.1. Pretty sure I'm using a CPU-only build, and my graphics card is not CUDA-compatible.
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+I've managed to crash Python with sparse_tensor_dense_matmul in two different ways.  I've included a reproducible example for each.  Let me know if you'd prefer them split into two separate issues.
+Crash 1
+An off-by-one error crashes my Python session.
+import numpy as np
+import tensorflow as tf
+sess = tf.InteractiveSession()
+
+nrow = 3
+ncol = 10
+
+X = tf.sparse_placeholder(tf.float32, shape=[None, ncol])
+W = tf.ones([ncol,1])
+
+# Note: largest allowable column index is ncol-1 because of zero-indexing
+col_indices = [1, 2, ncol] 
+indices = np.transpose(np.array([range(nrow),col_indices]))
+
+sess.run(tf.sparse_tensor_dense_matmul(X,W), feed_dict={X:(indices, [1] * nrow, [nrow, ncol])})
+
+This kills my Python session, and I get the following at my bash prompt:
+F tensorflow/core/kernels/sparse_tensor_dense_matmul_op.cc:242] Check failed: k < lhs_right (10 vs. 10)
+Abort trap: 6
+
+Crash 2
+import numpy as np
+import tensorflow as tf
+sess = tf.InteractiveSession()
+
+n = 3
+m = 3324
+p = 49
+
+a_sparse = tf.sparse_placeholder(tf.float32, shape=[None, m])
+b = tf.Variable(tf.random_normal([m, p]))
+
+
+indices = [[0,0],[1, 2]]
+values = [1, 1]
+shape = [n,m]
+
+feed={a_sparse:(np.array([[3828,  135],
+        [ 320,   11]]), [1, 1], [2, 3324])}
+
+
+init = tf.global_variables_initializer()
+sess.run(init)
+sess.run(tf.sparse_tensor_dense_matmul(a_sparse, b), feed_dict=feed)
+
+F tensorflow/core/kernels/sparse_tensor_dense_matmul_op.cc:273] Check failed: m < out.dimension(0) (3828 vs. 2)
+Abort trap: 6
+
+It looks like I'm exceeding the number of rows this time, and getting a crash instead of an error.
+What other attempted solutions have you tried?
+N/A

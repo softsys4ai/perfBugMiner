@@ -1,0 +1,36 @@
+Get rid of setdlopen() in tests
+
+We need to find a new strategy for loading .so files at runtime that depend on other .so files. This is so we can remove the dlopen hack, which is now present in >100 files.
+The solution needs to meet the requirement that each .py file fully specifies its dependencies and does not rely on code in __init__.py files to run beforehand. This requirement is necessary in order to maintain the work we've done to: a) remove hourglass imports so affected tests can be calculated better; and b) so Python modules can be loaded lazily like Java.
+Background
+We've refactored TensorFlow to remove hourglass imports in 5866e06, 58201a0, etc. Since tests no longer depend on the master __init__.py file, we've needed to add code like this to the tops of _test.py files that load custom ops defined by contrib libraries:
+import sys
+
+if hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags"):
+  import ctypes
+  sys.setdlopenflags(sys.getdlopenflags() | ctypes.RTLD_GLOBAL)
+
+from google3.third_party.tensorflow.contrib.rnn.python.ops import core_rnn_cell_impl
+from google3.third_party.tensorflow.python.framework import ops
+...
+Otherwise we get errors like undefined symbol: _ZTIN10tensorflow8OpKernelE e.g.
+Traceback (most recent call last):
+  File "bazel-out/local-fastbuild/bin/tensorflow/contrib/slim/python/slim/nets/inception_v2_test.runfiles/org_tensorflow/tensorflow/contrib/slim/python/slim/nets/inception_v2_test.py", line 26, in <module>
+    from tensorflow.contrib.slim.python.slim.nets import inception_v2
+  File "bazel-out/local-fastbuild/bin/tensorflow/contrib/slim/python/slim/nets/inception_v2_test.runfiles/org_tensorflow/tensorflow/contrib/slim/python/slim/nets/inception_v2.py", line 21, in <module>
+    from tensorflow.contrib import layers
+  File "bazel-out/local-fastbuild/bin/tensorflow/contrib/slim/python/slim/nets/inception_v2_test.runfiles/org_tensorflow/tensorflow/contrib/layers/__init__.py", line 118, in <module>
+    from tensorflow.contrib.layers.python.layers import *
+  File "bazel-out/local-fastbuild/bin/tensorflow/contrib/slim/python/slim/nets/inception_v2_test.runfiles/org_tensorflow/tensorflow/contrib/layers/python/layers/__init__.py", line 22, in <module>
+    from tensorflow.contrib.layers.python.layers.embedding_ops import *
+  File "bazel-out/local-fastbuild/bin/tensorflow/contrib/slim/python/slim/nets/inception_v2_test.runfiles/org_tensorflow/tensorflow/contrib/layers/python/layers/embedding_ops.py", line 21, in <module>
+    from tensorflow.contrib.layers.python.ops import sparse_feature_cross_op
+  File "bazel-out/local-fastbuild/bin/tensorflow/contrib/slim/python/slim/nets/inception_v2_test.runfiles/org_tensorflow/tensorflow/contrib/layers/python/ops/sparse_feature_cross_op.py", line 31, in <module>
+    resource_loader.get_path_to_datafile("_sparse_feature_cross_op.so"))
+  File "bazel-out/local-fastbuild/bin/tensorflow/contrib/slim/python/slim/nets/inception_v2_test.runfiles/org_tensorflow/tensorflow/contrib/util/loader.py", line 42, in load_op_library
+    ret = load_library.load_op_library(path)
+  File "bazel-out/local-fastbuild/bin/tensorflow/contrib/slim/python/slim/nets/inception_v2_test.runfiles/org_tensorflow/tensorflow/python/framework/load_library.py", line 64, in load_op_library
+    None, None, error_msg, error_code)
+tensorflow.python.framework.errors_impl.NotFoundError: bazel-out/local-fastbuild/bin/tensorflow/contrib/slim/python/slim/nets/inception_v2_test.runfiles/org_tensorflow/tensorflow/contrib/layers/python/ops/_sparse_feature_cross_op.so: undefined symbol: _ZTIN10tensorflow8OpKernelE
+
+CC: @gunan @martinwicke @yifeif

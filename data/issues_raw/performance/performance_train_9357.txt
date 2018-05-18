@@ -1,0 +1,62 @@
+init_op and concurrent.futures freeze forever
+
+System Information:
+OS Platform and Distribution: MAC OSX
+TensorFlow installed from: pip install tensorflow
+TensorFlow version : 1.0.0
+Python version : Python 3.6.1
+I found a  bug trying to run multiple agent in parallel using python, it boiled down to the code below:
+
+If i try to init an agent asynchronously after init an agent synchronously, it freezes forever
+if i do it the other way around, everything is fine
+
+Does anyone has an idea on this one?
+Source Code:
+import tensorflow as tf
+import concurrent.futures
+
+# Very basic model
+class Agent(object):
+    def __init__(self):
+        graph = tf.Graph()
+        with graph.as_default():
+            self.Qs = tf.get_variable('Qs', shape=[1, 1])
+            self.init_op = tf.global_variables_initializer()
+        self.sess = tf.Session(graph=graph)
+
+        print('Before init_op')
+        self.sess.run(self.init_op)
+        print('After init_op')
+
+
+def execute_run():
+    print('In execute')
+    agent = Agent()
+
+print('*** First: we create an agent asynchronously')
+with concurrent.futures.ProcessPoolExecutor(1) as executor:
+    concurrent.futures.wait([executor.submit(execute_run)])
+
+print('*** Then: we create an agent synchronously')
+agent = Agent()
+
+print('So far, everything is fine')
+
+
+print('*** Finally: we create an agent asynchronously again')
+with concurrent.futures.ProcessPoolExecutor(1) as executor:
+    concurrent.futures.wait([executor.submit(execute_run)])
+
+print('You\'ll never see this as we  can\'t get passed the init_op')
+output:
+*** First: we create an agent asynchronously
+In execute
+Before init_op
+After init_op
+*** Then: we create an agent synchronously
+Before init_op
+After init_op
+So far, everything is fine
+*** Finally: we create an agent asynchronously again
+In execute
+Before init_op

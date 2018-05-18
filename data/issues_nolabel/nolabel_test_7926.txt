@@ -1,0 +1,57 @@
+Freeze graph erroring out claiming there are uninitialized values in embeddings
+
+This is similar to #7172 but with my own model.
+I'm training a CNN with word embeddings and for some reason I'm getting FailedPreconditionError exception whenever I try to save a frozen version of the model for later use.
+This is despite the fact that I call sess.run(tf.global_variables_initializer()) just before training and I have no problem monitoring the training in tensorboard and checkpointing the model at regular intervals.
+The problem occurs when I try to load a model from a checkpoint and save a frozen model. The function I'm using is as follows:
+def freeze_model(checkpoint_path, model_save_path, output_node_names):
+    checkpoint = tf.train.get_checkpoint_state(checkpoint_path)
+    input_checkpoint = checkpoint.model_checkpoint_path
+
+    saver = tf.train.import_meta_graph(input_checkpoint + '.meta', clear_devices=True)
+    graph = tf.get_default_graph()
+    input_graph_def = graph.as_graph_def()
+    with tf.Session() as sess:
+        saver.restore(sess, input_checkpoint)
+
+        output_graph_def = graph_util.convert_variables_to_constants(
+            sess,
+            input_graph_def,
+            output_node_names
+        )
+
+        with tf.gfile.GFile(model_save_path, "wb") as f:
+            f.write(output_graph_def.SerializeToString())
+The error that I'm getting is as follows. It looks like the problem is with two embeddings coefficients. If I set clear_devices=False, I get the same error but for only one embedding coefficient:
+Traceback (most recent call last):
+  File "myproject/train.py", line 522, in <module>
+    tf.app.run()
+  File "/home/foo/anaconda2/lib/python2.7/site-packages/tensorflow/python/platform/app.py", line 44, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "myproject/train.py", line 518, in main
+    trainer.save_model(preprocessor)
+  File "myproject/train.py", line 312, in save_model
+    ut.freeze_model(self.checkpoint_dir, model_save_path, C.OUTPUT_NODE_NAMES)
+  File "/home/foo/anaconda2/lib/python2.7/site-packages/myproject/utils.py", line 224, in freeze_model
+    output_node_names
+  File "/home/foo/anaconda2/lib/python2.7/site-packages/tensorflow/python/framework/graph_util_impl.py", line 218, in convert_variables_to_constants
+    returned_variables = sess.run(variable_names)
+  File "/home/foo/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File "/home/foo/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/foo/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File "/home/foo/anaconda2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1035, in _do_call
+    raise type(e)(node_def, op, message)
+FailedPreconditionError: Attempting to use uninitialized value embeddings/W
+	 [[Node: embeddings/W/_20 = _Send[T=DT_FLOAT, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_30_embeddings/W", _device="/job:localhost/replica:0/task:0/gpu:0"](embeddings/W)]]
+	 [[Node: embeddings/W/_21 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_30_embeddings/W", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+Environment info
+tensorflow-gpu: 1.0.0
+Ubuntu 14.0.4.5
+CUDA Version 8.0.44
+What other attempted solutions have you tried?
+I am assigning the embeddings pretrained word2vec values after initializing. I have tried running the model without assigning these values and I get the same error.
+I have tried running the training for 70K batches.
+I have tried running tf.report_uninitialized_variables after calling tf.global_variables_initializer() and it has come up empty.

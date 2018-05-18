@@ -1,0 +1,58 @@
+How to know my loss function does not have numerical problems?
+
+I wrote the following loss function that I post below. How do I know that I don't have any kind of numerical issues with it? (because something tells me that I do)
+def gather_cols(params, indices, name=None):
+    """Gather columns of a 2D tensor.
+
+    Args:
+        params: A 2D tensor.
+        indices: A 1D tensor. Must be one of the following types: ``int32``, ``int64``.
+        name: A name for the operation (optional).
+
+    Returns:
+        A 2D Tensor. Has the same type as ``params``.
+    """
+    with tf.op_scope([params, indices], name, "gather_cols") as scope:
+        # Check input
+        params = tf.convert_to_tensor(params, name="params")
+        indices = tf.convert_to_tensor(indices, name="indices")
+        try:
+            params.get_shape().assert_has_rank(2)
+        except ValueError:
+            raise ValueError('\'params\' must be 2D.')
+        try:
+            indices.get_shape().assert_has_rank(1)
+        except ValueError:
+            raise ValueError('\'params\' must be 1D.')
+
+        # Define op
+        p_shape = tf.shape(params)
+        p_flat = tf.reshape(params, [-1])
+        i_flat = tf.reshape(tf.reshape(tf.range(0, p_shape[0]) * p_shape[1],
+                                       [-1, 1]) + indices, [-1])
+        return tf.reshape(tf.gather(p_flat, i_flat),
+                          [p_shape[0], -1])
+
+
+def custom_binary_crossentropy(y_true, y_pred):
+    # Assumes y_pred are probabilities and that y_true has actually 2 labels inside
+    # Calculate: gain(y1, y2) * log(p) + gain(y2, y1) * log(1 - p)
+    # gain(x1, x2) = (2 ^ x1 - 1) / ((2 ^ x1 - 1) + (2 ^ x2 - 1))
+
+    # Gather y1 and y2 first
+    y1 = gather_cols(y_true, [0])
+    y2 = gather_cols(y_true, [1])
+
+    # Get 2^y - 1
+    y1_g = tf.subtract(tf.pow(tf.fill(tf.shape(y1), 2.0), y1), tf.fill(tf.shape(y1), 1.0))
+    y2_g = tf.subtract(tf.pow(tf.fill(tf.shape(y2), 2.0), y1), tf.fill(tf.shape(y2), 1.0))
+
+    # Get gains
+    gain1 = tf.div(y1_g, tf.add(y1_g, y2_g))
+    gain2 = tf.div(y2_g, tf.add(y1_g, y2_g))
+
+    # Get logs
+    log1 = tf.log(y_pred)
+    log2 = tf.log(tf.subtract(tf.fill(tf.shape(y_pred), 1.0), y_pred))
+
+    return -K.mean(tf.add(tf.multiply(gain1, log1), tf.multiply(gain2, log2)))

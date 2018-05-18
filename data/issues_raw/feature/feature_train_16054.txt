@@ -1,0 +1,94 @@
+Lack of Complex64 support for Java API
+
+This issue is not about a bug, but I will fill in the form anyhow ;-)
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Mac 10.13.2
+TensorFlow installed from (source or binary):
+source
+TensorFlow version (use command below):
+master branch at commit: b86dc36
+Python version:
+N/A Using Java version "1.8.0_152"
+Bazel version (if compiling from source):
+Build label: 0.8.1-homebrew
+Build target: bazel-out/darwin-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Tue Dec 5 19:29:04 2017 (1512502144)
+GCC/Compiler version (if compiling from source):
+Configured with: --prefix=/Applications/Xcode.app/Contents/Developer/usr --with-gxx-include-dir=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.13.sdk/usr/include/c++/4.2.1
+Apple LLVM version 9.0.0 (clang-900.0.39.2)
+Target: x86_64-apple-darwin17.3.0
+Thread model: posix
+InstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+CUDA/cuDNN version:
+N/A not using CUDA
+GPU model and memory:
+N/A not using GPU
+Exact command to reproduce:
+There is no bug to reproduce
+
+Describe the problem
+There is not really a problem. I have need to build TensorFlow computations in Java and have support for complex numbers. Because the C API already supports COMPLEX64 tensors, it was a straight forward effort to expose them in the Java API. Along with unit tests, I have also added a Java example based on the Python tutorial that builds an image that displays the Mandelbrot fractal to show that the complex number support works correctly.
+Source code / logs
+Here is a very short example of using the API, clearly there are functions in the example that are not available defined in the example, but it gets the point across. This example is basically lifted from a new java example I created called MandelbrotExample.java
+Tensor<Complex64> resultZ = null;
+try(Graph g = new Graph()) {
+    //We create a meshgrid based on two numeric ranges, by wrapping the ranges
+    //in Tensors and then pulling out sub grids to make complex numbers
+    try (Tensor<Float> meshGridT = buildMeshGrid(range1Spec, range2Spec);
+         Tensor<Integer> zeroT = Tensors.create(new int[]{0});
+         Tensor<Integer> oneT = Tensors.create(new int[]{1});
+         Tensor<Complex64> jTensor = Tensors.create(0.0f, 1.0f)) {
+    
+        Output<Integer> zero = buildConstant(g, "0", zeroT);
+        Output<Integer> one = buildConstant(g, "1", oneT);
+
+        Output<Float> meshGrid = buildConstant(g, "meshgrid", meshGridT);
+
+        Output<Complex64> j = buildConstant(g, "imagUnit", jTensor);
+
+        //We use GatherNd to pull out the two parts of the original mesh grid
+        //the Z complex tensor
+        Output<Float> Yfloat = g.opBuilder("GatherNd", "get_y")
+                .addInput(meshGrid)
+                .addInput(zero) //use zero
+                .build().output(0);
+        Output<Float> Xfloat = g.opBuilder("GatherNd", "get_x")
+                .addInput(meshGrid)
+                .addInput(one) //use one
+                .build().output(0);
+
+        Output<Complex64> Y = g.opBuilder("Cast", "castYtoComplex")
+                .addInput(Yfloat)
+                .setAttr("DstT", DataType.COMPLEX64)
+                .build().output(0);
+
+        Output<Complex64> X = g.opBuilder("Cast", "castXtoComplex")
+                .addInput(Xfloat)
+                .setAttr("DstT", DataType.COMPLEX64)
+                .build().output(0);
+
+        //Z is constructed by X + Yj
+        Output<Complex64> mulYj = g.opBuilder("Mul", "mulYj")
+                .addInput(Y)
+                .addInput(j)
+                .build()
+                .output(0);
+        Output<Complex64> Z = g.opBuilder("Add", "addZ")
+                .addInput(X)
+                .addInput(mulYj)
+                .build()
+                .output(0);
+
+        try(Session s = new Session(g)){
+            resultZ = s.runner().fetch(Z).run().get(0).expect(Complex64.class);
+        }
+    }
+}
+
+I would like to get my local branched pushed to GitHub and then a pull request put in with these changes. I have attached a diff file for the curious. I am still working on getting a corporate CLA put into place.
+Thanks for your time and consideration!
+java-complex64.patch.txt

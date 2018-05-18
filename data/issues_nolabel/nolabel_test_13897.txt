@@ -1,0 +1,77 @@
+No OpKernel was registered to support Op 'SegmentSum'
+
+ENV
+
+OSX 10.12.6
+No GPU
+Tensorflow master. Built from source by tensorflow/contrib/makefile/build_all_linux.sh
+
+Error info
+Invalid argument: No OpKernel was registered to support Op 'SegmentSum' with these attrs.  Registered devices: [CPU], Registered kernels:
+  <no registered kernels>
+
+	 [[Node: emb_179/embedding_lookup_sparse = SegmentSum[T=DT_FLOAT, Tindices=DT_INT32](emb_179/embedding_lookup_sparse/mul, emb_179/embedding_lookup_sparse/Cast)]]
+
+My usage
+I use python to train model and freeze the graph with checkpoint. Then I use c++ to load freeze graph protobuf and to predict for some inputs.
+python core part
+with tf.variable_scope('input/sparse_field'):
+  with tf.variable_scope('index'):
+    sparse_index = tf.placeholder(tf.int64)
+  with tf.variable_scope('id'):
+   sparse_id = tf.placeholder(tf.int64)
+   with tf.variable_scope('value'):
+    sparse_val = tf.placeholder(tf.float32)
+  with tf.variable_scope('shape'):
+    sparse_shape = tf.placeholder(tf.int64)
+with tf.variable_scope('label'):
+  label = tf.placeholder(tf.float32)
+sparse_ids = tf.SparseTensor(sparse_index, sparse_id, sparse_shape)
+sparse_vals = tf.SparseTensor(sparse_index, sparse_val, sparse_shape)
+
+input_size = 100
+embedding_size = 50
+with tf.variable_scope("emb_179"):
+  embedding_variable = tf.Variable(tf.truncated_normal([input_size, embedding_size], stddev=0.05), name='emb' + str(field_id))
+  embedding = tf.nn.embedding_lookup_sparse(embedding_variable, sparse_ids, sparse_vals, "mod", combiner="sum")
+...
+
+C++ prediction core part
+auto id_indice_tensor =
+test::AsTensor<int64>(indice, {static_cast<int64>(indice.size()/2), 2});
+inputs.push_back(std::pair<std::string, Tensor>("input/sparse_field/index/Placeholder", id_indice_tensor));
+auto id_list_tensor = test::AsTensor<int64>(fid_list);
+inputs.push_back(std::pair<std::string, Tensor>("input/sparse_field/id/Placeholder", id_list_tensor));
+auto val_list_tensor = test::AsTensor<float>(fval_list);
+inputs.push_back(std::pair<std::string, Tensor>("input/sparse_field/value/Placeholder", val_list_tensor));
+
+std::vector<tensorflow::Tensor> outputs;
+Status status = session->Run(inputs, {"predict/add"}, {}, &outputs);
+
+Have checked
+I have checked it has registered all real type and complex type in cpu mode.
+
+  
+    
+      tensorflow/tensorflow/core/kernels/segment_reduction_ops.cc
+    
+    
+         Line 333
+      in
+      d1183ca
+    
+    
+    
+    
+
+        
+          
+           TF_CALL_REAL_NUMBER_TYPES(REGISTER_REAL_CPU_KERNELS_ALL); 
+        
+    
+  
+
+
+TF_CALL_REAL_NUMBER_TYPES(REGISTER_REAL_CPU_KERNELS_ALL);
+REGISTER_COMPLEX_CPU_KERNELS_ALL(complex64);
+REGISTER_COMPLEX_CPU_KERNELS_ALL(complex128);

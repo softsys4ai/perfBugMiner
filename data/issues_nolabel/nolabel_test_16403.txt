@@ -1,0 +1,131 @@
+1D Convolution in Tensorflow Serving
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Arch Linux
+TensorFlow installed from (source or binary): tensorflow binary
+TensorFlow version (use command below): 1.4.0
+Python version: 3.6
+CUDA/cuDNN version: 9.0, 7.0
+GPU model and memory: GTX 1050
+
+Describe the problem
+The Problem is a little bit hard to reproduce, I guess because so many steps are involved.
+So, the basic scenario is, that I am using keras to train a model in python. Here is the model I am using:
+`
+input = Input(shape=(200, 8))
+x = Conv1D(filters=128, kernel_size=7, activation="relu", padding="same")(input)
+x = Conv1D(filters=128, kernel_size=7, activation="relu", padding="same")(x)
+x = Conv1D(filters=128, kernel_size=3, activation="relu", padding="same")(x)
+x = Conv1D(filters=128, kernel_size=3, activation="relu", padding="same")(x)
+x = Conv1D(filters=128, kernel_size=3, activation="relu", padding="same")(x)
+x = Conv1D(filters=2, kernel_size=1, activation="softmax")(x)
+`
+Now, I extract the graph and I am saving graph and weights with the ModelBundleBuilder:
+`
+session = K.get_session()
+    signature = tf.saved_model.signature_def_utils.build_signature_def(
+        inputs={'input': tf.saved_model.utils.build_tensor_info(self._get_model().inputs[0])},
+        outputs={'output': tf.saved_model.utils.build_tensor_info(self._get_model().outputs[0])},
+        method_name=tf.saved_model.signature_constants.PREDICT_METHOD_NAME
+    )
+
+    b = tf.saved_model.builder.SavedModelBuilder(filename)
+    legacy_init_op = tf.group(tf.tables_initializer(), name='legacy_init_op')
+    b.add_meta_graph_and_variables(session,
+                                   [tf.saved_model.tag_constants.SERVING],
+                                   signature_def_map={
+                                       tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY: signature},
+                                   legacy_init_op=legacy_init_op)
+    b.save()
+
+`
+If I am loading the model via python, everything works as expected.
+Now I am deploying the model into TF serving and using protobuf / gRPC to make the prediction via Java. I am converting a 3D float array to a TensorProto like this:
+`
+TensorShapeProto.Dim dim1 = TensorShapeProto.Dim.newBuilder()
+.setSize(data.length).build();
+    TensorShapeProto.Dim dim2 = TensorShapeProto.Dim.newBuilder()
+            .setSize(data[0].length).build();
+
+    TensorShapeProto.Dim dim3 = TensorShapeProto.Dim.newBuilder()
+            .setSize(data[0][0].length).build();
+
+    TensorShapeProto shape = TensorShapeProto.newBuilder()
+            .addDim(dim1).addDim(dim2).addDim(dim3).build();
+
+    TensorProto.Builder builder = TensorProto.newBuilder()
+            .setDtype(DataType.DT_FLOAT)
+            .setTensorShape(shape);
+
+    for(int i = 0; i < data.length; i++) {
+        for(int j = 0; j < data[0].length; j++) {
+            for(int k = 0; k < data[0][0].length; k++) {
+                builder.addFloatVal(data[k][j][i]);
+            }
+        }
+    }
+
+    return builder.build();
+
+`
+And do the predicition like this:
+`
+public class ModelClientImpl implements ModelClient {
+private String host;
+private Integer port;
+private ManagedChannel channel;
+private PredictionServiceGrpc.PredictionServiceBlockingStub stub;
+
+public void init() {
+    channel = ManagedChannelBuilder
+            .forAddress(getHost(), getPort())
+            .usePlaintext(true)
+            .build();
+
+    stub = PredictionServiceGrpc.newBlockingStub(channel);
+}
+
+@Override
+public Map<String, TensorProto> predict(final String signatureName, Map<String, TensorProto> inputs) {
+    final Predict.PredictResponse response = stub.predict(createRequest(signatureName, inputs));
+
+    return response.getOutputsMap();
+}
+
+protected Predict.PredictRequest createRequest(final String signatureName, final Map<String, TensorProto> inputs) {
+    final Model.ModelSpec modelSpec = Model.ModelSpec.newBuilder()
+            .setName(signatureName)
+            .setSignatureName("serving_default").build();
+
+    final Predict.PredictRequest.Builder builder = Predict.PredictRequest.newBuilder()
+            .setModelSpec(modelSpec)
+            .putAllInputs(inputs);
+
+    return builder.build();
+}
+
+public String getHost() {
+    return host;
+}
+
+public void setHost(String host) {
+    this.host = host;
+}
+
+public Integer getPort() {
+    return port;
+}
+
+public void setPort(Integer port) {
+    this.port = port;
+}
+
+@Override
+public void close() throws Exception {
+    channel.shutdown().awaitTermination(5, TimeUnit.DAYS);
+}
+
+}
+`
+But the prediction is totally different from python. Does anybody know if this is a bug or is something wromg with 1dconv?

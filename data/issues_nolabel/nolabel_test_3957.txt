@@ -1,0 +1,85 @@
+Optimizer + tf.reduce_prod() + GPU = Cannot assign a device to node 'gradients/Prod_grad/ListDiff'
+
+Environment info
+Operating System: Ubuntu 14.4.5 LTS
+Installed version of CUDA and cuDNN:
+CUDA 7.5.18 and cuDNN 4.0.7
+-rw-r--r-- 1 root root 322936 Aug 15  2015 libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Jul 12 08:24 libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 Jul 12 08:24 libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 383336 Aug 15  2015 libcudart.so.7.5.18
+-rw-r--r-- 1 root root 720192 Aug 15  2015 libcudart_static.a
+
+-rw-r--r-- 1 sauterme tumuser        0 Aug 22 18:29 libcudart.so.7.5
+-rw-r--r-- 1 sauterme tumuser        0 Aug 22 18:29 libcudart.so.7.5.18
+lrwxrwxrwx 1 sauterme tumuser       13 Feb  9  2016 libcudnn.so -> libcudnn.so.4
+lrwxrwxrwx 1 sauterme tumuser       17 Feb  9  2016 libcudnn.so.4 -> libcudnn.so.4.0.7
+-rwxr-xr-x 1 sauterme tumuser 61453024 Feb  8  2016 libcudnn.so.4.0.7
+-rw-r--r-- 1 sauterme tumuser 62025862 Feb  8  2016 libcudnn_static.a
+
+If installed from binary pip package, provide:
+
+Which pip package you installed:
+pip package version 0.10 for Python 2.7 with GPU support:
+https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.10.0rc0-cp27-none-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.10.0rc0
+
+Steps to reproduce
+
+
+Use a system with GPU
+
+
+Use this code snippet
+import tensorflow as tf
+
+g = tf.Graph()
+with g.as_default():
+    with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
+
+        with tf.device('/gpu:0'):
+
+            a = tf.constant([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], shape=[2, 3], name='a')
+            b = tf.Variable([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], name='b')
+
+            c = tf.matmul(a, b)
+            res = tf.reduce_prod(c)
+
+            #with tf.device('/cpu:0'): # <<< adding this solves the issue!
+            train_op = tf.train.AdagradOptimizer(1e-3).minimize(res)
+
+        sess.run(tf.initialize_all_variables())    
+
+        print sess.run(res)
+        print sess.run(train_op)
+
+
+
+
+You will get an InvalidArgumentError:
+_InvalidArgumentError: Cannot assign a device to node 'gradients/Prod_grad/ListDiff': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+[[Node: gradients/Prod_grad/ListDiff = ListDiff[T=DT_INT32, _device="/device:GPU:0"](gradients/Prod_grad/range_1, Const)]]
+Caused by op u'gradients/Prod_grad/ListDiff', defined at:
+File "/usr/lib/python2.7/runpy.py", line 162, in _run_module_as_main
+"main", fname, loader, pkg_name)
+File "/usr/lib/python2.7/runpy.py", line 72, in run_code
+exec code in run_globals
+
+
+Cause of the issue: tf.reduce_prod() when running the train_op. So, the problem takes place while back-propagation through this op.
+
+
+What have you tried?
+
+
+Wrapping the tf.reduce_prod() with tf.device('/cpu:0'):
+Result: still getting this error!
+
+
+Exchangeing tf.reduce_prod() with other reduce_*() ops:
+Result: no error!
+
+
+Wrapping the Optimizer with  tf.device('/cpu:0'):
+Result: Solves the error!

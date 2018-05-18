@@ -1,0 +1,33 @@
+reshape on bad data: "segment_ids[0] = -1 is out of range"
+
+This piece of code fails in unsorted_segment_sum inside Reshape op. It works just fine for a few batches and then fails on one specific batch of data: it just so happened (bug in my code) that the length of one line of the input of rnn turned out to be zero (and length param in dynamic_rnn was also zero), and I was passing the resulting tensor to a reshape, so it gave me this error:
+InvalidArgumentError: segment_ids[0] = -1 is out of range [0, 100100)
+     [[Node: gradients/Reshape_grad/Reshape/tensor = UnsortedSegmentSum[T=DT_FLOAT, Tindices=DT_INT32, _device="/job:localhost/replica:0/task:0/cpu:0"](gradients/Gather_grad/Reshape/_137, gradients/Gather_grad/Reshape_1/_139, gradients/Reshape_grad/Reshape/Squeeze/_141)]]
+     [[Node: gradients/Reshape_grad/Reshape/tensor/_143 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:2", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_31_gradients/Reshape_grad/Reshape/tensor", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:2"]()]]
+...
+  File "/home/usman/anaconda2/envs/tfpy3/lib/python3.5/site-packages/tensorflow/python/ops/gen_array_ops.py", line 1383, in reshape
+    name=name)
+  File "/home/usman/anaconda2/envs/tfpy3/lib/python3.5/site-packages/tensorflow/python/ops/op_def_library.py", line 455, in apply_op
+    as_ref=input_arg.is_ref)
+  File "/home/usman/anaconda2/envs/tfpy3/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 620, in convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "/home/usman/anaconda2/envs/tfpy3/lib/python3.5/site-packages/tensorflow/python/ops/gradients.py", line 94, in _IndexedSlicesToTensor
+    name=name)
+  File "/home/usman/anaconda2/envs/tfpy3/lib/python3.5/site-packages/tensorflow/python/ops/gen_math_ops.py", line 2215, in unsorted_segment_sum
+    num_segments=num_segments, name=name)
+  File "/home/usman/anaconda2/envs/tfpy3/lib/python3.5/site-packages/tensorflow/python/ops/op_def_library.py", line 704, in apply_op
+    op_def=op_def)
+  File "/home/usman/anaconda2/envs/tfpy3/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2260, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+
+here's the piece of code on which it fails:
+def last_relevant(output, length):
+    batch_size = tf.shape(output)[0]
+    max_length = int(output.get_shape()[1])
+    output_size = int(output.get_shape()[2])
+    index = tf.range(0, batch_size) * max_length + (length - 1)
+    flat = tf.reshape(output, [-1, output_size])
+    relevant = tf.gather(flat, index)
+    return relevant
+
+just wondering if error message could be less obscure.

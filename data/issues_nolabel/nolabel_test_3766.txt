@@ -1,0 +1,57 @@
+Tensorflow distributed RNN crashed on ProtoBuf when using 3*512 rnn.
+
+Environment info
+Operating System:
+Linux XNLPEXP2 4.4.0-24-generic #43-Ubuntu SMP Wed Jun 8 19:27:37 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+Azure VM 8 cores, 56GB memory
+If installed from binary pip package, provide:
+pip 8.1.2 from /home/xubixiong/.local/lib/python2.7/site-packages (python 2.7)
+0.10.0rc0
+Steps to reproduce
+
+Create 2_PS + 2_worker,
+Try 3 * 512 RNN, (I changed some code in rnn/translate to make it distributed), worker0 will 100% crash on some code related to TensorBuf and run global_step, the stack is at the end of this post, same everytime
+Smaller the RNN, make it 1*128, it works fine.
+
+What have you tried?
+
+tensorflow.python.framework.errors.UnavailableError is said to not used in the document.
+The crashing line is TensorBuffer* buf = tensorflow::TensorCApi::Buffer(src); in tensorflow/core/client/tensor_c_api.cc:
+I try to smaller the RNN size and layers, then there is no problem.
+Is it a known issue, I did find some issue relating to TensorBuf, but not the exactly same case.
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+E tensorflow/core/client/tensor_c_api.cc:485]
+Traceback (most recent call last):
+File "/home/xubixiong/soulmate/intent_trainer/rnn/translate/translate.py", line 346, in 
+tf.app.run()
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+sys.exit(main(sys.argv))
+File "/home/xubixiong/soulmate/intent_trainer/rnn/translate/translate.py", line 343, in main
+train()
+File "/home/xubixiong/soulmate/intent_trainer/rnn/translate/translate.py", line 215, in train
+with sv.managed_session(server.target, config=sess_config) as sess:
+File "/usr/lib/python2.7/contextlib.py", line 17, in enter
+return self.gen.next()
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 942, in managed_session
+self.stop(close_summary_writer=close_summary_writer)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 768, in stop
+stop_grace_period_secs=self._stop_grace_secs)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/coordinator.py", line 357, in join
+six.reraise(*self._exc_info_to_raise)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 931, in managed_session
+start_standard_services=start_standard_services)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 683, in prepare_or_wait_for_session
+self.start_standard_services(sess)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 624, in start_standard_services
+current_step = training_util.global_step(sess, self._global_step)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/training_util.py", line 50, in global_step
+return int(sess.run(global_step_tensor))
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 382, in run
+run_metadata_ptr)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 655, in _run
+feed_dict_string, options, run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 723, in _do_run
+target_list, options, run_metadata)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 743, in _do_call    raise type(e)(node_def, op, message)tensorflow.python.framework.errors.UnavailableError

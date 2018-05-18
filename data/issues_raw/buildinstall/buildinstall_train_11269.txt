@@ -1,0 +1,122 @@
+Build failure for r1.2  & master (r1.1 builds fine)
+
+System information
+== cat /etc/issue ===============================================
+Linux Lounge 4.11.8-200.fc25.x86_64 #1 SMP Thu Jun 29 16:13:56 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="25 (Workstation Edition)"
+VERSION_ID=25
+REDHAT_BUGZILLA_PRODUCT_VERSION=25
+REDHAT_SUPPORT_PRODUCT_VERSION=25
+== are we in docker =============================================
+No
+== compiler =====================================================
+c++ (GCC) 6.3.1 20161221 (Red Hat 6.3.1-1)
+Copyright (C) 2016 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+== uname -a =====================================================
+Linux Lounge 4.11.8-200.fc25.x86_64 #1 SMP Thu Jun 29 16:13:56 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+== check pips ===================================================
+numpy (1.13.0)
+protobuf (3.3.0)
+tensorflow (1.2.1)
+tensorflow-tensorboard (0.1.2)
+== check for virtualenv =========================================
+False
+== tensorflow import ============================================
+tf.VERSION = 1.2.1
+tf.GIT_VERSION = v1.2.0-1709-g679bb02
+tf.COMPILER_VERSION = v1.2.0-1709-g679bb02
+Sanity check: array([1], dtype=int32)
+Traceback (most recent call last):
+File "", line 1, in 
+File "tensorflow/init.py", line 24, in 
+from tensorflow.python import *
+File "tensorflow/python/init.py", line 49, in 
+from tensorflow.python import pywrap_tensorflow
+File "tensorflow/python/pywrap_tensorflow.py", line 52, in 
+raise ImportError(msg)
+ImportError: Traceback (most recent call last):
+File "tensorflow/python/pywrap_tensorflow.py", line 41, in 
+from tensorflow.python.pywrap_tensorflow_internal import *
+ImportError: No module named pywrap_tensorflow_internal
+Failed to load the native TensorFlow runtime.
+See https://www.tensorflow.org/install/install_sources#common_installation_problems
+for some common reasons and solutions.  Include the entire stack trace
+above this error message when asking for help.
+== env ==========================================================
+LD_LIBRARY_PATH /usr/local/cuda::/usr/local/cuda-7.5/lib64
+DYLD_LIBRARY_PATH is unset
+== nvidia-smi ===================================================
+Tue Jul  4 21:42:35 2017
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 375.66                 Driver Version: 375.66                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 750 Ti  Off  | 0000:01:00.0      On |                  N/A |
+|  6%   36C    P8     1W /  38W |    243MiB /  2000MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0      1490    G   /usr/bin/gnome-shell                           118MiB |
++-----------------------------------------------------------------------------+
+== cuda libs  ===================================================
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0.61
+/usr/local/cuda-8.0/lib64/libcudart_static.a
+Describe the problem
+I've managed to compile tf r1.1 with CUDA support with no problems. Howwever r1.2 and master throw an error at the final link stage (I think). I call the build process from a script (below).
+The error is pasted below the calling script. The error message says to recompile with -fPIC, so I added that to the --copt and --cxxopt bazel command, but it makes no difference.
+And issue  #9149 is affecting me as well, although it doesn't affect build success.
+Thanks to all the wonderful TF hackers! You're making the world a better place.
+Script used to build TF
+#! /bin/sh
+cd ~/Downloads/Software/tensorflow
+export CUDA_TOOLKIT_PATH=/usr/local/cuda
+export CUDNN_INSTALL_PATH=/lib64
+export GCC_HOST_COMPILER_PATH=/usr/bin/gcc53
+export LD_LIBRARY_PATH=/lib64:/usr/lib64:/usr/local/cuda/lib64:/usr/local/cuda-8.0/lib64
+export PATH=/home/john/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/local/sbin:/usr/bin
+export PYTHON_BIN_PATH=/usr/bin/python
+export PYTHON_LIB_PATH=/usr/lib64/python2.7/site-packages
+export TF_CUDA_CLANG=0
+export TF_CUDA_COMPUTE_CAPABILITIES=5.2
+export TF_CUDA_VERSION='8'
+export TF_CUDNN_VERSION='6'
+export TF_NEED_CUDA=1
+export TF_NEED_OPENCL=0
+export CC=/usr/bin/gcc53
+export CXX=/usr/bin/g++-53
+rm -fr ~/.cache/bazel/_bazel_john/189563267da147eb81f91b14c734315c/
+bazel clean
+#git checkout r1.1
+./configure
+bazel build --config=opt --copt=-O2 ---copt=-mavx --copt=-mavx2 --copt=-mfma --copt=-mfpmath=both --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0" --cxxopt=-O2 --copt=-w --config=cuda //tensorflow/tools/pip_package:build_pip_package --verbose_failures
+Error at final (?) linking
+2017-07-04 22:01:21.178045: W tensorflow/core/framework/op_gen_lib.cc:194] Squeeze can't find input squeeze_dims to rename
+ERROR: /home/john/Downloads/Software/tensorflow/tensorflow/python/BUILD:2638:1: Linking of rule '//tensorflow/python:_pywrap_tensorflow_internal.so' failed: link_dynamic_library.sh failed: error executing command
+(cd /home/john/.cache/bazel/_bazel_john/189563267da147eb81f91b14c734315c/execroot/org_tensorflow && 
+exec env - 
+CUDA_TOOLKIT_PATH=/usr/local/cuda 
+CUDNN_INSTALL_PATH=/lib64 
+GCC_HOST_COMPILER_PATH=/usr/bin/gcc53 
+LD_LIBRARY_PATH=/lib64:/usr/lib64:/usr/local/cuda/lib64:/usr/local/cuda-8.0/lib64 
+PATH=/home/john/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/local/sbin:/usr/bin 
+PWD=/proc/self/cwd 
+PYTHON_BIN_PATH=/bin/python 
+PYTHON_LIB_PATH=/usr/lib/python2.7/site-packages 
+TF_CUDA_CLANG=0 
+TF_CUDA_COMPUTE_CAPABILITIES=3.5,5.2 
+TF_CUDA_VERSION='' 
+TF_CUDNN_VERSION='' 
+TF_NEED_CUDA=1 
+TF_NEED_OPENCL=0 
+external/bazel_tools/tools/cpp/link_dynamic_library.sh no ignored ignored ignored external/local_config_cuda/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc -shared -o bazel-out/local_linux-opt/bin/tensorflow/python/_pywrap_tensorflow_internal.so '-Wl,-rpath,$ORIGIN/../../_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccusolver___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib' '-Wl,-rpath,$ORIGIN/../../_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccublas___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib' '-Wl,-rpath,$ORIGIN/../../_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccuda_Udriver___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib' '-Wl,-rpath,$ORIGIN/../../_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccudnn___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib' '-Wl,-rpath,$ORIGIN/../../_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccufft___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib' '-Wl,-rpath,$ORIGIN/../../_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccurand___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib' '-Wl,-rpath,$ORIGIN/../../_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccudart___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib' -Lbazel-out/local_linux-opt/bin/_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccusolver___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib -Lbazel-out/local_linux-opt/bin/_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccublas___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib -Lbazel-out/local_linux-opt/bin/_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccuda_Udriver___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib -Lbazel-out/local_linux-opt/bin/_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccudnn___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib -Lbazel-out/local_linux-opt/bin/_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccufft___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib -Lbazel-out/local_linux-opt/bin/_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccurand___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib -Lbazel-out/local_linux-opt/bin/_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccudart___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib -Wl,--version-script tensorflow/tf_version_script.lds -Wl,-z,muldefs -Wl,-z,muldefs -Wl,-rpath,../local_config_cuda/cuda/lib64 -Wl,-rpath,../local_config_cuda/cuda/extras/CUPTI/lib64 -pthread -Wl,-no-as-needed -B/usr/bin/ -Wl,-z,relro,-z,now -no-canonical-prefixes -pass-exit-codes '-Wl,--build-id=md5' '-Wl,--hash-style=gnu' -Wl,--gc-sections -Wl,/bin/tensorflow/python/_pywrap_tensorflow_internal.so-2.params): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+/usr/bin/ld: /usr/lib/gcc/x86_64-redhat-linux/5.3.1/libgomp.a(critical.o): relocation R_X86_64_32 against `.bss' can not be used when making a shared object; recompile with -fPIC
+/usr/lib/gcc/x86_64-redhat-linux/5.3.1/libgomp.a: error adding symbols: Bad value
+collect2: error: ld returned 1 exit status
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+INFO: Elapsed time: 1865.691s, Critical Path: 223.61s

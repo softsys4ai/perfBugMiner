@@ -1,0 +1,94 @@
+Possible bug: LSTMCell with use_peephole=True breaks when using initializer=tf.orthogonal_initializer
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes, below.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): OSX Sierra
+TensorFlow installed from (source or binary): binary - pip
+TensorFlow version (use command below): 1.2rc0
+Bazel version (if compiling from source): NA
+CUDA/cuDNN version: NA
+GPU model and memory: NA
+Exact command to reproduce:
+
+
+class ToyModel(object):
+	def __init__(self):
+		x = tf.get_variable("x", shape=[5, 3, 7],
+							initializer=tf.random_normal_initializer(),
+							trainable=False)
+		cell = tf.contrib.rnn.LSTMCell(7, use_peepholes=True, initializer=tf.orthogonal_initializer)
+		self.rnn_out, self.final_state = tf.nn.dynamic_rnn(cell=cell,
+														   inputs=x,
+														   parallel_iterations=8,
+														   time_major=True,
+														   dtype=tf.float32)
+
+
+graph_context = tf.Graph()
+with graph_context.as_default():
+	m1 = ToyModel()
+
+	tf_init = tf.global_variables_initializer()
+	save_dir = "/Users/delkind/Desktop/whd/tf_checkpoints/unit_test"
+
+	sv = tf.train.Supervisor(logdir=save_dir)
+	with sv.managed_session() as sess:
+		y1 = m1.rnn_out.eval(session=sess)
+
+		print(y1)
+
+Describe the problem
+I believe this is a bug. When using this code, the following error is raised.
+
+Traceback (most recent call last):
+  File "src/tensorflow_unit_tests.py", line 84, in <module>
+    m1 = ToyModel()
+  File "src/tensorflow_unit_tests.py", line 79, in __init__
+    dtype=tf.float32)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 566, in dynamic_rnn
+    dtype=dtype)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 729, in _dynamic_rnn_loop
+    swap_memory=swap_memory)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2766, in while_loop
+    result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2595, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2545, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 712, in _time_step
+    skip_conditionals=True)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 198, in _rnn_step
+    new_output, new_state = call_cell()
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 700, in <lambda>
+    call_cell = lambda: cell(input_t, state)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 685, in __call__
+    output, new_state = self._cell(inputs, state, scope)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/rnn_cell_impl.py", line 165, in __call__
+    return super(_RNNCell, self).__call__(inputs, state)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/layers/base.py", line 439, in __call__
+    outputs = self.call(inputs, *args, **kwargs)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/contrib/rnn/python/ops/core_rnn_cell_impl.py", line 376, in call
+    "w_f_diag", shape=[self._num_units], dtype=dtype)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 1065, in get_variable
+    use_resource=use_resource, custom_getter=custom_getter)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 962, in get_variable
+    use_resource=use_resource, custom_getter=custom_getter)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 360, in get_variable
+    validate_shape=validate_shape, use_resource=use_resource)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/rnn_cell_impl.py", line 168, in _rnn_get_variable
+    variable = getter(*args, **kwargs)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 352, in _true_getter
+    use_resource=use_resource)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 725, in _get_single_variable
+    validate_shape=validate_shape)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/variables.py", line 200, in __init__
+    expected_shape=expected_shape)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/variables.py", line 278, in _init_from_args
+    initial_value(), name="initial_value", dtype=dtype)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 701, in <lambda>
+    shape.as_list(), dtype=dtype, partition_info=partition_info)
+  File "/Users/delkind/Desktop/whd/venv_tf_1.2rc0/lib/python2.7/site-packages/tensorflow/python/ops/init_ops.py", line 481, in __call__
+    raise ValueError("The tensor to initialize must be "
+ValueError: The tensor to initialize must be at least two-dimensional
+
+
+This is unexpected behavior. If you omit either of initializer=tf.orthogonal_initializer or use_peephole=True, the graph can be built and evaluated as expected. I'm not aware of a mathematical reason the weights in this model cannot be orthogonal.

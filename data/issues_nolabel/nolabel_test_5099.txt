@@ -1,0 +1,58 @@
+lookup_embedding returning 0 on missing index
+
+If I create a variable with the first dimension equal to k and I use it for looking up vectors with lookup_embeddings, if I input an invalid index (higher than k or lower than 0) the lookup just returns 0s.
+In the code below I create a 10x2 embedding matrix e, so that each embedding is of dimension 2. i then lookup for a number that is the step number. This has no use, it's just for showing the issue. Obviously for the first 10 steps the value I fetch is a random embedding of dimension 2, after the tenth iteration, I start getting all 0s.
+I think this should be documented. I'm not sure if it is a good default or not, probably it is, but at least there should be a warning or something similar telling that you are trying to access an index that is not there. It would be really useful for debugging. I would have saved few hours of work if I noticed this before.
+Environment info
+Operating System: Ubuntu 16.04 64bit
+Installed version of CUDA and cuDNN: cuda 8.0 cudnn 5.1
+Tensorflow version: 0.10.0 compiled for cuda 8.0 (but it is not the issue)
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import numpy as np
+import tensorflow as tf
+
+num_embedding = 10
+embedding_size = 2
+
+x = np.array([[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2], [2, 0], [2, 1], [2, 2]])
+y = np.array([0, 0, 0, 1, 1, 1, 1, 1, 1])
+
+graph = tf.Graph()
+with graph.as_default():
+    x_p = tf.placeholder(tf.float32, shape=[None, 2])
+    e_p = tf.placeholder(tf.int64, shape=[])
+
+    y_p = tf.placeholder(tf.float32, shape=[None])
+    y_pe = tf.expand_dims(y_p, 1)
+
+    w = tf.Variable(tf.random_normal([2, 1]))
+    b = tf.Variable(tf.random_normal([1]))
+    e = tf.Variable(tf.random_normal([num_embedding, embedding_size]))
+
+    embed = tf.nn.embedding_lookup(e, e_p)
+
+    logits = tf.matmul(x_p, w) + b + tf.reduce_sum(embed)
+
+    xe = tf.nn.sigmoid_cross_entropy_with_logits(logits, y_pe)
+    loss = tf.reduce_mean(xe)
+
+    accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.cast(tf.nn.sigmoid(logits) > 0.5, tf.float32), y_pe), tf.float32))
+    optimizer = tf.train.AdamOptimizer(0.5).minimize(loss)
+
+    #Dangling nodes in the computational graph
+    z_p = tf.placeholder(tf.float32, shape=[None, 2])
+    u = tf.Variable(tf.random_normal([2, 1]))
+    l = tf.matmul(z_p, u)
+
+    saver = tf.train.Saver()
+
+with tf.Session(graph=graph) as session:
+    tf.initialize_all_variables().run()
+    for step in range(201):
+        if step % 100 == 0:
+            save_path = saver.save(session, "lc_{:04d}.ckpt".format(step))
+        _, loss_val, acc_val, embed_val = session.run(
+            [optimizer, loss, accuracy, embed],
+            feed_dict={x_p: x, e_p: step, y_p: y})
+        print("step {step} - loss: {loss_val:.6f}, acc: {acc_val:.4f}".format(step=step, loss_val=loss_val, acc_val=acc_val))
+        print("embed_val: {}".format(embed_val))

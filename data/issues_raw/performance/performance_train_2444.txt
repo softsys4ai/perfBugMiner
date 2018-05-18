@@ -1,0 +1,45 @@
+Reinforcement Learning can be really, really slow in tensorflow.
+
+I was looking at applying DeepMind's DDPG algorithm to the new OpenAI gym problem set, focusing on continuous control problems like: the pendulum
+I noticed that a TensorFlow version of the algorithm was running about 10-20x slower than a theano version of the same algorithm.
+Tensorflow implementation  (but with a couple bugs fixed)
+Theano implementation
+When I started profiling both implementations in detail, I noticed there were huge performance difference even when just comparing the forward pass of the actor neural network.
+I built a quick script to just compare a forward pass of a layered net, varying the layer depth and layer breadth (code and results below), and using a "mini batch" size of 64.  (For reference, in Deepmind's DDPG paper, they used a network of 2 hidden layers, sized 400 and 300, mini batch size of 64).
+Using the handy tf.RunOptions.FULL_TRACE, it showed 99% of the cost was in running the ops themselves (vs op scheduling, startup time, etc).
+I then stumbled on a couple of settings that seemed to help:
+config_proto.intra_op_parallelism_threads = 1
+config_proto.inter_op_parallelism_threads = 1
+That seemed to improve things a bunch, to where tensorflow was as fast in a couple instances, or "only" 2-3x slower.
+Before finding the threading flags, I started looking at speeding up the individual ops. In MatMulOp I replaced the eigen matrix multiply call with a blas call.  That also seemed to help quite a bit.
+Below are some chart of the performance delta vs Theano.
+"EigenMultiThread" is just vanilla tensorflow.
+"EigenSingleThread" is tensorflow with intra/inter op_parallelism = 1.
+"BlasSingleThread is the same as "EigenSingleThread", with the eigen matrix multiply replaced by blas.
+The data that makes up these charts can be found here.
+
+
+
+
+I primarily ran these tests on a mac pro (with avx).  I did compile tensorflow with the avx flag.  I also spot checked these results on a linux box and got similar results.  Blas implementation was OpenBlas
+I guess my issue/question is: Is there any ongoing work to improve performance for Reinforcement Learning scenarios like these, especially on CPUs?
+I have heard DeepMind is moving completely to tensorflow, and they used/are using the new TPU chips. However, they also got a huge performance boost in runtime and error rate over GPUs by using 16 normal cores asynchronously (which btw, I don't think I can set the threading options to 1 and have an implementation still work).
+Environment info
+Operating System:
+OS X 10.11.4,  3.5 GHz 6-Core Intel Xeon E5
+and
+Fedora 20, 12 physical cores, Xeon X5670  @ 2.93GHz
+Installed version of CUDA and cuDNN:
+None
+If installed from binary pip package, provide:
+Tried both a release version:
+pip install --upgrade https://storage.googleapis.com/tensorflow/mac/tensorflow-0.8.0-py2-none-any.whl
+and from source, commit hash:
+371d341c7ef22d38b80235bbcb5a6e230546781c
+compile command:
+bazel build -c opt --copt=-mavx //tensorflow/tools/pip_package:build_pip_package
+(for the Xeon E5 machine)
+Steps to reproduce
+
+I used the script below to generate the numbers
+tf_perf_test.py.zip

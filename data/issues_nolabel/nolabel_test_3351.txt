@@ -1,0 +1,18 @@
+Fix gradient of prod op using cumprod
+
+This is an initial shot at fixing #2641 (NaNs in the gradient of tf.reduce_prod when the input is 0).
+@girving suggested to use two calls to cumprod and to multiply the outputs to produce an array containing the products of all values without the current one, like this:
+input: [0, 1, 2, 3, 4]
+cumprod1: [1, 0, 0, 0, 0]
+cumprod2 (reverse): [24, 24, 12, 4, 1]
+gradient: [24, 0, 0, 0, 0]
+
+The difficulty with this is handling the fact that tf.reduce_prod can calculate the product over a subset of the tensor dimensions.
+When solving this in Python, quite a bit of transposing and reshaping is required.
+The idea is to reshape the input into a tensor with shape [N, M], where the first dimension contains all the entries that we reduced over, and the second dimension contains the remaining ones.
+I've pushed a Python solution using the approach that makes the reduction op tests pass.
+As you can see, the gradient code is a bit complicated.
+Maybe someone knows a shortcut that makes this simpler?
+There might be other solutions that could be better here:
+@benoitsteiner suggested that tf.cumprod could be changed to take a list of dimensions to scan over instead of a single axis. This would bring it more in line with the reduction ops.
+I think this could be implemented without modifying Eigen, by using various Eigen methods to reshape and transpose the input.

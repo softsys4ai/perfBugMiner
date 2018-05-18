@@ -1,0 +1,25 @@
+Refactor word2vec_basic
+
+This MR changes two functions on word2vec_basic.py
+
+create_dataset: Update how the function search the dictionary for an index value.
+generate_batch:  Update how the context words are obtained. The function originally does that using the following code:
+
+    targets_to_avoid = [skip_window]
+    for j in range(num_skips):
+      while target in targets_to_avoid:
+        target = random.randint(0, span - 1)
+      targets_to_avoid.append(target)
+      batch[i * num_skips + j] = buffer[skip_window]
+      labels[i * num_skips + j, 0] = buffer[target]
+Meaning that it is randomly trying to select a new word in the span and checking if the word is valid to use. If it is, it will be now used to create a batch. I believe that a simpler approach is:
+   target = skip_window  # target label at the center of the buffer
+    context_words = [w for w in range(span) if w != target]
+    random.shuffle(context_words)
+    words_to_use = collections.deque(context_words)
+    for j in range(num_skips):
+      batch[i * num_skips + j] = buffer[target]
+      context_word = words_to_use.pop()
+      labels[i * num_skips + j, 0] = buffer[context_word]
+In this approach, an array of valid context words are created without randomly selecting each valid word. This valid context words are shuffled and added to a deque, to make word removal less costly.
+I believe that this modifications make both create_dataset and generate_batch a little simpler to understand, and although this is not the intention of this MR, but a little faster as well.

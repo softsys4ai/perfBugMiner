@@ -1,0 +1,21 @@
+Change variable name  not take effect in checkpoints
+
+I want to load into one session different checkpoints of the same model. Like take step 10 and step 100
+In order to avoid conflict name, I try to modify the variable name first, like change from
+show_and_tell/model_init/emb:0 to show_and_tell_1/model_init/emb:0,
+my input checkpoint with all varaibles starts with show_and_tell, and I want to modify it to show_and_tell_1
+so I can load the two models at once.
+Code like below, but the savec checkpoint.meta shows still show_and_tell/model_init/emb:0, what's wrong?
+def reset_model_top_scope():
+sess = tf.InteractiveSession()
+meta_filename = ".".join([input_checkpoint, "meta"])
+saver = tf.train.import_meta_graph(meta_filename)
+saver.restore(sess, input_checkpoint)
+scope = FLAGS.scope
+out_scope = FLAGS.out_scope if FLAGS.out_scope else '%s_%d'%(scope, FLAGS.out_index)
+output_checkpoint = FLAGS.output_checkpoint
+with tf.variable_scope(scope) as topscope:
+src_vars =[v for v in tf.all_variables() if v.name.startswith(topscope.name)]
+out_vars = {out_scope + v.name[len(scope):v.name.rfind(':')]:v for v in src_vars}
+tf.train.Saver(var_list=out_vars).save(sess, output_checkpoint)
+sess.close()

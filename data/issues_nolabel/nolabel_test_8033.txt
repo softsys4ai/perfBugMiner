@@ -1,0 +1,93 @@
+Direct access to Tensor Buffers in C++ interface
+
+I would like to request direct access to the tensorflow buffers through the C++ interface.  I have commented previously about this on StackOverflow, and have gotten it to work by exposing the TensorCApi class.  This required some fiddling around with the source code.
+My specific use case is using tensorflow from a ROS (robot operating system) node.  ROS has its own build system, so I have to link to the tensorflow library (libtensorflow.so) externally.  The C++ interface is much more convenient than the C interface, as I only load and do forward inference on static graphs.
+Because I get an OpenCV array as input, my only other option is to iterate the entire array and copy it to a newly allocated tensor buffer as suggested in this post.  In my case, copying the buffer by iterating it can take 25-75ms, whereas simply pointing to the memory already allocated by OpenCV incurs almost no overhead.  I am doing all of this in real time as part of a tight control loop, so this extra time is absolutely critical.
+I realize this patch is probably not the right way to expose the interface, and my example code provides no memory checking or safeguards, but it is an example (diff against the r1.0 tensorflow tag):
+diff --git a/tensorflow/c/c_api.cc b/tensorflow/c/c_api.cc
+index 83ce3e2..34ae2b4 100644
+--- a/tensorflow/c/c_api.cc
++++ b/tensorflow/c/c_api.cc
+@@ -464,14 +464,11 @@ TF_Tensor* TF_Tensor_EncodeStrings(const Tensor& src) {
+                       dimvec.size(), base, size, DeleteArray, base);
+ }
+ 
+-class TensorCApi {
+- public:
+-  static TensorBuffer* Buffer(const Tensor& tensor) { return tensor.buf_; }
+-  static Tensor MakeTensor(TF_DataType type, const TensorShape& shape,
+-                           TensorBuffer* buf) {
+-    return Tensor(static_cast<DataType>(type), shape, buf);
+-  }
+-};
++TensorBuffer* TensorCApi::Buffer(const Tensor& tensor) { return tensor.buf_; }
++Tensor TensorCApi::MakeTensor(TF_DataType type, const TensorShape& shape,
++                         TensorBuffer* buf) {
++  return Tensor(static_cast<DataType>(type), shape, buf);
++}
+ 
+ // Create an empty tensor of type 'dtype'. 'shape' can be arbitrary, but has to
+ // result in a zero-sized tensor.
+diff --git a/tensorflow/c/c_api.h b/tensorflow/c/c_api.h
+index e625d65..7479a1f 100644
+--- a/tensorflow/c/c_api.h
++++ b/tensorflow/c/c_api.h
+@@ -18,6 +18,7 @@ limitations under the License.
+ 
+ #include <stddef.h>
+ #include <stdint.h>
++#include "tensorflow/core/framework/tensor.h"
+ 
+ // --------------------------------------------------------------------------
+ // C API for TensorFlow.
+@@ -64,6 +65,10 @@ limitations under the License.
+ //   and the API just provides high level controls over the number of
+ //   devices of each type.
+ 
++using tensorflow::Tensor;
++using tensorflow::TensorBuffer;
++using tensorflow::TensorShape;
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+@@ -1030,6 +1035,15 @@ extern void TF_DeleteLibraryHandle(TF_Library* lib_handle);
+ // in this address space.
+ extern TF_Buffer* TF_GetAllOpList();
+ 
++namespace tensorflow{
++class TensorCApi {
++public:
++ static TensorBuffer* Buffer(const Tensor& tensor);
++ static Tensor MakeTensor(TF_DataType type, const TensorShape& shape,
++                          TensorBuffer* buf);
++};
++};
++
+ #ifdef __cplusplus
+ } /* end extern "C" */
+ #endif
+diff --git a/tensorflow/core/framework/tensor.h b/tensorflow/core/framework/tensor.h
+index c2a1c3d..14e9881 100644
+--- a/tensorflow/core/framework/tensor.h
++++ b/tensorflow/core/framework/tensor.h
+@@ -36,7 +36,7 @@ limitations under the License.
+ namespace tensorflow {
+ 
+ class TensorBuffer;  // Forward declaration.
+-class TensorCApi;
++// class TensorCApi;
+ 
+ /// @ingroup core
+ /// Represents an n-dimensional array of values.
+
+and a small snippet of code to use it:
+// Put an image in the cameraImg mat
+cv::resize(image->image, cameraImg, cv::Size(inputwidth, inputheight), 0, 0, cv::INTER_AREA);
+// Create a new tensor pointing to that memory:
+const int64_t tensorDims[4] = {1,inputheight,inputwidth,3};
+int *imNumPt = new int(1);
+TF_Tensor* tftensor = TF_NewTensor(TF_DataType::TF_UINT8, tensorDims, 4,
+                           cameraImg.data, inputheight * inputwidth * 3,
+                           NULL, imNumPt);
+Tensor inputImg = tensorflow::TensorCApi::MakeTensor(tftensor->dtype, tftensor->shape, tftensor->buffer);

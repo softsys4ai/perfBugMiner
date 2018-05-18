@@ -1,0 +1,29 @@
+Seg fault when computing gradient of 3D convolution filter with (1,1,1) kernel
+
+Minimal example to reproduce the bug:
+import numpy as np
+import tensorflow as tf
+
+sess = tf.Session()
+with sess.as_default():
+    # Input: [batch, height, width, depth, input_channels]
+    x_shape = [3, 85, 65, 83, 8]
+    # Filter: [kernel_height, kernel_width, depth, input_channels, output_channels]
+    f_shape = [1, 1, 1, x_shape[-1], 32]
+    # Output: [batch, height, width, depth, output_channels]
+    y_shape = [3, 85, 65, 83, f_shape[-1]]
+
+    np.random.seed(1)  # Make it reproducible.
+    x_val = np.random.random_sample(x_shape).astype(np.float32)
+    f_val = np.random.random_sample(f_shape).astype(np.float32)
+    output_val = np.random.random_sample(y_shape).astype(np.float32)
+    x = tf.constant(x_val, name="x", dtype=tf.float32)
+    f = tf.constant(f_val, name="f", dtype=tf.float32)
+
+    output = tf.nn.conv3d(x, f, strides=(1,1,1,1,1), padding="SAME")
+
+    r = tf.gradients(output, f)
+    print(r[0].eval())
+this leads to a seg fault, tested on a Mac with CPU, both with tensorflow 0.9.0 (binary release) and when compiled from source (last commit ad4f02a ).
+For certain values of (x_shape[–1], f_shape[-1]), for instance (2,4) or (8,32), the seg fault occurs, but for other values (2,2) or (16,32), there is no seg fault.
+Inserting some std::cout << print statements in the code shows that the segmentation fault occurs during this function call in Conv3DBackpropFilterOp::Compute https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/kernels/conv_grad_ops_3d.cc#L315

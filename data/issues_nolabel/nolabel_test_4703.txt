@@ -1,0 +1,102 @@
+Conditional print doesn't work appropriately as the control flow describe
+
+I stucked with this problem. I want to check if gradients or variables are NaN before applying them. Print conditionally the name of the variable and a value for both gradient and variable.
+Environment info
+Operating System: Linux
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+-rw-r--r-- 1 root root 189170 Jul 11 23:19 /opt/cuda/lib/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Jul 11 23:19 /opt/cuda/lib/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 Jul 11 23:19 /opt/cuda/lib/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 311596 Jul 11 23:19 /opt/cuda/lib/libcudart.so.7.5.18
+-rw-r--r-- 1 root root 558020 Jul 11 23:19 /opt/cuda/lib/libcudart_static.a
+Tensorflow version:
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+Backend Qt5Agg is interactive backend. Turning interactive mode on.
+0.9.0
+Bazel
+If installed from source, provide
+Extracting Bazel installation...
+Build label: 0.3.1- (@non-git)
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Aug 31 19:34:37 2016 (1472672077)
+Build timestamp: 1472672077
+Build timestamp as int: 1472672077
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+I reproduced with MNIST. I tried many different way in my code. Checked documentation, and try to explicitly restrict control flow, and still no success. The tf.print runs anyway, I didn't find anything that this is on purpose, or how to manage it.
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import argparse
+
+# Import data
+from tensorflow.examples.tutorials.mnist import input_data
+
+import tensorflow as tf
+
+FLAGS = None
+
+
+def main(_):
+    mnist = input_data.read_data_sets(FLAGS.data_dir, one_hot=True)
+
+    # Create the model
+    x = tf.placeholder(tf.float32, [None, 784])
+    W = tf.Variable(tf.zeros([784, 10]))
+    b = tf.Variable(tf.zeros([10]))
+    y = tf.matmul(x, W) + b
+
+    # Define loss and optimizer
+    y_ = tf.placeholder(tf.float32, [None, 10])
+
+    cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(y, y_))
+    train_step = tf.train.GradientDescentOptimizer(0.5)
+    gvs = train_step.compute_gradients(cross_entropy)
+
+    gvs = [(tf.select(tf.is_nan(grad), grad, tf.Print(grad, [grad, var, tf.is_nan(grad), tf.is_nan(var)])), var) for grad, var in gvs]
+
+    minimizer = train_step.apply_gradients(gvs)
+
+    sess = tf.InteractiveSession()
+    # Train
+    tf.initialize_all_variables().run()
+    for _ in range(1000):
+        batch_xs, batch_ys = mnist.train.next_batch(100)
+        sess.run(minimizer, feed_dict={x: batch_xs, y_: batch_ys})
+
+    # Test trained model
+    correct_prediction = tf.equal(tf.argmax(y, 1), tf.argmax(y_, 1))
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+    print(sess.run(accuracy, feed_dict={x: mnist.test.images,
+                                        y_: mnist.test.labels}))
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_dir', type=str, default='/tmp/data',
+                        help='Directory for storing data')
+    FLAGS = parser.parse_args()
+    tf.app.run()
+
+What other attempted solutions have you tried?
+1 with control flow restriction + replacing the condition with tf.greater or tf.is_finite, etc.
+    new_gvs = list()
+    for grad, var in gvs :
+        # c = tf.greater(grad, 1)
+        c = tf.is_finite(var)
+        with tf.control_dependencies([c]):
+            newGrad = tf.select(c, tf.Print(grad, [grad, var, tf.is_nan(grad), c]), grad)
+            with tf.control_dependencies([newGrad]):
+                new_gvs.append((newGrad, var))
+    gvs = new_gvs
+
+2 with is_nan 'var'
+gvs = [(tf.select(tf.is_nan(var), tf.Print(grad, [grad, var, tf.is_nan(grad), tf.is_nan(var)]), grad), var) for grad, var in gvs]
+
+Logs or other output that would be helpful
+It just logs everything, as if there were no condition.

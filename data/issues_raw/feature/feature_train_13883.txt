@@ -1,0 +1,86 @@
+Why do custom read op only works on test_session
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+NO
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04
+
+
+TensorFlow installed from (source or binary):
+pip install tensorflow
+
+
+TensorFlow version (use command below):
+('v1.3.0-rc2-20-g0787eee', '1.3.0')
+
+
+Python version:
+Python 2.7.12 from anaconda
+
+
+Bazel version (if compiling from source):
+
+
+CUDA/cuDNN version:
+
+
+GPU model and memory:
+
+
+Exact command to reproduce:
+I'm using a cpu only tensorflow.
+
+
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+I wrote an custom kernel op in tensorflow for reading csv format data.
+It works just fine in the TestCase with the sess object return by test_session() function.
+When I turn to normal codes, the reader op returns the same result every time. Then I put some debug printing at the beginning of the MyOp:Compute function. It seems like after the first run, the sess.run(myop) never calls the MyOp:Compute function at all.
+Then I return to my test cases, if I replace the session object with an tf.Session() instead of self.test_session(), it failed the same way.
+Source code / logs
+to share more details, here's my mini demo codes: https://github.com/littleDing/mini_csv_reader
+major codes in test cases
+def testSimple(self):
+  input_data_schema, feas, batch_size = self.get_simple_format()
+  iter_op = ops.csv_iter('./sample_data.txt', input_data_schema, feas, batch_size=batch_size, label='label2')
+  with self.test_session() as sess:
+    label,sign = sess.run(iter_op)
+    print label
+
+    self.assertAllEqual(label.shape, [batch_size])
+    self.assertAllEqual(sign.shape, [batch_size, len(feas)])
+    self.assertAllEqual(sum(label), 2)
+    self.assertAllEqual(sign[0,:], [7,0,4,1,1,1,5,9,8])
+
+    label,sign = sess.run(iter_op)
+    self.assertAllEqual(label.shape, [batch_size])
+    self.assertAllEqual(sign.shape, [batch_size, len(feas)])
+    self.assertAllEqual(sum(label), 1)
+    self.assertAllEqual(sign[0,:], [9,9,3,1,1,1,5,4,8])
+
+major codes in normal session call:
+def testing_tf():
+    path = './sample_data.txt'
+    input_data_schema, feas, batch_size = get_simple_format()
+    with tf.device('/cpu:0'):
+        n_data_op = tf.placeholder(dtype=tf.float32)
+        iter_op = ops.csv_iter(path, input_data_schema, feas, batch_size=batch_size, label='label2') 
+        init_op = [tf.global_variables_initializer(), tf.local_variables_initializer() ]
+
+    with tf.Session() as sess:
+      sess.run(init_op)
+      n_data = 0
+      for batch_idx in range(3):
+        print '>>>>>>>>>>>>>> before run batch', batch_idx
+        ## it should be some debug printing here, but nothing come out when batch_idx>0
+        label,sign = sess.run(iter_op)
+        print '>>>>>>>>>>>>>> after run batch', batch_idx
+        ## the content of sign remain the same every time
+        print sign
+        if len(label) == 0:
+          break

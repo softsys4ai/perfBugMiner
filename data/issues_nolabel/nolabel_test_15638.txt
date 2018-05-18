@@ -1,0 +1,102 @@
+PS:0 runs nothing but seizes the network in the distributed training
+
+It's strange but I think is a bug in tensorflow. When I use multi machine as PS, I specify the operations in PS:* but not PS:0. And I not use the PS:0, but the variable transfer between the PS:* and PS:0. By the way, I  use the lenet5 about 1.6M parameters, but when iterating one time, the data between PS:* and PS:0 is 4.7M in the network using tcpdump to calculate it. I don't know why. The following is my main code in worker machine and PS server just run server.join().
+https://github.com/niewuya/tensorflow-distributed-training/blob/master/code.py
+I will appreciate your reply.
+import tensorflow as tf
+slim = tf.contrib.slim
+
+parameter_servers = ["172.16.101.248:2225","172.16.101.249:2225","172.16.101.105:2225"]
+workers = ["172.20.110.94:2225"]
+cluster = tf.train.ClusterSpec({"ps": parameter_servers, "worker": workers})
+server = tf.train.Server(
+    cluster,
+    job_name="worker",
+    task_index=0)
+
+def dataset_input_fn():
+    buffer_size = 1024
+    batch = 128
+    num_epochs = 50
+    filenames = ['../datasets/mnist/train.tfrecord']
+    dataset = tf.data.TFRecordDataset(filenames)
+
+    def parser(record):
+        keys_to_features = {
+            "image/encoded": tf.FixedLenFeature((), tf.string, default_value=""),
+            "image/class/label": tf.FixedLenFeature((), tf.int64,
+                                                    default_value=tf.zeros([], dtype=tf.int64)),
+        }
+        parsed = tf.parse_single_example(record, keys_to_features)
+
+        image = tf.image.decode_jpeg(parsed["image/encoded"])
+        image = tf.image.convert_image_dtype(image, dtype=tf.float32)
+        image = tf.reshape(image, [28, 28, 1])
+        label = tf.cast(parsed["image/class/label"], tf.int32)
+        label = slim.one_hot_encoding(label, 10)
+        return image, label
+
+    dataset = dataset.repeat()
+    dataset = dataset.map(parser, num_parallel_calls=8)
+    dataset = dataset.prefetch(buffer_size=batch)
+    dataset = dataset.prefetch(buffer_size=buffer_size)
+    dataset = dataset.shuffle(buffer_size)
+    dataset = dataset.batch(batch)
+    iterator = dataset.make_one_shot_iterator()
+    images, labels = iterator.get_next()
+    return images, labels
+
+def lenet(images,labels,flag):
+    num_classes = 10
+    dropout_keep_prob = 0.5
+    scope = tf.variable_scope("lenet", reuse=flag)
+    with scope, slim.arg_scope([slim.conv2d, slim.fully_connected],
+                               activation_fn=tf.nn.relu,
+                               weights_initializer=tf.truncated_normal_initializer(stddev=0.1),
+                               weights_regularizer=slim.l2_regularizer(0.0)):
+        net = slim.conv2d(images, 20, [5, 5], scope='conv1_1')
+        net = slim.max_pool2d(net, [2, 2], 2, scope='pool1_1')
+        net = slim.conv2d(net, 50, [5, 5], scope='conv1_2')
+        net = slim.max_pool2d(net, [2, 2], 2, scope='pool1_2')
+        net = slim.flatten(net)
+        net = slim.fully_connected(net, 500, scope='fc1_3')
+        net = slim.dropout(net, dropout_keep_prob, scope='dropout1_3')
+        logits = slim.fully_connected(net, num_classes, activation_fn=None, scope='fc1_4')
+        loss = tf.losses.softmax_cross_entropy(
+            logits=logits, onehot_labels=labels)
+        loss = tf.reduce_mean(loss)
+        optimizer = tf.train.AdagradOptimizer(0.01)
+        correct_prediction = tf.equal(tf.argmax(logits, 1), tf.argmax(labels, 1))
+        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+        grads = optimizer.compute_gradients(loss)
+    return grads, accuracy, optimizer
+
+with tf.Graph().as_default():
+    with tf.device('/CPU:0'):
+        all_grads = []
+        with tf.device('/job:ps/task:2'):
+            images, labels = dataset_input_fn()
+            grads, accuracy_ps, optimizer =lenet(images,labels,False)
+
+        all_grads.clear()
+        all_grads.append(grads)
+        train_op_all=[]
+        for i, grad_and_vars in enumerate(zip(*all_grads)):
+            grads = []
+            for g, _ in grad_and_vars:
+                g = tf.expand_dims(g, 0)
+                grads.append(g)
+            grad = tf.concat(axis=0, values=grads)
+            grad = tf.reduce_mean(grad, 0)
+            v = grad_and_vars[0][1]
+            train_op_all.append(optimizer.apply_gradients([(grad, v)]))
+        train_op=tf.group(*train_op_all)
+
+    with tf.train.MonitoredTrainingSession(master=server.target,
+                                               is_chief=True
+                                           )as mon_sess:
+        frequency=10
+        for i in range(1000):
+            _ ,accuracy= mon_sess.run([train_op,accuracy_ps])
+            if i % frequency ==0 :
+                print("accuracy is :%f"%accuracy)

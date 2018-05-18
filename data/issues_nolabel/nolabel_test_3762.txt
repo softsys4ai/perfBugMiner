@@ -1,0 +1,68 @@
+PS is bound in GPU:0 by default, we can't change!
+
+I modified the seq2seq , mnist_replica and ptb model into distributed training model. But all of them have the same problem, that is when I start the server and server.join() the ps. The ps was bound in GPU:0 by default, and I can't change the setting. I follow the tutorial of distributed tensorflow here.
+This is part of my translate.py :
+def train():
+
+  # set distributed configs
+  ps_hosts = ["9.91.9.130:2222"]
+  worker_hosts = ["9.91.9.130:2223", "9.91.9.130:2224"]
+  #worker_hosts = ["9.91.9.130:2223"]
+
+  cluster = tf.train.ClusterSpec({"ps":ps_hosts, "worker":worker_hosts})
+  server = tf.train.Server(cluster,
+                            job_name=FLAGS.job_name,
+                            task_index=FLAGS.task_index)
+  if FLAGS.job_name == "ps":
+        server.join()
+  elif FLAGS.job_name == "worker":
+      # Worker server 
+      is_chief = (FLAGS.task_index == 0)      
+      gpu_num = FLAGS.task_index + 1
+      #with tf.Graph().as_default():
+      with tf.device(tf.train.replica_device_setter(cluster=cluster,
+          worker_device="/job:worker/task:%d/gpu:%d" % (FLAGS.task_index, gpu_num))):
+      #with tf.device("/gpu:%d" % FLAGS.task_index):
+          """Train a en->fr translation model using WMT data."""
+
+This is the GPU info:
+Fri Aug 12 09:17:07 2016
++------------------------------------------------------+
+| NVIDIA-SMI 352.39     Driver Version: 352.39         |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  Tesla K80           On   | 0000:06:00.0     Off |                    0 |
+| N/A   67C    P0    63W / 149W |  11099MiB / 11519MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   1  Tesla K80           On   | 0000:07:00.0     Off |                    0 |
+| N/A   45C    P0    72W / 149W |  10986MiB / 11519MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   2  Tesla K80           On   | 0000:85:00.0     Off |                    0 |
+| N/A   76C    P0    66W / 149W |  11049MiB / 11519MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   3  Tesla K80           On   | 0000:86:00.0     Off |                    0 |
+| N/A   57C    P0    75W / 149W |    223MiB / 11519MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0      9198    C   python                                       10940MiB |
+|    0     29865    C   python                                          64MiB |
+|    0     29961    C   python                                          64MiB |
+|    1      9198    C   python                                          64MiB |
+|    1     29865    C   python                                          64MiB |
+|    1     29961    C   python                                       10827MiB |
+|    2      9198    C   python                                          64MiB |
+|    2     29865    C   python                                       10891MiB |
+|    2     29961    C   python                                          64MiB |
+|    3      9198    C   python                                          64MiB |
+|    3     29865    C   python                                          64MiB |
+|    3     29961    C   python                                          64MiB |
++-----------------------------------------------------------------------------+
+
+As you can see, the pid 9198 is the ps server process, cause it occupied the GPU:0, I have to bind the worker server in GPU:1 and GPU:2.
+Could we add a function or API to set the ps server device by configuration or arguments?

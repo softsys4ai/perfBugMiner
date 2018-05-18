@@ -1,0 +1,46 @@
+Crash with dynamic tf.reshape "Check failed: dtype() == expected_dtype (9 vs. 3)"
+
+import tensorflow as tf
+
+queue = tf.train.string_input_producer(['data.tfrecord'])
+
+reader = tf.TFRecordReader()
+_, example = reader.read(queue)
+
+features = tf.parse_single_example(example,features={
+    'mr_image': tf.FixedLenFeature([], tf.string),
+    'us_image': tf.FixedLenFeature([], tf.string),
+    'mr_shape': tf.FixedLenFeature([2], tf.int64),
+    'us_shape': tf.FixedLenFeature([2], tf.int64),
+})
+
+mr_image = tf.decode_raw(features['mr_image'], tf.int16)
+us_image = tf.decode_raw(features['us_image'], tf.uint8)
+
+mr_shape = tf.cast(features['mr_shape'], tf.int64)
+us_shape = tf.cast(features['us_shape'], tf.int64)
+
+with tf.Session() as sess:
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+    
+    #mr = tf.reshape(mr_image, mr_shape)
+    #us = tf.reshape(us_image, us_shape)
+
+    print(len(sess.run(mr_image)),len(sess.run(us_image)))
+    print(sess.run([mr_shape, us_shape]))
+    #print(sess.run(tf.reshape(mr_image, mr_shape)))
+    
+    coord.request_stop()
+    coord.join(threads)
+Will print:
+183604 118218
+[array([466, 394]), array([366, 323])]
+
+However print(sess.run(tf.reshape(mr_image, mr_shape))) will cause a crash with:
+F tensorflow/core/framework/tensor.cc:441] Check failed: dtype() == expected_dtype (9 vs. 3)
+Also print(sess.run(tf.reshape(mr_image, [466, 394]))) works as expected.
+
+macOS 10.12.1
+Python 3.5.2
+tensorflow 0.11

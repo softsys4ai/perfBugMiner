@@ -1,0 +1,161 @@
+seq2seq.BasicDecoder incompatible with seq2seq.ScheduledOutputTrainingHelper
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below):  b'v1.1.0-0-g1ec6ed5' 1.1.0
+Bazel version (if compiling from source): 0.5.1
+CUDA/cuDNN version: 5.1.3
+GPU model and memory: TitanX 12GB
+Exact command to reproduce: See script below
+
+Describe the problem
+seq2seq.ScheduledOutputTrainingHelper.sample(...) outputs a tf.bool tensor but seq2seq.BasicDecoder.output_dtype assumes tf.int32 output.
+Source code / logs
+Minimal case script:
+import tensorflow as tf
+with tf.Graph().as_default():
+    batch_size = 32
+    nsteps = 100
+    ndims = 5
+    sequence_length = [nsteps] * batch_size
+    sampling_probability = 0.5
+    num_units = 20
+
+    cell = tf.contrib.rnn.BasicRNNCell(
+        num_units,
+    )
+
+    inputs = tf.random_uniform((batch_size, nsteps, ndims))
+
+    output, state = tf.nn.dynamic_rnn(
+        cell,
+        inputs,
+        dtype=tf.float32,
+    )
+
+    cell = tf.contrib.rnn.BasicRNNCell(
+        num_units,
+    )
+
+    helper = tf.contrib.seq2seq.ScheduledOutputTrainingHelper(
+        output,
+        sequence_length,
+        sampling_probability,
+    )
+
+    initial_state = tf.zeros((batch_size, num_units))
+    decoder = tf.contrib.seq2seq.BasicDecoder(
+        cell,
+        helper,
+        initial_state,
+    )
+
+    decoded = tf.contrib.seq2seq.dynamic_decode(
+        decoder,
+    )
+
+    run_ops = {'decoded': decoded}
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        ret = sess.run(run_ops)
+Output:
+2017-06-15 12:28:39.868640: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-06-15 12:28:39.868659: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-06-15 12:28:39.868664: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+2017-06-15 12:28:40.234562: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:901] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-06-15 12:28:40.234768: I tensorflow/core/common_runtime/gpu/gpu_device.cc:887] Found device 0 with properties:
+name: GeForce GTX TITAN X
+major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:01:00.0
+Total memory: 11.92GiB
+Free memory: 384.19MiB
+2017-06-15 12:28:40.234817: W tensorflow/stream_executor/cuda/cuda_driver.cc:485] creating context when one is currently active; existing: 0x31b49d0
+2017-06-15 12:28:40.315855: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:901] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-06-15 12:28:40.316063: I tensorflow/core/common_runtime/gpu/gpu_device.cc:887] Found device 1 with properties:
+name: GeForce GTX TITAN X
+major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:02:00.0
+Total memory: 11.92GiB
+Free memory: 384.19MiB
+2017-06-15 12:28:40.318076: I tensorflow/core/common_runtime/gpu/gpu_device.cc:908] DMA: 0 1
+2017-06-15 12:28:40.318084: I tensorflow/core/common_runtime/gpu/gpu_device.cc:918] 0:   Y Y
+2017-06-15 12:28:40.318088: I tensorflow/core/common_runtime/gpu/gpu_device.cc:918] 1:   Y Y
+2017-06-15 12:28:40.318093: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:01:00.0)
+2017-06-15 12:28:40.318098: I tensorflow/core/common_runtime/gpu/gpu_device.cc:977] Creating TensorFlow device (/gpu:1) -> (device: 1, name: GeForce GTX TITAN X, pci bus id: 0000:02:00.0)
+2017-06-15 12:28:40.927295: W tensorflow/core/framework/op_kernel.cc:1152] Invalid argument: TensorArray dtype is int32 but Op is trying to write dtype bool.
+	 [[Node: decoder/while/TensorArrayWrite_1/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_BOOL, _class=["loc:@decoder/TensorArray_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](decoder/while/TensorArrayWrite_1/TensorArrayWriteV3/Enter, decoder/while/Identity/_47, decoder/while/BasicDecoderStep/ScheduledOutputTrainingHelperSample/Cast/_49, decoder/while/Identity_2/_51)]]
+2017-06-15 12:28:40.927295: W tensorflow/core/framework/op_kernel.cc:1152] Invalid argument: TensorArray dtype is int32 but Op is trying to write dtype bool.
+	 [[Node: decoder/while/TensorArrayWrite_1/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_BOOL, _class=["loc:@decoder/TensorArray_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](decoder/while/TensorArrayWrite_1/TensorArrayWriteV3/Enter, decoder/while/Identity/_47, decoder/while/BasicDecoderStep/ScheduledOutputTrainingHelperSample/Cast/_49, decoder/while/Identity_2/_51)]]
+2017-06-15 12:28:40.927369: W tensorflow/core/framework/op_kernel.cc:1152] Invalid argument: TensorArray dtype is int32 but Op is trying to write dtype bool.
+	 [[Node: decoder/while/TensorArrayWrite_1/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_BOOL, _class=["loc:@decoder/TensorArray_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](decoder/while/TensorArrayWrite_1/TensorArrayWriteV3/Enter, decoder/while/Identity/_47, decoder/while/BasicDecoderStep/ScheduledOutputTrainingHelperSample/Cast/_49, decoder/while/Identity_2/_51)]]
+2017-06-15 12:28:40.927384: W tensorflow/core/framework/op_kernel.cc:1152] Invalid argument: TensorArray dtype is int32 but Op is trying to write dtype bool.
+	 [[Node: decoder/while/TensorArrayWrite_1/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_BOOL, _class=["loc:@decoder/TensorArray_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](decoder/while/TensorArrayWrite_1/TensorArrayWriteV3/Enter, decoder/while/Identity/_47, decoder/while/BasicDecoderStep/ScheduledOutputTrainingHelperSample/Cast/_49, decoder/while/Identity_2/_51)]]
+2017-06-15 12:28:40.927443: W tensorflow/core/framework/op_kernel.cc:1152] Invalid argument: TensorArray dtype is int32 but Op is trying to write dtype bool.
+	 [[Node: decoder/while/TensorArrayWrite_1/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_BOOL, _class=["loc:@decoder/TensorArray_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](decoder/while/TensorArrayWrite_1/TensorArrayWriteV3/Enter, decoder/while/Identity/_47, decoder/while/BasicDecoderStep/ScheduledOutputTrainingHelperSample/Cast/_49, decoder/while/Identity_2/_51)]]
+2017-06-15 12:28:40.927469: W tensorflow/core/framework/op_kernel.cc:1152] Invalid argument: TensorArray dtype is int32 but Op is trying to write dtype bool.
+	 [[Node: decoder/while/TensorArrayWrite_1/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_BOOL, _class=["loc:@decoder/TensorArray_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](decoder/while/TensorArrayWrite_1/TensorArrayWriteV3/Enter, decoder/while/Identity/_47, decoder/while/BasicDecoderStep/ScheduledOutputTrainingHelperSample/Cast/_49, decoder/while/Identity_2/_51)]]
+2017-06-15 12:28:41.647498: W tensorflow/core/framework/op_kernel.cc:1152] Invalid argument: TensorArray dtype is int32 but Op is trying to write dtype bool.
+	 [[Node: decoder/while/TensorArrayWrite_1/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_BOOL, _class=["loc:@decoder/TensorArray_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](decoder/while/TensorArrayWrite_1/TensorArrayWriteV3/Enter, decoder/while/Identity/_47, decoder/while/BasicDecoderStep/ScheduledOutputTrainingHelperSample/Cast/_49, decoder/while/Identity_2/_51)]]
+Traceback (most recent call last):
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1039, in _do_call
+    return fn(*args)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1021, in _run_fn
+    status, run_metadata)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/contextlib.py", line 89, in __exit__
+    next(self.gen)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/framework/errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: TensorArray dtype is int32 but Op is trying to write dtype bool.
+	 [[Node: decoder/while/TensorArrayWrite_1/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_BOOL, _class=["loc:@decoder/TensorArray_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](decoder/while/TensorArrayWrite_1/TensorArrayWriteV3/Enter, decoder/while/Identity/_47, decoder/while/BasicDecoderStep/ScheduledOutputTrainingHelperSample/Cast/_49, decoder/while/Identity_2/_51)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "tmp/scratch2.py", line 46, in <module>
+    ret = sess.run(run_ops)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 778, in run
+    run_metadata_ptr)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 982, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1032, in _do_run
+    target_list, options, run_metadata)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1052, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: TensorArray dtype is int32 but Op is trying to write dtype bool.
+	 [[Node: decoder/while/TensorArrayWrite_1/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_BOOL, _class=["loc:@decoder/TensorArray_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](decoder/while/TensorArrayWrite_1/TensorArrayWriteV3/Enter, decoder/while/Identity/_47, decoder/while/BasicDecoderStep/ScheduledOutputTrainingHelperSample/Cast/_49, decoder/while/Identity_2/_51)]]
+
+Caused by op 'decoder/while/TensorArrayWrite_1/TensorArrayWriteV3', defined at:
+  File "tmp/scratch2.py", line 40, in <module>
+    decoder,
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py", line 278, in dynamic_decode
+    swap_memory=swap_memory)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2623, in while_loop
+    result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2456, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2406, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py", line 267, in body
+    outputs_ta, emit)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/util/nest.py", line 305, in map_structure
+    structure[0], [func(*x) for x in entries])
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/util/nest.py", line 305, in <listcomp>
+    structure[0], [func(*x) for x in entries])
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py", line 266, in <lambda>
+    outputs_ta = nest.map_structure(lambda ta, out: ta.write(time, out),
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 279, in write
+    name=name)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 2823, in _tensor_array_write_v3
+    name=name)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 768, in apply_op
+    op_def=op_def)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 2336, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/sarroff/anaconda2/envs/py3/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1228, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): TensorArray dtype is int32 but Op is trying to write dtype bool.
+	 [[Node: decoder/while/TensorArrayWrite_1/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_BOOL, _class=["loc:@decoder/TensorArray_1"], _device="/job:localhost/replica:0/task:0/cpu:0"](decoder/while/TensorArrayWrite_1/TensorArrayWriteV3/Enter, decoder/while/Identity/_47, decoder/while/BasicDecoderStep/ScheduledOutputTrainingHelperSample/Cast/_49, decoder/while/Identity_2/_51)]]

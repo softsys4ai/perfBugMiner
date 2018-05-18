@@ -1,0 +1,36 @@
+bayesflow w/ higher order functions loops endlessly
+
+Environment: TensorFlow v1.2.0-rc2-21-g12f033d 1.2.0 running on Mac OS X (v10.12.5)
+Issue:
+Use of tensorflow.contrib.bayesflow.stochastic_tensor.StochasticTensor in conjunction with higher order functions, such as tf.map_fn and tf.while_loop, results in a seemingly endless loop during construction of the associated stochastic graph's surrogate_loss. Within the source code, the aforementioned loop occurs here. A minimal example is provided below.
+Example:
+# Dependencies
+import tensorflow as tf
+from tensorflow.contrib.distributions import Bernoulli
+from tensorflow.contrib.bayesflow import\
+	stochastic_tensor as st, stochastic_graph as sg
+
+# Flags and variable declaration
+_int, _float = 'int32', 'float32'
+num_logits = 0 #doesn't seem to matter
+logits = tf.get_variable('logits', shape=[num_logits, 1], dtype=_float)
+
+# Pass `logits` to a distribution and then wrap with a StochasticTensor
+dist = Bernoulli(logits, dtype=_float)
+with st.value_type(st.SampleValue()):
+	samples = st.StochasticTensor(dist)
+
+Building off of the above, the following seem to loop endlessly. Using tf.map_fn,
+losses = tf.map_fn(lambda x: x, samples, _float)
+loss = sg.surrogate_loss([tf.reduce_mean(losses, axis=0)])# <- loops endlessly
+
+Using tf.while_loop in conjunction with tf.TensorArray,
+array = tf.TensorArray(_float, num_logits).unstack(samples)
+def cond(k, *args):
+	return tf.less(k, num_logits)
+def body(k, losses):
+	return k+1, tf.concat([losses, array.read(k)], 0)
+loop_v = [0, tf.zeros([0], _float)]
+invars = [tf.TensorShape([]), tf.TensorShape([None])]
+losses = tf.while_loop(cond, body, loop_v, shape_invariants=invars)[1]
+loss = sg.surrogate_loss([tf.reduce_mean(losses, keep_dims=True)])# <- loops endlessly

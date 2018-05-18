@@ -1,0 +1,70 @@
+[solved]session->Create(graph_def) No OpKernel was registered to support Op 'RandomUniform'
+
+issue: crashes when loading pb file in C++ program:
+
+Session * session;
+GraphDef graph_def;
+SessionOptions opts;
+TF_CHECK_OK(ReadBinaryProto(Env::Default(), heartPrintPbPathFile, &graph_def));
+TF_CHECK_OK(NewSession(opts, &session));
+TF_CHECK_OK(session->Create(graph_def));
+
+
+os: linux
+train: python
+inference: C++ interface
+runtime error on inference part:
+
+Non-OK-status: session->Create(graph_def) status: Invalid argument: No OpKernel was registered to support Op 'RandomUniform' with these attrs.  Registered devices: [CPU], Registered kernels:
+
+[[Node: rnn_net/rnn/dropout_63/random_uniform/RandomUniform = RandomUniformT=DT_INT32, dtype=DT_FLOAT, seed=0, seed2=0]]
+
+python train code:
+
+    with tf.variable_scope("rnn_net") as scope:
+        cell = []
+        for i in range(num_layers):
+            cell.append(tf.nn.rnn_cell.LSTMCell(hidden_size, state_is_tuple=True))
+
+        cell = tf.nn.rnn_cell.MultiRNNCell(cell)
+
+        cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob = self.keep_prob)
+
+        initial_state = cell.zero_state(batch_size, tf.float32)
+
+        input_list = tf.unstack(conv_output, axis=1)
+
+        rnn_output, _ = tf.nn.static_rnn(cell, input_list, dtype=tf.float32)
+        self.rnn_output = rnn_output[-1]
+        print "rnn output shape: "
+        print self.rnn_output.get_shape()
+
+
+hint one : i found that if i delete this line:
+cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob = self.keep_prob)
+then the trained pb file can be loaded normally.
+hint two: beside rnn part, i also have cnn part in the network, and the dropout in cnn works just fine:
+
+    with tf.variable_scope("conv_net") as scope:
+        filters = [15, 11, 7, 5]
+        kernel_size = [64, 64, 32, 32]
+        input_layer = tf.reshape(self.x, [-1, seq_len, 1])
+        conv1_1 = tf.layers.conv1d(inputs=input_layer, filters=filters[0], kernel_size=kernel_size[0], padding="same", activation=tf.nn.tanh, name='conv1_1')
+        conv1_2 = tf.layers.conv1d(inputs=conv1_1, filters=filters[1], kernel_size=kernel_size[1], padding="same", activation=tf.nn.tanh)
+        pool1 = tf.layers.max_pooling1d(inputs=conv1_2, pool_size=4, strides=4)
+
+        bn1 = batch_norm(pool1, self.is_train, scope='bn1')
+        dropout1 = tf.layers.dropout(inputs=bn1, rate=(1 - self.keep_prob))
+
+        conv2_1 = tf.layers.conv1d(inputs=dropout1, filters=filters[2], kernel_size=kernel_size[2], padding="same", activation=tf.nn.tanh, name='conv2_1')
+        conv2_2 = tf.layers.conv1d(inputs=conv2_1, filters=filters[3], kernel_size=kernel_size[3], padding="same", activation=tf.nn.tanh)
+        pool2 = tf.layers.max_pooling1d(inputs=conv2_2, pool_size=4, strides=4)
+
+        bn2 = batch_norm(pool2, self.is_train, scope='bn2')
+        dropout2 = tf.layers.dropout(inputs=bn2, rate=(1 - self.keep_prob))
+
+        conv3_1 = tf.layers.conv1d(inputs=dropout2, filters=filters[2], kernel_size=kernel_size[2], padding="same", activation=tf.nn.tanh)
+        conv3_2 = tf.layers.conv1d(inputs=conv3_1, filters=filters[3], kernel_size=kernel_size[3], padding="same", activation=tf.nn.tanh)
+        pool3 = tf.layers.max_pooling1d(inputs=conv2_2, pool_size=2, strides=2)
+
+        conv_output = pool3

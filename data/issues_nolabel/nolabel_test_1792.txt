@@ -1,0 +1,31 @@
+FIFOQueue stopping early when graph restored from checkpoint
+
+I'm running into an issue when evaluating a previously-trained graph on test data: namely, the FIFOQueue returned by tf.train.string_input_producer is iterating fewer times over the data than the num_epochs parameter I give it.
+More specifically, I have my data stored as .tfrecords files, separated into training/validation/test sets.  To both train and evaluate the model, I do the following:
+
+Get the input data from a call to tf.train.string_input_producer(trainingdata, num_epochs=N, shuffle=True)
+instantiate a tf.train.Coordinator()
+Call tf.train.start_queue_runners
+Run the following loop:
+
+try:
+    while not coord.should_stop():
+        # run the appropriate operations
+except tf.errors.OutOfRangeError:
+    print('Halting -- epoch limit reached.')
+finally:
+    coord.request_stop()
+coord.join(threads)
+For training, I train the model for multiple epochs on the training data, saving a checkpoint every half epoch.
+Then, for evaluation, I restore the graph from one of those checkpoints as follows:
+
+Instantiate the input variables from the data pipeline as above
+Use those to construct the graph
+Call tf.train.Saver().restore() to restore the graph from the appropriate checkpoint
+
+The problem is, an OutOfRangeError is getting thrown the very first time I call sess.run() on any node.  If I keep increasing the number of epochs for the evaluation, I can eventually get it to actually iterate over the data (e.g. using num_epochs=4 may give me 1 iteration over the data).  It's consistent with the same checkpoint file (e.g. if num_epochs=4 gives me 1 iteration, num_epochs=5 gives me 2, etc.), but it varies between checkpoint files.  It also does not seem to be consistent with the number of training epochs that had been completed when the checkpoint was saved.
+My expectation is that using num_epochs=1 when initializing the data pipeline for the evaluation should be fine for doing a single iteration over those data points.  What am I missing?
+Environment info
+Operating System: RHEL
+TF commit hash: f82ad360140a2078afcef6af40ad6ec75bd11c1 (version 7.0)
+Python version: 3.5.1

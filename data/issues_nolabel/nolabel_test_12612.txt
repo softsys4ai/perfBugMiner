@@ -1,0 +1,28 @@
+Eager execution with string tensors.
+
+@alextp String tensors seem to cause lots of errors for me, when using the eager execution API, that do not occur when using normal ops and executing them using a session.
+The way I'm creating string tensors is by allocating a TF_Tensor with the right data type, shape, and size (where I use TF_StringEncodedSize to get the byte sizes of each element). Then, I encode the strings using TF_StringEncode and write them in the tensor buffer along with the offset table, as described here. Afterwards, I call TFE_NewTensorHandle to get an eager tensor handle and I delete the TF_Tensor object. This works fine for normal op construction and execution using sessions, but it fails for eager execution. Often I get a check failed: IsAligned() error from tensor.cc, but other times the whole application crashes, such as in the example that follows:
+val t = Tensor.fill(STRING, Shape())("test")  // The generated tensor is good. 
+                                              // I can access its elements and use it 
+                                              // with session execution.
+val tt = tfe.stack(Seq(t, t))  // I can no longer access the tensor elements correctly 
+                               // and when I try to slice it I get either errors (crashing) 
+                               // or empty strings.
+tt.unstack(2)                  // Crashes with the error shown below.
+This is run using my Scala API but I hope that the error I get may help resolve it. In the error stacktrace I get this:
+Stack: [0x0000700011571000,0x0000700011671000],  sp=0x000070001166cbf0,  free space=1006k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+C  [libsystem_platform.dylib+0x15da]  _platform_memmove$VARIANT$Nehalem+0x1da
+C  [libc++.1.dylib+0x3af29]  _ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC2ERKS5_+0x8d
+C  [libtensorflow.so+0x502fdb]  _ZNSt3__110__function6__funcIZN5Eigen8internal14TensorExecutorIKNS2_14TensorAssignOpINS2_9TensorMapINS2_6TensorINS_12basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEELi1ELi1ElEELi16ENS2_11MakePointerEEEKNS2_15TensorSlicingOpIKNS2_6DSizesIlLi1EEESK_KNS6_INS7_IKSD_Li1ELi1ElEELi16ESF_EEEEEENS2_16ThreadPoolDeviceELb0EE3runERSS_RKST_EUlllE_NSB_ISY_EEFvllEEclEOlS12_+0x5b
+C  [libtensorflow.so+0x1aa30d]  _ZNK5Eigen16ThreadPoolDevice11parallelForElRKNS_12TensorOpCostENSt3__18functionIFllEEENS5_IFvllEEE+0xbd
+C  [libtensorflow.so+0x502ebf]  _ZN5Eigen8internal14TensorExecutorIKNS_14TensorAssignOpINS_9TensorMapINS_6TensorINSt3__112basic_stringIcNS5_11char_traitsIcEENS5_9allocatorIcEEEELi1ELi1ElEELi16ENS_11MakePointerEEEKNS_15TensorSlicingOpIKNS_6DSizesIlLi1EEESI_KNS3_INS4_IKSB_Li1ELi1ElEELi16ESD_EEEEEENS_16ThreadPoolDeviceELb0EE3runERSQ_RKSR_+0x11f
+C  [libtensorflow.so+0x5a06f6]  _ZN10tensorflow22HandleStridedSliceCaseIN5Eigen16ThreadPoolDeviceENSt3__112basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEELi1EEEvPNS_15OpKernelContextERKNS_3gtl10ArraySliceIxEESG_SG_RKNS_11TensorShapeEbPNS_6TensorE+0x136
+C  [libtensorflow.so+0x58b082]  _ZN10tensorflow14StridedSliceOpIN5Eigen16ThreadPoolDeviceENSt3__112basic_stringIcNS3_11char_traitsIcEENS3_9allocatorIcEEEEE7ComputeEPNS_15OpKernelContextE+0x5f2
+C  [libtensorflow.so+0x1c60b9b]  _ZN10tensorflow16ThreadPoolDevice7ComputeEPNS_8OpKernelEPNS_15OpKernelContextE+0x13b
+C  [libtensorflow.so+0x8585]  _ZN10tensorflow15KernelAndDevice3RunEPNSt3__16vectorINS_6TensorENS1_9allocatorIS3_EEEES7_+0x285
+C  [libtensorflow.so+0x47ce]  TFE_Execute+0x36e
+
+EDIT: The following error seems to actually come up with all tensor data types, for various ops (such as the "Unpack" op).
+Another time I also got this error:
+C  [libtensorflow.so+0x20f0]  TFE_TensorHandleDeviceName+0x0

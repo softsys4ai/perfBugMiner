@@ -1,0 +1,63 @@
+Memory Overhead/Leak in Android lib
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):  Nexus 6p, Android v7.1.2
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below):  1.2.0-rc2
+Python version: 2.7.10
+Bazel version (if compiling from source): 0.4.5-homebrew
+CUDA/cuDNN version: N/A
+GPU model and memory:
+Exact command to reproduce:
+-- Selective Headers: bazel build -c opt --copt="-DSELECTIVE_REGISTRATION" --copt="-DSUPPORT_SELECTIVE_REGISTRATION" //tensorflow/contrib/android:libtensorflow_inference.so --crosstool_top=//external:android/crosstool --host_crosstool_top=@bazel_tools//tools/cpp:toolchain --cpu=armeabi-v7a
+-- Added tensorflow/core/kernels/random_shuffle_queue_op.cc and tensorflow/core/kernels/random_shuffle_op.cc to tf_op_files.txt file
+-- Removed unused nodes: bazel build tensorflow/tools/graph_transforms:transform_graph bazel-bin/tensorflow/tools/graph_transforms/transform_graph \ --in_graph=model.pb \ --out_graph=optimized_model.pb \ --inputs='input' \ --outputs='output' \ --transforms=' strip_unused_nodes(type=float, shape="1,299,299,3")'
+
+Describe the problem
+The Tensorflow Android library is using a lot more memory than I expected. It almost seems like it's maintaining a reference to all input arrays, as memory usage balloons the longer the model is used.
+Here is an example of the memory usage with feed/run/fetch commented out (source code below):
+
+Here is the same timeframe, with the only difference being that feed/run/fetch is enabled:
+
+Memory usage is over three times worse. The longer I leave the model running, the more memory usage increases (it eventually gets to 110 mb).
+The below method is being called at a rate of 4.419011933 per sec (i.e. it's processing 4.412 input arrays per second), where each input array is of size 96*96*3 (27648).
+This is being run on a Nexus 6p, running stock 7.1.2. The model is a conv net with inception, batch norm and dropout, trained using tensorflow slim.
+Source code / logs
+Commented out:
+public float[] runInference(float[] pixels) {
+        assertRightSize(pixels);
+        final float[] outputArray = new float[128];
+        // Simulate some sort of output
+        Arrays.fill(outputArray, new Random().nextInt(1000)/new Random().nextFloat());
+//     inferenceInterface.feed("phase_train", new bool[]{false});
+//     inferenceInterface.feed("input", pixels, 1, 96, 96, 3);
+//     inferenceInterface.run(new String[]{"output"});
+        // Copy the output Tensor back into the output array.
+//     inferenceInterface.fetch("output", outputArray);
+
+        return outputArray;
+    }
+Enabled:
+public float[] runInference(float[] pixels) {
+        assertRightSize(pixels);
+        final float[] outputArray = new float[128];
+        inferenceInterface.feed("phase_train", new bool[]{false});
+        inferenceInterface.feed("input", pixels, 1, 96, 96, 3);
+        inferenceInterface.run(new String[]{"output"});
+        // Copy the output Tensor back into the output array.
+        inferenceInterface.fetch("output", outputArray);
+
+        return outputArray;
+    }
+where float[] pixels is a float array of size 27648, denoting the pixels in an image of size 96x96.
+The custom code is an update to the InferenceInterface to accept boolean types during feeding:
+public void feed(String inputName, boolean[] src, long... dims) {
+        byte[] b = new byte[src.length];
+        for (int i = 0; i < src.length; ++i) {
+            b[i] = (byte) (src[i] ? 1 : 0);
+        }
+        addFeed(inputName, Tensor.create(DataType.BOOL, dims, ByteBuffer.wrap(b)));
+    }
+Please let me know if there's any other information I can provide.

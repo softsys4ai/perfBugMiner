@@ -1,0 +1,222 @@
+MultiRNNCell and reuse_variables()
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 14.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.4
+Python version: 2.7.6
+Bazel version (if compiling from source): 0.5.4
+GCC/Compiler version (if compiling from source): 4.8.4
+CUDA/cuDNN version: 8.0/6.0
+GPU model and memory: Geforce GTX TITAN X/12G
+
+Describe the problem
+tf.nn.dynamic_rnn() and tf.nn.rnn_cell.MultiRNNCell() breaks down when add tf.get_variable_scope().reuse_variables() before defining a rnn architecture.
+Correct Situation
+
+When there is no tf.get_variable_scope().reuse_variables()
+
+import tensorflow as tf
+x = tf.random_normal([6, 5, 100])
+
+def build_lstm(num_units, num_layers, batch_size):
+    def build_cell(num_units):
+        return tf.contrib.rnn.LSTMCell(num_units)
+    
+    with tf.name_scope('multi_cells'):
+        cell = tf.nn.rnn_cell.MultiRNNCell([build_cell(num_units) for _ in range(num_layers)])
+    init_state = cell.zero_state(batch_size, tf.float32)
+    
+    return cell, init_state
+
+lstm_cell, lstm_init_state = build_lstm(200, 2, 5)
+lstm, final_state =  tf.nn.dynamic_rnn(lstm_cell, x, initial_state=lstm_init_state, time_major=True)
+It works fine!
+Wrong Situation
+
+When there is tf.get_variable_scope().reuse_variables()
+
+import tensorflow as tf
+x = tf.random_normal([6, 5, 100])
+
+# add a magic sentence here
+tf.get_variable_scope().reuse_variables()
+
+def build_lstm(num_units, num_layers, batch_size):
+    def build_cell(num_units):
+        return tf.contrib.rnn.LSTMCell(num_units)
+    
+    with tf.name_scope('multi_cells'):
+        cell = tf.nn.rnn_cell.MultiRNNCell([build_cell(num_units) for _ in range(num_layers)])
+    init_state = cell.zero_state(batch_size, tf.float32)
+    
+    return cell, init_state
+
+lstm_cell, lstm_init_state = build_lstm(200, 2, 5)
+lstm, final_state =  tf.nn.dynamic_rnn(lstm_cell, x, initial_state=lstm_init_state, time_major=True)
+it returns:
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-7-d333e19dbfd0> in <module>()
+----> 1 lstm, final_state =  tf.nn.dynamic_rnn(lstm_cell, x, initial_state=lstm_init_state, time_major=True)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.pyc in dynamic_rnn(cell, inputs, sequence_length, initial_state, dtype, parallel_iterations, swap_memory, time_major, scope)
+    612         swap_memory=swap_memory,
+    613         sequence_length=sequence_length,
+--> 614         dtype=dtype)
+    615 
+    616     # Outputs of _dynamic_rnn_loop are always shaped [time, batch, depth].
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.pyc in _dynamic_rnn_loop(cell, inputs, initial_state, parallel_iterations, swap_memory, sequence_length, dtype)
+    775       loop_vars=(time, output_ta, state),
+    776       parallel_iterations=parallel_iterations,
+--> 777       swap_memory=swap_memory)
+    778 
+    779   # Unpack final output if not using output tuples.
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.pyc in while_loop(cond, body, loop_vars, shape_invariants, parallel_iterations, back_prop, swap_memory, name)
+   2814     loop_context = WhileContext(parallel_iterations, back_prop, swap_memory)  # pylint: disable=redefined-outer-name
+   2815     ops.add_to_collection(ops.GraphKeys.WHILE_CONTEXT, loop_context)
+-> 2816     result = loop_context.BuildLoop(cond, body, loop_vars, shape_invariants)
+   2817     return result
+   2818 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.pyc in BuildLoop(self, pred, body, loop_vars, shape_invariants)
+   2638       self.Enter()
+   2639       original_body_result, exit_vars = self._BuildLoop(
+-> 2640           pred, body, original_loop_vars, loop_vars, shape_invariants)
+   2641     finally:
+   2642       self.Exit()
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.pyc in _BuildLoop(self, pred, body, original_loop_vars, loop_vars, shape_invariants)
+   2588         structure=original_loop_vars,
+   2589         flat_sequence=vars_for_body_with_tensor_arrays)
+-> 2590     body_result = body(*packed_vars_for_body)
+   2591     if not nest.is_sequence(body_result):
+   2592       body_result = [body_result]
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.pyc in _time_step(time, output_ta_t, state)
+    760           skip_conditionals=True)
+    761     else:
+--> 762       (output, new_state) = call_cell()
+    763 
+    764     # Pack state if using state tuples
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.pyc in <lambda>()
+    746 
+    747     input_t = nest.pack_sequence_as(structure=inputs, flat_sequence=input_t)
+--> 748     call_cell = lambda: cell(input_t, state)
+    749 
+    750     if sequence_length is not None:
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn_cell_impl.pyc in __call__(self, inputs, state, scope)
+    181       with vs.variable_scope(vs.get_variable_scope(),
+    182                              custom_getter=self._rnn_get_variable):
+--> 183         return super(RNNCell, self).__call__(inputs, state)
+    184 
+    185   def _rnn_get_variable(self, getter, *args, **kwargs):
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/layers/base.pyc in __call__(self, inputs, *args, **kwargs)
+    573         if in_graph_mode:
+    574           self._assert_input_compatibility(inputs)
+--> 575         outputs = self.call(inputs, *args, **kwargs)
+    576 
+    577         if outputs is None:
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn_cell_impl.pyc in call(self, inputs, state)
+   1064                                       [-1, cell.state_size])
+   1065           cur_state_pos += cell.state_size
+-> 1066         cur_inp, new_state = cell(cur_inp, cur_state)
+   1067         new_states.append(new_state)
+   1068 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn_cell_impl.pyc in __call__(self, inputs, state, scope)
+    181       with vs.variable_scope(vs.get_variable_scope(),
+    182                              custom_getter=self._rnn_get_variable):
+--> 183         return super(RNNCell, self).__call__(inputs, state)
+    184 
+    185   def _rnn_get_variable(self, getter, *args, **kwargs):
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/layers/base.pyc in __call__(self, inputs, *args, **kwargs)
+    573         if in_graph_mode:
+    574           self._assert_input_compatibility(inputs)
+--> 575         outputs = self.call(inputs, *args, **kwargs)
+    576 
+    577         if outputs is None:
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn_cell_impl.pyc in call(self, inputs, state)
+    606               partitioned_variables.fixed_size_partitioner(
+    607                   self._num_unit_shards))
+--> 608         self._linear1 = _Linear([inputs, m_prev], 4 * self._num_units, True)
+    609 
+    610     # i = input_gate, j = new_input, f = forget_gate, o = output_gate
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn_cell_impl.pyc in __init__(self, args, output_size, build_bias, bias_initializer, kernel_initializer)
+   1169           _WEIGHTS_VARIABLE_NAME, [total_arg_size, output_size],
+   1170           dtype=dtype,
+-> 1171           initializer=kernel_initializer)
+   1172       if build_bias:
+   1173         with vs.variable_scope(outer_scope) as inner_scope:
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.pyc in get_variable(name, shape, dtype, initializer, regularizer, trainable, collections, caching_device, partitioner, validate_shape, use_resource, custom_getter, constraint)
+   1201       partitioner=partitioner, validate_shape=validate_shape,
+   1202       use_resource=use_resource, custom_getter=custom_getter,
+-> 1203       constraint=constraint)
+   1204 get_variable_or_local_docstring = (
+   1205     """%s
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.pyc in get_variable(self, var_store, name, shape, dtype, initializer, regularizer, reuse, trainable, collections, caching_device, partitioner, validate_shape, use_resource, custom_getter, constraint)
+   1090           partitioner=partitioner, validate_shape=validate_shape,
+   1091           use_resource=use_resource, custom_getter=custom_getter,
+-> 1092           constraint=constraint)
+   1093 
+   1094   def _get_partitioned_variable(self,
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.pyc in get_variable(self, name, shape, dtype, initializer, regularizer, reuse, trainable, collections, caching_device, partitioner, validate_shape, use_resource, custom_getter, constraint)
+    415       if "constraint" in estimator_util.fn_args(custom_getter):
+    416         custom_getter_kwargs["constraint"] = constraint
+--> 417       return custom_getter(**custom_getter_kwargs)
+    418     else:
+    419       return _true_getter(
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.pyc in wrapped_custom_getter(getter, *args, **kwargs)
+   1581     return custom_getter(
+   1582         functools.partial(old_getter, getter),
+-> 1583         *args, **kwargs)
+   1584   return wrapped_custom_getter
+   1585 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn_cell_impl.pyc in _rnn_get_variable(self, getter, *args, **kwargs)
+    184 
+    185   def _rnn_get_variable(self, getter, *args, **kwargs):
+--> 186     variable = getter(*args, **kwargs)
+    187     if context.in_graph_mode():
+    188       trainable = (variable in tf_variables.trainable_variables() or
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn_cell_impl.pyc in _rnn_get_variable(self, getter, *args, **kwargs)
+    184 
+    185   def _rnn_get_variable(self, getter, *args, **kwargs):
+--> 186     variable = getter(*args, **kwargs)
+    187     if context.in_graph_mode():
+    188       trainable = (variable in tf_variables.trainable_variables() or
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.pyc in _true_getter(name, shape, dtype, initializer, regularizer, reuse, trainable, collections, caching_device, partitioner, validate_shape, use_resource, constraint)
+    392           trainable=trainable, collections=collections,
+    393           caching_device=caching_device, validate_shape=validate_shape,
+--> 394           use_resource=use_resource, constraint=constraint)
+    395 
+    396     if custom_getter is not None:
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variable_scope.pyc in _get_single_variable(self, name, shape, dtype, initializer, regularizer, partition_info, reuse, trainable, collections, caching_device, validate_shape, use_resource, constraint)
+    758       raise ValueError("Variable %s does not exist, or was not created with "
+    759                        "tf.get_variable(). Did you mean to set "
+--> 760                        "reuse=tf.AUTO_REUSE in VarScope?" % name)
+    761     if not shape.is_fully_defined() and not initializing_from_value:
+    762       raise ValueError("Shape of a new variable (%s) must be fully defined, "
+
+ValueError: Variable rnn/multi_rnn_cell/cell_0/lstm_cell/kernel does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=tf.AUTO_REUSE in VarScope?
+
+Conclusion
+It seems that tf.get_variable_scope().reuse_variables() and tf.nn.rnn_cell.MultiRNNCell() are not compatiable

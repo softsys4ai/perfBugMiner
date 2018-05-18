@@ -1,0 +1,41 @@
+Environment variables PATH and LD_LIBRARY_PATH not being passed to Protobuf compiler
+
+With protobuf neither the PATH nor LD_LIBRARY_PATH are being passed and building tensorflow fails with:
+(cd /home/gbkedar/.cache/bazel/_bazel_gbkedar/2cce0d25c048758b29b453d7b4e29b85/execroot/tensorflow && \
+  exec env - \
+  bazel-out/host/bin/external/protobuf/protoc '--cpp_out=bazel-out/local_linux-opt/genfiles/' -I. -Iexternal/protobuf/src -Ibazel-out/local_linux-opt/genfiles/external/protobuf/src tensorflow/core/example/example.proto tensorflow/core/example/example_parser_configuration.proto tensorflow/core/example/feature.proto tensorflow/core/framework/allocation_description.proto tensorflow/core/framework/attr_value.proto tensorflow/core/framework/cost_graph.proto tensorflow/core/framework/device_attributes.proto tensorflow/core/framework/function.proto tensorflow/core/framework/graph.proto tensorflow/core/framework/kernel_def.proto tensorflow/core/framework/log_memory.proto tensorflow/core/framework/op_def.proto tensorflow/core/framework/step_stats.proto tensorflow/core/framework/summary.proto tensorflow/core/framework/tensor.proto tensorflow/core/framework/tensor_description.proto tensorflow/core/framework/tensor_shape.proto tensorflow/core/framework/tensor_slice.proto tensorflow/core/framework/types.proto tensorflow/core/framework/variable.proto tensorflow/core/framework/versions.proto tensorflow/core/lib/core/error_codes.proto tensorflow/core/protobuf/config.proto tensorflow/core/protobuf/meta_graph.proto tensorflow/core/protobuf/named_tensor.proto tensorflow/core/protobuf/queue_runner.proto tensorflow/core/protobuf/saver.proto tensorflow/core/protobuf/tensorflow_server.proto tensorflow/core/util/event.proto tensorflow/core/util/memmapped_file_system.proto tensorflow/core/util/saved_tensor_slice.proto tensorflow/core/util/test_log.proto)
+ERROR: /project/roysam/compiledLibs/tensorflow/tensorflow/core/BUILD:91:1: null failed: protoc failed: error executing command
+  (cd /home/gbkedar/.cache/bazel/_bazel_gbkedar/2cce0d25c048758b29b453d7b4e29b85/execroot/tensorflow && \
+  exec env - \
+  bazel-out/host/bin/external/protobuf/protoc '--cpp_out=bazel-out/host/genfiles/' -I. -Iexternal/protobuf/src -Ibazel-out/host/genfiles/external/protobuf/src tensorflow/core/example/example.proto tensorflow/core/example/example_parser_configuration.proto tensorflow/core/example/feature.proto tensorflow/core/framework/allocation_description.proto tensorflow/core/framework/attr_value.proto tensorflow/core/framework/cost_graph.proto tensorflow/core/framework/device_attributes.proto tensorflow/core/framework/function.proto tensorflow/core/framework/graph.proto tensorflow/core/framework/kernel_def.proto tensorflow/core/framework/log_memory.proto tensorflow/core/framework/op_def.proto tensorflow/core/framework/step_stats.proto tensorflow/core/framework/summary.proto tensorflow/core/framework/tensor.proto tensorflow/core/framework/tensor_description.proto tensorflow/core/framework/tensor_shape.proto tensorflow/core/framework/tensor_slice.proto tensorflow/core/framework/types.proto tensorflow/core/framework/variable.proto tensorflow/core/framework/versions.proto tensorflow/core/lib/core/error_codes.proto tensorflow/core/protobuf/config.proto tensorflow/core/protobuf/meta_graph.proto tensorflow/core/protobuf/named_tensor.proto tensorflow/core/protobuf/queue_runner.proto tensorflow/core/protobuf/saver.proto tensorflow/core/protobuf/tensorflow_server.proto tensorflow/core/util/event.proto tensorflow/core/util/memmapped_file_system.proto tensorflow/core/util/saved_tensor_slice.proto tensorflow/core/util/test_log.proto): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+bazel-out/host/bin/external/protobuf/protoc: /usr/lib64/libstdc++.so.6: version `GLIBCXX_3.4.20' not found (required by bazel-out/host/bin/external/protobuf/protoc)
+bazel-out/host/bin/external/protobuf/protoc: /usr/lib64/libstdc++.so.6: version `CXXABI_1.3.8' not found (required by bazel-out/host/bin/external/protobuf/protoc)
+bazel-out/host/bin/external/protobuf/protoc: /usr/lib64/libstdc++.so.6: version `GLIBCXX_3.4.18' not found (required by bazel-out/host/bin/external/protobuf/protoc)
+Target //tensorflow/cc:tutorials_example_trainer failed to build
+
+Further, checking the dependencies of protoc shows that they are set correctly when it is compiled
+ldd bazel-out/host/bin/external/protobuf/protoc
+        linux-vdso.so.1 =>  (0x00007ffffadff000)
+        libpthread.so.0 => /lib64/libpthread.so.0 (0x00002b5195f33000)
+        libstdc++.so.6 => /share/apps/gcc-4.9.2/lib64/libstdc++.so.6 (0x00002b5196150000)
+        libgcc_s.so.1 => /share/apps/gcc-4.9.2/lib64/libgcc_s.so.1 (0x00002b5196463000)
+        libc.so.6 => /lib64/libc.so.6 (0x00002b5196679000)
+        /lib64/ld-linux-x86-64.so.2 (0x0000003e37c00000)
+        libm.so.6 => /lib64/libm.so.6 (0x00002b5196a0d000)
+
+I have checked out and built the master of bazel. Previous to bazelbuild/bazel@c9bc051 other parts were being passed the PATH and not LD_LIBRARY_PATH. For example:
+//third_party/gpus/cuda:cuda_check [action 'Executing genrule //third_party/gpus/cuda:cuda_check']
+(cd /home/gbkedar/.cache/bazel/_bazel_gbkedar/2cce0d25c048758b29b453d7b4e29b85/execroot/tensorflow && \
+  exec env - \
+    PATH= ...... \
+  /bin/bash -c 'source external/bazel_tools/tools/genrule/genrule-setup.sh; OUTPUTDIR=`readlink -f bazel-out/local_linux-opt/genfiles/third_party/gpus/cuda/../../..`; cd `dirname third_party/gpus/cuda/cuda_config.sh`; OUTPUTDIR=$OUTPUTDIR ./cuda_config.sh --check;')
+
+The commit adds LD_LIBRARY_PATH:
+//third_party/gpus/cuda:cuda_check [action 'Executing genrule //third_party/gpus/cuda:cuda_check']
+(cd /home/gbkedar/.cache/bazel/_bazel_gbkedar/2cce0d25c048758b29b453d7b4e29b85/execroot/tensorflow && \
+  exec env - \
+    LD_LIBRARY_PATH= ...... \
+    PATH= ...... \
+  /bin/bash -c 'source external/bazel_tools/tools/genrule/genrule-setup.sh; OUTPUTDIR=`readlink -f bazel-out/local_linux-opt/genfiles/third_party/gpus/cuda/../../..`; cd `dirname third_party/gpus/cuda/cuda_config.sh`; OUTPUTDIR=$OUTPUTDIR ./cuda_config.sh --check;')
+
+which solves some issues when gcc or python are not in the default path but not this one.

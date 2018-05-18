@@ -1,0 +1,77 @@
+Convolution produces wrong result depending on the batch size.
+
+Environment info
+Operating System: Ubuntu 14.04 LTS
+Graphics: GeForce GTX 770/PCIe/SSE2
+Cuda compute capability: 3.0
+cuda version: 7.0
+cudnn version: 6.5
+installed from sources, commit hash: 5a30c8f
+Steps to reproduce
+
+Download the following numpy array in .npy format: https://www.dropbox.com/s/wljk6r83d0tee14/fail_tensor.npy?dl=0
+Below is shown the code to reproduce the problem. The numpy.float32 array stored in fail_tensor.npy has shape (4, 33, 33, 1). Only the first slice (a[0]) of the array holds the values that causes the problem. The values in the other slice can be any value. The original array with batch_size=4 will cause a problem, however if we use batch_size less than 4 (e.g., a[:3]), then there will be no problem. A convolution with a kernel of ones in the original array will produce a tensor with a negative number even though the input tensor has only non-negative values.
+
+import tensorflow as tf
+import numpy as np
+from scipy.ndimage import convolve
+
+def test(batch_size, set_others):
+    tt = np.load('fail_tensor.npy')
+    tt = tt[:batch_size]
+    tt[1:,...] = set_others
+    t = tf.constant(tt)
+    kernel = tf.constant(1.0, shape=[5, 5, 1, 1])
+    r = tf.nn.conv2d(t, kernel, [1, 1, 1, 1], padding='SAME')
+    sess = tf.Session()
+    print tt.shape
+    print tt[0].min()
+    rr = r.eval(session=sess)
+    print rr[0].min()
+    scipy_r = convolve(tt[0,:,:,0], np.ones((5,5), np.float32), mode='constant')
+    print np.allclose(scipy_r, rr[0,:,:,0])
+    sess.close()
+3: On IPython:
+In [0]: import fail_example
+
+# with batch_size=3 the result is the same as scipy convolve.
+In [1]: fail_example.test(batch_size=3, set_others=0)
+(3, 33, 33, 1)
+0.0
+4.47035e-08
+True
+
+# with batch_size=4 the result ISN'T the same as scipy convolve.
+In [2]: fail_example.test(batch_size=4, set_others=0)
+(4, 33, 33, 1)
+0.0
+-0.410374
+False
+
+# Setting set_others to 100 doesn't change the result
+In [3]: fail_example.test(batch_size=3, set_others=100)
+(3, 33, 33, 1)
+0.0
+4.47035e-08
+True
+
+# Setting set_others to 100 doesn't change the result
+In [4]: fail_example.test(batch_size=4, set_others=100)
+(4, 33, 33, 1)
+0.0
+-0.410374
+False
+
+# smaller batch_sizes than 4 produces correct result
+In [5]: fail_example.test(batch_size=2, set_others=0)
+(3, 33, 33, 1)
+0.0
+4.47035e-08
+True
+
+# smaller batch_sizes than 4 produces correct result
+In [6]: fail_example.test(batch_size=1, set_others=0)
+(3, 33, 33, 1)
+0.0
+4.47035e-08
+True

@@ -1,0 +1,64 @@
+tf.train.Saver does not restore input queue
+
+example.py
+import tensorflow as tf
+
+queue = tf.train.string_input_producer(['data.txt'])
+
+reader = tf.TextLineReader()
+_, line = reader.read(queue)
+
+global_step = tf.Variable(0, trainable=False, name='global_step')
+global_step_op = tf.assign_add(global_step, 1)
+
+with tf.Session() as sess:
+    saver = tf.train.Saver()
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
+
+    latest_checkpoint = tf.train.latest_checkpoint('/tmp')
+    if latest_checkpoint:
+        saver.restore(sess, latest_checkpoint)
+        print('restored from', latest_checkpoint)
+    else:
+        sess.run([
+            tf.local_variables_initializer(),
+            tf.global_variables_initializer(),
+        ])
+
+    for i in range(5):
+        value, step = sess.run([line, global_step_op])
+
+        print(value, step)
+
+    coord.request_stop()
+    coord.join(threads)
+
+    saver.save(sess, '/tmp/model')
+data.txt
+line 1
+line 2
+line 3
+line 4
+line 5
+line 6
+
+Will output on first run python3 example.py:
+
+b'line 1' 1
+b'line 2' 2
+b'line 3' 3
+
+Will output on second run python3 example.py:
+
+restored from /tmp/model
+b'line 1' 4
+b'line 2' 5
+b'line 3' 6
+
+but expected:
+
+restored from /tmp/model
+b'line 4' 4
+b'line 5' 5
+b'line 6' 6

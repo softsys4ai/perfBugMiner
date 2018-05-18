@@ -1,0 +1,49 @@
+Quantize weights causes accuracy to plunge when run in mobile but not in computers?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.2.1
+Python version:
+Bazel version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+/home/kwotsin/tensorflow/bazel-bin/tensorflow/tools/graph_transforms/transform_graph \
+--in_graph=./frozen_inception_resnet_v2_for_mobile.pb \
+--out_graph=./quantized_inception_resnet_v2_for_mobile_NEW.pb \
+--inputs='Placeholder_only' \
+--outputs='InceptionResnetV2/Logits/Predictions' \
+--transforms='
+  add_default_attributes
+  strip_unused_nodes(type=float, shape="1,299,299,3")
+  remove_nodes(op=Identity, op=CheckNumerics)
+  fold_constants(ignore_errors=true)
+  fold_batch_norms
+  fold_old_batch_norms
+  quantize_weights
+  strip_unused_nodes
+  sort_by_execution_order'
+
+Describe the problem
+Using the above quantization method, the quantization tool works so well that there is hardly a noticeable difference in accuracy drop (less than 0.5%) for a model like inception v3, with a 1/4 size reduction and slightly faster speed. However, when using the exact same files to be run on mobile, the performance gets so poor that there's more than 70-80% accuracy decrease. I'm unsure whether the issue lies with the quantization not getting optimized on mobile architectures (ARM instead of the usual desktop amd architecture), or whether there is a problem in the operations for the tensorflow mobile library.
+Note that quantize_nodes is totally unusable. When used to quantize the model, the model size increases a little and then causes the app to crash instantly. The error log produced when using quantize_nodes is this:
+07-01 00:07:01.760 28272-28357/com.mindorks.tensorflowexample E/art: No implementation found for long org.tensorflow.contrib.android.RunStats.allocate() (tried Java_org_tensorflow_contrib_android_RunStats_allocate and Java_org_tensorflow_contrib_android_RunStats_allocate__)
+07-01 00:07:03.508 28272-28357/com.mindorks.tensorflowexample A/libc: Fatal signal 11 (SIGSEGV), code 1, fault addr 0x0 in tid 28357 (pool-1-thread-1)
+
+Also, for almost every model I ran, the following error appeared:
+No implementation found for long org.tensorflow.contrib.android.RunStats.allocate()
+What does this mean and how could I resolve it?
+FYI: Not sure if it makes a difference, but when I built my lib_tensorflow_inference.so file and the JAR file for using the TF library on mobile, the tensorflow version was cloned from the master branch and not git checked out. Would this make a difference?
+Further weird phenomenon:
+Although I built my TF from source and bazel built the graph transform tool, the following warnings still appear:
+2017-07-01 00:05:19.612228: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-01 00:05:19.612262: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-01 00:05:19.612278: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-01 00:05:19.612282: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-01 00:05:19.612290: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+
+Thank you.

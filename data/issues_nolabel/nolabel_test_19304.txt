@@ -1,0 +1,345 @@
+With TF C-API, got "GPU device not registered" and no-op for SessionRun.
+
+Please go to Stack Overflow for help and support:
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Ubuntu 16.04
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below):1.7.0/1.8.0
+Python version: 2.7
+Bazel version (if compiling from source):n/a
+GCC/Compiler version (if compiling from source):5.4.0
+CUDA/cuDNN version:9.0/7.0
+GPU model and memory:1080Ti
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+Output:
+Linux yangl-contenttech 4.13.0-41-generic #46~16.04.1-Ubuntu SMP Thu May 3 10:06:43 UTC 2018 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="16.04.4 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+c++ (Ubuntu 5.4.0-6ubuntu1~16.04.9) 5.4.0 20160609
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+== uname -a =====================================================
+Linux yangl-contenttech 4.13.0-41-generic #46~16.04.1-Ubuntu SMP Thu May 3 10:06:43 UTC 2018 x86_64 x86_64 x86_64 GNU/Linux
+
+== check pips ===================================================
+numpy                         1.14.3                
+protobuf                      3.5.2.post1           
+tensorflow-gpu                1.8.0                 
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.8.0
+tf.GIT_VERSION = v1.8.0-0-g93bc2e2072
+tf.COMPILER_VERSION = v1.8.0-0-g93bc2e2072
+Sanity check: array([1], dtype=int32)
+/home/yangl/.local/lib/python2.7/site-packages/h5py/__init__.py:36: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+
+== env ==========================================================
+LD_LIBRARY_PATH /usr/local/cuda/lib64:/usr/local/cuda-9.0/extras/CUPTI/lib64/:
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+Tue May 15 13:54:31 2018       
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 390.48                 Driver Version: 390.48                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 108...  Off  | 00000000:01:00.0  On |                  N/A |
+| 27%   48C    P0    72W / 250W |   1489MiB / 11177MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+                                                                               
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID   Type   Process name                             Usage      |
+|=============================================================================|
+|    0      1168      G   /usr/lib/xorg/Xorg                           870MiB |
+|    0      2504      G   compiz                                       437MiB |
+|    0      3240      G   ...-token=F3F41E0025601B32775ADF60FE0AE568   178MiB |
++-----------------------------------------------------------------------------+
+
+== cuda libs  ===================================================
+/usr/local/cuda-9.0/targets/x86_64-linux/lib/libcudart_static.a
+/usr/local/cuda-9.0/targets/x86_64-linux/lib/libcudart.so.9.0.252
+/usr/local/cuda-9.0/targets/aarch64-linux/lib/libcudart_static.a
+/usr/local/cuda-9.0/targets/aarch64-linux/lib/libcudart.so.9.0.252
+/usr/local/cuda-9.0/doc/man/man7/libcudart.7
+/usr/local/cuda-9.0/doc/man/man7/libcudart.so.7
+
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+/home/yangl/.local/lib/python2.7/site-packages/h5py/__init__.py:36: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+('v1.8.0-0-g93bc2e2072', '1.8.0')
+
+Describe the problem
+I am trying to load and run graph model (mobilenet v2) with Tensorflow C-API. Python script downloaded from following link works on my desktop.
+https://github.com/tensorflow/models/blob/master/research/slim/nets/mobilenet/mobilenet_v2.py
+The c-api library and framework library are downloaded via Bazel:
+new_http_archive(
+    name = "libtensorflow",
+    build_file = "third_party/libtensorflow.BUILD",
+    sha256 = "05f5b543d5054f3c1ddc4f4caff7e3a6a96985579ef2d3dd9340ab94b1262f54",
+    
+    url = "https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-gpu-linux-x86_64-1.8.0.tar.gz",
+    )
+cc_library(
+    name = "libtensorflow",
+    srcs = [
+        "lib/libtensorflow.so",
+        "lib/libtensorflow_framework.so",
+    ],
+    hdrs = [
+        "include/tensorflow/c/c_api.h",
+        "include/tensorflow/c/c_api_experimental.h",
+    ],
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
+)
+
+With following code calling into C-API I see non-changed output buffer after SessionRun() and dubious console log:
+2018-05-15 15:42:11.572574: I tensorflow/core/platform/cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2018-05-15 15:42:11.695012: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1356] Found device 0 with properties: 
+name: GeForce GTX 1080 Ti major: 6 minor: 1 memoryClockRate(GHz): 1.582
+pciBusID: 0000:01:00.0
+totalMemory: 10.92GiB freeMemory: 9.26GiB
+2018-05-15 15:42:11.695035: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1435] Adding visible gpu devices: 0
+2018-05-15 15:42:12.104753: I tensorflow/core/common_runtime/gpu/gpu_device.cc:923] Device interconnect StreamExecutor with strength 1 edge matrix:
+2018-05-15 15:42:12.104773: I tensorflow/core/common_runtime/gpu/gpu_device.cc:929]      0 
+2018-05-15 15:42:12.104777: I tensorflow/core/common_runtime/gpu/gpu_device.cc:942] 0:   N 
+2018-05-15 15:42:12.104976: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1053] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 8958 MB memory) -> physical GPU (device: 0, name: GeForce GTX 1080 Ti, pci bus id: 0000:01:00.0, compute capability: 6.1)
+Hello from TensorFlow C library version 1.8.0
+inf starting
+2018-05-15 15:42:12.195162: E tensorflow/core/grappler/clusters/utils.cc:127] Not found: TF GPU device with id 0 was not registered
+Max value of 0 at 0
+Max value of 0 at 0
+Max value of 0 at 0
+Max value of 0 at 0
+Max value of 0 at 0
+Max value of 0 at 0
+Max value of 0 at 0
+Max value of 0 at 0
+Max value of 0 at 0
+Max value of 0 at 0
+
+
+The model is downloaded here: https://github.com/tensorflow/models/tree/master/research/slim/nets/mobilenet
+https://storage.googleapis.com/mobilenet_v2/checkpoints/mobilenet_v2_1.4_224.tgz
+The image is downloaded here:
+https://github.com/tensorflow/models/blob/master/research/slim/nets/mobilenet/mobilenet_example.ipynb
+and processed with python code for loading in c++:
+import numpy as np
+from PIL import Image
+img = np.array(Image.open('panda.jpeg').resize((224, 224))).astype(np.float) / 128 - 1
+reimg=np.reshape(img, [224,672])
+np.savetxt('panda.ndarray',reimg)
+
+Source code / logs
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <string>
+
+#include "gflags/gflags.h"
+#include "tensorflow/c/c_api.h"
+
+#define ASSERT(expr, ...)      \
+  if (!(expr)) {               \
+    char buf[1024];            \
+    sprintf(buf, __VA_ARGS__); \
+    std::cerr << buf;          \
+    std::abort();              \
+  }
+
+DEFINE_string(model_filename,
+              "mobilenet_v2_1.4_224_frozen.pb",
+              "Filename for model to load");
+
+DEFINE_int32(num_repeat, 10, "Run inference many times.");
+
+DEFINE_string(np_filename, "panda.ndarray",
+              "Filename for (text) image file to load");
+
+void free_buffer(void* data, size_t length) { free(data); }
+
+void Deallocator(void* data, size_t length, void* arg) { free(data); }
+
+TF_Buffer* read_file(const char* file) {
+  FILE* f = fopen(file, "rb");
+  ASSERT(f != nullptr, "Model File Not Ready");
+  fseek(f, 0, SEEK_END);
+  long fsize = ftell(f);
+  fseek(f, 0, SEEK_SET);  // same as rewind(f);
+
+  void* data = malloc(fsize);
+  std::ignore = fread(data, fsize, 1, f);
+  fclose(f);
+
+  TF_Buffer* buf = TF_NewBuffer();
+  buf->data = data;
+  buf->length = fsize;
+  buf->data_deallocator = free_buffer;
+  return buf;
+}
+
+int main(int argc, char** argv) {
+  printf("Hello from TensorFlow C library version %s\n", TF_Version());
+
+  // Creates buffer for graph def by reading pb file
+  std::unique_ptr<TF_Buffer, std::function<void(TF_Buffer*)>> p_model_buffer(
+      read_file(FLAGS_model_filename.c_str()), [](TF_Buffer* p) { TF_DeleteBuffer(p); });
+  ASSERT(
+      p_model_buffer != nullptr && p_model_buffer->data != nullptr && p_model_buffer->length != 0,
+      "Reading Graph Model pb file Failure");
+
+  // Creates error status for checking
+  std::unique_ptr<TF_Status, std::function<void(TF_Status*)>> p_status(
+      TF_NewStatus(), [](TF_Status* p) { TF_DeleteStatus(p); });
+  ASSERT(p_status != nullptr, "Status Creation Failure");
+
+  // Creates graph instance
+  std::unique_ptr<TF_Graph, std::function<void(TF_Graph*)>> p_graph(
+      TF_NewGraph(), [](TF_Graph* p) { TF_DeleteGraph(p); });
+  ASSERT(p_graph != nullptr, "Graph Creation Failure");
+
+  // Creates session option
+  std::unique_ptr<TF_SessionOptions, std::function<void(TF_SessionOptions*)>> p_session_opts(
+      TF_NewSessionOptions(), [](TF_SessionOptions* p) { TF_DeleteSessionOptions(p); });
+  ASSERT(p_session_opts != nullptr, "Create SessionOptions Failure");
+
+  // Creates options for importing graph_def
+  std::unique_ptr<TF_ImportGraphDefOptions, std::function<void(TF_ImportGraphDefOptions*)>>
+      p_import_graph_def_options(TF_NewImportGraphDefOptions(), [](TF_ImportGraphDefOptions* p) {
+        TF_DeleteImportGraphDefOptions(p);
+      });
+  ASSERT(p_import_graph_def_options != nullptr, "Create Import Graph Def Option Failure");
+
+  // Imports graph def into graph
+  TF_GraphImportGraphDef(p_graph.get(), p_model_buffer.get(), p_import_graph_def_options.get(),
+                         p_status.get());
+  ASSERT(TF_GetCode(p_status.get()) == TF_Code::TF_OK, "Import Failure %s",
+         TF_Message(p_status.get()));
+
+  // Grab output ops from importing result
+  TF_Operation* ops_in = TF_GraphOperationByName(p_graph.get(), "input");
+  ASSERT(ops_in != nullptr, "Getting Input Operation Failure");
+  TF_Operation* ops_out =
+      TF_GraphOperationByName(p_graph.get(), "MobilenetV2/Predictions/Reshape_1");
+  ASSERT(ops_out != nullptr, "Getting Output Operation Failure");
+  TF_Output tf_output_in{.oper = ops_in, .index = 0};
+  TF_Output tf_output_out{.oper = ops_out, .index = 0};
+
+  // Create Tensors for input and output
+  std::vector<std::shared_ptr<TF_Tensor>> input_tensor_vector;
+  std::vector<std::shared_ptr<TF_Tensor>> output_tensor_vector;
+  // Input tensor is fp32 image of 224x224 with bgr channels, as
+  // img = np.array(PIL.Image.open('panda.jpeg').resize((224, 224))).astype(np.float) / 128 - 1
+  int64_t input_dims[] = {1, 224, 224, 3};
+  ASSERT(sizeof(float) == 4, "Float32 should be 4 bytes.");
+  size_t input_num_bytes = 224 * 224 * 3 * sizeof(float);
+  // Output tensor is fp32 1001x1 one-hot for classes of objects
+  int64_t output_dims[] = {1, 1001};
+  size_t output_num_bytes = 1001 * sizeof(float);
+
+  float* input_buffer = static_cast<float*>(malloc(input_num_bytes));
+  ASSERT(input_buffer != nullptr, "Input Tensor Memory Allocation Failure.");
+  TF_Tensor* input_tensor =
+      TF_NewTensor(TF_FLOAT, input_dims, 4, input_buffer, input_num_bytes, &Deallocator, 0);
+  ASSERT(input_tensor != nullptr, "Input Tensor Creation Failure");
+  input_tensor_vector.push_back(
+      std::shared_ptr<TF_Tensor>(input_tensor, [](TF_Tensor* p) { TF_DeleteTensor(p); }));
+
+  float* output_buffer = static_cast<float*>(malloc(output_num_bytes));
+  ASSERT(output_buffer != nullptr, "Output Tensor Memory Allocation Failure.");
+  memset(output_buffer, 0, output_num_bytes);
+  TF_Tensor* output_tensor =
+      TF_NewTensor(TF_FLOAT, output_dims, 2, output_buffer, output_num_bytes, &Deallocator, 0);
+  ASSERT(output_tensor != nullptr, "Output Tensor Creation Failure");
+  output_tensor_vector.push_back(
+      std::shared_ptr<TF_Tensor>(output_tensor, [](TF_Tensor* p) { TF_DeleteTensor(p); }));
+
+  // Prepare input image data
+  {
+    std::ifstream img(FLAGS_np_filename);
+    ASSERT(img, "Read input image tensor failure.");
+    float* p_data = static_cast<float*>(TF_TensorData(input_tensor_vector[0].get()));
+    for (int i = 0; i < 224; ++i) {
+      for (int j = 0; j < 224 * 3; ++j) {
+        int offset = i * 224 * 3 + j;
+        img >> p_data[offset];
+      }
+    }
+  }
+  {
+    // Initializes config proto with magic numbers got from following python code:
+    // config = tf.ConfigProto(allow_soft_placement = True)
+    // serialized = config.SerializeToString() # '8\x01'
+    char config_proto[] = {'8', 0x01};
+    TF_SetConfig(p_session_opts.get(), config_proto, 2, p_status.get());
+    ASSERT(TF_GetCode(p_status.get()) == TF_Code::TF_OK, "Set Config Failure %s",
+           TF_Message(p_status.get()));
+
+    // Creates session instance for loaded graph model
+    std::unique_ptr<TF_Session, std::function<void(TF_Session*)>> p_session(
+        TF_NewSession(p_graph.get(), p_session_opts.get(), p_status.get()), [&](TF_Session* p) {
+          TF_CloseSession(p, p_status.get());
+          TF_DeleteSession(p, p_status.get());
+        });
+    ASSERT(p_session != nullptr, "Session Creation Failure %s", TF_Message(p_status.get()));
+
+    // Empty RunOptions for inference.
+    TF_Buffer* run_options = nullptr;
+    constexpr int ninputs = 1;
+    constexpr int noutputs = 1;
+    constexpr int ntargets = 0;
+    TF_Tensor* output_tensors[1] = {output_tensor_vector[0].get()};
+    TF_Tensor* const input_tensors[1] = {input_tensor_vector[0].get()};
+
+    std::cerr << "inf starting" << std::endl;
+    for (int i = 0; i < FLAGS_num_repeat; ++i) {
+      TF_SessionRun(p_session.get(), run_options,
+                    // Input tensors
+                    &tf_output_in, input_tensors, ninputs,
+                    // Output tensors
+                    &tf_output_out, output_tensors, noutputs,
+                    // Target operations
+                    nullptr, ntargets,
+                    // RunMetadata
+                    nullptr,  // only valid run_metadata value
+                    p_status.get());
+      ASSERT(p_status != nullptr, "Inference Failure %s", TF_Message(p_status.get()));
+
+      // print out max prob and corresponding idx
+      const float* p_data = static_cast<const float*>(TF_TensorData(output_tensor_vector[0].get()));
+      float v_max = p_data[0];
+      int i_max = 0;
+      for (int i = 1; i < 1001; ++i) {
+        if (p_data[i] > v_max) {
+          v_max = p_data[i];
+          i_max = i;
+        }
+      }
+      std::cout << "Max value of " << v_max << " at " << i_max << std::endl;
+    }
+  }
+
+  return 0;
+}

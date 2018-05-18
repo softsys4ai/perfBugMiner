@@ -1,0 +1,54 @@
+Please explain what is going on in tf.nn.raw_rnn function?
+
+I am trying to implement custom hidden state computation with a help of tf.nn.raw_rnn function. However, using the API example provided I am receiving a strange message:
+<tensorflow.python.util.tf_should_use._add_should_use_warning.<locals>.TFShouldUseWarningWrapper at 0x7f80ac138dd8>
+
+
+What I want to do is the following:
+                    |--   hidden recurrent layer   --|
+[10 x 32 x 100] --> LSTM cell [200] + Linear [200 x 1] --> [10 x 32 x 1]
+
+Here is my implementation, well basically it is the example from official docs:
+   outputs, state = self._get_raw_rnn_graph(inputs, config, is_training)
+
+   def _get_raw_rnn_graph(self, inputs, config, is_training):
+        time = tf.constant(0, dtype=tf.int32)
+        # define placeholders
+        #_inputs = tf.placeholder(shape=(config.num_steps, config.batch_size, config.input_size),
+        #                         dtype=tf.float32)
+        #_batch_len = tf.placeholder(shape=(config.batch_size,), dtype=tf.int32)
+        _inputs_ta = tf.TensorArray(dtype=tf.float32, size=config.num_steps, name="TA")
+        _inputs_ta = _inputs_ta.unstack(inputs)  # <-- throws a warning 
+
+        # create simple LSTM cell
+        cell = tf.contrib.rnn.LSTMCell(config.hidden_size)
+
+        # create loop_fn for raw_rnn
+        def loop_fn(time, cell_output, cell_state, loop_state):
+            emit_output = cell_output  # == None if time = 0
+
+            if cell_output is None:  # time = 0
+                next_cell_state = cell.zero_state(config.batch_size, tf.float32)
+                self._initial_state = next_cell_state
+            else:
+                next_cell_state = cell_state
+
+            elements_finished = (time >= config.num_steps)
+            finished = tf.reduce_all(elements_finished)
+            next_input = tf.cond(finished,
+                                 lambda: tf.zeros([config.batch_size, config.input_size],
+                                                   dtype=tf.float32),
+                                 lambda: _inputs_ta.read(time))
+
+            # apply linear + sig transform here
+            print("before lin+sig", next_input)
+            next_input = self._linear_transform(next_input)  # [32, 200] --> [32, 1]
+            print("after lin+sig", next_input)
+
+            next_loop_state = None
+            return (elements_finished, next_input, next_cell_state, emit_output, next_loop_state)
+
+        outputs_ta, final_state, _ = tf.nn.raw_rnn(cell, loop_fn)
+        outputs = outputs_ta.stack()
+        return outputs, final_state
+The line _inputs_ta = _inputs_ta.unstack(inputs) causes the message above and I wonder if this is actually a bug or am I doing something wrong completely. The end result is that I am not getting the correct output shape because the next_input comes as [32, 100] into my linear transform function as if LSTM cell was never applied to it. Please clarify whether raw_rnn is usable under Tensorflow 1.5.0.

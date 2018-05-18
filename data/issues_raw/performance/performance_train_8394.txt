@@ -1,0 +1,52 @@
+Protobufs are into multiple shared libraries loaded from python
+
+Issue description
+Tensorflow currently fails with the following error if compiled using clang in -c opt mode when trying to import tensorflow.contrib package in Python .
+Python code reproducing the problem is very simple:
+import tensorflow.contrib
+
+Program output:
+[libprotobuf ERROR external/protobuf/src/google/protobuf/descriptor_database.cc:57] File already exists in database: tensorflow/core/example/example.proto
+[libprotobuf FATAL external/protobuf/src/google/protobuf/descriptor.cc:1275] CHECK failed: generated_database_->Add(encoded_file_descriptor, size): 
+terminate called after throwing an instance of 'google::protobuf::FatalException'
+  what():  CHECK failed: generated_database_->Add(encoded_file_descriptor, size): 
+
+The short story is that protobufs are getting statically linked into two shared libraries, both of which get loaded at runtime and that causes the error.
+Here's the full breakdown of what happens:
+
+Protobufs (//tensorflow/core:protos_all_cc) get compiled as a static library.
+Protobufs (//tensorflow/core:protos_all_cc) get statically linked into two separate shared libraries: _pywrap_tensorflow_internal.so and _pywrap_tensorflow_print_model_analysis_lib.so.
+While compiling those clang inlines the protobuf initialization code(AddDescriptors) inside example.pb.cc(look for it in bazel-genfiles)  to the global initialization code of both shared libraries.
+python run.py starts running. While processing python's import statement, dynamic linker gets called to load _pywrap_tensorflow_internal.so. Static initialization code inside example.pb.cc is run, registering it to the protobuf database of _pywrap_tensorflow_internal.so
+At a later point _pywrap_tensorflow_print_model_analysis_lib.so gets loaded. Since python calls dlopen with RTLD_GLOBAL dynamic linker finds an existing symbols for AddDescriptorsImpl in _pywrap_tensorflow_internal.so and uses that for all calls to that function later(for calls coming from _pywrap_tensorflow_print_model_analysis_lib.so too).
+Static initialization code inside example.pb.cc is run again (for _pywrap_tensorflow_print_model_analysis_lib.so), it calls AddDescriptorsImpl and gets into the function from _pywrap_tensorflow_internal.so, which tries to registers the same file again in the protobuf database of _pywrap_tensorflow_internal.so leading to the specified error.
+
+Here are a few observations that may be interesting:
+
+It works with gcc, because gcc doesn't inline AddDescriptors to the global initialization code of libraries, then dynamic linker merges those two functions into one, and that function has a proper check for being called multiple times(AddDescriptorsImpl, which is getting called after inlining doesn't). But note that it may break too if gcc will start inlining AddDescriptors in a newer version.
+It works on Mac, because dynamic linker there doesn't merge corresponding functions into one. Note that it means we get multiple protobuf databases(one for each loaded shared library that has protobufs in it) and can probably lead to other problems.
+
+Environment info
+Operating System: ubuntu 14.04
+Installed version of CUDA and cuDNN: none
+
+The commit hash (git rev-parse HEAD)
+ff9682b5f493ae7ad912da29789668dbf50d5e1f
+The output of bazel version
+Build label: 0.4.4 Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar Build time: Wed Feb 1 18:54:21 2017 (1485975261) Build timestamp: 1485975261 Build timestamp as int: 1485975261
+
+Repro
+
+Extract test.zip to the repository root(it's a sample python target that fails)
+Make sure clang is installed. My version is 3.8.0-2ubuntu3~trusty4, but that shouldn't matter.
+Configure with
+
+export CC=/usr/bin/clang
+TF_NEED_JEMALLOC=1 TF_NEED_GCP=0 TF_NEED_HDFS=0 \
+TF_ENABLE_XLA=0 TF_NEED_OPENCL=0 TF_NEED_CUDA=0 \
+yes ""  | ./configure
+
+
+Build and run with opt
+
+bazel run -c opt //test:run

@@ -1,0 +1,118 @@
+i not understand what matter is my code about beamsearchdecoder
+
+decoder_cell=[]
+for _ in range(n_layers):
+decoder_c=tf.nn.rnn_cell.BasicLSTMCell(num_units)
+if train_state:
+decoder_c=tf.contrib.rnn.DropoutWrapper(decoder_c,input_keep_prob)
+decoder_cell.append(decoder_c)
+decoder_cell=tf.nn.rnn_cell.MultiRNNCell(decoder_cell,state_is_tuple=True)
+attention_mechanism=tf.contrib.seq2seq.BahdanauAttention(num_units,encoder_outputs)
+attention_cell=tf.contrib.seq2seq.AttentionWrapper(decoder_cell,attention_mechanism)
+helper=tf.contrib.seq2seq.TrainingHelper(decoder_embedded,decoder_length)
+initial_state=attention_cell.zero_state(dtype=tf.float32,batch_size=50)
+initial_state=initial_state.clone(cell_state=encoder_state)
+training_decoder=tf.contrib.seq2seq.BasicDecoder(attention_cell,helper,
+initial_state,
+output_layer=None)
+train_decoder_outputs,train_decoder_state,_=tf.contrib.seq2seq.dynamic_decode(training_decoder)
+start_tokens=tf.placeholder(dtype=tf.int32,shape=[None])
+end_token=tf.placeholder(dtype=tf.int32,shape=[])
+tiled_encoder_outputs=tf.contrib.seq2seq.tile_batch(encoder_outputs,multiplier=beam_width)
+tiled_encoder_state=tf.contrib.seq2seq.tile_batch(encoder_state,multiplier=beam_width)
+tiled_sequence_length=tf.contrib.seq2seq.tile_batch(encoder_length,multiplier=beam_width)
+attention_mechanism=tf.contrib.seq2seq.BahdanauAttention(num_units,tiled_encoder_state[-1][0])
+attention_cell=tf.contrib.seq2seq.AttentionWrapper(decoder_cell,attention_mechanism)
+initial_state=attention_cell.zero_state(dtype=tf.float32,batch_size=50*beam_width)
+initial_state=initial_state.clone(cell_state=tiled_encoder_state)
+predicting_decoder=tf.contrib.seq2seq.BeamSearchDecoder(attention_cell,
+embeddings,
+start_tokens,
+end_token,
+initial_state=initial_state,
+beam_width=beam_width,
+output_layer=None)
+predict_decoder_ouputs,,=tf.contrib.seq2seq.dynamic_decode(predicting_decoder)
+
+ndexError                                Traceback (most recent call last)
+ in ()
+----> 1 predict_decoder_ouputs,,=tf.contrib.seq2seq.dynamic_decode(predicting_decoder)
+~/anaconda3/lib/python3.6/site-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py in dynamic_decode(decoder, output_time_major, impute_finished, maximum_iterations, parallel_iterations, swap_memory, scope)
+284         ],
+285         parallel_iterations=parallel_iterations,
+--> 286         swap_memory=swap_memory)
+287
+288     final_outputs_ta = res[1]
+~/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py in while_loop(cond, body, loop_vars, shape_invariants, parallel_iterations, back_prop, swap_memory, name)
+2814     loop_context = WhileContext(parallel_iterations, back_prop, swap_memory)  # pylint: disable=redefined-outer-name
+2815     ops.add_to_collection(ops.GraphKeys.WHILE_CONTEXT, loop_context)
+-> 2816     result = loop_context.BuildLoop(cond, body, loop_vars, shape_invariants)
+2817     return result
+2818
+~/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py in BuildLoop(self, pred, body, loop_vars, shape_invariants)
+2638       self.Enter()
+2639       original_body_result, exit_vars = self._BuildLoop(
+-> 2640           pred, body, original_loop_vars, loop_vars, shape_invariants)
+2641     finally:
+2642       self.Exit()
+~/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py in _BuildLoop(self, pred, body, original_loop_vars, loop_vars, shape_invariants)
+2588         structure=original_loop_vars,
+2589         flat_sequence=vars_for_body_with_tensor_arrays)
+-> 2590     body_result = body(*packed_vars_for_body)
+2591     if not nest.is_sequence(body_result):
+2592       body_result = [body_result]
+~/anaconda3/lib/python3.6/site-packages/tensorflow/contrib/seq2seq/python/ops/decoder.py in body(time, outputs_ta, state, inputs, finished, sequence_lengths)
+232       """
+233       (next_outputs, decoder_state, next_inputs,
+--> 234        decoder_finished) = decoder.step(time, inputs, state)
+235       next_finished = math_ops.logical_or(decoder_finished, finished)
+236       if maximum_iterations is not None:
+~/anaconda3/lib/python3.6/site-packages/tensorflow/contrib/seq2seq/python/ops/beam_search_decoder.py in step(self, time, inputs, state, name)
+456           self._maybe_merge_batch_beams,
+457           cell_state, self._cell.state_size)
+--> 458       cell_outputs, next_cell_state = self._cell(inputs, cell_state)
+459       cell_outputs = nest.map_structure(
+460           lambda out: self._split_batch_beams(out, out.shape[1:]), cell_outputs)
+~/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/rnn_cell_impl.py in call(self, inputs, state, scope)
+181       with vs.variable_scope(vs.get_variable_scope(),
+182                              custom_getter=self._rnn_get_variable):
+--> 183         return super(RNNCell, self).call(inputs, state)
+184
+185   def _rnn_get_variable(self, getter, *args, **kwargs):
+~/anaconda3/lib/python3.6/site-packages/tensorflow/python/layers/base.py in call(self, inputs, *args, **kwargs)
+573         if in_graph_mode:
+574           self._assert_input_compatibility(inputs)
+--> 575         outputs = self.call(inputs, *args, **kwargs)
+576
+577         if outputs is None:
+~/anaconda3/lib/python3.6/site-packages/tensorflow/contrib/seq2seq/python/ops/attention_wrapper.py in call(self, inputs, state)
+1322       attention, alignments = _compute_attention(
+1323           attention_mechanism, cell_output, previous_alignments[i],
+-> 1324           self._attention_layers[i] if self._attention_layers else None)
+1325       alignment_history = previous_alignment_history[i].write(
+1326           state.time, alignments) if self._alignment_history else ()
+~/anaconda3/lib/python3.6/site-packages/tensorflow/contrib/seq2seq/python/ops/attention_wrapper.py in _compute_attention(attention_mechanism, cell_output, previous_alignments, attention_layer)
+971   """Computes the attention and alignments for a given attention_mechanism."""
+972   alignments = attention_mechanism(
+--> 973       cell_output, previous_alignments=previous_alignments)
+974
+975   # Reshape from [batch_size, memory_time] to [batch_size, 1, memory_time]
+~/anaconda3/lib/python3.6/site-packages/tensorflow/contrib/seq2seq/python/ops/attention_wrapper.py in call(self, query, previous_alignments)
+531     with variable_scope.variable_scope(None, "bahdanau_attention", [query]):
+532       processed_query = self.query_layer(query) if self.query_layer else query
+--> 533       score = _bahdanau_score(processed_query, self._keys, self._normalize)
+534     alignments = self._probability_fn(score, previous_alignments)
+535     return alignments
+~/anaconda3/lib/python3.6/site-packages/tensorflow/contrib/seq2seq/python/ops/attention_wrapper.py in _bahdanau_score(processed_query, keys, normalize)
+425   dtype = processed_query.dtype
+426   # Get the number of hidden units from the trailing dimension of keys
+--> 427   num_units = keys.shape[2].value or array_ops.shape(keys)[2]
+428   # Reshape from [batch_size, ...] to [batch_size, 1, ...] for broadcasting.
+429   processed_query = array_ops.expand_dims(processed_query, 1)
+~/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/tensor_shape.py in getitem(self, key)
+519         return TensorShape(self._dims[key])
+520       else:
+--> 521         return self._dims[key]
+522     else:
+523       if isinstance(key, slice):
+IndexError: list index out of range

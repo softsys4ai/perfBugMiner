@@ -1,0 +1,45 @@
+tf.contrib.data.Iterator - Continue from dataset with reinitializable iterator.
+
+I'd like to request the following feature. In TF 1.3.0rc0 and probably before the reinitializable iterator can be used to switch between dataset sources as shown here. This is great for switching between train and test data, but has a nasty side-effect: when reinitializing the iterator the iteration starts from the beginning of the dataset. Therefore, switching the dataset between epoch (i.e do a validation run every 100 iterations or so) causes the epoch to never finish. Moreover, training will only ever use the first 100 batches (except you have a huge shuffle buffer size) of the dataset.
+The following illustrates the problem
+import tensorflow as tf
+
+a = tf.contrib.data.Dataset.range(50)
+b = tf.contrib.data.Dataset.range(50)
+
+iterator = tf.contrib.data.Iterator.from_structure(a.output_types, a.output_shapes)
+next_element = iterator.get_next()
+
+a_init_op = iterator.make_initializer(a)
+b_init_op = iterator.make_initializer(b)
+
+sess = tf.Session()
+sess.run(a_init_op)
+sess.run(next_element) 
+# 0
+sess.run(next_element) 
+# 1
+
+sess.run(b_init_op)
+sess.run(next_element) 
+sess.run(next_element) 
+
+sess.run(a_init_op)
+sess.run(next_element) 
+# 0  <- rather expect 2
+sess.run(next_element) 
+# 1 <- rather expect 3
+I'd like to request a reinitializable iterator that maintains the state of the dataset and continues from where it left off. Something along the lines
+# ... Same as above
+
+a_init_op, a_continue_op = iterator.make_initializer(a)
+
+sess = tf.Session()
+sess.run(a_init_op)
+sess.run(next_element) # 0
+
+sess.run(b_init_op)
+sess.run(next_element) 
+
+sess.run(a_continue_op)
+sess.run(next_element) # 1

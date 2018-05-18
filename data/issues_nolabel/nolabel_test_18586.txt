@@ -1,0 +1,83 @@
+tf.train.batch does not work with tf.uint32 and tf.uint64 data types
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): MacOS
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): 1.7.0
+Python version: 3.6
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:
+
+import tensorflow as tf
+
+values = tf.constant([0, 1, 2, 3, 4], dtype=tf.uint64)
+batch = tf.train.batch(
+    [values],
+    batch_size=2,
+    num_threads=1,
+    enqueue_many=True,
+)
+
+with tf.Session() as sess:
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+    print(sess.run(batch))
+
+    coord.request_stop()
+    coord.join(threads)
+
+Describe the problem
+tf.train.batch does not work on tensors with types uint32 or uint64. It works with all other primitive types. The source of this issue can be traced back to CopyElementToSlice which calls TF_CALL_ALL_TYPES
+
+  
+    
+      tensorflow/tensorflow/core/kernels/batch_util.cc
+    
+    
+         Line 94
+      in
+      3128b43
+    
+    
+    
+    
+
+        
+          
+           Status CopyElementToSlice(Tensor element, Tensor* parent, int64 index) { 
+        
+    
+  
+
+
+This TF_CALL_ALL_TYPES macro eventually calls into TF_CALL_INTEGRAL_TYPES
+
+  
+    
+      tensorflow/tensorflow/core/framework/register_types.h
+    
+    
+         Line 154
+      in
+      3128b43
+    
+    
+    
+    
+
+        
+          
+           #define TF_CALL_INTEGRAL_TYPES(m)                                      \ 
+        
+    
+  
+
+
+This macro includes int8, uint8, int16, uint16, int32, and int64 but does not include uint32 or uint64
+The change to support these types appears to be simple, but since TF_CALL_ALL_TYPES is a high-level macro, I did not know if these data types were purposefully excluded.

@@ -1,0 +1,88 @@
+Issues running TensorFlow module in a Python sub-interpreter
+
+I'm using the tensorflow Python module in a custom C++ application, by instantiating the Python interpreter and then running Python code that imports tensorflow.
+The Python code is run in a sub-interpreter (created using Py_NewInterpreter). This works fine the first time around, but when I end the sub-interpreter and create a second one, the call to 'import tensorflow' fails with the exception shown below. Looks like the TensorFlow module is either not being cleaned up properly when it de-initializes, and/or it has some global state that is shared between multiple interpreters? In particular it looks it tries to load a shared object that has already been loaded.
+Is there a way to fix this and to make TensorFlow compatible with Python sub-interpreters, or is this just the tip of the iceberg and more issues would pop up once this particular one is resolved?
+Thanks!
+Peter
+--- C++ code to reproduce the problem:
+#include <cassert>
+#include <python/Python.h>
+
+// set this to the folder containing a virtual env with TensorFlow:
+static char g_pythonHome[] = "/Users/peter/tf101";
+
+void create_sub_interpreter_import_tensorflow()
+{
+    // acquire global interpreter lock and create new sub-interpreter:
+    PyEval_AcquireLock();
+    PyThreadState* pThreadState = Py_NewInterpreter();
+    assert(pThreadState);
+
+    // set sys.argv because TensorFlow needs it:
+    int ret = PyRun_SimpleString("import sys\n"
+                                 "sys.argv = ['']\n");
+    assert(ret == 0);
+
+    // import TensorFlow, say hello.
+    // !!! this fails when it is called the second time:
+    ret = PyRun_SimpleString("import tensorflow\n"
+                             "print 'hello world'\n");
+    assert(ret == 0);
+
+    // end sub-interpreter and release global interpreter lock:
+    Py_EndInterpreter(pThreadState);
+    PyEval_ReleaseLock();
+}
+
+int main(int argc, const char * argv[]) {
+    // set Python home to a virtual env containing TensorFlow:
+    Py_SetPythonHome(g_pythonHome);
+
+    // initialise Python and threads:
+    Py_Initialize();
+    PyEval_InitThreads();
+
+    // store current thread state, release global interpreter lock:
+    PyThreadState* pMainThreadState = PyEval_SaveThread();
+    assert(pMainThreadState);
+
+    create_sub_interpreter_import_tensorflow();
+    create_sub_interpreter_import_tensorflow();
+
+    // acquire global interpreter lock, restore main thread state, finalize Python:
+    PyEval_RestoreThread(pMainThreadState);
+    Py_Finalize();
+
+    return 0;
+}
+
+--- Python error message:
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/Users/peter/tf101/lib/python2.7/site-packages/tensorflow/__init__.py", line 23, in <module>
+    from tensorflow.python import *
+  File "/Users/peter/tf101/lib/python2.7/site-packages/tensorflow/python/__init__.py", line 65, in <module>
+    import tensorflow.contrib as contrib
+  File "/Users/peter/tf101/lib/python2.7/site-packages/tensorflow/contrib/__init__.py", line 26, in <module>
+    from tensorflow.contrib import grid_rnn
+  File "/Users/peter/tf101/lib/python2.7/site-packages/tensorflow/contrib/grid_rnn/__init__.py", line 27, in <module>
+    from tensorflow.contrib.grid_rnn.python.ops.grid_rnn_cell import *
+  File "/Users/peter/tf101/lib/python2.7/site-packages/tensorflow/contrib/grid_rnn/python/ops/grid_rnn_cell.py", line 28, in <module>
+    from tensorflow.contrib import layers
+  File "/Users/peter/tf101/lib/python2.7/site-packages/tensorflow/contrib/layers/__init__.py", line 77, in <module>
+    from tensorflow.contrib.layers.python.layers import *
+  File "/Users/peter/tf101/lib/python2.7/site-packages/tensorflow/contrib/layers/python/layers/__init__.py", line 22, in <module>
+    from tensorflow.contrib.layers.python.layers.feature_column import *
+  File "/Users/peter/tf101/lib/python2.7/site-packages/tensorflow/contrib/layers/python/layers/feature_column.py", line 79, in <module>
+    from tensorflow.contrib.layers.python.ops import bucketization_op
+  File "/Users/peter/tf101/lib/python2.7/site-packages/tensorflow/contrib/layers/python/ops/bucketization_op.py", line 25, in <module>
+    resource_loader.get_path_to_datafile("_bucketization_op.so"))
+  File "/Users/peter/tf101/lib/python2.7/site-packages/tensorflow/python/framework/load_library.py", line 71, in load_op_library
+    raise errors._make_specific_exception(None, None, error_msg, error_code)
+tensorflow.python.framework.errors.AlreadyExistsError: /Users/peter/tf101/lib/python2.7/site-packages/tensorflow/contrib/layers/python/ops/_bucketization_op.so has already been loaded
+
+--- Environment:
+OS: OSX El Capitan (10.11.5)
+tensorflow version: 0.9.0
+installed using: pip install --upgrade https://storage.googleapis.com/tensorflow/mac/tensorflow-0.9.0-py2-none-any.whl

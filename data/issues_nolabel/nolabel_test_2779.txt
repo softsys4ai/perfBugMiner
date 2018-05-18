@@ -1,0 +1,57 @@
+dynamic_rnn execution with EmbeddingWrapper
+
+Hi Guys,
+I'm currently working on a sequence to sequence model for sequences with variable length. Instead of using buckets (like in the example of seq2seq) I used the rnn.dynamic_rnn function. But when I use an EmbeddingWrapper around my RNNCell I'll get exceptions because of two reasons:
+
+EmbeddingWrapper doesn't implement the derived property def output_size(self): (used in the function dynamic_rnn)
+Since I want to use word embeddings and dynamic_rnn, my input has the datatype tf.int32 (like in the seq2seq example) and shape (batch_size, n_steps, 1). But then I get following error:
+
+
+ValueError: Tensor conversion requested dtype int32 for Tensor with dtype float32: 'Tensor("RNN/while/BasicRNNCell/Tanh:0", shape=(3, 4), dtype=float32)'
+
+Since I'm new to tensorflow I don't know whats the best way to fix this issue. However, If I change the datatype of the input to tf.float32 and the modify EmbeddingWrapper class as follows it works.
+class EmbeddingWrapper(RNNCell):
+    if not isinstance(cell, RNNCell):
+      raise TypeError("The parameter cell is not RNNCell.")
+    if embedding_classes <= 0 or embedding_size <= 0:
+      raise ValueError("Both embedding_classes and embedding_size must be > 0: "
+                       "%d, %d." % (embedding_classes, embedding_size))
+    self._cell = cell
+    self._embedding_classes = embedding_classes
+    self._embedding_size = embedding_size
+    self._initializer = initializer
+
+  @property
+  def state_size(self):
+    return self._cell.state_size
+
+  @property
+  def output_size(self):
+    return self._cell.output_size
+
+  def __call__(self, inputs, state, scope=None):
+    inputs = tf.cast(inputs, tf.int32) # <<<< if I cast the input (tf.float32) to tf.int32 it works
+
+    with vs.variable_scope(scope or type(self).__name__):  # "EmbeddingWrapper"
+      with ops.device("/cpu:0"):
+        if self._initializer:
+          initializer = self._initializer
+        elif vs.get_variable_scope().initializer:
+          initializer = vs.get_variable_scope().initializer
+        else:
+          # Default initializer for embeddings should have variance=1.
+          sqrt3 = math.sqrt(3)  # Uniform(-sqrt(3), sqrt(3)) has variance=1.
+          initializer = init_ops.random_uniform_initializer(-sqrt3, sqrt3)
+        embedding = vs.get_variable("embedding", [self._embedding_classes,
+                                                  self._embedding_size],
+                                    initializer=initializer)
+        embedded = embedding_ops.embedding_lookup(
+            embedding, array_ops.reshape(inputs, [-1]))
+    return self._cell(embedded, state)
+
+I attached a simple working example: simplernn.txt
+My Environment:
+
+Ubuntu 16.04, installed tensorflow 0.9rc0 over pip, python 3.5.1
+
+Thanks in advance!

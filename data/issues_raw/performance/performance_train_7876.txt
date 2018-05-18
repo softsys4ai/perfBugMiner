@@ -1,0 +1,49 @@
+Import meta graph followed by save overwrites the previous checkpoints
+
+NOTE: Only file GitHub issues for bugs and feature requests.  All other topics will be closed.
+For general support from the community, see StackOverflow.
+To make bugs and feature requests more easy to find and organize, we close issues that are deemed
+out of scope for GitHub Issues and point people to StackOverflow.
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Environment info
+Operating System: Ubuntu 14.04
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*): using CPU version of tensorflow 1.0.0
+If installed from binary pip package, provide:
+
+A link to the pip package you installed: pip install tensorflow
+The output from python -c "import tensorflow; print(tensorflow.__version__)". 1.0.0
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+The output of bazel version
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+
+graph = tf.Graph()
+with graph.as_default():
+    initializer = tf.random_uniform_initializer(minval=-0.5, maxval=0.5, seed=42, dtype=tf.float32)
+    var1 = tf.get_variable('var1', shape=(1,), dtype=tf.float32, initializer=initializer)
+    saver = tf.train.Saver(tf.trainable_variables(), max_to_keep=20)
+    init_op = tf.global_variables_initializer()
+    graph.finalize()
+
+with tf.Session(graph=graph) as sess:
+    sess.run(init_op)
+    saver.save(sess, 'sample_graph', global_step=0)
+
+graph = tf.Graph()
+with tf.Session(graph=graph) as sess:
+    saver = tf.train.import_meta_graph('sample_graph-0.meta')
+    saver.restore(sess, './sample_graph-0')
+    saver.save(sess, 'sample_graph', global_step=1)
+    print(saver.last_checkpoints) # lists only ['sample_graph-1'] does not preserve the previous checkpoint sample_graph-0
+Essentially I am checkpointing a graph and then importing it. On trying to save the next checkpoint, the saver overwrites the previous checkpoint in the checkpoint file (the actual meta, index and data files are not overwritten) and only the last saved checkpoint is present in the checkpoint file. Is this the intended behavior? Is there any way to preserve the checkpoints across multiple saves of the graph.
+What other attempted solutions have you tried?
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).

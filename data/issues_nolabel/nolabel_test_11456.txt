@@ -1,0 +1,39 @@
+GPU-Isolated docker containers fail in a distributed training with more than one worker.
+
+System information
+
+Have I written custom code: Yes
+OS Platform and Distribution: Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): No
+TensorFlow version: v1.2.0-rc2-21-g12f033d 1.2.0
+Python version: Python 3.5.2
+Bazel version: -
+CUDA/cuDNN version: 'CUDA_VERSION': '8.0.61' / 'CUDNN_VERSION': '5.1.10'
+GPU model and memory: 8x GCE K80 Tesla
+
+Context:
+
+
+I have created a Cloud Compute Engine instance with 8 GPUs.
+
+
+I have started a couple of GPU-isolated containers with intention to run each as a separate worker:
+sudo NV_GPU=0 nvidia-docker run -it --name tf_worker_0 -p 8000:8000 -v /$(pwd)/repo:/notebooks/repo gcr.io/tensorflow/tensorflow:latest-gpu-py3 /bin/bash
+
+
+To create a loopback to the host I run following:
+echo $(netstat -nr | grep '^0\.0\.0\.0' | awk '{print $2}') dockerhost >> /etc/hosts
+Through dockerhost it properly detects and pings all the open ports on the host including processes running in other containers that are exposed with -p hostport:containerport.
+
+
+Problem:
+Case 1 - Normal: When I run a distributed TensorFlow script using dockerhost with only one worker and any number of ps servers (e.g.  --ps_hosts=dockerhost:7000,dockerhost:7001 --worker_hosts=dockerhost:8000) everything works as intended - local grcp servers are launched, worker and ps communicate well.
+Case 2 - Issue: When I increase the number of worker jobs (e.g.  --worker_hosts=dockerhost:8000,dockerhost:8001) i get Master init: Unavailable and Master init: Internal Errors.
+Case 3 - Normal: BTW, everything works smoothly when I run all the workers inside a single container isolating GPUs with CUDA_VISIBLE_DEVICES.
+Case 4 - Issue: Also, it is worth mentioning here, that using queues solution to shutdown ps proposed in #4713 fails in both Case 1 and Case 2. This results in immediate tensorflow.python.framework.errors_impl.UnavailableError when starting ps.
+Statement:
+Is this an intended behaviour? Or does such setting is insufficient for a distributed training and a special master server or a cluster manager is needed? It just seems interesting that it would work for one worker but not for more.
+Reproducible Toy Example:
+repr.txt
+Log:
+worker_log.txt

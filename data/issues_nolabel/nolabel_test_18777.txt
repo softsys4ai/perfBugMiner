@@ -1,0 +1,59 @@
+GraphDef not ok for the TensorRT API but ok for the TensorFlow iteslf
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.7.0
+Python version: Python 3.5
+Bazel version (if compiling from source): 0.11.1
+GCC/Compiler version (if compiling from source): 5.4.0-6ubuntu1~16.04.9
+CUDA/cuDNN version: 9.0 / 7.0.5
+GPU model and memory: GTX 1070, 8Gb
+
+Describe the problem
+I'm trying to convert Keras model (MobileNet or Xception) to TensorRT engine using TensorFlow API.
+First, I'm getting graph from K.session() and appropriate GraphDef.
+Second, I'm freeze it with convert_variables_to_constants.
+Then, I'm able to make predictions using TensorFlow. But when I submit it to the the create_inference_graph, it complaints to bad dimensions:
+2018-04-22 20:13:17.560097: W tensorflow/contrib/tensorrt/convert/convert_graph.cc:412] subgraph conversion error for subgraph_index:47 due to: "Unimplemented: Not supported constant type, at conv_pw_4_bn/Const_5" SKIPPING......( 7 nodes)
+2018-04-22 20:13:17.563078: W tensorflow/contrib/tensorrt/convert/convert_graph.cc:412] subgraph conversion error for subgraph_index:48 due to: "Unimplemented: Not supported constant type, at conv_pw_1_bn/Const_5" SKIPPING......( 7 nodes)
+2018-04-22 20:13:17.565057: W tensorflow/contrib/tensorrt/convert/convert_graph.cc:412] subgraph conversion error for subgraph_index:49 due to: "Unimplemented: Not supported constant type, at conv_dw_1_bn/Const_5" SKIPPING......( 7 nodes)
+2018-04-22 20:13:17.567257: W tensorflow/contrib/tensorrt/convert/convert_graph.cc:412] subgraph conversion error for subgraph_index:50 due to: "Unimplemented: Not supported constant type, at conv_dw_12_bn/Const_5" SKIPPING......( 7 nodes)
+2018-04-22 20:13:17.569343: W tensorflow/contrib/tensorrt/convert/convert_graph.cc:412] subgraph conversion error for subgraph_index:51 due to: "Unimplemented: Not supported constant type, at conv_dw_7_bn/Const_5" SKIPPING......( 7 nodes)
+2018-04-22 20:13:17.571571: W tensorflow/contrib/tensorrt/convert/convert_graph.cc:412] subgraph conversion error for subgraph_index:52 due to: "Unimplemented: Not supported constant type, at conv_pw_10_bn/Const_5" SKIPPING......( 7 nodes)
+2018-04-22 20:13:17.573851: W tensorflow/contrib/tensorrt/convert/convert_graph.cc:412] subgraph conversion error for subgraph_index:53 due to: "Unimplemented: Require 4 dimensional input. Got 1 conv_dw_6_bn/cond/batchnorm/add/Switch" SKIPPING......( 6 nodes)
+
+as many times as there are such */Switch nodes. Digging deeper, I found such strange design in the graph's GraphDef:
+tensor_shape {
+  dim {
+  }
+}
+
+within some (not all) nodes of type Const, e.g.
+node {
+  name: "conv_pw_8_bn/Const_5"
+  op: "Const"
+  attr {
+    key: "dtype"
+    value {
+      type: DT_FLOAT
+    }
+  }
+  attr {
+    key: "value"
+    value {
+      tensor {
+        dtype: DT_FLOAT
+        tensor_shape {
+          dim {
+          }
+        }
+      }
+    }
+  }
+}
+
+All such nodes are mentioned in the traceback.
+So, it's ok for TensorFlow itself but wrong for the TensorRT. I gues there is an error either in GraphDef generation or while parsing for TensorRT.

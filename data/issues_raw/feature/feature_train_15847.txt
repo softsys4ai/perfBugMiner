@@ -1,0 +1,65 @@
+Reinitializing an iterator throws an OutOfRangeError when using a MonitoredSession with NanTensorHook
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 10
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+1.4.0
+Python version:
+3.5.4
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+edit: none, using CPU only
+GPU model and memory:
+Exact command to reproduce:
+See below under source code
+
+Describe the problem
+When using a Monitored Training Session with a NanTensorHook and an Iterator from a Dataset, reinitializing the Iterator causes an OutOfRangeError.
+This is likely because the NanTensorHook adds the loss value to the SessionRunArgs, but the evaluation of the loss-value then fails since no more data are available from the iterator.
+Ideally, there should be a way to reinitialize the iterator without the hooks beeing executed.
+Source code / logs
+example code to reproduce the problem
+import tensorflow as tf
+
+dataset = tf.data.Dataset.range(100)
+dataset = dataset.map(lambda x: (0, x))
+dataset = dataset.batch(64)
+iterator = dataset.make_initializable_iterator()
+(label, element) = iterator.get_next()
+
+# pseudo loss for the NanTensorHook
+loss = tf.reduce_mean(1 - label)
+
+global_step = tf.train.get_or_create_global_step()
+scaffold = tf.train.Scaffold(local_init_op=iterator.initializer)
+
+with tf.train.MonitoredTrainingSession(
+        scaffold=scaffold,
+        hooks=[tf.train.NanTensorHook(loss_tensor=loss)]) as sess:
+    # Compute for 5 epochs.
+    for epoch in range(5):
+        print('epoch: ' + str(epoch))
+        try:
+            while not sess.should_stop():
+                sess.run(element)
+        except tf.errors.OutOfRangeError:
+            print('end')
+
+        if sess.should_stop():
+            break
+
+        # the following line silently fails, since an OutOfRangeError is thrown
+        sess.run(iterator.initializer)
+
+Removing the NanTensorHook or placing the sess.run(iterator.initializer) call inside an try-except-statement provides a workaround for this problem
+        try:
+            sess.run(iterator.initializer)
+        except tf.errors.OutOfRangeError:
+            print('Out of range errors occurs')

@@ -1,0 +1,46 @@
+Why tf.FIFOQueue didn't removed when using tf.reset_default_graph?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):  Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Pip
+TensorFlow version (use command below):  1.2.1
+Python version:  2.7
+Bazel version (if compiling from source): None
+CUDA/cuDNN version: None
+GPU model and memory: None
+Exact command to reproduce:
+
+Describe the problem
+I want to empty the entire session and grapth while every loop . But the FIFOQueue seems didn't  removed when I  using tf.reset_default_graph.
+So how to make everything clean in currrent process(without create a subprocess \ or change FIFO's name)?
+Source code / logs
+import tensorflow as tf
+
+cluster = tf.train.ClusterSpec({"ps": ["localhost:65062"], "worker": ["localhost:65063"]})
+ps = tf.train.Server(cluster, job_name="ps", task_index=0)
+worker = tf.train.Server(cluster, job_name="worker", task_index=0)
+
+while True:
+  print "begin a new job"
+
+  print("PS: {0}".format(ps.target))
+  print("Worker: {0}".format(worker.target))
+
+  with tf.Session(worker.target) as sess:
+    with tf.device("/job:ps/task:0"):
+        W = tf.Variable(tf.zeros([784, 10]))
+        b = tf.Variable(tf.zeros([10]))
+        file_queue = tf.FIFOQueue(10,
+                                     [tf.int32, tf.bool, tf.string, tf.string],
+                                     shared_name = 'global_queue')
+    init = tf.global_variables_initializer()
+    sess.run([init, file_queue.close()])
+
+  tf.reset_default_graph()
+  time.sleep(2)
+
+ERROR
+CancelledError (see above for traceback): Queue 'global_queue' is already closed.
+	 [[Node: fifo_queue_Close = QueueCloseV2[cancel_pending_enqueues=false, _device="/job:ps/replica:0/task:0/cpu:0"](fifo_queue)]]

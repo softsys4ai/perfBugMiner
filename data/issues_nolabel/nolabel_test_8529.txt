@@ -1,0 +1,224 @@
+Compile Tensorflow 1.0 with GPU on RHEL6 / SL6
+
+Dear all,
+i managed to compile Tensorflow 0.12.1 with GPU option few months ago on our computational grid based on SL6 but moving to version 1.0 is still an issue with trying to activate the GPU support.
+I tried to merge all the advise i could find here but still no success.
+So here is a summary:
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+This issue is actually close to the ones as #7118, #2109, #2413, etc.
+My compilation attempts always show similar error but dealing with different packages. Here is the last example:
+ERROR: /gpfs/MUST-SHARE/univ_home/alben/.cache/bazel/_bazel_alben/07a9bf809031fe756469f64b1512dee9/external/grpc/BUILD:71:1: undeclared inclusion(s) in rule '@grpc//:gpr': this rule is missing dependency declarations for the following files included by 'external/grpc/src/core/lib/support/thd_windows.c': '/opt/rh/devtoolset-4/root/usr/lib/gcc/x86_64-redhat-linux/5.3.1/include/stdint.h'. Target //tensorflow/tools/pip_package:build_pip_package failed to build INFO: Elapsed time: 20.467s, Critical Path: 9.90s
+Please note that Tensorflow compiles fine if GPU support is not activated. Then, i suspect a missing include option in third_party/gpus/crosstool/CROOSTOOL.tpl or third_party/gpus/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc.tpl since such options disappeared from version 0.12 such as cxx_builtin_include_directory: "/usr/local/cuda-8.0/include/"but i need some detailled information to fix it.
+Environment info
+Operating System:
+RedHat Scientific Linux 6 with kernel 2.6.32-642.13.1.el6.x86_64
+Regarding libc , gcc versions, i rely on the devtoolsets-4.
+Using the following gcc version:
+ gcc -v
+Using built-in specs.
+COLLECT_GCC=gcc
+COLLECT_LTO_WRAPPER=/var/opt/rh/devtoolset-4/root/usr/bin/../libexec/gcc/x86_64-redhat-linux/5.3.1/lto-wrapper
+Target: x86_64-redhat-linux
+Configured with: ../configure --enable-bootstrap --enable-languages=c,c++,fortran,lto --prefix=/opt/rh/devtoolset-4/root/usr --mandir=/opt/rh/devtoolset-4/root/usr/share/man --infodir=/opt/rh/devtoolset-4/root/usr/share/info --with-bugurl=http://bugzilla.redhat.com/bugzilla --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --enable-plugin --with-linker-hash-style=gnu --enable-initfini-array --disable-libgcj --with-default-libstdcxx-abi=gcc4-compatible --with-isl=/builddir/build/BUILD/gcc-5.3.1-20160406/obj-x86_64-redhat-linux/isl-install --enable-libmpx --with-mpc=/builddir/build/BUILD/gcc-5.3.1-20160406/obj-x86_64-redhat-linux/mpc-install --with-tune=generic --with-arch_32=i686 --build=x86_64-redhat-linux
+Thread model: posix
+gcc version 5.3.1 20160406 (Red Hat 5.3.1-6) (GCC) 
+
+Regarding system variables, here are the specific tunings:
+set path=(/univ_home/UNIVSOFT/COMMON/python/2.7.6/bin $path)
+set path=(/usr/local/cuda-8.0/bin $path)
+set path=(/uds_data/listic/install/bazel/output $path)
+set path=(/opt/rh/devtoolset-4/root/usr/bin $path)
+setenv CC /opt/rh/devtoolset-4/root/usr/bin/gcc
+
+setenv JAVA_HOME /usr/lib/jvm/java-1.8.0-openjdk-1.8.0.111-0.b15.el6_8.x86_64/
+setenv GRPC_JAVA_PLUGIN /gpfs/MUST-DATA/listic/install/grpc/protoc-gen-grpc-java-0.15.0-linux-x86_64.exe
+
+setenv CUDA_HOME /usr/local/cuda-8.0
+setenv INCLUDE_PATH /usr/local/cuda-8.0/include
+setenv LD_LIBRARY_PATH /usr/local/cuda-8.0/lib64:$LD_LIBRARY_PATH
+
+setenv LD_LIBRARY_PATH /gpfs/MUST-DATA/listic/install/caffe_must/cudnn_51/cuda/lib64:/usr/local/cuda-8.0/extras/CUPTI/lib64:/opt/rh/devtoolset-4/root/usr/lib:$LD_LIBRARY_PATH
+#set path=(/uds_data/listic/install/gcc/build6.2/bin $path)
+setenv EXTRA_BAZEL_ARGS '-s --verbose_failures --ignore_unsupported_sandboxing --genrule_strategy=standalone --spawn_strategy=standalone --jobs 8'
+
+
+
+Installed version of CUDA and cuDNN: Cuda 8.0 and CuDNN 5.1
+ls /usr/local/cuda-8.0/lib64/libcud*
+/usr/local/cuda-8.0/lib64/libcudadevrt.a
+/usr/local/cuda-8.0/lib64/libcudart.so
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0.44
+/usr/local/cuda-8.0/lib64/libcudart_static.a
+
+
+ls /univ_home/UNIVSOFT/COMMON/cudnn/lib64
+libcudnn.so  libcudnn.so.5  libcudnn.so.5.1.5  libcudnn_static.a  libm.so
+
+
+Tensorflow is being compiled from source
+
+The commit hash (git rev-parse HEAD)
+
+git rev-parse HEAD
+e895d5ca395c2362df4f5c8f08b68501b41f8a98
+
+
+The output of bazel version
+I actually tried with the following bazel versions : 0.4.3, 0.4.4 and 0.4.5 and always got the same errors.
+
+bazel version
+Build label: 0.4.3-2017-03-18 (@1d2fb1f)
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Sat Mar 18 15:58:41 2017 (1489852721)
+Build timestamp: 1489852721
+Build timestamp as int: 1489852721
+
+
+Here are my local code changes to target devtoolsets-4 compiling tools:
+git diff
+diff --git a/tensorflow/core/platform/default/build_config.bzl b/tensorflow/core
+index 48ef8df..be831d5 100644
+--- a/tensorflow/core/platform/default/build_config.bzl
++++ b/tensorflow/core/platform/default/build_config.bzl
+@@ -8,7 +8,7 @@ load("//tensorflow:tensorflow.bzl", "if_not_mobile")
+ WITH_GCP_SUPPORT = False
+ WITH_HDFS_SUPPORT = False
+ WITH_XLA_SUPPORT = False
+-WITH_JEMALLOC = True
++WITH_JEMALLOC = False
+ 
+ # Appends a suffix to a list of deps.
+ def tf_deps(deps, suffix):
+diff --git a/tensorflow/tensorflow.bzl b/tensorflow/tensorflow.bzl
+index 3788eed..fa5b670 100644
+--- a/tensorflow/tensorflow.bzl
++++ b/tensorflow/tensorflow.bzl
+@@ -751,7 +751,7 @@ def tf_custom_op_library(name, srcs=[], gpu_srcs=[], deps=[]
+   )
+ 
+ def tf_extension_linkopts():
+-  return []  # No extension link opts
++  return ["-lrt"]  # No extension link opts
+ 
+ def tf_extension_copts():
+   return []  # No extension c opts
+diff --git a/third_party/gpus/crosstool/CROSSTOOL.tpl b/third_party/gpus/crossto
+index b77a45c..746817f 100644
+--- a/third_party/gpus/crosstool/CROSSTOOL.tpl
++++ b/third_party/gpus/crosstool/CROSSTOOL.tpl
+@@ -42,10 +42,10 @@ toolchain {
+   target_system_name: "local"
+   toolchain_identifier: "local_linux"
+ 
+-  tool_path { name: "ar" path: "/usr/bin/ar" }
+-  tool_path { name: "compat-ld" path: "/usr/bin/ld" }
+-  tool_path { name: "cpp" path: "/usr/bin/cpp" }
+-  tool_path { name: "dwp" path: "/usr/bin/dwp" }
++  tool_path { name: "ar" path: "/opt/rh/devtoolset-4/root/usr/bin/ar" }
++  tool_path { name: "compat-ld" path: "/opt/rh/devtoolset-4/root/usr/bin/ld" }
++  tool_path { name: "cpp" path: "/opt/rh/devtoolset-4/root/usr/bin/cpp" }
++  tool_path { name: "dwp" path: "/opt/rh/devtoolset-4/root/usr/bin/dwp" }
+   # As part of the TensorFlow release, we place some cuda-related compilation
+   # files in @local_config_cuda//crosstool/clang/bin, and this relative
+   # path, combined with the rest of our Bazel configuration causes our
+@@ -56,21 +56,23 @@ toolchain {
+   cxx_flag: "-std=c++11"
+   linker_flag: "-Wl,-no-as-needed"
+   linker_flag: "-lstdc++"
+-  linker_flag: "-B/usr/bin/"
++  linker_flag: "-lm"
++  linker_flag: "-lrt"
++  linker_flag: "-B/opt/rh/devtoolset-4/root/usr/bin/"
+ 
+ %{gcc_host_compiler_includes}
+-  tool_path { name: "gcov" path: "/usr/bin/gcov" }
++  tool_path { name: "gcov" path: "/opt/rh/devtoolset-4/root/usr/bin/gcov" }
+ 
+   # C(++) compiles invoke the compiler (as that is the one knowing where
+   # to find libraries), but we provide LD so other rules can invoke the linker.
+-  tool_path { name: "ld" path: "/usr/bin/ld" }
++  tool_path { name: "ld" path: "/opt/rh/devtoolset-4/root/usr/bin/ld" }
+ 
+-  tool_path { name: "nm" path: "/usr/bin/nm" }
+-  tool_path { name: "objcopy" path: "/usr/bin/objcopy" }
++  tool_path { name: "nm" path: "/opt/rh/devtoolset-4/root/usr/bin/nm" }
++  tool_path { name: "objcopy" path: "/opt/rh/devtoolset-4/root/usr/bin/objcopy"
+   objcopy_embed_flag: "-I"
+   objcopy_embed_flag: "binary"
+-  tool_path { name: "objdump" path: "/usr/bin/objdump" }
+-  tool_path { name: "strip" path: "/usr/bin/strip" }
++  tool_path { name: "objdump" path: "/opt/rh/devtoolset-4/root/usr/bin/objdump"
++  tool_path { name: "strip" path: "/opt/rh/devtoolset-4/root/usr/bin/strip" }
+ 
+   # Anticipated future default.
+   unfiltered_cxx_flag: "-no-canonical-prefixes"
+diff --git a/third_party/gpus/crosstool/clang/bin/crosstool_wrapper_driver_is_no
+index b7d6cc6..e78b70c 100755
+--- a/third_party/gpus/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc.t
++++ b/third_party/gpus/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc.t
+@@ -51,7 +51,7 @@ GCC_HOST_COMPILER_PATH = ('%{gcc_host_compiler_path}')
+ 
+ CURRENT_DIR = os.path.dirname(sys.argv[0])
+ NVCC_PATH = CURRENT_DIR + '/../../../cuda/bin/nvcc'
+-LLVM_HOST_COMPILER_PATH = ('/usr/bin/gcc')
++LLVM_HOST_COMPILER_PATH = ('/opt/rh/devtoolset-4/root/usr/bin/gcc')
+ PREFIX_DIR = os.path.dirname(GCC_HOST_COMPILER_PATH)
+ NVCC_VERSION = '%{cuda_version}'
+ 
+(END) 
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Here is my configuration step:
+./configure
+Please specify the location of python. [Default is /univ_home/UNIVSOFT/COMMON/python/2.7.6/bin/python]: 
+Please specify optimization flags to use during compilation [Default is -march=native]: 
+Do you wish to use jemalloc as the malloc implementation? (Linux only) [Y/n] n
+jemalloc disabled on Linux
+Do you wish to build TensorFlow with Google Cloud Platform support? [y/N] 
+No Google Cloud Platform support will be enabled for TensorFlow
+Do you wish to build TensorFlow with Hadoop File System support? [y/N] 
+No Hadoop File System support will be enabled for TensorFlow
+Do you wish to build TensorFlow with the XLA just-in-time compiler (experimental)? [y/N] 
+No XLA support will be enabled for TensorFlow
+Found possible Python library paths:
+  /univ_home/UNIVSOFT/COMMON/python/2.7.6/lib/python2.7/site-packages
+Please input the desired Python library path to use.  Default is [/univ_home/UNIVSOFT/COMMON/python/2.7.6/lib/python2.7/site-packages]
+
+Using python library path: /univ_home/UNIVSOFT/COMMON/python/2.7.6/lib/python2.7/site-packages
+Do you wish to build TensorFlow with OpenCL support? [y/N] 
+No OpenCL support will be enabled for TensorFlow
+Do you wish to build TensorFlow with CUDA support? [y/N] y
+CUDA support will be enabled for TensorFlow
+Please specify which gcc should be used by nvcc as the host compiler. [Default is /opt/rh/devtoolset-4/root/usr/bin/gcc]: 
+Please specify the CUDA SDK version you want to use, e.g. 7.0. [Leave empty to use system default]: 8.0
+Please specify the location where CUDA 8.0 toolkit is installed. Refer to README.md for more details. [Default is /usr/local/cuda]: /usr/local/cuda-8.0
+Please specify the Cudnn version you want to use. [Leave empty to use system default]: 5
+Please specify the location where cuDNN 5 library is installed. Refer to README.md for more details. [Default is /usr/local/cuda-8.0]: /univ_home/UNIVSOFT/COMMON/cudnn/
+Please specify a list of comma-separated Cuda compute capabilities you want to build with.
+You can find the compute capability of your device at: https://developer.nvidia.com/cuda-gpus.
+Please note that each additional compute capability significantly increases your build time and binary size.
+[Default is: "3.5,5.2"]: 
+.
+INFO: Starting clean (this may take a while). Consider using --expunge_async if the clean takes more than several minutes.
+...............
+INFO: All external dependencies fetched successfully.
+Configuration finished
+
+Next, compiling:
+bazel build --linkopt='-lrt' -c opt --config=cuda --genrule_strategy=standalone --spawn_strategy=standalone //tensorflow/tools/pip_package:build_pip_package
+WARNING: Sandboxed execution is not supported on your system and thus hermeticity of actions cannot be guaranteed. See http://bazel.build/docs/bazel-user-manual.html#sandboxing for more information. You can turn off this warning via --ignore_unsupported_sandboxing.
+INFO: Found 1 target...
+ERROR: /gpfs/MUST-SHARE/univ_home/alben/.cache/bazel/_bazel_alben/07a9bf809031fe756469f64b1512dee9/external/grpc/BUILD:71:1: undeclared inclusion(s) in rule '@grpc//:gpr':
+this rule is missing dependency declarations for the following files included by 'external/grpc/src/core/lib/support/tmpfile_windows.c':
+  '/opt/rh/devtoolset-4/root/usr/lib/gcc/x86_64-redhat-linux/5.3.1/include/stdint.h'.
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+INFO: Elapsed time: 12.842s, Critical Path: 3.24s
+
+
+This time the error highlights grpc inclusion errors, it used to be related to @nasm or others. depending on the trials.
+What other attempted solutions have you tried?
+Tried bazel version 0.4.3, 0.4.4, 0.4.5 with the same results.
+Tried Tensorflow R1.0, v1.0.1, same results
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).

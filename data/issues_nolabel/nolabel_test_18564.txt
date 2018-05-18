@@ -1,0 +1,77 @@
+Failed to compile summarize_graph on macOS with TF 1.7
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS High Sierra 10.13.3
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.7.0
+Python version: 2.7.14
+Bazel version (if compiling from source): 0.12.0-homebrew
+GCC/Compiler version (if compiling from source): Xcode 9.3: Apple LLVM version 9.1.0 (clang-902.0.39.1)
+CUDA/cuDNN version: n/a
+GPU model and memory: n/a
+Exact command to reproduce: bazel build tensorflow/tools/graph_transforms:summarize_graph
+
+Describe the problem
+Build fails with the output in the section below. Removing armeabi-v7a from third_party/jpeg/jpeg.BUILD seems to resolve the issue. See output of git diff below.
+Building summarize_graph above fails fast, but I originally found the issue by trying to build print_selective_registration_header using the following command, which fails in ~90 seconds on my machine:
+bazel build tensorflow/tools/graph_transforms:summarize_graph
+Source code / logs
+Output of build command:
+WARNING: /private/var/tmp/_bazel_json/e38619818ff94aae50ac5b3bdbbe0f32/external/protobuf_archive/WORKSPACE:1: Workspace name in /private/var/tmp/_bazel_json/e38619818ff94aae50ac5b3bdbbe0f32/external/protobuf_archive/WORKSPACE (@com_google_protobuf) does not match the name given in the repository's definition (@protobuf_archive); this will cause a build error in future versions
+INFO: Analysed target //tensorflow/tools/graph_transforms:summarize_graph (0 packages loaded).
+INFO: Found 1 target...
+ERROR: /private/var/tmp/_bazel_json/e38619818ff94aae50ac5b3bdbbe0f32/external/jpeg/BUILD:44:1: C++ compilation of rule '@jpeg//:jpeg' failed (Exit 1)
+error: unknown target CPU 'armv7-a'
+Target //tensorflow/tools/graph_transforms:summarize_graph failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+INFO: Elapsed time: 0.877s, Critical Path: 0.18s
+FAILED: Build did NOT complete successfully
+
+Diff of workaround via git diff:
+diff --git a/third_party/jpeg/jpeg.BUILD b/third_party/jpeg/jpeg.BUILD
+index 87a23925c4..fa6dd27a70 100644
+--- a/third_party/jpeg/jpeg.BUILD
++++ b/third_party/jpeg/jpeg.BUILD
+@@ -28,12 +28,6 @@ libjpegturbo_copts = select({
+         "-w",
+     ],
+ }) + select({
+-    ":armeabi-v7a": [
+-        "-D__ARM_NEON__",
+-        "-march=armv7-a",
+-        "-mfloat-abi=softfp",
+-        "-fprefetch-loop-arrays",
+-    ],
+     ":linux_ppc64le": [
+         "-mcpu=power8",
+         "-mtune=power8",
+@@ -125,7 +119,6 @@ cc_library(
+     visibility = ["//visibility:public"],
+     deps = select({
+         ":k8": [":simd_x86_64"],
+-        ":armeabi-v7a": [":simd_armv7a"],
+         ":arm64-v8a": [":simd_armv8a"],
+         ":linux_ppc64le": [":simd_altivec"],
+         "//conditions:default": [":simd_none"],
+@@ -423,7 +416,6 @@ genrule(
+         ":windows": "cp $(location jconfig_win.h) $@",
+         ":windows_msvc": "cp $(location jconfig_win.h) $@",
+         ":k8": "cp $(location jconfig_nowin_simd.h) $@",
+-        ":armeabi-v7a": "cp $(location jconfig_nowin_simd.h) $@",
+         ":arm64-v8a": "cp $(location jconfig_nowin_simd.h) $@",
+         ":linux_ppc64le": "cp $(location jconfig_nowin_simd.h) $@",
+         "//conditions:default": "cp $(location jconfig_nowin_nosimd.h) $@",
+@@ -524,11 +516,6 @@ config_setting(
+     values = {"crosstool_top": "//external:android/crosstool"},
+ )
+ 
+-config_setting(
+-    name = "armeabi-v7a",
+-    values = {"android_cpu": "armeabi-v7a"},
+-)
+-
+ config_setting(
+     name = "arm64-v8a",
+     values = {"android_cpu": "arm64-v8a"},

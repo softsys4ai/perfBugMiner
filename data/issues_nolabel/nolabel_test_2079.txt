@@ -1,0 +1,21 @@
+Attention Mask Ops
+
+The current attention seq2seq example (i.e., in seq2seq.py function attention_decoder) has a bug. The code (quoted below):
+520     def attention(query):
+521       """Put attention masks on hidden using hidden_features and query."""
+522       ds = []  # Results of attention reads will be stored here.
+523       for a in xrange(num_heads):
+524         with variable_scope.variable_scope("Attention_%d" % a):
+525           y = rnn_cell.linear(query, attention_vec_size, True)
+526           y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
+527           # Attention mask is a softmax of v^T * tanh(...).
+528           s = math_ops.reduce_sum(
+529               v[a] * math_ops.tanh(hidden_features[a] + y), [2, 3])
+530           a = nn_ops.softmax(s)
+531           # Now calculate the attention-weighted vector d.
+532           d = math_ops.reduce_sum(
+533               array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden,
+534               [1, 2])
+535           ds.append(array_ops.reshape(d, [-1, attn_size]))
+536       return ds
+does not do a masking op before the softmax. This git pull request will fix this problem, i.e., we should mask the attention energies before the softmax based on the encoder sequence length.

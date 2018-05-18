@@ -1,0 +1,48 @@
+Dataset map KeyError from external tensors
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Arch 15 Feb 2018
+TensorFlow installed from (source or binary): binary - tensorflow-gpu via pip
+TensorFlow version (use command below): v1.5.0-0-g37aa430d84 1.5.0
+Python version: 3.6.4
+CUDA/cuDNN version: 9.0.176, 7.0.5-2
+GPU model and memory: NVIDIA GeForce GTX 860M, 4GB
+Exact command to reproduce: python dataset-map.py
+
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+The following script raises the subsequent KeyError. I don't see anything obvious in the documentation that indicates that referencing tensors not defined in the callback function is invalid, though perhaps this is a common feature/limitation of library functions that call user functions to generate subgraphs, such as Dataset#map and tf.cond.
+This exact issue has an obvious workaround, but it gets a little trickier when you're referencing something more complex than a simple tf.zeros tensor.
+The type of Dataset doesn't matter - I'm just using from_generator for brevity.
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+Source (permalink)
+import tensorflow as tf
+
+dataset = tf.data.Dataset.from_generator(lambda: None, tf.float32)
+
+# raises no errors
+dataset.map(lambda i: (i, tf.zeros(tf.float32)))
+
+zeros = tf.zeros(tf.float32)
+# raises KeyError: 'zeros:0' (see below)
+dataset.map(lambda i: (i, zeros))
+Traceback
+Traceback (most recent call last):
+  File "dataset-map.py", line 10, in <module>
+    dataset.map(lambda i: (i, zeros))
+  File "/usr/lib/python3.6/site-packages/tensorflow/python/data/ops/dataset_ops.py", line 780, in map
+    return MapDataset(self, map_func)
+  File "/usr/lib/python3.6/site-packages/tensorflow/python/data/ops/dataset_ops.py", line 1591, in __init__
+    self._map_func.add_to_graph(ops.get_default_graph())
+  File "/usr/lib/python3.6/site-packages/tensorflow/python/framework/function.py", line 486, in add_to_graph
+    self._create_definition_if_needed()
+  File "/usr/lib/python3.6/site-packages/tensorflow/python/framework/function.py", line 321, in _create_definition_if_needed
+    self._create_definition_if_needed_impl()
+  File "/usr/lib/python3.6/site-packages/tensorflow/python/framework/function.py", line 376, in _create_definition_if_needed_impl
+    out_names=self._out_names)
+  File "/usr/lib/python3.6/site-packages/tensorflow/python/framework/graph_to_function_def.py", line 185, in graph_to_function_def
+    func.ret[k] = input_dict[o.name]
+KeyError: 'zeros:0'

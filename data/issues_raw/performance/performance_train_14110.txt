@@ -1,0 +1,109 @@
+GPU underutilized using DNNClassifier
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Using stock code: https://www.tensorflow.org/get_started/estimator
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary from pip
+TensorFlow version (use command below): 1.3.1, 1.4rc1, master
+Python version: 3.5
+Bazel version (if compiling from source): 0.7
+CUDA/cuDNN version: CUDA 8; cuDNN 6.0
+GPU model and memory: NVidia GeForce 1070 (8GB)
+Exact command to reproduce: run the above code for the estimator (or see below)
+
+Describe the problem
+Running this code results in GPU use of up to 5-10% of GPU resources (measured using nvidia-smi). Changing the network nodes won't improve performance. Using derived code (but essentially the same) on much larger datasets increases GPU performance up to 25%. I would expect max GPU utilization. Memory allocation is in any case 100%.
+Source code / logs
+The code used is from https://www.tensorflow.org/get_started/estimator , here reproduced with minor fixes (it won't run on python3 otherwise):
+from __future__ import division
+from __future__ import print_function
+
+import os, json
+#import urllib
+from urllib.request import urlopen
+
+import numpy as np
+import tensorflow as tf
+
+# Data sets
+IRIS_TRAINING = "iris_training.csv"
+IRIS_TRAINING_URL = "http://download.tensorflow.org/data/iris_training.csv"
+
+IRIS_TEST = "iris_test.csv"
+IRIS_TEST_URL = "http://download.tensorflow.org/data/iris_test.csv"
+
+def main():
+  # If the training and test sets aren't stored locally, download them.
+  if not os.path.exists(IRIS_TRAINING):
+    raw = urlopen(IRIS_TRAINING_URL).read()
+    print(raw)
+    with open(IRIS_TRAINING, "w") as f:
+      #f.write(raw)
+      f.write(json.loads(raw.decode('utf-8')))
+
+  if not os.path.exists(IRIS_TEST):
+    raw = urlopen(IRIS_TEST_URL).read()
+    with open(IRIS_TEST, "w") as f:
+      #f.write(raw)
+      f.write(json.loads(raw.decode('utf-8')))
+
+
+  # Load datasets.
+  training_set = tf.contrib.learn.datasets.base.load_csv_with_header(
+      filename=IRIS_TRAINING,
+      target_dtype=np.int,
+      features_dtype=np.float32)
+  test_set = tf.contrib.learn.datasets.base.load_csv_with_header(
+      filename=IRIS_TEST,
+      target_dtype=np.int,
+      features_dtype=np.float32)
+
+  # Specify that all features have real-value data
+  feature_columns = [tf.feature_column.numeric_column("x", shape=[4])]
+
+  # Build 3 layer DNN with 10, 20, 10 units respectively.
+  classifier = tf.estimator.DNNClassifier(feature_columns=feature_columns,
+                                          hidden_units=[100],
+                                          n_classes=3,
+                                          model_dir="./iris_model")
+  # Define the training inputs
+  train_input_fn = tf.estimator.inputs.numpy_input_fn(
+      x={"x": np.array(training_set.data)},
+      y=np.array(training_set.target),
+      num_epochs=None,
+      shuffle=True)
+
+  # Train model.
+  classifier.train(input_fn=train_input_fn, steps=2000)
+
+  # Define the test inputs
+  test_input_fn = tf.estimator.inputs.numpy_input_fn(
+      x={"x": np.array(test_set.data)},
+      y=np.array(test_set.target),
+      num_epochs=1,
+      shuffle=False)
+
+  # Evaluate accuracy.
+  accuracy_score = classifier.evaluate(input_fn=test_input_fn)["accuracy"]
+
+  print("\nTest Accuracy: {0:f}\n".format(accuracy_score))
+
+  # Classify two new flower samples.
+  new_samples = np.array(
+      [[6.4, 3.2, 4.5, 1.5],
+       [5.8, 3.1, 5.0, 1.7]], dtype=np.float32)
+  predict_input_fn = tf.estimator.inputs.numpy_input_fn(
+      x={"x": new_samples},
+      num_epochs=1,
+      shuffle=False)
+
+  predictions = list(classifier.predict(input_fn=predict_input_fn))
+  predicted_classes = [p["classes"] for p in predictions]
+
+  print(
+      "New Samples, Class Predictions:    {}\n"
+      .format(predicted_classes))
+
+if __name__ == "__main__":
+    main()

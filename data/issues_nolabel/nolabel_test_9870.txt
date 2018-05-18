@@ -1,0 +1,74 @@
+Incorrect inference in convnet with batch size >65535
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): v1.1.0-rc0-61-g1ec6ed5 1.1.0
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: 8.0.44
+GPU model and memory: GTX 1080, 16GB
+Exact command to reproduce: See source code below
+
+Describe the problem
+When inference is performed on a convolutional NN with batch sizes larger than 65,535, the outputs on cases after 65,535 are incorrect.  The convolution operation appears to be important because I have not been able to reproduce this problem with a fully connected NN.
+In the source code below, I am training a convnet with one convolutional layer to distinguish between sine waves of two periods.  If I perform inference on a batch size of 100,000, I find that the output for case number 65,535 is correct, but the output for case number 65,536 is zero.
+Source code / logs
+import tensorflow as tf
+import numpy as np
+
+n_features = 80
+def gen_data(size):
+  '''Generate sine waves of one of two periods.'''
+  labels = np.random.randint(0, 2, size)
+  periods = np.zeros(size)
+  periods[labels == 0] = 1
+  periods[labels == 1] = 10
+
+  x = np.arange(0, n_features)
+  data = np.zeros((size, n_features))
+  for i in range(size):
+    data[i] = np.sin(x / periods[i])
+
+    data = np.expand_dims(data, axis=2)
+    return (data, labels)
+
+X = tf.placeholder(tf.float32, [None, n_features, 1])
+Y = tf.placeholder(tf.int32, [None])
+
+W_conv = tf.get_variable('W_conv', [8, 1, 16])
+preact = tf.nn.conv1d(X, W_conv, stride=1, padding='SAME')
+pooled = tf.nn.pool(preact, window_shape=[2], pooling_type='MAX', padding='SAME', strides=[2])
+conv_output = tf.contrib.layers.flatten(tf.nn.relu(pooled))
+
+W_out = tf.get_variable('W_out', [int(n_features/2) * 16, 1])
+logits = tf.squeeze(tf.matmul(conv_output, W_out))
+
+xentropy = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(
+    labels=tf.cast(Y, tf.float32), logits=logits))
+train_step = tf.train.AdamOptimizer(1e-2).minimize(xentropy)
+
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+
+# Train a little while with small batches
+for i in range(1000):
+  data, labels = gen_data(size=128)
+  sess.run(train_step, feed_dict={X: data, Y: labels})
+
+# Now try performing inference on a much larger batch
+large_batch = np.zeros((100000, n_features, 1))
+large_batch[2**16 - 1] = data[0]
+logits_ = sess.run(logits, feed_dict={X: large_batch})
+
+# This should be some non-zero number
+print('Logit for input number 65,535:', logits_[2**16-1])
+
+# Now do the same thing, but putting the input in spot 65,536
+large_batch = np.zeros((100000, n_features, 1))
+large_batch[2**16] = data[0]
+logits_ = sess.run(logits, feed_dict={X: large_batch})
+
+# This is now zero on my system
+print('Logit for input number 65,536:', logits_[2**16])

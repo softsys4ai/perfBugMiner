@@ -1,0 +1,18 @@
+feed_dict 10x slower on read-only numpy arrays
+
+There's a significant slowdown when feeding numpy arrays which are read-only. Looking at cpu profile, it looks like time is spent in memcpy (incorrectly reported as __nss_passwd_lookup). This memory copy seems unnnecessary
+IE,
+# arr=64-byte aligned numpy array
+sess.run(some_op, feed_dict={a:arr})  # 12.6 GB/sec
+arr.flags['WRITEABLE']=False
+sess.run(some_op, feed_dict={a:arr})  # 1.2 GB/sec
+
+tf_numpy_benchmark.py
+wget -N https://raw.githubusercontent.com/diux-dev/cluster/ee5c07056a9d1dadb118aaa93e721bc81a962428/yuxin_numpy/tf_numpy_benchmark.py
+python tf_numpy_benchmark.py --benchmark=feed_cpu_tensor --allocator=tf --num-iters=51
+feed_cpu_tensor               :  12.9 GB/sec, min:  7.75, median:  8.98, mean:  9.01
+
+python tf_numpy_benchmark.py --benchmark=feed_cpu_tensor --allocator=tf_readonly --num-iters=51
+feed_cpu_tensor               :   1.1 GB/sec, min: 88.48, median: 91.55, mean: 93.30
+
+cc @alextp

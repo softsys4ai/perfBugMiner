@@ -1,0 +1,125 @@
+MultivariateNormalDiag probability gradient fails
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): MacOS 10.12.5
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): v1.2.0-rc2-0-gce1d6ec49 1.2.0-rc2
+Bazel version (if compiling from source): 0.5.1-homebrew
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: python test_diag.py
+
+Describe the problem
+The gradients for the tensorflow.contrib.distributions.MultiVariateNormalDiag throw an error.  This might be related to #10149.  Notice that the tensorflow.contrib.distributions.Normal works as expected so I think this is a bug in the gradient implementation of the MultiVarateNormalDiag.
+Source code
+import numpy as np
+import tensorflow as tf
+import tensorflow.contrib.distributions as td
+
+assert_args = dict(validate_args=True, allow_nan_stats=False)
+
+# tf Graph Input
+x = tf.placeholder(shape=(4, 6), dtype=tf.float32, name="X")
+y = tf.placeholder(shape=(4, 2), dtype=tf.float32, name="Y")
+
+# Set model weights
+b = tf.Variable(np.ones((4, 6)), dtype=np.float32, name="b")
+W = tf.Variable(np.ones((6, 6)), dtype=np.float32, name="W")
+
+pred_mu = tf.reshape(x@W + b, (4, 3, 2))
+pred_sigma = tf.reshape(tf.exp(x@W + b), (4, 3, 2))
+
+# fails below
+dist = td.MultivariateNormalDiag(loc=pred_mu, scale_diag=pred_sigma, **assert_args)
+prob = dist.prob(y[:, tf.newaxis])
+
+# this works fine
+# dist_x = td.Normal(loc=pred_mu[:, :, 0], scale=pred_sigma[:, :, 0], **assert_args)
+# dist_y = td.Normal(loc=pred_mu[:, :, 1], scale=pred_sigma[:, :, 1], **assert_args)
+# prob = dist_x.prob(y[:, 0, tf.newaxis]) * dist_y.prob(y[:, 1, tf.newaxis])
+
+gradients = tf.gradients(prob, [b, W])
+
+feed_dict = {
+    x: np.ones((4, 6), dtype=np.float32),
+    y: np.ones((4, 2), dtype=np.float32)
+}
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    sess.run(prob, feed_dict=feed_dict)  # works fine
+    retval = sess.run(gradients, feed_dict=feed_dict)  # throws
+    print(retval)
+Output
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1139, in _do_call
+    return fn(*args)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1121, in _run_fn
+    status, run_metadata)
+  File "/usr/local/Cellar/python3/3.6.1/Frameworks/Python.framework/Versions/3.6/lib/python3.6/contextlib.py", line 89, in __exit__
+    next(self.gen)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: indices[0] = -1 is not in [0, 3)
+	 [[Node: gradients/MultivariateNormalDiag_3/prob/Prod_grad/Gather = Gather[Tindices=DT_INT32, Tparams=DT_INT32, validate_indices=true, _device="/job:localhost/replica:0/task:0/cpu:0"](gradients/MultivariateNormalDiag_3/prob/Prod_grad/Shape, gradients/MultivariateNormalDiag_3/prob/Prod_grad/Reshape)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "test_diag.py", line 41, in <module>
+    retval = sess.run(gradients, feed_dict=feed_dict) # throws
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 789, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 997, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1132, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1152, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: indices[0] = -1 is not in [0, 3)
+	 [[Node: gradients/MultivariateNormalDiag_3/prob/Prod_grad/Gather = Gather[Tindices=DT_INT32, Tparams=DT_INT32, validate_indices=true, _device="/job:localhost/replica:0/task:0/cpu:0"](gradients/MultivariateNormalDiag_3/prob/Prod_grad/Shape, gradients/MultivariateNormalDiag_3/prob/Prod_grad/Reshape)]]
+
+Caused by op 'gradients/MultivariateNormalDiag_3/prob/Prod_grad/Gather', defined at:
+  File "test_diag.py", line 31, in <module>
+    gradients = tf.gradients(prob, [b, W])
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 540, in gradients
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 346, in _MaybeCompile
+    return grad_fn()  # Exit early
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 540, in <lambda>
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/math_grad.py", line 129, in _ProdGrad
+    reduced_num = math_ops.reduce_prod(array_ops.gather(input_shape, reduced))
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/gen_array_ops.py", line 1179, in gather
+    validate_indices=validate_indices, name=name)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 2506, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1269, in __init__
+    self._traceback = _extract_stack()
+
+...which was originally created as op 'MultivariateNormalDiag_3/prob/Prod', defined at:
+  File "test_diag.py", line 24, in <module>
+    prob = dist.prob(y[:,tf.newaxis])
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/distributions/distribution.py", line 712, in prob
+    return self._call_prob(value, name)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/distributions/distribution.py", line 694, in _call_prob
+    return self._prob(value, **kwargs)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/distributions/util.py", line 688, in _fn
+    return fn(*args, **kwargs)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/contrib/distributions/python/ops/mvn_linear_operator.py", line 216, in _prob
+    return super(MultivariateNormalLinearOperator, self)._prob(x)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/distributions/transformed_distribution.py", line 406, in _prob
+    prob = math_ops.reduce_prod(prob, self._reduce_event_indices)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/math_ops.py", line 1392, in reduce_prod
+    name=name)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/ops/gen_math_ops.py", line 1488, in _prod
+    keep_dims=keep_dims, name=name)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+
+InvalidArgumentError (see above for traceback): indices[0] = -1 is not in [0, 3)
+	 [[Node: gradients/MultivariateNormalDiag_3/prob/Prod_grad/Gather = Gather[Tindices=DT_INT32, Tparams=DT_INT32, validate_indices=true, _device="/job:localhost/replica:0/task:0/cpu:0"](gradients/MultivariateNormalDiag_3/prob/Prod_grad/Shape, gradients/MultivariateNormalDiag_3/prob/Prod_grad/Reshape)]]

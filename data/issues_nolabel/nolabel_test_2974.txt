@@ -1,0 +1,43 @@
+Could not parse default value '1.0' from Attr("distortion: float = 1.0") [locale dependent float parsing]
+
+Hi! I link my library against tensorflow library. When loading I get the following error:
+
+F tensorflow/core/framework/op.cc:160] Check failed: ::tensorflow::Status::OK() == (RegisterAlreadyLocked(deferred_[i])) (OK vs. Invalid argument: Could not parse default value '1.0' from Attr("distortion: float = 1.0") for Op FixedUnigramCandidateSampler)
+
+I tried to figure out what causes this problem and found that tensorflow can't parse OP with float attrs. For example, have a look at core/ops/candidate_sampling_ops.cc:219
+
+.Attr("distortion: float = 1.0")
+
+If I rewrite it as follows:
+
+.Attr("distortion: float = 1")
+
+it works fine until it finds another float attribute. I tried to trace down this problem and stuck here tensorflow/core/lib/strings/numbers.cc:230:
+bool safe_strtof(const char* str, float* value) {
+  char* endptr;
+  *value = strtof(str, &endptr);
+  while (isspace(*endptr)) ++endptr;
+  // Ignore range errors from strtod/strtof.
+  // The values it returns on underflow and
+  // overflow are the right fallback in a
+  // robust setting.
+  return *str != '\0' && *endptr == '\0';
+}
+
+this function returns false for str = "1.0" because endptr points to ".0".
+Please, fix this problem or suggest me the to fix it and I'll contribute or... tell me how i can work around this... Thank you.
+Operating System:
+$ uname -a
+Linux user-desktop 4.4.0-24-generic #43-Ubuntu SMP Wed Jun 8 19:27:37 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+$ cat /etc/issue
+Ubuntu 16.04 LTS \n \l
+$ g++ --version
+g++ (Ubuntu 4.9.3-13ubuntu2) 4.9.3
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+commit hash: b77f607
+UPD. Solution
+I found out the reason of this strange behavior. If I run my program as follows:
+$ LC_NUMERIC=C ./my_program_with_tensorflow
+than it works properly (my previous LC_NUMERIC was ru_RU.UTF-8 where decimal separator is ','). I find it weird when correctness of program depends on current user locale (you always use the same decimal separator in OP descriptions). Fix it please.

@@ -1,0 +1,82 @@
+Tensorflow Windows Bug with BeamSearchDecoder
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes,
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): Pip Binary
+TensorFlow version (use command below): 1.2.1
+Python version: 3.5
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 5.1
+GPU model and memory: Nvidia Gtx 1080 (8 GB)
+
+Describe the problem
+Tensorflow on Windows gives an error ("Multiple OpKernel registrations match NodeDef") when I try to use BeamSearchDecoder in the seq2seq module. The same code works well on Ubuntu. Someone else on stackoverflow also had the same issue. I have attached a snippet of code that generates the same error on my computer (original code is much bigger).
+Source code to reproduce the problem
+import tensorflow as tf
+import numpy as np
+sess = tf.Session()
+cell1 = tf.contrib.rnn.BasicLSTMCell(90)
+word_embedding = tf.convert_to_tensor(np.eye(1,1),dtype=tf.float32)
+decoder = tf.contrib.seq2seq.BeamSearchDecoder(
+                                                        cell=cell1,
+                                                        embedding=lambda inputs : tf.nn.embedding_lookup(word_embedding, inputs),
+                                                        start_tokens=[1],
+                                                        end_token=2,
+                                                        initial_state=cell1.zero_state(batch_size=3,dtype=tf.float32),
+                                                        beam_width=3
+)
+outputs_decoding, last_state_decoding, _ = tf.contrib.seq2seq.dynamic_decode(
+                        decoder, maximum_iterations=1)
+sess.run(outputs_decoding)
+
+Error Message
+Traceback (most recent call last):
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1139, in _do_call
+    return fn(*args)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1117, in _run_fn
+    self._extend_graph()
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1166, in _extend_graph
+    self._session, graph_def.SerializeToString(), status)
+  File "C:\Program Files\Python35\lib\contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\framework\errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Multiple OpKernel registrations match NodeDef 'decoder/GatherTree = GatherTree[T=DT_INT32](decoder/TensorArrayStack_1/TensorArrayGatherV3, decoder/TensorArrayStack_2/TensorArrayGatherV3, decoder/while/Exit_11)': 'op: "GatherTree" device_type: "GPU" constraint { name: "T" allowed_values { list { type: DT_INT32 } } }' and 'op: "GatherTree" device_type: "GPU" constraint { name: "T" allowed_values { list { type: DT_INT32 } } }'
+         [[Node: decoder/GatherTree = GatherTree[T=DT_INT32](decoder/TensorArrayStack_1/TensorArrayGatherV3, decoder/TensorArrayStack_2/TensorArrayGatherV3, decoder/while/Exit_11)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "a.py", line 16, in <module>
+    sess.run(outputs_decoding)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\client\session.py", line 789, in run
+    run_metadata_ptr)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\client\session.py", line 997, in _run
+    feed_dict_string, options, run_metadata)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1132, in _do_run
+    target_list, options, run_metadata)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\client\session.py", line 1152, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Multiple OpKernel registrations match NodeDef 'decoder/GatherTree = GatherTree[T=DT_INT32](decoder/TensorArrayStack_1/TensorArrayGatherV3, decoder/TensorArrayStack_2/TensorArrayGatherV3, decoder/while/Exit_11)': 'op: "GatherTree" device_type: "GPU" constraint { name: "T" allowed_values { list { type: DT_INT32 } } }' and 'op: "GatherTree" device_type: "GPU" constraint { name: "T" allowed_values { list { type: DT_INT32 } } }'
+         [[Node: decoder/GatherTree = GatherTree[T=DT_INT32](decoder/TensorArrayStack_1/TensorArrayGatherV3, decoder/TensorArrayStack_2/TensorArrayGatherV3, decoder/while/Exit_11)]]
+
+Caused by op 'decoder/GatherTree', defined at:
+  File "a.py", line 15, in <module>
+    decoder, maximum_iterations=1)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\contrib\seq2seq\python\ops\decoder.py", line 296, in dynamic_decode
+    final_outputs, final_state, final_sequence_lengths)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\contrib\seq2seq\python\ops\beam_search_decoder.py", line 280, in finalize
+    sequence_length=sequence_lengths)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\contrib\seq2seq\ops\gen_beam_search_ops.py", line 43, in gather_tree
+    sequence_length=sequence_length, name=name)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\framework\ops.py", line 2506, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "C:\Program Files\Python35\lib\site-packages\tensorflow\python\framework\ops.py", line 1269, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Multiple OpKernel registrations match NodeDef 'decoder/GatherTree = GatherTree[T=DT_INT32](decoder/TensorArrayStack_1/TensorArrayGatherV3, decoder/TensorArrayStack_2/TensorArrayGatherV3, decoder/while/Exit_11)': 'op: "GatherTree" device_type: "GPU" constraint { name: "T" allowed_values { list { type: DT_INT32 } } }' and 'op: "GatherTree" device_type: "GPU" constraint { name: "T" allowed_values { list { type: DT_INT32 } } }'
+         [[Node: decoder/GatherTree = GatherTree[T=DT_INT32](decoder/TensorArrayStack_1/TensorArrayGatherV3, decoder/TensorArrayStack_2/TensorArrayGatherV3, decoder/while/Exit_11)]]

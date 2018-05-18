@@ -1,0 +1,61 @@
+Possible memory leak with tf.py_func() with distributed Tensorflow?
+
+When running Tensorflow as an distributed process to provide data with tf.data, it gradually consumes more and more memory, and finally consumes all memory of the system.
+Scripts to reproduce:
+We use a dummy dataset which produce [128, 28, 28, 1] tensors.
+Case1: Without distribute, which works fine, it will only consume 429Mb memory, no matter how many batches we run.
+Codes in test1.py:
+#test1.py
+import tensorflow as tf
+import numpy as np
+from tqdm import tqdm
+
+def dataset_generator():
+    while True:
+        yield np.random.uniform(size=[28, 28, 1]).astype(np.float32)
+dataset = tf.data.Dataset.from_generator(dataset_generator, tf.float32)
+dataset = dataset.batch(128)
+value = dataset.make_one_shot_iterator().get_next()
+
+sess = tf.Session()
+for _ in tqdm(range(100000), ascii=True):
+    sess.run(value)
+
+Case: With distribute, it will consumes more and more memory while running more and more batches. It consumes 10+Gb with less than 1M batches. Use the following two commands in two processes to run the test2.py:
+CUDA_VISIBLE_DEVICES="" python test2.py dataset
+CUDA_VISIBLE_DEVICES="" python test2.py test
+
+Codes in test2.py
+# test2.py
+import tensorflow as tf
+import numpy as np
+from tqdm import tqdm
+import sys
+def main(role):
+    def dataset_generator():
+        while True:
+            yield np.random.uniform(size=[28, 28, 1]).astype(np.float32)
+    cluster = tf.train.ClusterSpec({'dataset': ['localhost:2001'], 'test': ['localhost:2002']})
+    if role == 'dataset':
+        server = tf.train.Server(cluster, 'dataset', 0)
+    elif role == 'test':
+        server = tf.train.Server(cluster, 'test', 0)
+    else:
+        raise ValueError("Uknown role {}.".format(role))
+    with tf.device('/job:dataset/task:0')    :
+        dataset = tf.data.Dataset.from_generator(dataset_generator, tf.float32)
+        dataset = dataset.batch(128)
+        value = dataset.make_one_shot_iterator().get_next()
+    if role == 'dataset':
+        server.join()
+    elif role == 'test':
+        sess = tf.Session(target=server.target)
+        for _ in tqdm(range(100000000), ascii=True):
+            sess.run(value)
+            
+if __name__ == "__main__":
+    main(sys.argv[1])
+
+Tensorflow: v1.4.0-rc1-11-g130a514 1.4.0
+OS: ubuntu mate 16.04.1
+Python: 3.6.1 (conda 4.3.30)

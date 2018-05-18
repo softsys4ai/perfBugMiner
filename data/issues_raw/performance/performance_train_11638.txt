@@ -1,0 +1,19 @@
+Probably wrong implementation for tf.layers.max_pooling1d when data_format='channels_first'
+
+In function call of class _Pooling1D,  when the input data_format='channels_first', it should transform input tensor from 'N,C,H' to 'N,C,H,W' (batch_size, channels, height, width), meaning that we should expand dimension on the last dimension.
+However, in the code we use inputs = array_ops.expand_dims(inputs, 1), expanding on the second dimension and transforming from 'N,C,H' to 'N,1,C,H'. Then the pool_shape and strides are looking at the third dimension, which is not consistant with our expand_dims(inputs, 1) used before.
+I think the code should be changed to inputs = array_ops.expand_dims(inputs, -1) and return array_ops.squeeze(outputs, -1). Using -1 will expand and squeeze on the last dimension, transforming from 'N,C,H' to **'N,C,H,1', and then doing pool_shape and strides on the third dimension.
+Source Code
+
+  def call(self, inputs):
+    # There is no TF op for 1D pooling, hence we make the inputs 4D.
+    if self.data_format == 'channels_last':
+      inputs = array_ops.expand_dims(inputs, 2)
+      pool_shape = (1,) + self.pool_size + (1, 1)
+      strides = (1,) + self.strides + (1, 1)
+      data_format = 'NHWC'
+    else:
+      inputs = array_ops.expand_dims(inputs, 1)
+      pool_shape = (1, 1) + self.pool_size + (1,)
+      strides = (1, 1) + self.strides + (1,)
+      data_format = 'NCHW'

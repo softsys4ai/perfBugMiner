@@ -1,0 +1,88 @@
+GradientDescentOptimizer got wrong result
+
+I want use gradient descent to solve equation set, but I got wrong result everytime, so I check my code and written a numpy edition, in this edition I provide explicit loss gradient and I can get currect result.
+So I don't understand why GradientDescentOptimizer can not work.
+here is my code without tf:
+import numpy as np
+
+
+class SolveEquation:
+    def __init__(self, rate: float, loss_threshold: float=0.0001, max_epochs: int=1000):
+        self.__rate = rate
+        self.__loss_threshold = loss_threshold
+        self.__max_epochs = max_epochs
+        self.__x = None
+
+    def solve(self, coefficients, b):
+        _a = np.array(coefficients)
+        _b = np.array(b).reshape([len(b), 1])
+        _x = np.zeros([_a.shape[1], 1])
+        for epoch in range(self.__max_epochs):
+            grad_loss = np.matmul(np.transpose(_a), np.matmul(_a, _x) - _b)
+            _x -= self.__rate * grad_loss
+            if epoch % 10 == 0:
+                loss = np.mean(np.square(np.subtract(np.matmul(_a, _x), _b)))
+                print('loss = {:.8f}'.format(loss))
+                if loss < self.__loss_threshold:
+                    break
+        return _x
+
+s = SolveEquation(0.1, max_epochs=1)
+print(s.solve([[1, 2], [1, 3]], [3, 4]))
+And here is my code with tf:
+import tensorflow as tf
+import numpy as np
+
+
+class TFSolveEquation:
+    def __init__(self, rate: float, loss_threshold: float=0.0001, max_epochs: int=1000):
+        self.__rate = rate
+        self.__loss_threshold = tf.constant(loss_threshold)
+        self.__max_epochs = max_epochs
+        self.__session = tf.Session()
+        self.__x = None
+
+    def __del__(self):
+        try:
+            self.__session.close()
+        finally:
+            pass
+
+    def solve(self, coefficients, b):
+        coefficients_data = np.array(coefficients)
+        b_data = np.array(b)
+        _a = tf.placeholder(tf.float32)
+        _b = tf.placeholder(tf.float32)
+        _x = tf.Variable(tf.zeros([coefficients_data.shape[1], 1]))
+        loss = tf.reduce_mean(tf.square(tf.matmul(_a, _x) - _b))
+        optimizer = tf.train.GradientDescentOptimizer(self.__rate)
+        model = optimizer.minimize(loss)
+        self.__session.run(tf.global_variables_initializer())
+        for epoch in range(self.__max_epochs):
+            self.__session.run(model, {_a: coefficients_data, _b: b_data})
+            if epoch % 10 == 0:
+                if self.__session.run(loss < self.__loss_threshold, {_a: coefficients_data, _b: b_data}):
+                    break
+        return self.__session.run(_x)
+
+s = TFSolveEquation(0.1, max_epochs=1)
+print(s.solve([[1, 2], [1, 3]], [3, 4]))
+I test these 2 codes with very simple equation set:
+x_1 + 2 * x_2 = 3
+x_1 + 3 * x_3 = 4
+loss = 1/2 * || Ax - b ||^2
+Init x_1 = 0, x_2 = 0, rate = 0.1
+Use gradient descent
+So at 1st compute, the delta x = (0.7, 1.8)
+But unfortunately my code with tf give the
+delta x =
+[[ 0.69999999]
+[ 1.75      ]]
+And my code without tf give the
+delta x =
+[[ 0.7]
+[ 1.8]]
+Absolutely code without tf is right, but why tf comput gradient may less 0.05 then currect result?
+I think this is the reason my code without tf can solve the equation set, but tf edition can not solve equation set currently.
+Can someone tell me why tf give a incurrent gradiant? Thanks
+My platform is Win10 + tensorflow-gpu v1.0

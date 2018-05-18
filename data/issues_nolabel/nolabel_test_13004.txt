@@ -1,0 +1,190 @@
+Tensorflow import breaks numpy calls
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+
+See source code below.
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+
+% cat tf_env.txt
+== cat /etc/issue ===============================================
+Linux bda9acc7988e 4.12.9-300.fc26.x86_64 #1 SMP Fri Aug 25 13:09:43 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="16.04.3 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+== are we in docker =============================================
+Yes
+== compiler =====================================================
+c++ (Ubuntu 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+== uname -a =====================================================
+Linux bda9acc7988e 4.12.9-300.fc26.x86_64 #1 SMP Fri Aug 25 13:09:43 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+
+
+
+TensorFlow installed from (source or binary):
+pip install tensorflow-gpu
+
+
+TensorFlow version (use command below):
+
+
+ % pip list | grep 'numpy\|scipy\|tensorflow\|wheel'
+DEPRECATION: The default format will switch to columns in the future. You can use --format=(legacy|columns) (or define a format=(leg
+acy|columns) in your pip.conf under the [list] section) to disable this warning.
+numpy (1.12.1)
+scipy (0.19.0)
+tensorflow-gpu (1.3.0)
+tensorflow-tensorboard (0.1.6)
+wheel (0.29.0)
+
+% python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+v1.3.0-rc2-20-g0787eee 1.3.0
+
+
+Python version:
+
+ % python
+Python 3.5.3 |Intel Corporation| (default, Apr 27 2017, 18:08:47)
+[GCC 4.8.2 20140120 (Red Hat 4.8.2-15)] on linux
+
+
+
+Bazel version (if compiling from source):
+Not compiling from source.
+
+
+CUDA/cuDNN version:
+/usr/local/cuda-8.0/targets/x86_64-linux/lib/libcudart.so.8.0.61
+
+
+GPU model and memory:
+
+
+ % nvidia-smi
+Tue Sep 12 21:56:13 2017
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 384.69                 Driver Version: 384.69                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 106...  Off  | 00000000:01:00.0  On |                  N/A |
+|  0%   56C    P8    12W / 200W |     62MiB /  6070MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
++-----------------------------------------------------------------------------+
+
+
+Exact command to reproduce:
+Run this test1.py in a new python terminal (below), once with the import tensorflow line, once without it. The code loads a stock image, and calls np.fft.fft2, and reads values on the corners of the resulting matrix. Output is as follows:
+
+Expected:
+ % python
+Python 3.5.3 |Intel Corporation| (default, Apr 27 2017, 18:08:47)
+[GCC 4.8.2 20140120 (Red Hat 4.8.2-15)] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+Intel(R) Distribution for Python is brought to you by Intel Corporation.
+Please check out: https://software.intel.com/en-us/python-distribution
+>>> exec(open('test1.py').read()) # WITHOUT TF IMPORT
+(768, 1024)
+-- loop 0 --
+0.825823 0.593467 0.860577 0.842033
+(595544+0j) (-41240.3+54651.8j) (-28777.7+57397.5j) (28693.1-15865.9j)
+
+-- loop 1 --
+0.825823 0.593467 0.860577 0.842033
+(595544+0j) (-41240.3+54651.8j) (-28777.7+57397.5j) (28693.1-15865.9j)
+
+-- loop 2 --
+0.825823 0.593467 0.860577 0.842033
+(595544+0j) (-41240.3+54651.8j) (-28777.7+57397.5j) (28693.1-15865.9j)
+
+Problem: non-deterministic loop after TF import,
+ % python
+Python 3.5.3 |Intel Corporation| (default, Apr 27 2017, 18:08:47)
+[GCC 4.8.2 20140120 (Red Hat 4.8.2-15)] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+Intel(R) Distribution for Python is brought to you by Intel Corporation.
+Please check out: https://software.intel.com/en-us/python-distribution
+>>> exec(open('test1.py').read()) # WITH TF IMPORT
+(768, 1024)
+-- loop 0 --
+0.825823 0.593467 0.860577 0.842033
+(4.01544e+06-4.30166e+06j) (-384357+1.41085e+06j) (349169+983449j) (228823-235335j)
+
+-- loop 1 --
+0.825823 0.593467 0.860577 0.842033
+(6.03746e+06+42733.2j) (83067.3-1.09108e+06j) (-331458-151395j) (-87943.5+165673j)
+
+-- loop 2 --
+0.825823 0.593467 0.860577 0.842033
+(475988+254405j) (11989.8+49912j) (13361.2+6137.22j) (-3503.42-15194.5j)
+
+Describe the problem
+Importing tensorflow causes numpy.fft.fft2 to produce non-deterministic results. This is not expected. Why does importing tensorflow break the numpy call?
+Just for reference, I have been able to tf.Session() with the GPU. In any case, tensorflow should not override / affect the numpy package. I am not sure what is going on here.
+ % python
+Python 3.5.3 |Intel Corporation| (default, Apr 27 2017, 18:08:47)
+[GCC 4.8.2 20140120 (Red Hat 4.8.2-15)] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+Intel(R) Distribution for Python is brought to you by Intel Corporation.
+Please check out: https://software.intel.com/en-us/python-distribution
+>>> import tensorflow as tf
+tf.S>>> tf.Session()
+2017-09-12 22:04:13.379385: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1
+ instructions, but these are available on your machine and could speed up CPU computations.
+2017-09-12 22:04:13.379504: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2
+ instructions, but these are available on your machine and could speed up CPU computations.
+2017-09-12 22:04:13.379534: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX in
+structions, but these are available on your machine and could speed up CPU computations.
+2017-09-12 22:04:13.379560: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 i
+nstructions, but these are available on your machine and could speed up CPU computations.
+2017-09-12 22:04:13.379584: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA in
+structions, but these are available on your machine and could speed up CPU computations.
+2017-09-12 22:04:13.512425: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:893] successful NUMA node read from SysFS had neg
+ative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-09-12 22:04:13.512712: I tensorflow/core/common_runtime/gpu/gpu_device.cc:955] Found device 0 with properties:
+name: GeForce GTX 1060 6GB
+major: 6 minor: 1 memoryClockRate (GHz) 1.7335
+pciBusID 0000:01:00.0
+Total memory: 5.93GiB
+Free memory: 5.80GiB
+2017-09-12 22:04:13.512727: I tensorflow/core/common_runtime/gpu/gpu_device.cc:976] DMA: 0
+2017-09-12 22:04:13.512731: I tensorflow/core/common_runtime/gpu/gpu_device.cc:986] 0:   Y
+2017-09-12 22:04:13.512739: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1045] Creating TensorFlow device (/gpu:0) -> (device:
+ 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0)
+<tensorflow.python.client.session.Session object at 0x7f396c316c88>
+
+Source code / logs
+test1.py
+import numpy as np
+import scipy.misc
+import tensorflow as tf # comment this out to make deterministic
+
+DTYPE = np.complex64
+im_uint8 = scipy.misc.face()
+im = im_uint8.astype(DTYPE) / (np.power(2,im_uint8.itemsize*8) - 1)
+im = np.linalg.norm(im, axis=-1)
+print(im.shape)
+printcorners = lambda M: print( M[0,0], M[-1,0], M[0,-1], M[-1,-1])
+
+for i in range(0,3):
+    # THIS LOOP SHOULD BE DETERMINISTIC!
+    print('-- loop',i,'--')
+    B = im.copy()
+    printcorners(B)
+    Bhat = np.fft.fft2(B.copy())
+    printcorners(Bhat)
+    print('')
+#
+
+Thanks in advance.

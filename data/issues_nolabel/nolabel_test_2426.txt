@@ -1,0 +1,29 @@
+Supporting negative reduction indices.
+
+The reduce operations do not support negative indices as opposed to their numpy equivalents. In particular, the following code fails with the error message ValueError: Invalid reduction dimension -1 for input with 2 dimensions.
+import tensorflow as tf
+import numpy as np
+
+# Create reference values in numpy
+x = np.random.normal(0, 1, (40, 50))
+y = np.sum(x, axis=-1)
+
+# Try to reproduce the same in tensorflow
+sess = tf.InteractiveSession()
+tf_x = tf.constant(x)
+tf_y = tf.reduce_sum(x, -1)
+np.testing.assert_allclose(tf_y.eval(), y)
+sess.close()    
+The code that checks the reduction indices and throws the exception appears to know about the dimensionality of the vector (taken from _ReductionShape).
+for reduction_index in reduction_indices:
+    if reduction_index < 0 or reduction_index >= input_shape.ndims:
+        raise ValueError("Invalid reduction dimension %d for input with %d dimensions" % (reduction_index, input_shape.ndims))
+I have thus started using the following function to support negative indices.
+def _reduction_indices(input_tensor, reduction_indices):
+    # Get the shape and convert indices to a list
+    input_shape = input_tensor.get_shape()
+    reduction_indices = np.ravel(reduction_indices)
+
+    # Convert the indices
+    return [(input_shape.ndims + index) if index < 0 else index for index in reduction_indices]
+Would this be worth integrating into the main repository or is the lack of support for tensors with completely unknown shape problematic?

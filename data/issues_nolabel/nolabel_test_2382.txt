@@ -1,0 +1,99 @@
+ValueError: GraphDef cannot be larger than 2GB
+
+I'm trying to implement a deep autoencoder with tensorflow. The RBM pretraining works just fine, but when it comes to fine tuning, it raises the error: 'ValueError: GraphDef cannot be larger than 2GB'. My input is an array in the shape of [12396, 8192], and here is my layers: [8192 16384 8192 4096 2048 1024 512 256 512 1024 2048 4096 8192 16384 8192].
+I know where the problem is, but I have no idea how to fix it. I have thought about using multiple graph, but what if my input is too big to even store one layer? Besides I don't know how many graph I should use. Set up a graph for every layer? That would be too slow and unnecessary.
+Thank you!
+`  ...
+def __init__(self, input_num, layers, rbm_learning_rate, deepnn_learning_rate, rbm_num_epoch, 
+             deepnn_num_epoch, momentum=0, batch_size=128, data_type='float32'):
+    self.input_num = input_num
+    self.layers = layers
+    self.n_layers = len(self.layers)
+    self.rbm_learning_rate = rbm_learning_rate
+    self.deepnn_learning_rate = deepnn_learning_rate
+    if momentum == 0:
+        self.momentum = []            
+        for _ in range(self.n_layers):            
+            self.momentum.append(1)
+    self.rbm_num_epoch = rbm_num_epoch
+    self.deepnn_num_epoch = deepnn_num_epoch
+    self.batch_size = batch_size
+    self.data_type = data_type
+    self.rbm_list = []
+    self.rbm_list.append(RBM(self.input_num, self.layers[0], self.rbm_num_epoch, 
+                            self.momentum[0], self.rbm_learning_rate[0], self.batch_size, self.data_type))            
+    for i in range(self.n_layers-1):
+        self.rbm_list.append(RBM(self.layers[i], self.layers[i+1], self.rbm_num_epoch,
+                            self.momentum[i], self.rbm_learning_rate[i], self.batch_size, self.data_type))
+
+def pretrain(self, train_set):
+    self.W_list = []
+    self.b_list = []
+    self.a_list = []   
+    if not cmp(train_set.dtype, self.data_type):
+        train_set.dtype = self.data_type        
+    next_train = train_set        
+    for i, rboltz in enumerate(self.rbm_list):
+        next_train = self._pretrain_and_get_para(rboltz, next_train)
+
+def _pretrain_and_get_para(self, rboltz, next_train):
+    output, W_out, a_out, b_out = rboltz.fit(next_train)
+    self.W_list.append(W_out)
+    self.a_list.append(a_out)
+    self.b_list.append(b_out)
+    return output
+
+def fine_tune(self, train_set):
+    m, _ = train_set.shape
+    self.num_per_epoch = m / self.batch_size         
+    train_batch = tf.placeholder(self.data_type, [None, self.input_num])        
+    logits = self._build_model(train_batch)
+    loss = self._loss(logits, train_batch)
+    train_op = self._training(loss)
+    init = tf.initialize_all_variables()
+    with tf.Session() as sess:
+        sess.run(init)
+        for _ in range(self.deepnn_num_epoch):
+            for i in range(self.num_per_epoch):
+                _, cost = sess.run([train_op, loss], feed_dict = self._feed_build(train_batch, train_set, i))
+            print cost    
+
+def _feed_build(self, train_batch, train_set, i):
+    batch = prepare_data.next_batch(train_set, i, self.batch_size)
+    feed_dict = {train_batch: batch}
+    return feed_dict    
+
+def _build_model(self, train_batch):      
+    middle_layer = self._make_encoder(train_batch)
+    last_layer = self._make_decoder(middle_layer)
+    return last_layer
+
+def _make_encoder(self, train_batch):
+    encoder = []
+    encoder.append(train_batch)        
+    for i, layer in enumerate(self.layers):
+        with tf.name_scope('encoder'+str(i)):
+            W = tf.Variable(self.W_list[i], name = 'weights')
+            b = tf.Variable(self.b_list[i], name = 'biases')
+            encoder.append(tf.sigmoid(b + tf.matmul(encoder[i], W)))
+    return encoder[self.n_layers]
+
+
+def _make_decoder(self, middle_layer):
+    decoder = []
+    decoder.append(middle_layer)        
+    for i, layer in enumerate(self.layers):
+        with tf.name_scope('decoder'+str(i)):
+            W = tf.Variable(self.W_list[self.n_layers-i-1], name = 'weights')
+            a = tf.Variable(self.a_list[self.n_layers-i-1], name = 'biases')
+            decoder.append(tf.sigmoid(a + tf.matmul(decoder[i], W, transpose_b = True)))
+    return decoder[self.n_layers]        
+
+def _loss(self, logits, labels):
+    loss = tf.nn.l2_loss(logits-labels)
+    return loss
+
+def _training(self, loss):
+    optimizer = tf.train.GradientDescentOptimizer(self.deepnn_learning_rate)
+    train_op = optimizer.minimize(loss)
+    return train_op `

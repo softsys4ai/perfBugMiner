@@ -1,0 +1,8 @@
+Feature Request: Allow disabling the use of host pinned memory
+
+Right now, TensorFlow will always use pinned memory (allocated by the stream executor with cuMemHostAlloc) whenever it knows that a tensor will need to be transferred to the GPU (or something like that).
+When a TensorFlow process crashes (does not exit gracefully) due to segfaults or other unforeseen circumstances, the PoolAllocator destructor is not called, and the pinned memory is not freed. When pinned memory is not freed, the CUDA driver does not actually release it, and so memory usage grows over time if you have processes that are not exiting gracefully. After this happens for a while, the machine needs to swap and/or runs out of pinned memory, and if there is no swap space enabled, the node dies (and the only way to recover it is a hard-reboot, not accessible via the network).
+As far as we can tell, there is no workaround to this, and we simply need to disable the pinned memory allocator if we want to be absolutely certain that this cannot happen. Right now, TensorFlow does not allow you to do so.
+Proposal: There is currently an environment variable called TF_CUDA_HOST_MEM_LIMIT_IN_MB which used to set a maximum size for the BFCAllocator that does CUDA host memory allocation. In order to implement this feature, we would check whether the value of that environment variable is zero, and, if it is zero, use a non-pinned memory allocator as the sub-allocator for the BFCAllocator.
+Is that acceptable?
+This issue was probably related.

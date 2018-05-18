@@ -1,0 +1,79 @@
+Why is reading a CSV file with a TextLineDataset and decode_csv so slow?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): 1.7.0
+Python version: 3.6.0
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: 9.0.176/7.0.7
+GPU model and memory: Titan X (12 GB)
+Exact command to reproduce: See below
+
+I have a dataset saved on an SSD as a moderately large (~7 million line) .csv file. It's small enough to load into memory, but large enough that it takes a couple minutes to read the entire file into a NumPy array, and I don't always need the entire thing. This seemed like a perfect use case for tf.data.TextLineDataset.
+I attempted to use it similarly to as demonstrated in the documentation with the tf.decode_csv and tf.data.Dataset.map functions, as shown in the code below, but I'm finding it to be unreasonably slow to fetch batches from the TextLineDataset. Of course I'd expect it to be slower than if the data has already been read into memory. But if I compare the total time to read the entire thing into a NumPy array in memory first and process it as a TensorSliceDataset vs. creating a TextLineDataset and reading batches that way, the former is many times faster.
+Am I missing something, or is this an issue with TextLineDataset and/or tf.decode_csv?
+def make_tld(csv_filename, header_lines, delim, batch_size):
+    dataset = tf.data.TextLineDataset(filenames=csv_filename).skip(header_lines)
+
+    def parse_csv(line):
+        cols_types = [[]] * num_cols_  # all required
+        columns = tf.decode_csv(line, record_defaults=cols_types, field_delim=delim)
+        return tf.stack(columns)
+
+    dataset = dataset.map(parse_csv).batch(batch_size)
+    return dataset
+
+
+def make_tsd(csv_filename, header_lines, delim, batch_size):
+    with open(csv_filename, "r") as f:
+        lines = f.readlines()
+
+    data_shape = (len(lines) - header_lines, len(lines[header_lines].strip().split(delim)))
+    data = np.empty(shape=data_shape, dtype=np.float32)
+
+    for idx, line in enumerate(lines[header_lines:]):
+        columns = [float(el) for el in line.strip().split(delim)]
+        data[idx, :] = np.array(columns)
+
+    dataset = tf.data.Dataset.from_tensor_slices(data).batch(batch_size)
+    return dataset
+
+
+if __name__ == "__main__":
+    batch_size_ = 100
+
+    tld_start = datetime.datetime.now()
+    tld = make_tld(csv_filename_, header_lines_, delim_, batch_size_)
+    tld_next = tld.make_one_shot_iterator().get_next()
+    with tf.Session() as tld_sess:
+        tld_sess.run(tf.global_variables_initializer())
+        try:
+            while True:
+                tld_out = tld_sess.run(tld_next)
+        except tf.errors.OutOfRangeError:
+            print("Done")
+    tld_end = datetime.datetime.now()
+    print("TextLineDataset: " + str(tld_end - tld_start))
+
+    tsd_start = datetime.datetime.now()
+    tsd = make_tsd(csv_filename_, header_lines_, delim_, batch_size_)
+    tsd_next = tsd.make_one_shot_iterator().get_next()
+    with tf.Session() as tsd_sess:
+        tsd_sess.run(tf.global_variables_initializer())
+        try:
+            while True:
+                tsd_out = tsd_sess.run(tsd_next)
+        except tf.errors.OutOfRangeError:
+            print("Done")
+    tsd_end = datetime.datetime.now()
+    print("TensorSliceDataset: " + str(tsd_end - tsd_start))
+
+Output:
+Done
+TextLineDataset: 0:11:24.675474
+Done
+TensorSliceDataset: 0:02:12.061404

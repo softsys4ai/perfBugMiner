@@ -1,0 +1,43 @@
+When data become large,parition variables can not initialized successfully
+
+i use tensorflow to distributed trainning models, i use the partition valriables to store an array data, when the data is not so bigger, everything looks ok,but when the array data become larger, when the session initialize, the partition variables can not initialized and the session will wait util time out.
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request. the feat_info can initialize successfully, but the adj_info cannot initialized. the adj_info is larger than feat_info
+i use monitored_session or supervisor to do the initialize_variables, when data is not so large, it will initialize successfully, my machine have more than 300GB memory is enough for the larger variable
+Have I written custom code
+yes
+OS Platform and Distribution
+linux platform
+TensorFlow installed from
+N/A
+TensorFlow version
+r1.4
+Bazel version
+CUDA/cuDNN version
+no gpu
+GPU model and memory
+no gpu
+Exact command to reproduce
+N/A
+Source code / logs
+i use ps_num = 4, worker_num =4 and i also try some other distributed config, like ps_num=1, worker_num=4, the result is the same
+source code:
+with tf.device(tf.train.replica_device_setter(
+worker_device="/job:worker/task:%d" % task_id,
+cluster=cluster_spec)):
+feat_info = tf.get_variable("feature_info", (len(id_map),FLAGS.features_column), tf.float32, trainable=False, partitioner=tf.fixed_size_partitioner(num_workers))
+adj_info = tf.get_variable("adj_info", (len(id_map),FLAGS.max_degree), tf.int64, trainable=False, partitioner=tf.fixed_size_partitioner(num_workers))
+with tf.device('/job:worker/task:%d' %task_id):
+adj_local = tf.Variable(tf.constant(minibatch.adj, dtype=tf.int64), trainable=False, name="adj_local", collections=[tf.GraphKeys.LOCAL_VARIABLES])
+feat_local = tf.Variable(tf.constant(features, dtype=tf.float32), trainable=False, name="feat_local", collections=[tf.GraphKeys.LOCAL_VARIABLES])
+length, begin, end = split_node_by_task(len(id_map), task_id, num_workers)
+adj = tf.nn.embedding_lookup(adj_info, [x for x in range(begin, end)])
+adj = adj_local
+feat = tf.nn.embedding_lookup(feat_info, [x for x in range(begin, end)])
+feat = feat_local
+log:
+2017-12-08 23:54:17.377290: I tensorflow/core/distributed_runtime/master_session.cc:998] Start master session c2b3ba9b700261ba with config:
+INFO:tensorflow:Waiting for model to be ready. Ready_for_local_init_op: None, ready: Variables not initialized: adj_info/part_0, adj_info/part_1, adj_info/part_2, adj_info/part_3, adj_info/part_4, adj_info/part_5, adj_info/part_6, adj_info/part_7, adj_info/part_8, adj_info/part_9, adj_info/part_10, adj_info/part_11, adj_info/part_12, adj_info/part_13, adj_info/part_14, adj_info/part_15
+2017-12-09 00:00:35.637019: I tensorflow/core/distributed_runtime/master_session.cc:998] Start master session f35fcf332e3908ec with config:
+INFO:tensorflow:Waiting for model to be ready. Ready_for_local_init_op: None, ready: Variables not initialized: adj_info/part_0, adj_info/part_1, adj_info/part_2, adj_info/part_3, adj_info/part_4, adj_info/part_5, adj_info/part_6, adj_info/part_7, adj_info/part_8, adj_info/part_9, adj_info/part_10, adj_info/part_11, adj_info/part_12, adj_info/part_13, adj_info/part_14, adj_info/part_15
+and it will alway waiting adj_info to initialize

@@ -1,0 +1,164 @@
+[Windows] Couldn't open CUDA library cupti64_80.dll
+
+NOTE: Only file GitHub issues for bugs and feature requests.  All other topics will be closed.
+For general support from the community, see StackOverflow.
+To make bugs and feature requests more easy to find and organize, we close issues that are deemed
+out of scope for GitHub Issues and point people to StackOverflow.
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+This issue  is not applicable for me as CuDNN is getting loaded. I checked the CuDNN folder manually, there is no such dll.
+Environment info
+Operating System: Windows 10 Pro
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+D:\TensorFlow>nvcc --version
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2016 NVIDIA Corporation
+Built on Sat_Sep__3_19:05:48_CDT_2016
+Cuda compilation tools, release 8.0, V8.0.44
+
+cudnn-8.0-windows10-x64-v5.1.zip
+
+If installed from binary pip package, provide:
+
+A link to the pip package you installed: Sorry, I cant remember which package pip fetched. I just ran this command.
+
+D:\TensorFlow>pip3.5 install --upgrade tensorflow-gpu
+Requirement already up-to-date: tensorflow-gpu in c:\users\windows\appdata\local\programs\python\python35\lib\site-packages
+Requirement already up-to-date: wheel>=0.26 in c:\users\windows\appdata\local\programs\python\python35\lib\site-packages (from tensorflow-gpu)
+Requirement already up-to-date: six>=1.10.0 in c:\users\windows\appdata\local\programs\python\python35\lib\site-packages (from tensorflow-gpu)
+Requirement already up-to-date: numpy>=1.11.0 in c:\users\windows\appdata\local\programs\python\python35\lib\site-packages (from tensorflow-gpu)
+Requirement already up-to-date: protobuf==3.1.0 in c:\users\windows\appdata\local\programs\python\python35\lib\site-packages (from tensorflow-gpu)
+Requirement already up-to-date: setuptools in c:\users\windows\appdata\local\programs\python\python35\lib\site-packages (from protobuf==3.1.0->tensorflow-gpu)
+
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:128] successfully opened CUDA library cublas64_80.dll locally
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:128] successfully opened CUDA library cudnn64_5.dll locally
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:128] successfully opened CUDA library cufft64_80.dll locally
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:128] successfully opened CUDA library nvcuda.dll locally
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:128] successfully opened CUDA library curand64_80.dll locally
+0.12.0-rc1
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+import numpy as np
+import random
+
+vLength = 8
+
+nodeCount = [vLength,8,8,vLength]
+
+SUMMARY_DIR = 'D:/Summary/'
+
+BATCH_SIZE = 10
+TRAIN_SIZE = 100
+
+def model(x_t):    
+    layerCount = len(nodeCount)
+    layer = [None for _ in range(layerCount)]
+    weights = [None for _ in range(layerCount - 1)]
+    biases = [None for _ in range(layerCount - 1)]
+    layer[0] = x_t
+    for i in range(layerCount-1):
+        weights[i] = tf.Variable(tf.random_normal([nodeCount[i],nodeCount[i+1]]))
+        biases[i] = tf.Variable(tf.random_normal([nodeCount[i+1]]))
+          
+        layer[i+1] = tf.add(tf.matmul(layer[i],weights[i]),biases[i])
+        if(i != layerCount-2):
+            layer[i+1] = tf.nn.tanh(layer[i+1])
+        else:
+            layer[i+1] = tf.nn.softmax(layer[i+1])
+
+    return layer[i+1]
+
+def getNextBatch():
+    v = [0.0 for _ in range(vLength)]
+    v[0] = 1.0
+
+    r = [None for _ in range(BATCH_SIZE)]
+    for i in range(BATCH_SIZE):
+        random.shuffle(v)
+        r[i] = v.copy()
+    return r,r
+    
+m = None
+def trainNN():
+    x_t = tf.placeholder(tf.float32,[None,vLength],'input')
+    y_t = tf.placeholder(tf.float32, [None, vLength],'actual')
+    
+    m = model(x_t)    
+
+    with tf.name_scope('Cost_Function'):
+        cost = tf.reduce_mean(-tf.reduce_sum(y_t * tf.log(m)))
+        
+    with tf.name_scope('Learning_Rate'):
+        learning_rate = tf.Variable(0.5,dtype=tf.float32)
+
+    with tf.name_scope('Optimizer'):
+        optimizer = tf.train.AdamOptimizer().minimize(cost)
+
+    with tf.name_scope('testing'):
+        correct = tf.equal(tf.argmax(y_t,1),tf.argmax(m,1))
+        accuracy = tf.reduce_mean(tf.cast(correct,'float'))
+        tf.summary.scalar('accuracy',accuracy)
+
+    epochs = 10
+
+    with tf.Session() as sess:
+        merged = tf.summary.merge_all()
+        
+        sess.run(tf.global_variables_initializer())
+        
+        for epoch in range(epochs):            
+            tw = tf.summary.FileWriter(SUMMARY_DIR+'/epoch'+str(epoch),sess.graph)
+            epochLoss = 0
+            c = 0
+            for i in range(TRAIN_SIZE):
+                bx,by = getNextBatch()    
+                fd = {x_t:bx,y_t:by}                
+                run_metadata = tf.RunMetadata()
+                run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                summary,c,_ = sess.run([merged,cost,optimizer],
+                              feed_dict=fd,
+                              options=run_options,
+                              run_metadata=run_metadata)
+                if(i%BATCH_SIZE == 0):
+                    tw.add_summary(summary,i)
+                    tw.add_run_metadata(run_metadata,'step%d'%i)
+                
+                epochLoss += c       
+            
+            tx,ty = getNextBatch()
+            print('Epoch ',epoch,'/',epochs,':',epochLoss/TRAIN_SIZE,' ',accuracy.eval({x_t:tx,y_t:ty}))
+       
+        tw.close()            
+
+trainNN()
+
+What other attempted solutions have you tried?
+I googled the said dll file. No, results.
+Could PTI stand for Parameter Tuning Interface?
+I found this link, but I am hesitant to installed anything that is not prescribed officially.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+D:\TensorFlow>D:\TensorFlow\identity_dnn_bare.py
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:128] successfully opened CUDA library cublas64_80.dll locally
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:128] successfully opened CUDA library cudnn64_5.dll locally
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:128] successfully opened CUDA library cufft64_80.dll locally
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:128] successfully opened CUDA library nvcuda.dll locally
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:128] successfully opened CUDA library curand64_80.dll locally
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\core\common_runtime\gpu\gpu_device.cc:885] Found device 0 with properties:
+name: GeForce 930MX
+major: 5 minor: 0 memoryClockRate (GHz) 1.0195
+pciBusID 0000:01:00.0
+Total memory: 2.00GiB
+Free memory: 1.66GiB
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\core\common_runtime\gpu\gpu_device.cc:906] DMA: 0
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\core\common_runtime\gpu\gpu_device.cc:916] 0:   Y
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\core\common_runtime\gpu\gpu_device.cc:975] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce 930MX, pci bus id: 0000:01:00.0)
+I c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\stream_executor\dso_loader.cc:119] Couldn't open CUDA library cupti64_80.dll
+F c:\tf_jenkins\home\workspace\release-win\device\gpu\os\windows\tensorflow\core\platform\default\gpu\cupti_wrapper.cc:59] Check failed: ::tensorflow::Status::OK() == (::tensorflow::Env::Default()->GetSymbolFromLibrary( GetDsoHandle(), kName, &f)) (OK vs. Not found: cuptiActivityRegisterCallbacks not found)could not find cuptiActivityRegisterCallbacksin libcupti DSO

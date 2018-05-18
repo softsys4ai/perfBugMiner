@@ -1,0 +1,29 @@
+Export C API symbols of _pywrap_tensorflow_internal.so on OS X
+
+This follows up #10469 by exporting C API symbols on OS X.
+How?
+This PR widens the .lds matching pattern to include the C API symbols as they are mangled on OS X.
+Before this PR the C API symbols are exported in Linux but are hidden in OS X:
+(Linux)$ nm _pywrap_tensorflow_internal.so | grep TF_CloseSession
+00000000012d2d40 T TF_CloseSession
+00000000010f8e50 t _wrap_TF_CloseSession
+
+(OS X)$ nm _pywrap_tensorflow_internal.so | grep TF_CloseSession
+00000000002be1b0 t _TF_CloseSession
+000000000001a0a0 t __Z21_wrap_TF_CloseSessionP7_objectS0_
+After this PR the C API symbols are exported in both Linux and OS X:
+(Linux)$ nm _pywrap_tensorflow_internal.so | grep TF_CloseSession
+0000000000fa25f0 T TF_CloseSession
+0000000000cf02e0 t _wrap_TF_CloseSession
+
+(OS X)$ nm _pywrap_tensorflow_internal.so | grep TF_CloseSession
+0000000000392880 T _TF_CloseSession
+000000000001ae50 t __Z21_wrap_TF_CloseSessionP7_objectS0_
+(notice the change from t to T, i.e. static to global)
+Why?
+This is important for libraries that use multiple client APIs as described in #7541. My use case is an R package that uses the Python API through rstudio/tensorflow and also uses the C API library: I build tf graphs using the Python API and run those graphs from R-wrapped C++ code using the C API. This already works in Linux, and should also work in OS X after this PR.
+Tested
+Successfully loaded a shared library in R that uses symbols from _pywrap_tensorflow_internal.so:
+
+ Linux
+ OS X

@@ -1,0 +1,31 @@
+Packet16q16i does not name a type
+
+When I compile from source using the flag of AVX512 on Xeon Phi with gcc, I come across a problem as below:
+ERROR: tensorflow/tensorflow/core/kernels/BUILD:895:1: C++ compilation of rule '//tensorflow/core/kernels:gather_functor' failed: gcc failed: error executing command /opt/rh/devtoolset-4/root/usr/bin/gcc -U_FORTIFY_SOURCE '-D_FORTIFY_SOURCE=1' -fstack-protector -Wall -Wl,-z,-relro,-z,now -B/opt/rh/devtoolset-4/root/usr/bin -B/usr/bin -Wunused-but-set-parameter ... (remaining 56 argument(s) skipped): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+In file included from ./third_party/eigen3/unsupported/Eigen/CXX11/FixedPoint:35:0,
+from ./tensorflow/core/framework/numeric_types.h:25,
+from ./tensorflow/core/framework/type_traits.h:22,
+from ./tensorflow/core/kernels/gather_functor.h:22,
+from tensorflow/core/kernels/gather_functor.cc:50:
+./third_party/eigen3/unsupported/Eigen/CXX11/src/FixedPoint/PacketMathAVX512.h:84:11: error: 'Packet16q16i' does not name a type
+typedef Packet16q16i half;
+^
+./third_party/eigen3/unsupported/Eigen/CXX11/src/FixedPoint/PacketMathAVX512.h:135:11: error: 'Packet16q16i' does not name a type
+typedef Packet16q16i half;
+Is it caused by some code missing? I add some code in the file PacketMathAVX512.h:
+typedef struct Packet16q16i {
+__m512i val;
+operator __m512i() const { return val; }
+Packet16q16i();
+Packet16q16i(__m512i val) : val(val) {}
+} Packet16q16i;
+However, it is still failed with the following issue:
+ERROR: tensorflow/tensorflow/core/kernels/BUILD:346:1: C++ compilation of rule '//tensorflow/core/kernels:split_lib' failed: gcc failed: error executing command
+external/eigen_archive/unsupported/Eigen/CXX11/../../../Eigen/src/Core/GenericPacketMath.h:478:16: error: 'alignment' is not a member of 'Eigen::internal::unpacket_traitsEigen::internal::Packet64q8u'
+if(Alignment >= unpacket_traits::alignment)
+^
+I am not sure if I did something wrong. Can someone help?
+I use the command provided in https://github.com/tensorflow/tensorflow/issues/4775
+bazel build --ignore_unsupported_sandboxing -c opt //tensorflow/tools/pip_package:build_pip_package  --copt "-mavx512f" --copt "-mavx512cd" --copt "-mavx512er" --copt "-mavx512pf" --copt "-mavx2" --copt "-fopt-info-vec-all" --copt "-DEIGEN_ENABLE_AVX512" --copt "-DEIGEN_ENABLE_AVX2"  --verbose_failures   -j 64
+The gcc version is 5.3.
+BTW, I also tried to use Intel compiler to compile the code, but failed. I saw two issues are discussed, but it seems that there is no solution.

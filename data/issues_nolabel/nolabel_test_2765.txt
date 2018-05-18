@@ -1,0 +1,139 @@
+Initializing all weight matrices for RNN
+
+It is currently impossible to initialize the input -> hidden connectivity matrix, and the hidden->hidden connectivity matrix in RNNCells. Indeed, these are generated automatically in tf.python.ops.rnn_cell._linear, which constricts the connectivity architecture. As an example, I would like to have an identity connectivity matrix for input->hidden (H), an all-to-all for H->H and another identity for H->output. This is currently not feasible if you don't want to correct the weights at every iteration.
+I am not sure if this is the right place to post it, since I have never contributed to big projects like tensorflow. Nevertheless, I modified the BasicRNNCell and _linear function in order to allow such initialization.
+High level description:
+BasicRNNCell can now take 'initializer' and 'trainable' as inputs, which can be both list of two elements.
+Initializer: Weight matrix combining Input -> H and H -> H connections. Initializer can actually be a list of two matrices, or a matrice and a vector. The first matrix can act as an update index (if trainable of the first matrix is set to False) and the other one (trainable) will either do a dot product (if w2 is a vector) or element wise model (if w2 is a matrix).
+Trainable: Whether the specified weight matrice can be trained. If 'initializer' is composed of two matrices, 'trainable' has to be a boolean list of two elements.
+This allows a full control of the weight matrices for the cell, while still leaving all the defaults behaviours.
+*Code changes are wrap between double stars ( * ). Do a CTRL+F to highlight them.
+BasicRNNCell function
+`class BasicRNNCell(RNNCell):
+  """The most basic RNN cell."""
+
+  def __init__(self, num_units, input_size=None, activation=tanh,
+                     **initializer = None, trainable = True**):
+    if input_size is not None:
+      logging.warn("%s: The input_size parameter is deprecated." % self)
+   self._num_units   = num_units
+    self._activation  = activation
+   **self._initializer = initializer**
+    **self._trainable   = trainable**
+  @property
+  def state_size(self):
+    return self._num_units
+
+  @property
+  def output_size(self):
+    return self._num_units
+
+  def __call__(self, inputs, state, scope=None):
+    """Most basic RNN: output = new_state = activation(W * input + U * state + B)."""
+    with vs.variable_scope(scope or type(self).__name__):  # "BasicRNNCell"
+      output = self._activation(_linear([inputs, state], 
+                                        self._num_units, 
+                                        True,
+                                        **initializer = self._initializer**,
+                                        **trainable   = self._trainable**))
+    return output, output`
+
+_linear function
+def _linear(args, output_size, bias, bias_start=0.0, scope=None,
+            **initializer=None, trainable=True**):
+  """Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
+
+  Args:
+    args: a 2D Tensor or a list of 2D, batch x n, Tensors.
+    output_size: int, second dimension of W[i].
+    bias: boolean, whether to add a bias term or not.
+    bias_start: starting value to initialize the bias; 0 by default.
+    scope: VariableScope for the created subgraph; defaults to "Linear".
+    **initializer: Initial weight tensor. Can be a list with up to 2 tensors. 
+                 If both tensors are 2D, an element wise multiplication 
+                 will be applied. If the first tensor is 2D and the second 1D, 
+                 innder product will be applied. Ws have to have inner dimension
+                 equal to total_arg_size.
+    trainable: True if the variable is trainable. Can be a list with 
+               same dimension as initializer.**
+
+  Returns:
+    A 2D Tensor with shape [batch x output_size] equal to
+    sum_i(args[i] * W[i]), where W[i]s are newly created matrices.
+
+  Raises:
+    ValueError: if some of the arguments has unspecified or wrong shape.
+  """
+  if args is None or (_is_sequence(args) and not args):
+    raise ValueError("`args` must be specified")
+  if not _is_sequence(args):
+    args = [args]
+
+  # Calculate the total size of arguments on dimension 1.
+  total_arg_size = 0
+  shapes = [a.get_shape().as_list() for a in args]
+  for shape in shapes:
+    if len(shape) != 2:
+      raise ValueError("Linear is expecting 2D arguments: %s" % str(shapes))
+    if not shape[1]:
+      raise ValueError("Linear expects shape[1] of arguments: %s" % str(shapes))
+    else:
+      total_arg_size += shape[1]   
+
+  **if not np.shape(initializer) and not np.shape(trainable):
+    trainLen = initLen = 0
+  elif not np.shape(trainable):
+    initLen  = np.shape(initializer)[0]
+    trainLen = 1
+  else:
+    initLen = len(initializer)
+    trainLen = len(trainable)
+  if initLen != trainLen:
+    raise ValueError("`initializer`(len: %s) and `trainable`(len: %s) must be the same len."
+                      % (str(initLen), str(trainLen)))**
+
+  # Now the computation.
+  with vs.variable_scope(scope or "Linear"):
+    **if not initializer:**
+      matrix = vs.get_variable("Matrix", [total_arg_size, output_size], 
+                                 **trainable = trainable)
+    else:
+      if initLen == 1: 
+        matrix = vs.get_variable("Matrix",initializer = initializer,
+                                          trainable   = trainable)
+      elif initLen == 2:
+        init0Shape = initializer[0].get_shape().as_list()
+        init1Shape = initializer[1].get_shape().as_list() 
+
+        if init0Shape[0] !=total_arg_size:
+          raise ValueError(
+    "`initializer` first dimension (%s,) should be equal to the `input` inner dimension (%s,)."
+                            % (str(init0Shape[0]),str(total_arg_size)))
+
+        matrix0 = vs.get_variable("Matrix0",initializer = initializer[0],
+                                            trainable   = trainable[0]  )
+        matrix1 = vs.get_variable("Matrix1",initializer = initializer[1],
+                                            trainable   = trainable[1]  )            
+        if init0Shape[1] > init1Shape[1]:
+          matrix = math_ops.matmul(matrix0,matrix1)
+        elif init0Shape[1] == init1Shape[1]:
+          matrix = math_ops.mul(matrix0,matrix1)
+        else:
+          raise ValueError("First matrix in `initializer` should be equal or bigger \
+                            than the second matrix")
+      else:
+        raise ValueError("`initializer`and `trainable` must be lists of 2 elements \
+                               maximum") 
+    if len(args) == 1:
+      res = math_ops.matmul(args[0], matrix)
+    else:
+      res = math_ops.matmul(array_ops.concat(1, args), matrix)**
+    if not bias:
+      return res
+    bias_term = vs.get_variable(
+        "Bias", [output_size],
+        initializer = init_ops.constant_initializer(bias_start))
+  return res + bias_term`
+
+Would this be an interesting feature for a future release? I added error raises that cover pretty much all errors I could think of. This is a simple change and could be implemented in the other RNNCells type.
+Thank you for your feedback.

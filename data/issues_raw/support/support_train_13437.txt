@@ -1,0 +1,83 @@
+Sin family identities for y=x yield bad gradients
+
+I'm writing a custom continuous piecewise function. At some point the function becomes an identity of f(x) = x, but while the loss decreases, the accuracy does not improve. Simply swapping in an "x" in the below code does cause everything to work smoothly.
+Originally suspected tf.where as that has NaN gradient troubles, so I rewrote an equivalent function using boolean_mask. Still the same issue. I also attempted to trim values to prevent NaN propagation. A simplified version of the code is below (the troublesome statement in question being tf.cos(i*tf.acos(x)), which equals x):
+i = 1
+
+location_value = tf.stack([
+    tf.less_equal(tf.abs(x), 1), # between_neg_1_and_1
+    tf.greater(x, 1), # greater_than_1
+    tf.less(x, -1), # less_than_neg_1
+    tf.is_nan(x)] 
+, -1)
+
+res = tf.stack([
+    tf.cos(i*tf.acos(tf.minimum(tf.maximum(x, -1), 1))),
+    x,
+    x,
+    0*x]
+, -1)
+
+out_shape = x.get_shape().as_list()
+out_shape[0] = batch_size
+
+res = tf.reshape(tf.boolean_mask(res, location_value), out_shape)
+
+
+== cat /etc/issue ===============================================
+Linux tyler-desktop 4.2.0-42-generic #49~14.04.1-Ubuntu SMP Wed Jun 29 20:22:11 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="14.04.5 LTS, Trusty Tahr"
+VERSION_ID="14.04"
+== are we in docker =============================================
+No
+== compiler =====================================================
+c++ (Ubuntu 4.8.5-2ubuntu1~14.04.1) 4.8.5
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+== uname -a =====================================================
+Linux tyler-desktop 4.2.0-42-generic #49~14.04.1-Ubuntu SMP Wed Jun 29 20:22:11 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+== check pips ===================================================
+numpy (1.12.0)
+protobuf (3.1.0.post1)
+tensorflow-gpu (0.12.1)
+== check for virtualenv =========================================
+False
+== tensorflow import ============================================
+tf.VERSION = 0.12.1
+tf.GIT_VERSION = v0.12.0-10-g4d924e7-dirty
+tf.COMPILER_VERSION = v0.12.0-10-g4d924e7-dirty
+Sanity check: array([1], dtype=int32)
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+== env ==========================================================
+LD_LIBRARY_PATH /root/torch/install/lib:/root/torch/install/lib:/usr/local/cuda-8.0/lib64:/usr/lib:/usr/openwin/lib:/usr/dt/lib:/X11.6/lib:/X11.5/lib:/uva/lib:/gnu/lib:/usr/local/cuda/lib64:/usr/local/cuda:/usr/bin/g++
+DYLD_LIBRARY_PATH /root/torch/install/lib:/root/torch/install/lib:
+== nvidia-smi ===================================================
+Sun Oct  1 18:05:01 2017
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 367.48                 Driver Version: 367.48                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 1070    Off  | 0000:01:00.0      On |                  N/A |
+|  0%   37C    P0    40W / 230W |    728MiB /  8110MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0      1137    G   /usr/bin/X                                     370MiB |
+|    0      1761    G   compiz                                         243MiB |
+|    0      2645    G   /usr/lib/firefox/firefox                         1MiB |
+|    0      3024    G   ...ble-features=DocumentWriteEvaluator<Disal   111MiB |
++-----------------------------------------------------------------------------+
+== cuda libs  ===================================================
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0.44
+/usr/local/cuda-8.0/lib64/libcudart_static.a

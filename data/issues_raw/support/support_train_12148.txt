@@ -1,0 +1,104 @@
+Tensorflow Experiment shape mismatch between train set and test set
+
+Hi guys,
+I am not sure if this is a bug or my mistake but it looks like when the experiment evaluates with the testing set it expects it to be of the same shape as the training set.
+First let me show you how I feed the experiment with the train set and eval set:
+def input_fun(data):
+        x, y = data
+        x, y = np.reshape(x,(1, -1, n_inputs)), np.reshape(y,(1, -1, n_outputs))
+        return tf.constant(x, dtype = tf.float32), tf.constant(y, dtype = tf.float32)
+
+    def get_train_inputs():
+        return input_fun(train_set)
+
+    def get_test_inputs():
+        return input_fun(test_set)
+
+when I print my train set and eval set, I have :
+
+(<tf.Tensor 'Const_22:0' shape=(1, 1000, 1) dtype=float32>, <tf.Tensor 'Const_23:0' shape=(1, 1000, 1) dtype=float32>)
+(<tf.Tensor 'Const_24:0' shape=(1, 100, 1) dtype=float32>, <tf.Tensor 'Const_25:0' shape=(1, 100, 1) dtype=float32>)
+
+Then I build my model:
+def model_fn(x, y, mode, params):
+       predict = prediction(x)
+       loss = None
+       train_op = None
+       eval_metric_ops = None
+    
+       if mode == learn.ModeKeys.TRAIN or mode == learn.ModeKeys.EVAL:
+          loss = model_loss(y, predict, mode)
+          #eval_metric_ops = { "rmse":tf.metrics.root_mean_squared_error(tf.cast(y,tf.float32), predict) }
+    
+       if mode == learn.ModeKeys.TRAIN:
+          global_step = tf.train.get_global_step()
+          #train_op = model_train_op(loss, params['learning_rate'], global_step, mode)
+    
+          learning_rate = tf.train.exponential_decay(learning_rate = params["learning_rate"], 
+                                                  global_step = tf.contrib.framework.get_global_step(), 
+                                                  decay_steps = 20, 
+                                                  decay_rate = 0.96, 
+                                                  staircase = True)
+
+           train_op = tf.contrib.layers.optimize_loss(loss = loss,
+                                              global_step = tf.contrib.framework.get_global_step(),
+                                              learning_rate = learning_rate,
+                                              optimizer = "Adam")
+    
+       predictions = {"predictions": predict}
+    
+       return model_fn_lib.ModelFnOps(
+          mode = mode, 
+          predictions = predictions,
+          loss = loss, 
+          train_op = train_op,
+       )
+
+Then I define the experiment:
+def experiment_fn(output_dir):
+        model_params = {'learning_rate': 0.01}
+        trainingConfig = tf.contrib.learn.RunConfig(save_checkpoints_steps = 4, save_summary_steps = 2)
+        export_strategy = saved_model_export_utils.make_export_strategy(serving_input_fn=serving_input_fn, exports_to_keep=None)
+        hooks = [
+            #tf.train.LoggingTensorHook({'loss'}, every_n_iter = 2),
+            tf.train.StepCounterHook(every_n_steps = 2, output_dir = output_dir),
+            tf.train.CheckpointSaverHook(output_dir, save_steps = 10, checkpoint_basename = 'model.ckpt'),
+            tf.train.SummarySaverHook(
+                save_steps = 10, 
+                output_dir = output_dir, 
+                #summary_op = ['loss'],
+                scaffold= tf.train.Scaffold(),
+                summary_op=tf.summary.merge_all()
+            )
+        ]
+        return learn.Experiment(
+            estimator = learn.Estimator(model_fn = model_fn, 
+                                params = model_params, 
+                                model_dir = output_dir, 
+                                config = trainingConfig),
+            train_input_fn = get_train_inputs,
+            eval_input_fn = get_test_inputs,
+            #eval_metrics = model_eval_metrics(),
+            train_steps = 100,
+            #train_monitors = hooks,
+            eval_hooks = hooks,
+            export_strategies = export_strategy
+        )
+
+Eventually I run this line:
+learn_runner.run(experiment_fn = experiment_fn, 
+                    output_dir = outdir)
+
+The results are as followed:
+
+Monitors are deprecated. Please use tf.train.SessionRunHook.
+INFO:tensorflow:Create CheckpointSaverHook.
+INFO:tensorflow:Saving checkpoints for 1 into .\model.ckpt.
+INFO:tensorflow:step = 1, loss = 0.043889
+
+It works fine for the training set, but when it evaluates on the test set I get the following error:
+
+ValueError: Features are incompatible with given information. Given features: Tensor("Const:0", shape=(1, 100, 1), dtype=float32), required signatures: TensorSignature(dtype=tf.float32, shape=TensorShape([Dimension(1), Dimension(1000), Dimension(1)]), is_sparse=False).
+
+Do you know where it comes from ?
+Thanks!

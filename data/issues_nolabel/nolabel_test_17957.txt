@@ -1,0 +1,44 @@
+InvalidArgumentError when training with weight regularization with anaconda in win 10 (tensorflow-gpu 1.6.0)
+
+Error message occurs when applying L2 loss weight decay with 1080ti gpu activated
+No Error message occurs when applying weight decay with only cpu running
+The error message always come out if training with all the Optimizer in anaconda, win10, gpu 1080ti, tensorflow 1.6.0. CUDA 9 CUDNN 7.0
+Traceback (most recent call last):
+  File "train_ADAM_add1CNN.py", line 89, in <module>
+    _ = sess.run([train_step_adam],feed_dict={img_in:X_mb, label_gt:y_gt})
+  File "D:\ProgramData\Anaconda4\envs\tff\lib\site-packages\tensorflow\python\client\session.py", line 905, in run
+    run_metadata_ptr)
+  File "D:\ProgramData\Anaconda4\envs\tff\lib\site-packages\tensorflow\python\client\session.py", line 1137, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "D:\ProgramData\Anaconda4\envs\tff\lib\site-packages\tensorflow\python\client\session.py", line 1355, in _do_run
+    options, run_metadata)
+  File "D:\ProgramData\Anaconda4\envs\tff\lib\site-packages\tensorflow\python\client\session.py", line 1374, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: AttrValue must not have reference type value of float_ref
+         for attr 'tensor_type'
+
+Here is the example code that can duplicate the issue:
+...
+def optimize_adam(loss, learning_rate, LRdecaysteps, LRdecayrate):
+    decay_learning_rate = tf.train.exponential_decay(learning_rate, global_step, LRdecaysteps, LRdecayrate, staircase=True)
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        return tf.train.AdamOptimizer(decay_learning_rate).minimize(loss, global_step=global_step), decay_learning_rate
+
+regularization_loss = tf.add_n(tf.losses.get_regularization_losses())
+total_loss = total_loss + regularization_loss
+train_step_adam,decay_learning_rate = optimize_adam(total_loss,learning_rate,LRdecaysteps,LRdecayrate)
+...
+
+it can be run with :
+session_conf = tf.ConfigProto(
+device_count={'CPU' : 1, 'GPU' : 0},
+allow_soft_placement=True,
+log_device_placement=False
+)
+But it will come out this error message with:
+session_conf = tf.ConfigProto(
+device_count={'CPU' : 1, 'GPU' : 1},
+allow_soft_placement=True,
+log_device_placement=False
+)

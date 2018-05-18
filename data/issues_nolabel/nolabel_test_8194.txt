@@ -1,0 +1,95 @@
+NaN loss during training in GMM
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Github issue :- 7784 
+Stackoverflow question :- here and here
+Environment info
+Operating System: Windows 10 / Ubuntu 16.04
+Installed version of CUDA and cuDNN:  NO
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+The output from python -c "import tensorflow; print(tensorflow.__version__)". 1.0 and from here 
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+If using 1.0
+from tensorflow.contrib.factorization.python.ops import gmm as gmm_lib 
+import random 
+import numpy as np 
+x = np.array([[random.random() for i in range(100)] for j in range(1000)] , dtype=np.float32) 
+gmm = gmm_lib.GMM(128,random_seed=0) 
+gmm.fit(x)
+
+If using master branch
+from tensorflow.contrib.factorization.python.ops import gmm as gmm_lib
+from tensorflow.python.framework import constant_op
+from tensorflow.python.framework import dtypes
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import random_ops
+import random
+import numpy as np
+
+
+def input_fn(points, batch_size=None):
+    num_points = points.shape[0]
+    batch_size = batch_size or num_points
+    def _fn():
+        x = constant_op.constant(points)
+        if batch_size == num_points:
+            return x, None
+        indices = random_ops.random_uniform(constant_op.constant([batch_size]),
+                                            minval=0, maxval=num_points - 1,
+                                            dtype=dtypes.int32,
+                                            seed=10)
+        return array_ops.gather(x, indices), None
+
+    return _fn
+
+x = np.array([[random.random() for i in range(100)] for j in range(1000)], dtype=np.float32)
+gmm = gmm_lib.GMM(50, random_seed=0)
+gmm.fit(input_fn=input_fn(x), max_steps=1)
+y = list(gmm.predict_assignments(input_fn=input_fn(x)))
+
+What other attempted solutions have you tried?
+As per the discusion happened in here. I tried to fix the issue of matrix inversion
+InvalidArgumentError (see above for traceback): Input is not invertible.
+	 [[Node: MatrixInverse_2 = MatrixInverse[T=DT_FLOAT, adjoint=false, _device="/job:localhost/replica:0/task:0/cpu:0"](add_138)]]
+
+I have modified gmm_ops.py  and linalg_ops.py here
+But even after calculating pseudo matrix inverse I am getting a new error mentioned here
+Logs or other output that would be helpful
+ERROR:tensorflow:Model diverged with loss = NaN.
+Traceback (most recent call last):
+  File "C:\Users\#####\Anaconda3\lib\site-packages\IPython\core\interactiveshell.py", line 2881, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-2-7be5ab638a15>", line 15, in <module>
+    gmm.fit(input_fn=input_fn(x), max_steps=300)
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\python\util\deprecation.py", line 281, in new_func
+    return func(*args, **kwargs)
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\contrib\learn\python\learn\estimators\estimator.py", line 418, in fit
+    loss = self._train_model(input_fn=input_fn, hooks=hooks)
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\contrib\learn\python\learn\estimators\estimator.py", line 968, in _train_model
+    return loss
+  File "C:\Users\#####\Anaconda3\lib\contextlib.py", line 77, in __exit__
+    self.gen.throw(type, value, traceback)
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\python\framework\ops.py", line 3623, in get_controller
+    yield default
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\contrib\learn\python\learn\estimators\estimator.py", line 968, in _train_model
+    return loss
+  File "C:\Users\#####\Anaconda3\lib\contextlib.py", line 77, in __exit__
+    self.gen.throw(type, value, traceback)
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\python\framework\ops.py", line 3049, in device
+    yield
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\contrib\learn\python\learn\estimators\estimator.py", line 966, in _train_model
+    _, loss = mon_sess.run([model_fn_ops.train_op, model_fn_ops.loss])
+  File "C:\Users\gidnri6\Anaconda3\lib\site-packages\tensorflow\python\training\monitored_session.py", line 483, in run
+    run_metadata=run_metadata)
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\python\training\monitored_session.py", line 818, in run
+    run_metadata=run_metadata)
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\python\training\monitored_session.py", line 775, in run
+    return self._sess.run(*args, **kwargs)
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\python\training\monitored_session.py", line 936, in run
+    run_metadata=run_metadata))
+  File "C:\Users\#####\Anaconda3\lib\site-packages\tensorflow\python\training\basic_session_run_hooks.py", line 481, in after_run
+    raise NanLossDuringTrainingError
+tensorflow.python.training.basic_session_run_hooks.NanLossDuringTrainingError: NaN loss during training.

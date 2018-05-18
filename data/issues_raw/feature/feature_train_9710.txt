@@ -1,0 +1,30 @@
+Error restoring checkpoints using tf.estimator.Estimator or tf.contrib.learn.Estimator, If moved since training
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.1
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 8.0/5.1
+GPU model and memory: Titan X
+Exact command to reproduce:
+
+output_dir = /location1
+estimator = learn.Estimator(model_fn=model_fn, model_dir=output_dir,
+                                params=params, config = config)
+estimator.fit(input_fn=train_input_fn, steps = 1000)
+$ cp -r /location1 /location2
+$ rm -rf /location1
+output_dir = /location2
+estimator = learn.Estimator(model_fn=model_fn, model_dir=output_dir,
+                                params=params, config = config)
+estimator.fit(input_fn=train_input_fn, steps = 1000)
+InvalidArgumentError (see above for traceback): Unsuccessful TensorSliceReader constructor: Failed to get matching files on /location1
+Describe the problem
+I had a need to copy my checkpoints to continue training on another machine, without access to the original location.
+The root cause seems to be in tensorflow/python/training/session_manager.py  at line 177 where
+ckpt = saver_mode.get_checkpoint_state(checkpoint_dir) is used to find the checkpoint path used at training, and then line 188
+saver.restore(sess, ckpt.model_checkpoint_path) is used to restore, instead of using, for example, the latest checkpoint available provided by the model_dir argument to estimator.fit, which is the behavior I expected.
+In any case, it would be nice to be able to point an estimator.fit() or .train() (v1.1) call to continue at a specific checkpoint file.

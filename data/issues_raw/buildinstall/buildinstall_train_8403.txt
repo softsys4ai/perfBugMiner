@@ -1,0 +1,59 @@
+C++ libtensorflow.so segfault on exit on Ubuntu 14.04 (no segfault on OSX)
+
+Summary
+When using libtensorflow.so in a C++ app a segfault occurs when exiting the app on Ubuntu 14.04 while on OSX Sierra this does not get thrown (both using Protobuf 3.2.0). The actual execution of the app is fine, successfully running data through the graph. Only the mentioned segfault when exiting. From the stacktrace you can see it occurs while a protobuf hastable is cleared by libtensorflow.so.
+Environment info
+Ubuntu 14.04
+Installed version of CUDA and cuDNN:
+ls -l /usr/local/cuda/lib64/libcud*
+-rw-r--r-- 1 root    546K Sep 15 00:02 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root      16 Sep 15 00:05 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root      19 Sep 15 00:05 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rw-r--r-- 1 root    406K Sep 15 00:02 /usr/local/cuda/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root    757K Sep 15 00:02 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 mtanner   13 Jul 27  2016 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5*
+lrwxrwxrwx 1 mtanner   17 Jul 27  2016 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5*
+-rwxrwxr-x 1 mtanner  76M Jul 27  2016 /usr/local/cuda/lib64/libcudnn.so.5.1.5*
+-rw-rw-r-- 1 mtanner  67M Jul 27  2016 /usr/local/cuda/lib64/libcudnn_static.a
+Installed from source
+
+The commit hash - e895d5ca395c2362df4f5c8f08b68501b41f8a98 (from the r1.0 branch)
+The output of bazel version - Build label: 0.4.4 Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar Build time: Wed Feb 1 18:54:21 2017 (1485975261) Build timestamp: 1485975261 Build timestamp as int: 1485975261
+Workspace.bzl simply updated to point to a fixed protobuf 3.2.0 to match our system version
+
+...
+  native.http_archive(
+      name = "protobuf",
+      urls = [
+          "https://github.com/google/protobuf/archive/v3.2.0.tar.gz",
+      ],
+      sha256 = "2a25c2b71c707c5552ec9afdfb22532a93a339e1ca5d38f163fe4107af08c54c",
+      strip_prefix = "protobuf-3.2.0",
+  )
+...
+
+Logs or other output that would be helpful
+protoc --version
+libprotoc 3.2.0
+
+gdb stacktrace (at the end of app execution)
+[Thread 0x7fffdcdc0700 (LWP 2193) exited]
+Program received signal SIGSEGV, Segmentation fault.
+0x00007fffefed8ea3 in std::_Hashtable<std::string, std::pair<std::string const, google::protobuf::FieldDescriptorProto_Type>, std::allocator<std::pair<std::string const, google::protobuf::FieldDescriptorProto_Type> >, std::__detail::_Select1st, std::equal_to<std::string>, google::protobuf::hash<std::string>, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits<true, false, true> >::clear() () from /home/dbarnes/code/third_party/tensorflow/bazel-bin/tensorflow/libtensorflow.so
+(gdb)
+
+ldd libtensorflow.so
+ldd /home/dbarnes/code/third_party/tensorflow/bazel-bin/tensorflow/libtensorflow.so
+        linux-vdso.so.1 =>  (0x00007ffe19bf6000)
+        libcudart.so.8.0 => /home/dbarnes/code/third_party/tensorflow/bazel-bin/tensorflow/../_solib_local/_U@local_Uconfig_Ucuda_S_Scuda_Ccudart___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib/libcudart.so.8.0 (0x00007f92440ef000)
+        libdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f9243eeb000)
+        libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f9243be5000)
+        libpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f92439c7000)
+        libstdc++.so.6 => /usr/lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f92436c3000)
+        libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f92434ad000)
+        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f92430e8000)
+        /lib64/ld-linux-x86-64.so.2 (0x00007f924ef6a000)
+        librt.so.1 => /lib/x86_64-linux-gnu/librt.so.1 (0x00007f9242ee0000)
+
+I tried to make this brief but if any other info is helpful let me know.
+Cheers

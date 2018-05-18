@@ -1,0 +1,33 @@
+Wrong order of dependencies after running freeze_graph and/or optimize_for_inference
+
+I haven't found any mention of this anywhere online.
+It makes the graph serializations completely useless for inference.
+Steps to reproduce:
+
+create graph that contains tf.contrib.layers.batch_norm with tf.bool tensor as is_training argument (to force use of Switch node
+run freeze_graph.freeze_graph and optimize_for_inference_lib.optimize_for_inference
+load resulting graph on Android via TensorFlowInferenceInterface
+
+What happened:
+ADB Logcat shows error message
+E/TensorFlowInferenceInterface: Failed to load model from 'file:///android_asset/optimized_model.pb': java.io.IOException: Not a valid TensorFlow Graph serialization: Node 'conv1/bn1/BatchNorm/cond/AssignMovingAvg/BatchNorm/moving_mean/sub_1/x': Control dependencies must come after regular dependencies
+Why did this happen:
+I found out that the order of dependencies was inconsistent after the processing.
+Dependencies before processing:
+input: "^conv1/bn1/BatchNorm/cond/AssignMovingAvg/BatchNorm/moving_mean/BatchNorm/BatchNorm/moving_mean"
+input: "^conv1/bn1/BatchNorm/cond/AssignMovingAvg/BatchNorm/moving_mean/AssignAdd"
+input: "^conv1/bn1/BatchNorm/cond/switch_t"
+
+Dependencies after processing:
+input: "^conv1/bn1/BatchNorm/cond/AssignMovingAvg/BatchNorm/moving_mean/BatchNorm/BatchNorm/moving_mean"
+input: "^conv1/bn1/BatchNorm/cond/AssignMovingAvg/BatchNorm/moving_mean/AssignAdd"
+input: "conv1/bn1/BatchNorm/cond/Switch:1"
+
+What is wrong:
+The control dependencies (starting with '^') should be after the regular dependencies.
+Expected behaviour:
+Reordering of dependencies to ensure ordering consistency.
+Expected order of dependencies:
+input: "conv1/bn1/BatchNorm/cond/Switch:1"
+input: "^conv1/bn1/BatchNorm/cond/AssignMovingAvg/BatchNorm/moving_mean/BatchNorm/BatchNorm/moving_mean"
+input: "^conv1/bn1/BatchNorm/cond/AssignMovingAvg/BatchNorm/moving_mean/AssignAdd"

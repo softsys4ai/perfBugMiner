@@ -1,0 +1,25 @@
+resize_image_with_crop_or_pad should work with batch of images
+
+This is a repost of #2284 per comment from @mrry (CC @ziky90).
+resize_image_with_crop_or_pad should be modified to take either a single image or a batch of images. Right now the signature of the function specifies:
+    image: 3-D tensor of shape `[height, width, channels]`
+
+For a reference of what the api should look like, see resize_images(images,....):
+    images: 4-D Tensor of shape `[batch, height, width, channels]` or
+            3-D Tensor of shape `[height, width, channels]`.
+
+Some commentary:
+
+docs for resize_images say: " Resized images will be distorted if their original aspect ratio is not the same as size.  To avoid distortions see [resize_image_with_crop_or_pad]." However the method referenced cannot be currently used in some cases for which resize_images works due to the above mentioned limitations.
+the entire operation can be implemented using slice operations on the tensor batch. This is what resize_image_with_crop_or_pad does but it has the following logic which would be nice not to copy and paste (there is some subtlety with round down vs up):
+
+  width_diff = target_width - width
+  offset_crop_width = max_(-width_diff // 2, 0)
+  offset_pad_width = max_(width_diff // 2, 0)
+
+  height_diff = target_height - height
+  offset_crop_height = max_(-height_diff // 2, 0)
+  offset_pad_height = max_(height_diff // 2, 0)
+
+the fact this one image op method does not handle batches leads to confusion and various SO posts. People even resort to solving the problem using all sorts of crazy solutions (e.g. tf.while_loop).
+this method is useful in combination with concatenation operations. For example see the Lasagne ConcatLayer.

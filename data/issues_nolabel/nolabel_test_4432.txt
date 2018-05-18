@@ -1,0 +1,63 @@
+wrong tf.control_dependencies using tf.case  and tf.cond
+
+add tf.control_dependencies in one branch of tf.case infulunce the other brach:
+tf version: rc10
+as we can see below, the tfvar is increasing no mather brach f1 or f2 is executed
+change tf.case to tf.cond will get the same output.
+`def testTF_case_with_control_dependencies():
+isTraining=tf.placeholder(tf.bool,shape=[])
+tfvar=tf.Variable(tf.constant(0),tf.int32);
+
+increase_tfvar_op=tf.assign_add(tfvar.ref(), 1);
+
+sess=tf.Session()
+sess.run(tf.initialize_all_variables())
+
+def f1():
+    print ('f1')
+    with tf.control_dependencies([increase_tfvar_op]):
+        return -tfvar;  #if return tfvar directly, no control_dependencies is added
+
+def f2():
+    print('f2')
+    with tf.control_dependencies([]):
+        return tfvar*10;
+caseResult = tf.case([(isTraining, f1)], default=f2)
+
+b=True;
+for t in range(4):
+    b=not b;
+    print('\n------')
+    print('isTraining: ',end='')
+    print(b)
+    beforeCase=sess.run(tfvar)
+    print('\ttfvar before run case: %d'%beforeCase)
+    r=sess.run(caseResult,feed_dict={isTraining:b})
+    print('case result:%d'%r)
+    aftercase=sess.run(tfvar)
+    print('\ttfvar after run case: %d'%aftercase)`
+
+output:
+f2
+f2
+f1
+
+isTraining: False
+tfvar before run case: 0
+case result:10
+tfvar after run case: 1
+
+isTraining: True
+tfvar before run case: 1
+case result:-2
+tfvar after run case: 2
+
+isTraining: False
+tfvar before run case: 2
+case result:30
+tfvar after run case: 3
+
+isTraining: True
+tfvar before run case: 3
+case result:-4
+tfvar after run case: 4

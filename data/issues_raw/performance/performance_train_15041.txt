@@ -1,0 +1,167 @@
+Gradient computation occupies too much memories in "cnn (using while_loop) + lstm" network
+
+System information
+
+Have I written custom code: No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.3
+Python version: 3.6
+CUDA/cuDNN version: 8.0/5.1
+GPU model and memory: GTX Titan X 12GB
+Bazel version: No use
+Exact command to reproduce: using python *.py
+
+Describe the problem
+I'm using while_loop function to build a cnn because of the scale of input tensors. And put the cnn feature into a lstm structure. The problem is that if I only do the forward computatoin it is good, but if I add the backward computation GradientDescentOptimizer().minimize(loss)) the memory is significantly insufficient .
+I tried to split the two part of the model -- cnn and lstm part, and both do well with the whole computation. I think this is the fact:
+
+Single while_loop cnn net is treated as time distributed when computing gradient. Every temporary feature vector and gradients occupy the same memory location at each time step.
+When coneected with a lstm, the cnn net will be treated as many subnet in computing gradients. At every time step in backward computation, it will occupy new memory for its temporary feature vector and gradients. The number of timesteps is very large so that the memory is significantly not enough.
+
+Here is a simplified code of my project. It will show my cnn+lstm structure:
+Source code
+import tensorflow as tf
+import tensorflow.contrib as contrib
+
+def vgg_m(input_layer, reuse=None):
+    # input shape [batch_size, 120, 120, 5]
+    with tf.variable_scope('vgg_m', reuse=reuse):
+        conv_1 = tf.layers.conv2d(input_layer, 96, [3, 3], padding='same', activation=tf.nn.relu, name='conv_1')
+        pool_1 = tf.layers.max_pooling2d(conv_1, 3, 2, padding='same', name='pool_1')
+        norm_1 = tf.layers.batch_normalization(pool_1, name='norm_1')
+
+        conv_2 = tf.layers.conv2d(norm_1, 256, [3, 3], padding='same', activation=tf.nn.relu, name='conv_2')
+        pool_2 = tf.layers.max_pooling2d(conv_2, 3, 2, padding='same', name='pool_2')
+        norm_2 = tf.layers.batch_normalization(pool_2, name='norm_2')
+
+        conv_3 = tf.layers.conv2d(norm_2, 512, [3, 3], padding='same', activation=tf.nn.relu, name='conv_3')
+
+        conv_4 = tf.layers.conv2d(conv_3, 512, [3, 3], padding='same', activation=tf.nn.relu, name='conv_4')
+
+        conv_5 = tf.layers.conv2d(conv_4, 512, [3, 3], padding='same', activation=tf.nn.relu, name='conv_5')
+        pool_5 = tf.layers.max_pooling2d(conv_5, 3, 2, padding='same', name='pool_5')
+
+        flatten_6 = contrib.layers.flatten(pool_5)
+        fc_6 = tf.layers.dense(flatten_6, 512, name='fc6')
+
+    return fc_6
+
+# [batch, time_step, image_h, image_w, image_channel
+input_tensor = tf.random_normal([64, 150, 120, 120, 5], dtype=tf.float32)
+
+# vgg_m is a cnn net whose input and output size is [batch, 120, 120, 5], [batch, 512]
+# in order to create vgg_m variables for reuse later.
+vgg_m(input_tensor[:, 0, :, :, :])
+
+time_steps = 150
+initial_t = tf.constant(0, dtype=tf.int32)
+initial_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps)
+
+def _should_continue(t, *args):
+    return t < time_steps
+
+def _iteration(t, outputs_):
+    # compute cnn feature at time t
+    single_output = vgg_m(input_tensor[:, t, :, :, :], reuse=True)
+    outputs_ = outputs_.write(t, single_output)
+    return t+1, outputs_
+
+_, outputs = tf.while_loop(_should_continue, _iteration, [initial_t, initial_outputs])
+
+# transpose the batch dim and time dim to build a [batch, time_step, 512] feature and send to lstm
+outputs = tf.transpose(outputs.stack(), perm=[1, 0, 2])
+outputs = tf.reshape(outputs, [-1, 150, 512])
+
+lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(512)
+lstm_outputs, lstm_state = tf.nn.dynamic_rnn(
+            lstm_cell,
+            outputs,
+            sequence_length=tf.constant(150, dtype=tf.int32, shape=[64]),
+            dtype=tf.float32,
+        )
+
+# not really a "loss", just perform an loss example
+loss = tf.reduce_max(tf.reduce_max(tf.reduce_max(lstm_outputs, -1), -1), -1)
+train_op = tf.train.GradientDescentOptimizer(0.01).minimize(loss)
+
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+sess.run(train_op)
+
+Log
+2017-12-01 22:44:24.228695: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-12-01 22:44:24.228717: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-12-01 22:44:24.228725: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-12-01 22:44:24.228731: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-12-01 22:44:24.228736: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+2017-12-01 22:44:26.620700: I tensorflow/core/common_runtime/gpu/gpu_device.cc:955] Found device 0 with properties:
+name: GeForce GTX TITAN X
+major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:4c:00.0
+Total memory: 11.92GiB
+Free memory: 11.81GiB
+2017-12-01 22:44:26.620728: I tensorflow/core/common_runtime/gpu/gpu_device.cc:976] DMA: 0
+2017-12-01 22:44:26.620735: I tensorflow/core/common_runtime/gpu/gpu_device.cc:986] 0:   Y
+2017-12-01 22:44:26.620742: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1045] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:4c:00.0)
+2017-12-01 22:44:29.102674: W tensorflow/core/common_runtime/bfc_allocator.cc:217] Allocator (GPU_0_bfc) ran out of memory trying to allocate 1.33GiB. The caller indicates that this is not a failure, but may mean that there could be performance gains if more memory is available.
+2017-12-01 22:44:29.102971: W tensorflow/core/common_runtime/bfc_allocator.cc:217] Allocator (GPU_0_bfc) ran out of memory trying to allocate 1.33GiB. The caller indicates that this is not a failure, but may mean that there could be performance gains if more memory is available.
+2017-12-01 22:44:29.103146: W tensorflow/core/common_runtime/bfc_allocator.cc:217] Allocator (GPU_0_bfc) ran out of memory trying to allocate 748.02MiB. The caller indicates that this is not a failure, but may mean that there could be performance gains if more memory is available.
+2017-12-01 22:44:39.103321: W tensorflow/core/common_runtime/bfc_allocator.cc:273] Allocator (GPU_0_bfc) ran out of memory trying to allocate 112.50MiB.  Current allocation summary follows.
+2017-12-01 22:44:39.103363: I tensorflow/core/common_runtime/bfc_allocator.cc:643] Bin (256):   Total Chunks: 3, Chunks in use: 0 768B allocated for chunks. 20B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2017-12-01 22:44:39.103372: I tensorflow/core/common_runtime/bfc_allocator.cc:643] Bin (512):   Total Chunks: 1, Chunks in use: 0 512B allocated for chunks. 4B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2017-12-01 22:44:39.103379: I tensorflow/core/common_runtime/bfc_allocator.cc:643] Bin (1024):  Total Chunks: 1, Chunks in use: 0 1.0KiB allocated for chunks. 1.0KiB client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2017-12-01 22:44:39.103384: I tensorflow/core/common_runtime/bfc_allocator.cc:643] Bin (2048):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+...(many Chunks)
+2017-12-01 22:44:39.103507: I tensorflow/core/common_runtime/bfc_allocator.cc:643] Bin (67108864):      Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2017-12-01 22:44:39.103514: I tensorflow/core/common_runtime/bfc_allocator.cc:643] Bin (134217728):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2017-12-01 22:44:39.103521: I tensorflow/core/common_runtime/bfc_allocator.cc:643] Bin (268435456):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2017-12-01 22:44:39.103528: I tensorflow/core/common_runtime/bfc_allocator.cc:660] Bin for 112.50MiB was 64.00MiB, Chunk State:
+2017-12-01 22:44:39.103536: I tensorflow/core/common_runtime/bfc_allocator.cc:678] Chunk at 0x230a3c0000 of size 1280
+2017-12-01 22:44:39.103542: I tensorflow/core/common_runtime/bfc_allocator.cc:678] Chunk at 0x230a3c0500 of size 256
+2017-12-01 22:44:39.103547: I tensorflow/core/common_runtime/bfc_allocator.cc:678] Chunk at 0x230a3c0600 of size 512
+...(many Chunks)
+2017-12-01 22:44:39.104420: I tensorflow/core/common_runtime/bfc_allocator.cc:678] Chunk at 0x25cc3c8000 of size 88473600
+2017-12-01 22:44:39.104425: I tensorflow/core/common_runtime/bfc_allocator.cc:678] Chunk at 0x25d1828000 of size 122539008
+2017-12-01 22:44:39.104430: I tensorflow/core/common_runtime/bfc_allocator.cc:693]      Summary of in-use Chunks by size:
+2017-12-01 22:44:39.104438: I tensorflow/core/common_runtime/bfc_allocator.cc:696] 19 Chunks of size 256 totalling 4.8KiB
+...(many Chunks)
+2017-12-01 22:44:39.104599: I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 245891072 totalling 234.50MiB
+2017-12-01 22:44:39.104605: I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 268435456 totalling 256.00MiB
+2017-12-01 22:44:39.104611: I tensorflow/core/common_runtime/bfc_allocator.cc:696] 5 Chunks of size 353894400 totalling 1.65GiB
+2017-12-01 22:44:39.104617: I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 405815296 totalling 387.02MiB
+2017-12-01 22:44:39.104623: I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 513720320 totalling 489.92MiB
+2017-12-01 22:44:39.104629: I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 4294967296 totalling 4.00GiB
+2017-12-01 22:44:39.104635: I tensorflow/core/common_runtime/bfc_allocator.cc:700] Sum Total of in-use chunks: 11.22GiB
+2017-12-01 22:44:39.104644: I tensorflow/core/common_runtime/bfc_allocator.cc:702] Stats:
+Limit:                 12050517197
+InUse:                 12049901824
+MaxInUse:              12049901824
+NumAllocs:                     297
+MaxAllocSize:           4294967296
+
+2017-12-01 22:44:39.104660: W tensorflow/core/common_runtime/bfc_allocator.cc:277] ********x************************xxxxxxxxxxx********************************************************
+2017-12-01 22:44:39.104678: W tensorflow/core/framework/op_kernel.cc:1192] Resource exhausted: OOM when allocating tensor with shape[64,512,30,30]
+2017-12-01 22:44:49.104957: W tensorflow/core/common_runtime/bfc_allocator.cc:273] Allocator (GPU_0_bfc) ran out of memory trying to allocate 225.00MiB.  Current allocation summary follows.
+2017-12-01 22:44:49.105020: I tensorflow/core/common_runtime/bfc_allocator.cc:643] Bin (256):   Total Chunks: 3, Chunks in use: 0 768B allocated for chunks. 20B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2017-12-01 22:44:49.105043: I tensorflow/core/common_runtime/bfc_allocator.cc:643] Bin (512):   Total Chunks: 1, Chunks in use: 0 512B allocated for chunks. 4B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2017-12-01 22:44:49.105063: I tensorflow/core/common_runtime/bfc_allocator.cc:643] Bin (1024):  Total Chunks: 1, Chunks in use: 0 1.0KiB allocated for chunks. 1.0KiB client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+...(similar chunks)
+2017-12-01 22:44:49.107700: I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 4294967296 totalling 4.00GiB
+2017-12-01 22:44:49.107714: I tensorflow/core/common_runtime/bfc_allocator.cc:700] Sum Total of in-use chunks: 11.11GiB
+2017-12-01 22:44:49.107731: I tensorflow/core/common_runtime/bfc_allocator.cc:702] Stats:
+Limit:                 12050517197
+InUse:                 11927362816
+MaxInUse:              12049901824
+NumAllocs:                     297
+MaxAllocSize:           4294967296
+
+2017-12-01 22:44:49.107769: W tensorflow/core/common_runtime/bfc_allocator.cc:277] ********x************************xxxxxxxxxxx*******************************************************_
+2017-12-01 22:44:49.107799: W tensorflow/core/framework/op_kernel.cc:1192] Resource exhausted: OOM when allocating tensor with shape[64,60,60,256]
+2017-12-01 22:44:49.107877: W tensorflow/core/framework/op_kernel.cc:1192] Resource exhausted: OOM when allocating tensor with shape[64,512,30,30]
+         [[Node: while/vgg_m/conv_4/convolution = Conv2D[T=DT_FLOAT, data_format="NHWC", padding="SAME", strides=[1, 1, 1, 1], use_cudnn_on_gpu=true, _device="/job:localhost/replica:0/task:0/gpu:0"](while/vgg_m/conv_3/Relu, while/vgg_m/conv_4/convolution/Enter)]]
+
+....(same thing occuring again and again util it is closed.
+
+Is this an unknown bug
+I saw a different processing with loop_state in gradients function, so is this an unknown bug with multiple loop operation(lstm contains loop as well)

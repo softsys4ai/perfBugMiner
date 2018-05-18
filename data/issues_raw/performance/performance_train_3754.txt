@@ -1,0 +1,53 @@
+Unresolved RNN performance issue
+
+My previous issue was closed without resolution: #3738 (comment)
+The tf RNN approach of running up to the maximum length seems to be fundamentally flawed compared to the pycnn approach.
+Even when only calling the LSTM cell on the relevant steps like below the performance issue persists:
+flat_state = nest.flatten(state)
+    flat_zero_output = nest.flatten(zero_output)
+
+    def select_relevant_state(state, mask):
+        c = tf.boolean_mask(state[0], mask)
+        h = tf.boolean_mask(state[1], mask)
+        return (c, h)
+
+    # Function to Perform at Each Time Step
+    def time_step(time, output_ta, state):
+
+        mask = (time < sequence_length)
+        indices = tf.squeeze(tf.to_int32(tf.where(mask)))
+        invert_indices = tf.squeeze(tf.to_int32(tf.where(invert_mask)))
+        invert_indices = tf.to_int32(tf.where(invert_mask))
+        input_t = tuple(ta.read(time) for ta in input_ta)
+
+        # Restore Shape Information
+        for input_, shape in zip(input_t, inputs_got_shape):
+            input_.set_shape(shape[1:])
+
+        input_t = nest.pack_sequence_as(structure=inputs, flat_sequence=input_t)
+
+        # Select Only Relevant at This Time Step
+        input_t = tf.boolean_mask(input_t, mask)
+        state = select_relevant_state(state, mask)
+        call_cell = lambda: cell(input_t, state)
+
+        # Call Cell
+        (output, new_state) = call_cell()
+
+        # Fill Unprocessed Steps
+        filler_output = tf.boolean_mask(zero_output, invert_mask)
+        filler_state = select_relevant_state(state, invert_mask)
+
+        output = tf.dynamic_stitch([indices, invert_indices], [output, filler_output])
+        new_state_c = tf.dynamic_stitch([indices, invert_indices], [new_state[0], filler_state[0]])
+        new_state_h = tf.dynamic_stitch([indices, invert_indices], [new_state[1], filler_state[1]])
+        new_state = tf.pack([new_state_c, new_state_h], axis=0)
+
+        # Pack State if Using State Tuples
+        output = nest.flatten(output)
+
+        output_ta = tuple(ta.write(time, out) for ta, out in zip(output_ta, output))
+
+        return (time + 1, output_ta, new_state)
+
+Bucketing is not a reasonable approach in this situation as a LSTM is applied to each token and then a higher level LSTM is applied across combined word and character embeddings for actual tagging. This means that the only available inputs at each training step are the tokens in the sentence and therefore bucketing is not possible.

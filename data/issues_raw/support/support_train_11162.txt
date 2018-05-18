@@ -1,0 +1,85 @@
+Rank mismatch error when using contrib.seq2seq.AttentionWrapper in a dynamic_rnn with sequence_length
+
+System information
+Linux Ubuntu 16.04
+TensorFlow installed from pip binary
+TensorFlow version 1.2.0 (v1.2.0-rc2-21-g12f033d)
+Python 3.6.1 Anaconda 4.4.0
+CUDA 8.0 / cuDNN 5.1
+TITAN X (Pascal) 11.9GB
+Describe the problem
+Error: Shapes must be equal rank, but are 0 and 1 for 'rnn/while/Select_4' (op: 'Select') with input shapes: [10], [], []. when using tf.contrib.seq2seq.AttentionWrapper in a dynamic_rnn with seqence_length provided.
+Code to reproduce:
+import tensorflow as tf
+from tensorflow.contrib.rnn import LSTMCell, MultiRNNCell
+import numpy as np
+
+encoder_outputs = tf.constant(np.random.rand(10,20,512).astype(np.float32))
+decoder_inputs = tf.constant(np.random.rand(10,20,512).astype(np.float32))
+lengths = tf.constant(np.random.randint(5,20,(10,),dtype=np.int32))
+
+cell = LSTMCell(512)
+attention_mechanism = tf.contrib.seq2seq.LuongAttention(512, encoder_outputs)
+attn_cell = tf.contrib.seq2seq.AttentionWrapper(
+          cell, attention_mechanism, attention_layer_size=256)
+
+o, s = tf.nn.dynamic_rnn(attn_cell, decoder_inputs, lengths, dtype=tf.float32)
+# this works: o, s = tf.nn.dynamic_rnn(attn_cell, decoder_inputs, dtype=tf.float32)
+# this works: o, s = tf.nn.dynamic_rnn(cell, decoder_inputs, lengths, dtype=tf.float32)
+
+with tf.Session() as sess:
+    tf.global_variables_initializer().run()
+    sess.run(o)
+
+Traceback
+Traceback (most recent call last):
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/common_shapes.py", line 671, in _call_cpp_shape_fn_impl
+    input_tensors_as_shapes, status)
+  File "/home/dgaddy/anaconda3/lib/python3.6/contextlib.py", line 89, in __exit__
+    next(self.gen)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Shapes must be equal rank, but are 0 and 1 for 'rnn/while/Select_4' (op: 'Select') with input shapes: [10], [], [].
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "test.py", line 14, in <module>
+    o, s = tf.nn.dynamic_rnn(attn_cell, decoder_inputs, lengths, dtype=tf.float32)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/rnn.py", line 574, in dynamic_rnn
+    dtype=dtype)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/rnn.py", line 737, in _dynamic_rnn_loop
+    swap_memory=swap_memory)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2770, in while_loop
+    result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2599, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2549, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/rnn.py", line 720, in _time_step
+    skip_conditionals=True)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/rnn.py", line 210, in _rnn_step
+    final_output_and_state = _copy_some_through(new_output, new_state)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/rnn.py", line 182, in _copy_some_through
+    for state, new_state in zip(flat_state, flat_new_state)]
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/rnn.py", line 182, in <listcomp>
+    for state, new_state in zip(flat_state, flat_new_state)]
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/rnn.py", line 171, in _copy_one_through
+    return array_ops.where(copy_cond, output, new_output)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/array_ops.py", line 2328, in where
+    return gen_math_ops._select(condition=condition, t=x, e=y, name=name)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/ops/gen_math_ops.py", line 2145, in _select
+    name=name)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 2508, in create_op
+    set_shapes_for_outputs(ret)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1873, in set_shapes_for_outputs
+    shapes = shape_func(op)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1823, in call_with_requiring
+    return call_cpp_shape_fn(op, require_shape_fn=True)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/common_shapes.py", line 610, in call_cpp_shape_fn
+    debug_python_shape_fn, require_shape_fn)
+  File "/home/dgaddy/anaconda3/lib/python3.6/site-packages/tensorflow/python/framework/common_shapes.py", line 676, in _call_cpp_shape_fn_impl
+    raise ValueError(err.message)
+ValueError: Shapes must be equal rank, but are 0 and 1 for 'rnn/while/Select_4' (op: 'Select') with input shapes: [10], [], [].

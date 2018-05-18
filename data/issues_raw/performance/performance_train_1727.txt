@@ -1,0 +1,104 @@
+GPU resources not released when session is closed
+
+As I understand from the documentation, running sess.close() is supposed to release the resources, but it doesn't. I have been running the following test:
+with tf.Session() as sess:
+    with tf.device('/gpu:0'):
+        matrix1 = tf.constant([[3., 3]])
+        matrix2 = tf.constant([[2.], [2.]])
+        product = tf.matmul(matrix1, matrix2)
+        result = sess.run(product)
+        print(result)
+This allocates all the free memory of gpu0, but it is not released when sess is closed (both using a context manager as in the code above, but also when calling sess.close() manually). The memory usage persists until that Python process is terminated. The way I have been checking memory usage is through nvidia-smi, but I have also confirmed that other processes can't allocate that GPU memory until the process terminates (not the session closes). I would like to be able to free the resources and still keep the Python process running.
+Environment info
+I am running a 64-bit Linux (CentOS) with a computer that has two Tesla K40c (driver 346.46, CUDA 7.0). I installed the 0.7.1 tensorflow for Linux and Python 3.4 through pip. The output of tf.__version__ is 0.7.1.
+Steps to reproduce
+Simply running the code above should according to the document allocate and then release the memory. However, the GPU memory is still allocated and thus unusable by other processes. However, it can be re-used by the same Python process, meaning that I can re-run the snippet over and over as long as I do it from the same Python process.
+Logs or other output that would be helpful
+Here is a log of the session. At the end, the memory is still allocated. Note that another user is connected to both GPUs through Torch7, and is actively using gpu0.
+In [1]: import tensorflow as tf
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so locally
+
+In [2]: with tf.Session() as sess:
+    with tf.device('/gpu:1'):
+        matrix1 = tf.constant([[3., 3]])
+        matrix2 = tf.constant([[2.], [2.]])
+        product = tf.matmul(matrix1, matrix2)
+        result = sess.run(product)
+        print(result)
+   ...:
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties:
+name: Tesla K40c
+major: 3 minor: 5 memoryClockRate (GHz) 0.745
+pciBusID 0000:03:00.0
+Total memory: 11.25GiB
+Free memory: 3.27GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 1 with properties:
+name: Tesla K40c
+major: 3 minor: 5 memoryClockRate (GHz) 0.745
+pciBusID 0000:82:00.0
+Total memory: 11.25GiB
+Free memory: 11.05GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:59] cannot enable peer access from device ordinal 0 to device ordinal 1
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:59] cannot enable peer access from device ordinal 1 to device ordinal 0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0 1
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y N
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 1:   N Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:717] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla K40c, pci bus id: 0000:03:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:717] Creating TensorFlow device (/gpu:1) -> (device: 1, name: Tesla K40c, pci bus id: 0000:82:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 1.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 2.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 4.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 8.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 16.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 32.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 64.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 128.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 256.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 512.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 1.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 2.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 4.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 8.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 16.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 32.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 64.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 128.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 256.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 512.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 1.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 2.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 4.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 1.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 2.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 4.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 8.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 16.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 32.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 64.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 128.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 256.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 512.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 1.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 2.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 4.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 8.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 16.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 32.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 64.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 128.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 256.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 512.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 1.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 2.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 4.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 8.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 16.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:73] Allocating 10.50GiB bytes.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:83] GPU 1 memory begins at 0x4208f40000 extends to 0x44a8b030cd
+[[ 12.]]
+
+In [3]:

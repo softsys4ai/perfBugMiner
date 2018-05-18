@@ -1,0 +1,63 @@
+init_fn Error of tf.train.Scaffold
+
+In my experiment the init_fn of the tf.train.Scaffold can not  work correctly. It seems that this is caused by the lambda usage in the init of tf.train.Scaffold
+Environment info
+Operating System: ubuntu 16.04
+Installed version of CUDA and cuDNN:
+-rw-r--r-- 1 root root    556000 Jan 26 23:48 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root        16 Jan 26 23:51 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root        19 Jan 26 23:51 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.61
+-rw-r--r-- 1 root root    415432 Jan 26 23:48 /usr/local/cuda/lib64/libcudart.so.8.0.61
+-rw-r--r-- 1 root root    775162 Jan 26 23:48 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 1000 users       13 Nov  7 07:00 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 1000 users       18 Nov  7 07:00 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.10
+-rwxr-xr-x 1 1000 users 84163560 Nov  7 06:47 /usr/local/cuda/lib64/libcudnn.so.5.1.10
+-rw-r--r-- 1 1000 users 70364814 Nov  7 06:47 /usr/local/cuda/lib64/libcudnn_static.a
+All the experiments run in a nvidia-docker container run with tensorflow/tensorflow:devel-latest-gpu image
+
+A link to the pip package you installed: tensorflow/tensorflow:devel-latest-gpu
+The output from python -c "import tensorflow; print(tensorflow.__version__)". 1.0.1
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+with tf.Graph().as_default():
+    images = tf.placeholder(shape=[32, 224, 224, 3], dtype=tf.float32)`
+    logits = tf.layers.conv2d(images, 3, 1)
+    all_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+    my_init_fn = slim.assign_from_checkpoint_fn('', all_vars)
+    scaffold = tf.train.Scaffold(init_fn=my_init_fn)
+    with tf.train.MonitoredTrainingSession(
+        checkpoint_dir='',
+        scaffold=scaffold,
+        ) as session:
+        pass
+What other attempted solutions have you tried?
+It seems that the problem may be solved by replacing the
+ scaffold = tf.train.Scaffold(init_fn=my_init_fn)
+with
+scaffold = tf.train.Scaffold()
+scaffold._init_fn = my_init_fn
+Logs or other output that would be helpful
+Traceback (most recent call last):
+  File "start_job.py", line 219, in <module>
+    train_param=get_train_param(train_args)
+  File "/root/py_libs/slim_toolbox/training/train_core.py", line 150, in train_network
+    config=get_default_sess_config()) as session:
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.py", line 315, in MonitoredTrainingSession
+    return MonitoredSession(session_creator=session_creator, hooks=all_hooks)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.py", line 601, in __init__
+    session_creator, hooks, should_recover=True)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.py", line 434, in __init__
+    self._sess = _RecoverableSession(self._coordinated_creator)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.py", line 767, in __init__
+    _WrappedSession.__init__(self, self._create_session())
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.py", line 772, in _create_session
+    return self._sess_creator.create_session()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.py", line 494, in create_session
+    self.tf_sess = self._session_creator.create_session()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.py", line 375, in create_session
+    init_fn=self._scaffold.init_fn)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/session_manager.py", line 264, in prepare_session
+    init_fn(sess)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/monitored_session.py", line 128, in <lambda>
+    self._init_fn = lambda sess: init_fn(self, sess)
+TypeError: callback() takes exactly 1 argument (2 given)

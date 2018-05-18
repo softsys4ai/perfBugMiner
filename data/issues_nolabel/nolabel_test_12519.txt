@@ -1,0 +1,15 @@
+Bug on the gradients graph computation - C++ API
+
+The gradient computation in the C++ API works as follow.
+Let's say that we have the following graph:
+                Tanh
+                  |
+         Assign MatMul
+         /    \ /    \
+      Const   Var   Const
+
+Here our Output is Tanh and our Input is Var. The gradient method does a BFS from Var to Tanh to count for each node how many backprop we should expect. If a node has two outgoing edges, it will be ready only when both would have been backpropagated and the gradient summed. In our case, Var has 2, Assign 0, MatMul 1. These values are saved into a pending array.
+Then the gradient method does a BFS from Tanh to Var, this is the actual backpropagation, the error is backpropagated until we reach Var. When a Node is reached, pending is decreased by one and if pending == 0, the Node is ready and is added to the queue of Nodes to be processed. If it is not ready, it will be reached again in the future and will be ready at some point.
+In our case, doing a BFS from Var to Tanh give us 2 expected gradients, one from Assign and one from MatMul, whereas doing a BFS from Tanh to Var, we will reach Var only once, because we can't reach Assign from Tanh. In that case, the pending count will never reach Zero, Var will never be ready and the BFS will end. At the end, a check is done and if pending nodes are still there, an error is raised.
+The PR #12397 updates the gradient method to ignore nodes that have 0 outgoing edges and are not in the list of Output (Tanh is the only one in the list of outputs in our case).
+As @skye pointed it out as a comment in the PR, there is other cases where there is still a problem. I am working on it.

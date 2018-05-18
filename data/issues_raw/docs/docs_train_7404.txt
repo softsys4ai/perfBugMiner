@@ -1,0 +1,50 @@
+No attribute 'outer_context' when calculating gradient from imported graph
+
+It seems when you import a graph with a "while" loop, you can't calculate gradients as you could on the original graph. e.g.
+import tensorflow as tf
+i=tf.constant(0, name="input")
+out=tf.while_loop(lambda i: tf.less(i,5), lambda i: [tf.add(i,1)], [i], name="output")
+graph_def = tf.get_default_graph().as_graph_def()
+
+g = tf.Graph()
+with g.as_default():
+    tf.import_graph_def(graph_def)
+s = tf.Session(graph=g)
+i_imported = g.get_tensor_by_name("import/input:0")
+out_imported = g.get_tensor_by_name("import/output/Exit:0")
+tf.gradients(out_imported, i_imported)
+---------------------------------------------------------------------------
+AttributeError                            Traceback (most recent call last)
+<ipython-input-12-e7e2b78684d3> in <module>()
+----> 1 tf.gradients(out_imported, i_imported)
+
+/Users/malmaud/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/gradients_impl.pyc in gradients(ys, xs, grad_ys, name, colocate_gradients_with_ops, gate_gradients, aggregation_method)
+    439     pending_count, loop_state = _PendingCount(ops.get_default_graph(), to_ops,
+    440                                               from_ops,
+--> 441                                               colocate_gradients_with_ops)
+    442 
+    443     # Iterate over the collected ops.
+
+
+/Users/malmaud/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/gradients_impl.pyc in _PendingCount(graph, to_ops, from_ops, colocate_gradients_with_ops)
+    184   # 'loop_state' is None if there are no while loops.
+    185   loop_state = control_flow_ops.MaybeCreateControlFlowState(
+--> 186       between_op_list, between_ops, colocate_gradients_with_ops)
+    187 
+    188   # Initialize pending count for between ops.
+
+/Users/malmaud/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.pyc in MaybeCreateControlFlowState(between_op_list, between_ops, colocate_gradients_with_ops)
+   1293           loop_state.AddWhileContext(op, between_op_list, between_ops)
+   1294       else:
+-> 1295         loop_state.AddWhileContext(op, between_op_list, between_ops)
+   1296   return loop_state
+   1297 
+
+/Users/malmaud/anaconda/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.pyc in AddWhileContext(self, op, between_op_list, between_ops)
+   1102     if grad_state is None:
+   1103       # This is a new while loop so create a grad state for it.
+-> 1104       outer_forward_ctxt = forward_ctxt.outer_context
+   1105       if outer_forward_ctxt:
+   1106         outer_forward_ctxt = outer_forward_ctxt.GetWhileContext()
+
+AttributeError: 'NoneType' object has no attribute 'outer_context'

@@ -1,0 +1,52 @@
+Bug: tf.Variable uses always twice the memory (on the CPU)
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): tested on both
+TensorFlow version (use command below): 1.3 for pip / 0cfb16e for self-compiled
+Python version: Python 3.4.3 [GCC 4.9.2] on linux
+Bazel version (if compiling from source): 0.5.4
+CUDA/cuDNN version: not used
+GPU model and memory: not used
+
+Describe the problem
+Every tf.variable occupies always twice the necessary memory:
+Once for the tf.constant vector that is created for the initializer and once as the persistend storage.
+Code to reproduce:
+import os
+os.environ['TF_CPP_MIN_VLOG_LEVEL'] = '100' #print all
+import tensorflow as tf
+
+runs = 1
+N = int(1024 * 1024 * 1.1)
+M = int(1024 / 8)
+print("testing allocation of {:.2f} MB".format(N*M*8. / 1024 / 1024))
+
+#does not matter which version you use:
+v = tf.Variable(tf.ones([M, N], tf.float64), name="var1")
+#v = tf.get_variable(shape=(M,N), initializer=tf.ones_initializer, dtype=tf.float64, name='var1', trainable=False)
+
+init = tf.global_variables_initializer()
+for i in range(runs):
+      print("start session")
+      with tf.Session() as sess:
+            print("start init")
+            sess.run(init)
+
+In my self-compiled version the output contains the following lines:
+ tensorflow/core/common_runtime/bfc_allocator.cc:133] Extending allocation by 2.00GiB bytes.
+ tensorflow/core/common_runtime/bfc_allocator.cc:137] Total allocated bytes: 4.00GiB
+
+For the pip version, the current allocation is not displayed, but observing htop during the execution or using mprof reveals the same.
+The issue seems to occur because assign does not reuse the memory of tf.ones but instead allocates additional memory. Related lines: assign_op.h
+context->forward_input returns null in this case, because the memory of tf.ones has a ref count of 2.
+(I dont know why) see op_kernel.cc
+input->RefCountIsOne() is therefore false.
+I tried to comment out the input->RefCountIsOne() check, but then it still doesn't work because of the
+output_attr.IsEqualOrLessRestrictiveThan() check.
+If you remove this check too, the memory usage finaly drops to the expected value, the memory of tf.ones is reused.
+But this is not a real solution, because I don't know how this would effect other operations and it seems to break the memory freeing.
+I think this bug is quiet serious, because it affects nearly all computations.
+Is this an already known bug?

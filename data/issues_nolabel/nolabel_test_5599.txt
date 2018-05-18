@@ -1,0 +1,31 @@
+Error in Recurrent Neural Networks tutorial
+
+I was suprised to see that the two implementations of char-rnn in tensorflow I found on the web fall in the same Python trap:
+
+https://github.com/carpedm20/lstm-char-cnn-tensorflow/blob/master/models/LSTMTDNN.py#L151
+https://github.com/sherjilozair/char-rnn-tensorflow/blob/master/model.py#L25
+
+They use MultiRNNCell by copying the pointer to a unique cell instead of creating individual cell instances.
+This error can be illustrated with the following example:
+In [1]: a = [[]]*10
+
+In [2]: a[0].append(3)
+
+In [3]: a
+Out[3]: [[3], [3], [3], [3], [3], [3], [3], [3], [3], [3]]
+
+In [4]: a = [[] for i in range(10)]
+
+In [5]: a[0].append(3)
+
+In [6]: a
+Out[6]: [[3], [], [], [], [], [], [], [], [], []]
+In the first case, we create 10 pointers to the same empty list, which is rarely what we want, while in the second case, we create 10 individual empty lists.
+If two independent persons are doing the same mistake, it might be that the documentation is wrong.
+In https://www.tensorflow.org/versions/r0.11/tutorials/recurrent/index.html it is written:
+To give the model more expressive power, we can add multiple layers of LSTMs to process the data. The output of the first layer will become the input of the second and so on.
+
+However, the code is stacking pointers to the same LSTM cell. It is creating "shared weights" across those cells.
+You can notice that if you go back to the original Lua code cited in the example:
+https://github.com/wojzaremba/lstm/blob/master/main.lua#L136 and https://github.com/wojzaremba/lstm/blob/master/base.lua#L33 , it talks about cloning and avoiding pointers.
+More interestingly, in the README of https://github.com/wojzaremba/lstm , it speaks of achieving 115 perplexity for a small model in 1h, which is not what the current code does (I obtained 116.983), but is attained with the proposed fix (I got 115.063), see https://gist.github.com/kevin-keraudren/f9607e281d9d75fee4000101f7e22a70#file-ptb_word_lm-txt .

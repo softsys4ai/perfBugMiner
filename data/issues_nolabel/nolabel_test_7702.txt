@@ -1,0 +1,50 @@
+dynamic_rnn_decoder returns shape [?, batch_size, cell.output_size]
+
+According to the docs,  the dynamic_rnn_decoder returns a tuple contaning outputs, which is a Tensor of shape [max_time, batch_size, cell.output_size](provided time_major==True).
+In my case, however, the first dimension of that Tensor is returned as underspecified (Dimension ?), and in fact depending on the provided batch when running the RNN.
+If this is the intended behaviour, it should probably be highlighted in the documentation that max_time is variable.
+Reproduce with:
+import numpy as np
+
+# toy data, timesteps between 1 and 10
+timesteps = np.random.randint(1, 11, [10])
+X=np.random.randint(0, 20, [10,10,1])
+
+batch_size = 2
+max_ts = 10
+inputs = tf.placeholder(tf.float32, 
+                        (max_ts, batch_size, 1), name="X_in")
+
+cell_fw = tf.contrib.rnn.LSTMCell(50)
+cell_bw = tf.contrib.rnn.LSTMCell(50)
+cell_dec = tf.contrib.rnn.LSTMCell(50)
+
+seq_lens = tf.placeholder(tf.int32, batch_size, name="seq_lens")
+
+enc_outputs, states = tf.nn.bidirectional_dynamic_rnn(
+    cell_fw, cell_bw, inputs, time_major=True, sequence_length=seq_lens, dtype=tf.float32)
+
+decoder_inp = tf.concat(enc_outputs, axis=2) 
+
+attention_states = tf.zeros([batch_size, 1, cell_dec.output_size],
+                                    name="attention_states")
+
+att_keys, att_vals, att_score_fn, att_construct_fn = \
+            tf.contrib.seq2seq.prepare_attention(attention_states,
+                                                 attention_option="luong",
+                                                 num_units=50)
+
+dynamic_fn_train = tf.contrib.seq2seq.attention_decoder_fn_train(
+            states[0], att_keys, att_vals, att_score_fn, att_construct_fn)
+
+outputs, _, _ = tf.contrib.seq2seq.dynamic_rnn_decoder(
+            cell_dec, dynamic_fn_train, decoder_inp, time_major=True,
+            sequence_length=seq_lens)
+
+with tf.Session() as sess:
+    feed_dict = {inputs: X[:,:2,:], seq_lens: ts[:2]}
+    sess.run(tf.global_variables_initializer())
+    out = sess.run(outputs, feed_dict=feed_dict)
+    print(out.shape[0])
+
+The very last print statement will show that the first output dimension is not max_ts, but the max timestep of the batch (<= 10)

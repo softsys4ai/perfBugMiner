@@ -1,0 +1,119 @@
+session_bundle in TensorFlow 0.12.0-rc1 cannot restore v2 checkpoint
+
+I used example/export_half_plus_two.py to test session_bundle. I run the below command to write v2 checkpoint files in export path,
+root§b47d8eea090e:/tensorflow/model-export/session_bundle# python export_half_plus_two.py --use_checkpoint_v2=True
+copying asset files to: /tmp/half_plus_two/00000123-tmp/assets
+copying asset file: hello2.txt
+copying asset file: hello1.txt
+The export directory is
+root@b47d8eea090e:/tmp/half_plus_two/00000123# ls -l
+total 32
+drwxr-xr-x 2 root root  4096 Dec 15 13:59 assets
+-rw-r--r-- 1 root root   133 Dec 15 13:59 checkpoint
+-rw-r--r-- 1 root root     8 Dec 15 13:59 export.data-00000-of-00001
+-rw-r--r-- 1 root root   134 Dec 15 13:59 export.index
+-rw-r--r-- 1 root root 14980 Dec 15 13:59 export.meta
+Then I write a import python file, the content is
+import tensorflow as tf
+import numpy as np
+from tensorflow.contrib.session_bundle import session_bundle
+from tensorflow.contrib.session_bundle import constants
+from tensorflow.contrib.session_bundle import manifest_pb2
+
+export_dir = "/tmp/half_plus_two/00000123"
+
+tf.reset_default_graph()
+
+sess, meta_graph_def = session_bundle.load_session_bundle_from_path(
+    export_dir, target="", config=tf.ConfigProto(device_count={"CPU": 2}))
+
+with sess.as_default():
+    collection_def = meta_graph_def.collection_def
+    signatures_any = collection_def[constants.SIGNATURES_KEY].any_list.value
+    print("signatures length: %d\n" % len(signatures_any))
+
+    signatures = manifest_pb2.Signatures()
+    signatures_any[0].Unpack(signatures)
+
+    named_signatures = signatures.named_signatures
+    input_name = (named_signatures["inputs"].generic_signature.map["x"].tensor_name)
+    output_name = (named_signatures["outputs"].generic_signature.map["y"].tensor_name)
+
+    y = sess.run([output_name], {input_name: np.array([[0], [1], [2], [3]])})
+    print(y[0])
+It will tell me the variables are uninitialized,
+root§b47d8eea090e:/tensorflow/model-export/session_bundle# python import_half_plus_two.py 
+signatures length: 1
+
+Traceback (most recent call last):
+  File "import_half_plus_two.py", line 26, in <module>
+    y = sess.run(Äoutput_nameÜ, äinput_name: np.array(ÄÄ0Ü, Ä1Ü, Ä2Ü, Ä3ÜÜ)¨)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 766, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 964, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.FailedPreconditionError: Attempting to use uninitialized value b
+	 ÄÄNode: b/read = IdentityÄT=DT_FLOAT, _class=Ä"loc:§b"Ü, _device="/job:localhost/replica:0/task:0/cpu:0"Ü(b)ÜÜ
+
+Caused by op u'b/read', defined at:
+  File "import_half_plus_two.py", line 12, in <module>
+    export_dir, target="", config=tf.ConfigProto(device_count=ä"CPU": 2¨))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/session_bundle/session_bundle.py", line 95, in load_session_bundle_from_path
+    saver = tf.train.import_meta_graph(meta_graph_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 1526, in import_meta_graph
+    **kwargs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/meta_graph.py", line 502, in import_scoped_meta_graph
+    producer_op_list=producer_op_list)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/importer.py", line 285, in import_graph_def
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2240, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1128, in __init__
+    self._traceback = _extract_stack()
+
+FailedPreconditionError (see above for traceback): Attempting to use uninitialized value b
+	 ÄÄNode: b/read = IdentityÄT=DT_FLOAT, _class=Ä"loc:§b"Ü, _device="/job:localhost/replica:0/task:0/cpu:0"Ü(b)ÜÜ
+If I changed the "use_checkpoint_v2" option to "False", there would be no error.
+root§b47d8eea090e:/tensorflow/model-export/session_bundle# python export_half_plus_two.py --use_checkpoint_v2=False
+WARNING:tensorflow:*******************************************************
+WARNING:tensorflow:TensorFlow's V1 checkpoint format has been deprecated.
+WARNING:tensorflow:Consider switching to the more efficient V2 format:
+WARNING:tensorflow:   `tf.train.Saver(write_version=tf.train.SaverDef.V2)`
+WARNING:tensorflow:now on by default.
+WARNING:tensorflow:*******************************************************
+copying asset files to: /tmp/half_plus_two/00000123-tmp/assets
+copying asset file: hello2.txt
+copying asset file: hello1.txt
+root§b47d8eea090e:/tensorflow/model-export/session_bundle# 
+root§b47d8eea090e:/tensorflow/model-export/session_bundle# python import_half_plus_two.py                          
+signatures length: 1
+
+ÄÄ 2. Ü
+ Ä 2.5Ü
+ Ä 3. Ü
+ Ä 3.5ÜÜ
+root§b47d8eea090e:/tensorflow/model-export/session_bundle# 
+At this time, the export directory is
+root@b47d8eea090e:/tmp/half_plus_two/00000123# ls -l
+total 28
+drwxr-xr-x 2 root root  4096 Dec 15 14:07 assets
+-rw-r--r-- 1 root root   163 Dec 15 14:07 checkpoint
+-rw-r--r-- 1 root root   169 Dec 15 14:07 export-00000-of-00001
+-rw-r--r-- 1 root root 13740 Dec 15 14:07 export.meta
+I found that the diff between v2 checkpoint file and v1 checkpoint is a substring ".data" in v2 checkpoint filename. Just see the above example, the v2 checkpoint filename is "export.data-00000-of-00001" and the v1 checkpoint filename is "export-00000-of-00001".
+So, I moved to read the load function "load_session_bundle_from_path", I found a bug at L64. See following code snippet
+if not file_io.file_exists(variables_filename):
+    variables_filename = os.path.join(
+        export_dir, constants.VARIABLES_FILENAME_PATTERN)
+    if not file_io.get_matching_files(variables_filename):
+      # If graph_util.convert_variables_to_constants() is called on a model
+      # it won't have any variables, and that's OK.
+      #
+      # TODO(yxshi): verify that the graph_def in fact does not have any
+      # reachable variables.
+      variables_filename = None
+where the constant "constants.VARIABLES_FILENAME_PATTERN"( defined in constant.py) is "export-????-of-????". It cannot match the v2 checkpoint filename, so the load function cannot restore the v2 checkpoint file.

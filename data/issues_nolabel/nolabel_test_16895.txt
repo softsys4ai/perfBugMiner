@@ -1,0 +1,98 @@
+Variables disappearing when freezing graph with (fused) BatchNorm
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): I'm using an inception_resnet_v2 from the slim model zoo
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.6.0rc0
+Python version: 3.5
+Bazel version (if compiling from source): -
+GCC/Compiler version (if compiling from source): -
+CUDA/cuDNN version: 9.0/7.0.5
+GPU model and memory: 1080, 8GB
+Exact command to reproduce: -
+
+Describe the problem
+There seem to be a bug in handling fused BatchNorm's variables when freezing a graph.
+Both moving_mean and moving_average disappear from the graph after inference_graph = extract_sub_graph(input_graph_def, output_node_names) in graph_util.convert_variables_to_constants and this breaks afterwards the optimize_for_inference script, that searches for those two variables-turned-const.
+From inspecting the input and output GraphDef, what I think is the culprit is the definition of the FusedBatchNorm node:
+
+  Node GraphDef
+node {
+  name: "InceptionResnetV2/Conv2d_1a_3x3/BatchNorm/FusedBatchNorm"
+  op: "FusedBatchNorm"
+  input: "InceptionResnetV2/Conv2d_1a_3x3/Conv2D"
+  input: "InceptionResnetV2/Conv2d_1a_3x3/BatchNorm/Const"
+  input: "InceptionResnetV2/Conv2d_1a_3x3/BatchNorm/beta/read"
+  input: "InceptionResnetV2/Conv2d_1a_3x3/BatchNorm/Const_1"
+  input: "InceptionResnetV2/Conv2d_1a_3x3/BatchNorm/Const_2"
+  attr {
+    key: "T"
+    value {
+      type: DT_FLOAT
+    }
+  }
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: -1
+          }
+          dim {
+            size: 149
+          }
+          dim {
+            size: 149
+          }
+          dim {
+            size: 32
+          }
+        }
+        shape {
+          dim {
+            size: 32
+          }
+        }
+        shape {
+          dim {
+            size: 32
+          }
+        }
+        shape {
+          dim {
+            size: 32
+          }
+        }
+        shape {
+          dim {
+            size: 32
+          }
+        }
+      }
+    }
+  }
+  attr {
+    key: "data_format"
+    value {
+      s: "NHWC"
+    }
+  }
+  attr {
+    key: "epsilon"
+    value {
+      f: 0.001
+    }
+  }
+  attr {
+    key: "is_training"
+    value {
+      b: true
+    }
+  }
+}
+
+
+The inputs don't mention neither the mean or average, my suspicion is that extract_sub_graph does not detect them as part of the graph to be kept and strips the nodes.

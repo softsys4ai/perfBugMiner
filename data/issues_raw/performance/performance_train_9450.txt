@@ -1,0 +1,34 @@
+Compute gradient inside tf.while_loop using TensorArray
+
+I was trying to call opt.compute_gradients() inside the while_loop, but it failed with the error message:
+AttributeError: 'WhileContext' object has no attribute 'pred'
+
+I found a similiar problem in stackoverflow
+test code:
+batch_size = 2
+inputs = tf.ones((batch_size, 10))
+labels = tf.zeros((batch_size, 1))
+outputs = tf.layers.dense(inputs, units=1)
+loss = outputs - labels
+loss_ta = tf.TensorArray(dtype=tf.float32, size=batch_size)
+loss_ta = loss_ta.unstack(loss)
+
+opt = tf.train.AdamOptimizer(0.1)
+init_grad = []
+vars_list = tf.trainable_variables()
+for var in vars_list:
+    init_grad.append(tf.zeros_like(var))
+
+i = tf.constant(0, dtype=tf.int32)
+def condition(i, *args):
+    return tf.less(i, batch_size)
+def loop_fn(i, gradients, all_loss):
+    loss_ = all_loss.read(i)
+    grads = opt.compute_gradients(loss_, vars_list)
+    for idx, (grad, var) in enumerate(grads):
+        gradients[idx] += grad
+    return i + 1, gradients, all_loss
+_, final_grad, _ = tf.while_loop(condition, loop_fn, [i, init_grad, loss_ta])
+
+train_op = opt.apply_gradients(zip(final_grad, vars_list))
+Seems like the problem is in the TensorArray, if I do not read loss from the TensorArray, it will be fine. Besides, I am using version1.0.1 on CPU

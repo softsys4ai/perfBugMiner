@@ -1,0 +1,31 @@
+seq2seq model is not efficient when using sampled softmax
+
+Hi,
+my commit number is
+70de76e
+I want to try sampled softmax to speed up my lm training. I'm changing slightly on the ptb training example code. I'm working on a CPU machine.
+First, on ptb(vocab 10k), I'm using the "small" config, I see some speed up gain:
+normal softmax 896wps
+sample_softmax h256L1ba20 sample512 1975wps
+Then, I move to a larger set, and using 100k vocab, I'm still setting the sample number to 512, I think the speed should be similar to the ptb case. But I got the speed to be about 300 wps, even if I set the sample number as small as 4. I don't understand why it should be so slower than the ptb case. Do you know how can I make it faster?
+Here's some of the related code:
+      output = tf.reshape(tf.concat(1, outputs), [-1, size])
+      softmax_w = tf.get_variable("softmax_w", [size, vocab_size])
+      softmax_w_t = tf.transpose(softmax_w)
+      softmax_b = tf.get_variable("softmax_b", [vocab_size])
+
+    if use_sample_softmax == True:
+      loss = tf.nn.sampled_softmax_loss(softmax_w_t, softmax_b, output, tf.reshape(self._targets, [-1, 1]), num_samples, vocab_size) #todo
+      self._cost = cost = tf.reduce_sum(loss) / batch_size
+    else:
+      logits = tf.matmul(output, softmax_w) + softmax_b
+      loss = tf.nn.seq2seq.sequence_loss_by_example(
+          [logits],
+          [tf.reshape(self._targets, [-1])],
+          [tf.ones([batch_size * num_steps])])
+      self._cost = cost = tf.reduce_sum(loss) / batch_size
+
+
+
+Thanks!
+Goose

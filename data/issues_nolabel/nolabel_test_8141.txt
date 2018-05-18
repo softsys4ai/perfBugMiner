@@ -1,0 +1,86 @@
+Error Compiling with XLA
+
+I'm attempting to build Tensorflow from source with XLA, and am not able to run my test code. My test code:
+def main(_):
+    config = tf.ConfigProto(log_device_placement=True)
+    jit_level = 0 
+    if FLAGS.xla:
+        # Turns on XLA JIT compilation.
+        jit_level = tf.OptimizerOptions.ON_1
+
+    config.graph_options.optimizer_options.global_jit_level = jit_level
+    # Creates a session with log_device_placement set to True.
+    with tf.Session(config=config) as sess:
+        # Creates a graph.
+        with tf.device('/job:localhost/replica:0/task:0/device:XLA_CPU:0'):
+            a = tf.constant([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], shape=[2, 3], name='a')
+            b = tf.constant([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], shape=[3, 2], name='b')
+            c = tf.matmul(a, b)
+
+        # Runs the op.
+        print(sess.run(c))
+
+The error I get:
+$ TF_XLA_FLAGS=--xla_generate_hlo_graph=.* python xla_test.py
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE3 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+Device mapping: no known devices.
+I tensorflow/core/common_runtime/direct_session.cc:257] Device mapping:
+
+Traceback (most recent call last):
+  File "xla_test.py", line 49, in <module>
+    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 44, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "xla_test.py", line 37, in main
+    run_metadata=run_metadata))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1035, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Cannot assign a device to node 'MatMul': Could not satisfy explicit device specification '/job:localhost/replica:0/task:0/device:XLA_CPU:0' because no devices matching that specification are registered in this process; available devices: /job:localhost/replica:0/task:0/cpu:0
+	 [[Node: MatMul = MatMul[T=DT_FLOAT, transpose_a=false, transpose_b=false, _device="/job:localhost/replica:0/task:0/device:XLA_CPU:0"](a, b)]]
+
+Caused by op u'MatMul', defined at:
+  File "xla_test.py", line 49, in <module>
+    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 44, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "xla_test.py", line 33, in main
+    c = tf.matmul(a, b)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/math_ops.py", line 1855, in matmul
+    a, b, transpose_a=transpose_a, transpose_b=transpose_b, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_math_ops.py", line 1454, in _mat_mul
+    transpose_b=transpose_b, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 763, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2395, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1264, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Cannot assign a device to node 'MatMul': Could not satisfy explicit device specification '/job:localhost/replica:0/task:0/device:XLA_CPU:0' because no devices matching that specification are registered in this process; available devices: /job:localhost/replica:0/task:0/cpu:0
+	 [[Node: MatMul = MatMul[T=DT_FLOAT, transpose_a=false, transpose_b=false, _device="/job:localhost/replica:0/task:0/device:XLA_CPU:0"](a, b)]]
+
+
+Building with:
+PYTHON_BIN_PATH=/usr/bin/python3 TF_NEED_GCP=0 TF_NEED_HDFS=0 PYTHON_LIB_PATH=/usr/lib/python3/dist-packages TF_NEED_OPENCL=0 TF_NEED_CUDA=0 TF_ENABLE_XLA=1 TF_NEED_JEMALLOC=1 CC_OPT_FLAGS="-march=native" ./configure && \
+bazel build --config=opt //tensorflow/tools/pip_package:build_pip_package && \
+bazel-bin/tensorflow/tools/pip_package/build_pip_package /tmp/tensorflow_pkg && \
+sudo pip3 install --upgrade /tmp/tensorflow_pkg/tensorflow-1.0.0*.whl
+
+I am working on the master branch
+$ git log | head -1
+commit e6f547e4645f4922c50abb7d0506b1f9a6bd81c7
+$ git branch
+* master
+
+I've posted on stackoverflow: http://stackoverflow.com/questions/42541323/error-running-tensorflow-with-xla

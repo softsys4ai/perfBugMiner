@@ -1,0 +1,15 @@
+Could not specify explicit device specification ''
+
+Several users have reported an issue that occurs with the following steps (e.g. Issue #1297):
+
+Start TensorFlow in a setting with a GPU.
+Define some variables with no explicit tf.device() set. This most often happens with embedding variables (used as arguments to tf.gather() or tf.embedding_lookup()).
+Initialize them. (They will be placed on the GPU, because it is the "best available device".)
+On running the first training step, the following error (or similar) is raised:
+
+InvalidArgumentError: Cannot assign a device to node 'Adagrad/update_Variable_2/SparseApplyAdagrad': Could not satisfy explicit device specification '' because the node was colocated with a group of nodes that required incompatible device '/job:localhost/replica:0/task:0/GPU:0'
+
+The SparseApplyAdagrad op (or in general most SparseApplyFoo ops) is only defined on CPU. The variable has already been placed on GPU, so the graph is not placeable. Attempting to run the same program with use_soft_placement=True also fails, although with a stranger error.
+TL;DR: If this affects you, create your variables in a with tf.device("/cpu:0"): block, until this issue is resolved.
+The issue arises because (i) TensorFlow places variables on the first device where they run, (ii) it always prefers GPU over CPU when it is availabe, (iii) initialization ops are available on GPU, and (iv) it applies the placement algorith to the pruned subgraph (not the entire client graph).
+One workaround would be to apply the placement algorithm to the entire client graph. (This is the approach used in the separate master_session.cc/simple_graph_execution_state.cc codepath, used in the distributed runtime.) However, this has the effect of leaving the session in a broken state as soon as an unplaceable node is encountered. Switching to this behavior might cause issues for people doing exploratory graph construction in a REPL (IPython etc.) because the only remedy would be to recreate the entire graph on seeing such an error. Therefore, while failing fast in a non-interactive setting would be fine, a different solution for interactive use might be required.

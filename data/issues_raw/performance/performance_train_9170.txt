@@ -1,0 +1,29 @@
+[Windows] `import tensorflow` error messages are uninformative.
+
+When a user runs import tensorflow, we attempt to dynamically load the DLL _pywrap_tensorflow.pyd. If this fails, the user gets an uninformative (perhaps downright misleading) message:
+Traceback (most recent call last): 
+File "C:\...\lib\site-packages\tensorflow\python\pywrap_tensorflow.py", line 18, in swig_import_helper
+    fp, pathname, description = imp.find_module('_pywrap_tensorflow', [dirname(file)])
+File "C:\...\lib\imp.py", line 296, in find_module
+    raise ImportError(_ERR_MSG.format(name), name=name)
+ImportError: No module named '_pywrap_tensorflow'
+
+This error can happen for several reasons:
+
+(Rare) The package has not been installed correctly, and the file _pywrap_tensorflow.pyd is not present in the expected location.
+The package has been installed for an incompatible version of Python (e.g. installed on Python 3.6, but built for 3.5, as in #9167). I suspect this is because it fails to load python35.dll.
+The library has been installed correctly, but one or more of its native dependencies is missing. Common examples include:
+
+MSVCP140.dll (the Microsoft Visual C++ redistributable library). The compiled C++ code depends on this library being present, but it is not installed as standard, unless you use Anaconda. (See this Stack Overflow question, for example.)
+CUDA libraries. The user's %PATH% may not include the directory that contains the CUDA DLLs.
+cudnn64_5.dll. This is typically installed in a different directory from the CUDA libraries, and must be added to the user's %PATH% explicitly.
+
+
+
+It would be helpful if we could provide more information about the cause of an ImportError, and in particular we would like to show the name of the missing DLL to aid the user in diagnosing the problem. It's less clear to me how we achieve this, since the error is reported by LoadLibrary() of our compiled code before we have the chance to execute anything.
+A couple of thoughts spring to mind:
+
+Can we use /DELAYLOAD during the build process so that (at least) we have the chance to probe the CUDA-related libraries before using them? Are there any performance consequences to doing this?
+Alternatively, can we implement a sanity check in Python before we import _pywrap_tensorflow.pyd to ensure that the relevant files will be found?
+
+/cc @guschmue @vit-stepanovs in case they have any smart ideas!

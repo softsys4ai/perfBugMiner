@@ -1,0 +1,63 @@
+Expectations of MonitoredTrainingSession for saving and restoring (fixes inside)
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+
+No, anything discussed here is valid with the cifar10 model script -- https://github.com/tensorflow/models/blob/master/tutorials/image/cifar10/cifar10_train.p
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+
+Ubuntu 16.04, but should be platform independent
+
+TensorFlow installed from (source or binary):
+
+Binary
+
+TensorFlow version (use command below):
+
+1.5
+
+Python version:
+
+3.5
+
+Bazel version (if compiling from source):
+
+N / A
+
+GCC/Compiler version (if compiling from source):
+
+N / A
+
+CUDA/cuDNN version:
+
+7
+
+
+GPU model and memory:
+
+
+Exact command to reproduce:
+
+
+Describe the problem
+MonitoredTrainingSession is the simplest and, to my knowledge, often recommended way to run a training session that can easily be saved and restored. I think there is some confusion here that could be cleared up by fixing two things:
+
+MonitoredTrainingSession does not restore the global step.
+
+If one creates a step with tf.train.get_or_create_global_step(), and even if this is passed into the optimizer, MonitoredTrainingSession will not restore the correct value in a new session. Instead, it starts it again from 0. This has been mentioned several times, here are some references:
+
+#6081
+https://stackoverflow.com/questions/36113090/how-to-get-the-global-step-when-restoring-checkpoints-in-tensorflow
+https://stackoverflow.com/questions/47932738/tensorflow-restoring-model-in-a-monitoredsession?rq=1
+
+The only solution that I've found works is to extract the step from the checkpoint filename manually, and add an operation to set it on restore, via something like
+step = int(os.path.basename(ckpt.model_checkpoint_path).split('-')[1])
+It would be great if this could be fixed so global steps are properly restored as well.
+
+Instead of checkpoint_dir as an argument, MonitoredTrainingSession should probably have a save_checkpoint_dir and a restore_checkpoint_dir.
+
+The reason why this is important is that TensorBoard does not support appending to summary files. This means that a restored session, to my knowledge, can only be viewed in TensorBoard if a new directory is used to write the new event files instead of the directory it was restored from. If that is not done, TensorBoard simply strips the events away and does not display them. It took me time to understand this was what was happening.
+Unfortunately, MonitoredTrainingSession does not support a different save directory at the moment, so the way to make MonitoredTrainingSession work with TensorBoard on restore is to create your own summary hooks. But this defeats part of what MonitoredTrainingSession is supposed to do for you.
+I believe this would be fixed with different save and restore directory, as specified above. A comment about how a different save directory is needed for TensorBoard visualization would also be helpful in the MonitoredTrainingSession documentation.

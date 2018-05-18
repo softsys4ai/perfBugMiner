@@ -1,0 +1,14 @@
+Huge network traffic between parameter server and worker
+
+hi, we found huge network traffic between parameter server and worker during distributed dnn training. our model has one embedding layer with 40M sparse features, those features are spitted into 20 groups and each group full-connected to one 5-dimension vector, so for sparse part, total parameter count is 200M. we used tf.nn.embedding_lookup_sparse to retrieve sparse parameters. however, with one parameter server one worker, parameter will send about 700M to worker for one batch, this traffic is very close to whole parameter size.
+here is our code for sparse part:
+W_embeddings = []
+for i in range(1, FLAGS.feature_group_count):
+    W_embeddings.append(tf.get_variable("W_embedding_%d" % (i-1), [feature_dimensions[i], FLAGS.embedding_count], partitioner=tf.min_max_variable_partitioner(ps_count)))
+
+embedding_tensors = []
+for i in range(len(W_embeddings)):
+    embedding_tensors.append(tf.nn.embedding_lookup_sparse(W_embeddings[i],sp_ids=feature_groups[i+1],sp_weights=None,combiner="sum"))
+
+python version is Ubuntu 3.4.3, tensorflow 0.11.0 is downloaded following official site using pip3.
+I searched and found no one reported this kind of issue before, i am not sure whether we are using tensorflow incorrectly or something wrong with our environment, any idea about how to fix this?

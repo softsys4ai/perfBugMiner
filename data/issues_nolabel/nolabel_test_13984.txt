@@ -1,0 +1,79 @@
+Issues importing external tf_library from project
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 14
+
+
+TensorFlow installed from (source or binary): Source (bazel)
+
+
+TensorFlow version (use command below):  1.2
+
+
+Python version:
+
+
+Bazel version (if compiling from source):
+bazel version
+Build label: 0.7.0
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Oct 18 14:27:19 2017 (1508336839)
+Build timestamp: 1508336839
+Build timestamp as int: 1508336839
+
+
+CUDA/cuDNN version:
+
+
+GPU model and memory:
+2x1080ti
+
+
+Exact command to reproduce:
+
+
+I import tensorflow with Bazel into my workspace with:
+#WORKSPACE
+patched_http_archive(
+    name = "org_tensorflow",
+    urls = [
+        "https://github.com/tensorflow/tensorflow/archive/v1.2.0.tar.gz",
+    ],
+    sha256 = "03dbf7548d1fc1c11ed58da5fa68616f795c819f868f43478cbcaa26abed374f",
+    strip_prefix = "tensorflow-1.2.0",
+    patch_file = "//tools/third_party:tensorflow_bazel054.patch",
+)
+
+load('@org_tensorflow//tensorflow:workspace.bzl', 'tf_workspace')
+
+tf_workspace(path_prefix = "", tf_repo_name = "org_tensorflow")
+
+I am able to correctly reference the tf_library from my BUILD file but it fails to resolve the //tensorflow/... targets because its relative to MY workspace which expects tensorflow targets to be under @org_tensorflow//tensorflow/...
+
+load("@org_tensorflow//tensorflow/compiler/aot:tfcompile.bzl", "tf_library")
+
+tf_library(...)
+
+Get error:
+no such package 'tensorflow/compiler/tf2xla/kernels': BUILD file not found on package path and referenced by '//my/local/bazel/target:test_graph_tfmatmul'
+See the output of my bazel query:
+cc_library(
+  name = "test_graph_tfmatmul",
+  generator_name = "test_graph_tfmatmul",
+  generator_function = "tf_library",
+  generator_location = "ros/src/visual_orientation/bench/BUILD:13",
+  deps = ["//tensorflow/compiler/tf2xla/kernels:gather_op_kernel_float_int32", "//tensorflow/compiler/tf2xla/kernels:gather_op_kernel_float_int64", "//tensorflow/compiler/tf2xla/kernels:index_ops_kernel_argmax_float_1d", "//tensorflow/compiler/tf2xla/kernels:index_ops_kernel_argmax_float_2d", "//tensorflow/compiler/aot:runtime", "//tensorflow/compiler/tf2xla:xla_local_runtime_context", "//tensorflow/compiler/xla/service/cpu:runtime_conv2d", "//tensorflow/compiler/xla/service/cpu:runtime_matmul", "//tensorflow/compiler/xla/service/cpu:runtime_single_threaded_conv2d", "//tensorflow/compiler/xla/service/cpu:runtime_single_threaded_matmul", "//tensorflow/compiler/xla:executable_run_options", "//third_party/eigen3:eigen3", "//tensorflow/core:framework_lite"],
+  srcs = ["//ros/src/visual_orientation/bench:test_graph_tfmatmul.o"],
+  hdrs = ["//ros/src/visual_orientation/bench:test_graph_tfmatmul.h"],
+)
+
+The deps reference //tensorflow/... which I do not have in my WORKSPACE.
+bazel build @org_tensorflow//tensorflow/compiler/tf2xla/kernels:gather_op_kernel_float_int32 succeeds
+bazel build //tensorflow/compiler/tf2xla/kernels:gather_op_kernel_float_int32 fails
+Can the tf_library reference targets more inteligently or am I making a mistake? Example targets:
+https://github.com/tensorflow/tensorflow/blob/master/tensorflow/compiler/aot/tfcompile.bzl#L313

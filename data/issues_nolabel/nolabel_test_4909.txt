@@ -1,0 +1,49 @@
+Empty array as loss function causes unhandled exception
+
+If the loss fed to an optimizer is an empty array and attempt is made to train on a GPU, an unhandled exception occurs that kills the python kernel. The logs reveal the following error message
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties: 
+name: GeForce GTX TITAN X
+major: 5 minor: 2 memoryClockRate (GHz) 1.076
+pciBusID 0000:03:00.0
+Total memory: 12.00GiB
+Free memory: 4.89GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:838] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN X, pci bus id: 0000:03:00.0)
+F tensorflow/stream_executor/cuda/cuda_dnn.cc:423] could not set cudnn tensor descriptor: CUDNN_STATUS_BAD_PARAM
+
+Code to reproduce the problem:
+import tensorflow as tf
+import numpy as np
+
+# Define a useless network
+with tf.Graph().as_default() as graph:
+    placeholder = tf.placeholder(tf.float32)
+    filter = tf.Variable(np.random.gamma(1, 1, (10, 10, 1, 1)).astype(np.float32))
+    loss = tf.nn.conv2d(placeholder, filter, [1, 1, 1, 1], 'VALID')
+    optimizer = tf.train.AdamOptimizer()
+    train_op = optimizer.minimize(loss)
+    init_op = tf.initialize_all_variables()
+
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
+session = tf.Session(graph=graph, config=tf.ConfigProto(gpu_options=gpu_options))
+session.run(init_op)
+
+
+def run(x):
+    print("loss", session.run(loss, {placeholder: x}))
+    session.run(train_op, {placeholder: x})
+    print("executed one training step")
+
+
+# This succeeds
+run(np.ones((1, 10, 10, 1)))
+
+# This kills the kernel because the 'VALID' padding in the convolutional layer
+# leads to an empty array which the optimizer cannot handle
+run(np.ones((1, 10, 9, 1)))

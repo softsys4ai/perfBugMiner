@@ -1,0 +1,30 @@
+Android: Op type not registered 'GatherTree' in binary running on localhost.
+
+System information
+
+**OS Platform and Distribution : Linux Ubuntu 14.04
+**TensorFlow installed from source
+**TensorFlow version 1.4.0
+**Python 2.7
+**Bazel version [bazel release 0.8.0]
+**GCC/Compiler version gcc version 4.9.4 (GCC)
+**CUDA/cuDNN (only for cpu)
+
+Describe the problem
+Hi.  I have tried to load the rnn model inside Android that I generated from python for machine translation. When I want to use beam_search in decode I meet an (can't find ** op) error at Android. I have tried below solutions but the error is continue.
+solution 1:
+use python script “tensorflow/python/tools/print_selective_registration_header.py” to create "ops_to_register.h", then copy it into "tensorflow/core/framework/", then generate "//tensorflow/contrib/android:libtensorflow_inference.so"
+I change "print_selective_registration_header.py":
+parser.add_argument( '--default_ops', type=str, #default='NoOp:NoOp,_Recv:RecvOp,_Send:SendOp', default='all',
+...)
+cmd like below:
+bazel build tensorflow/python/tools:print_selective_registration_header && bazel-bin/tensorflow/python/tools/print_selective_registration_header --graphs=/path/to/my/model/decode-model_1213_real_model_with_beam.pb > ops_to_register.h
+bazel build -c opt --copt="-DSELECTIVE_REGISTRATION" --copt="-DSUPPORT_SELECTIVE_REGISTRATION" //tensorflow/contrib/android:libtensorflow_inference.so --host_crosstool_top=@bazel_tools//tools/cpp:toolchain --crosstool_top=//external:android/crosstool --cpu=armeabi-v7a
+solution 2:
+I met the same type of mistake before, and with "Op type not registered ListDiff" error. I find "listdiff_op.cc" is at "tensorflow/core/kernels". Then I add a line at "tensorflow/core/kernels/BUILD", and re-generate libtensorflow_inference.so to solve that error. But the "beam_search_ops.cc" is at "tensorflow/contrib/seq2seq/kernels", when I add it like "ListDiff" it's still reporting that error at android studio.
+add line like below:
+filegroup( name = "android_extended_ops_group1", srcs = [ "listdiff_op.cc", #"//tensorflow/contrib/seq2seq/kernels/beam_search_ops.cc", ...] )
+I need some help for solving this problem. thanks.
+Source code / logs
+error log at android studio:
+E/AndroidRuntime: FATAL EXCEPTION: main Process: com.example.phua.mt_1201, PID: 20817 java.lang.RuntimeException: Unable to start activity ComponentInfo{com.example.phua.mt_1201/com.example.phua.mt_1201.MainActivity}: org.tensorflow.TensorFlowException: Op type not registered 'GatherTree' in binary running on localhost. Make sure the Op and Kernel are registered in the binary running in this process. at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:2955) at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:3030) at android.app.ActivityThread.-wrap11(Unknown Source:0) at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1696) at android.os.Handler.dispatchMessage(Handler.java:105) at android.os.Looper.loop(Looper.java:164) at android.app.ActivityThread.main(ActivityThread.java:6938) at java.lang.reflect.Method.invoke(Native Method) at com.android.internal.os.Zygote$MethodAndArgsCaller.run(Zygote.java:327) at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1374) Caused by: org.tensorflow.TensorFlowException: Op type not registered 'GatherTree' in binary running on localhost. Make sure the Op and Kernel are registered in the binary running in this process. at org.tensorflow.Graph.importGraphDef(Native Method) at org.tensorflow.Graph.importGraphDef(Graph.java:118) at org.tensorflow.Graph.importGraphDef(Graph.java:102) at org.tensorflow.contrib.android.TensorFlowInferenceInterface.loadGraph(TensorFlowInferenceInterface.java:396) at org.tensorflow.contrib.android.TensorFlowInferenceInterface.<init>(TensorFlowInferenceInterface.java:97) at com.example.phua.mt_1201.tfonandroid.Loadmodel(tfonandroid.java:37) at com.example.phua.mt_1201.MainActivity.onCreate(MainActivity.java:52) at android.app.Activity.performCreate(Activity.java:7174) at android.app.Instrumentation.callActivityOnCreate(Instrumentation.java:1220) at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:2908) at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:3030)  at android.app.ActivityThread.-wrap11(Unknown Source:0)  at android.app.ActivityThread$H.handleMessage(ActivityThread.java:1696)  at android.os.Handler.dispatchMessage(Handler.java:105)  at android.os.Looper.loop(Looper.java:164)  at android.app.ActivityThread.main(ActivityThread.java:6938)

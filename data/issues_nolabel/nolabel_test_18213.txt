@@ -1,0 +1,34 @@
+Request a new padding mode
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): n/a
+TensorFlow installed from (source or binary): n/a
+TensorFlow version (use command below): n/a
+Python version: n/a
+Bazel version (if compiling from source): n/a
+GCC/Compiler version (if compiling from source): n/a
+CUDA/cuDNN version: n/a
+GPU model and memory: n/a
+Exact command to reproduce: n/a
+
+According to https://www.tensorflow.org/api_guides/python/nn#Convolution, the current padding mode "SAME" will depend on the input size to determine how many pixels to pad, for example:
+input=225, kernel=7, stride=2  ---> padding = [3, 3]
+input=224, kernel=7, stride=2  ---> padding = [2, 3]
+However, in most other CNN implementations, (and also, historically), padding does not depend on the input size. For kernel=7 and stride=2, padding usually will be [3, 3] (which is actually equivalent to [3, 2] when input=224).
+Potential issues:
+
+
+Inconsistent with models trained in other frameworks. It's not the first time I have to manually fix the padding when loading a model released by others, e.g. here. This also causes pain for multi-backend framework such as Keras, because "SAME" does not mean the same thing for each backend. One example Keras issue here. Also Keras has to explicit pad the image in its ResNet50 model: here.
+
+
+Due to how padding is computed (by left=total_padding//2, right=total_padding-left), the number of pixels padded on left or top of the image may change with different input size, as shown by the example above. This is not a good default and in particular harmful for pixel-level tasks, such as detection&segmentation, where all the annotations have an offset starting from the top-left corner of the image.
+
+
+In fact, many of TF team's own code has to fix this manually by tf.pad, for example:
+
+tensorflow/benchmarks has a new mode called "SAME_RESNET": https://github.com/tensorflow/benchmarks/blob/bab8a61aaca3d2b94072ae2b87f0aafe1797b165/scripts/tf_cnn_benchmarks/convnet_builder.py#L183-L199
+The recent tpu training code has a function called "conv2d_fixed_padding": https://github.com/tensorflow/tpu/blob/b189540102d6b5b40b1730d7e5ad5c884bae323c/models/experimental/resnet_bfloat16/resnet_model.py#L102-L107
+
+Given all these I think it's reasonable to add a new mode to make things easier.

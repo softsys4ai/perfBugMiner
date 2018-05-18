@@ -1,0 +1,45 @@
+Unable to change reuse from True to False when using a variable scope to create new one.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+No.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 14.04.
+TensorFlow installed from (source or binary):
+From source.
+TensorFlow version (use command below):
+('v1.3.0-rc1-633-gcf375f0', '1.2.1-rc1').
+Python version:
+2.7.6.
+Bazel version (if compiling from source):
+0.5.3.
+CUDA/cuDNN version:
+CUDA 8.0.
+GPU model and memory:
+N/A.
+Exact command to reproduce:
+with tf.variable_scope("test_scope", reuse=True) as scope:
+    pass
+with tf.variable_scope(scope, reuse=False) as scope2:
+    print scope2.reuse
+
+
+Describe the problem
+When users using a variable scope to create another variable scope, the reuse can not be changed from True to False. But it's OK if users change reuse from False to True. You can use the code above to reproduce the issue.
+Source code / logs
+I debugged the problem and found the root cause is at https://github.com/tensorflow/tensorflow/blob/r1.3/tensorflow/python/ops/variable_scope.py#L1322.
+default_varscope[0] = VariableScope(
+    name_or_scope.reuse if reuse is None else reuse, # the line of code causing the bug
+    name=new_name,
+    initializer=name_or_scope.initializer,
+    regularizer=name_or_scope.regularizer,
+    caching_device=name_or_scope.caching_device,
+    partitioner=name_or_scope.partitioner,
+    dtype=name_or_scope.dtype,
+    custom_getter=name_or_scope.custom_getter,
+    name_scope=name_scope,
+    use_resource=name_or_scope.use_resource)
+The line of code means that if reuse is None, it will use name_or_scope.reuse, preventing users from changing reuse to None or False. Note that  None is the same as False for reuse and tensorflow replaces False with None beforehand at https://github.com/tensorflow/tensorflow/blob/r1.3/tensorflow/python/ops/variable_scope.py#L1540.
+I think it should be changed to reuse.
+Thank you.

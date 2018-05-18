@@ -1,0 +1,173 @@
+segmentation fault when stride > ksize in conv2d
+
+Hello,
+I experience segfault trying to use recently merged modification of conv2d to support stride > ksize (yes, residual networks). Somehow it only arises in a complicated graph. I wrote minimal example, but it is still pretty big.
+Environment info
+Operating System: Fedora 21
+Python 3.4, GPU Titan X and Titan Z
+Installed version of CUDA and cuDNN: Cuda 7.5, Cudnn 4.
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+$ ls -1 $CUDA_HOME/lib/libcud*
+$CUDA_HOME/lib/libcudadevrt.a
+$CUDA_HOME/lib/libcudart.so
+$CUDA_HOME/lib/libcudart.so.7.5
+$CUDA_HOME/lib/libcudart.so.7.5.18
+$CUDA_HOME/lib/libcudart_static.a
+
+$ ls -1 $CUDA_HOME/lib64/libcud*
+$CUDA_HOME/lib64/libcudadevrt.a
+$CUDA_HOME/lib64/libcudart.so
+$CUDA_HOME/lib64/libcudart.so.7.5
+$CUDA_HOME/lib64/libcudart.so.7.5.18
+$CUDA_HOME/lib64/libcudart_static.a
+$CUDA_HOME/lib64/libcudnn.so
+$CUDA_HOME/lib64/libcudnn.so.4
+$CUDA_HOME/lib64/libcudnn.so.4.0.7
+$CUDA_HOME/lib64/libcudnn_static.a
+
+commit hash (nightly): 7b536cd
+Steps to reproduce
+Run the following code.
+import tensorflow as tf
+import numpy as np
+
+FLAGS = tf.app.flags.FLAGS
+
+tf.app.flags.DEFINE_integer('res_n', 18,
+                            """Residual network parameter.""")
+tf.app.flags.DEFINE_integer('batch_size', 128,
+                            """Batch size.""")
+tf.app.flags.DEFINE_integer('proj_ksize', 1,
+                            """Kernel size of identity projection.""")
+
+
+def weight_variable(shape):
+    init = tf.uniform_unit_scaling_initializer()
+    var = tf.get_variable('weights', shape, initializer=init)
+    return var
+
+
+def batch_norm(x, conv=True, scope='bn'):
+    phase_train = tf.get_collection('is_train')[0]
+    n_out = int(x.get_shape()[-1])
+    with tf.variable_scope(scope):
+        beta = tf.get_variable('beta', shape=[n_out],
+                initializer=tf.constant_initializer(0.0), trainable=True)
+        gamma = tf.get_variable('gamma', shape=[n_out],
+                initializer=tf.constant_initializer(1.0), trainable=True)
+
+        axes = [0, 1, 2] if conv else [0]
+        batch_mean, batch_var = tf.nn.moments(x, axes, name='moments')
+        ema = tf.train.ExponentialMovingAverage(decay=0.9)
+        ema_apply_op = ema.apply([batch_mean, batch_var])
+        ema_mean, ema_var = ema.average(batch_mean), ema.average(batch_var)
+        def mean_var_with_update():
+            with tf.control_dependencies([ema_apply_op]):
+                return tf.identity(batch_mean), tf.identity(batch_var)
+        mean, var = tf.python.control_flow_ops.cond(phase_train,
+            mean_var_with_update,
+            lambda: (ema_mean, ema_var))
+
+        normed = tf.nn.batch_normalization(x, mean, var, beta, gamma, 1e-3)
+    return normed
+
+
+def create_conv_layer(src, name, ksize, out_filters,
+                      stride=1, padding='SAME'):
+    in_filters = int(src.get_shape()[-1])
+    with tf.variable_scope(name):
+        W = weight_variable([ksize, ksize, in_filters, out_filters])
+        conv = tf.nn.conv2d(src, W, strides=[1, stride, stride, 1],
+                            padding=padding)
+    return conv
+
+
+def res_block(layer, i, lvl, num_filters, preact=True):
+    in_filters = int(layer.get_shape()[-1])
+    name = 'conv%i_%i' % (lvl, i)
+    if preact:
+        layer_act = tf.nn.relu(batch_norm(layer,
+                                          scope='bn_%i_%i_0' % (lvl, i)))
+    else:
+        layer_act = layer
+    if num_filters != in_filters:
+        stride = 2
+    else:
+        stride = 1
+    layer2 = create_conv_layer(layer_act, name+'_1', 3, num_filters, stride=stride)
+    layer2_act = tf.nn.relu(batch_norm(layer2, scope='bn_%i_%i_1' % (lvl, i)))
+    layer3 = create_conv_layer(layer2_act, name+'_2', 3, num_filters)
+    if stride > 1:
+        layer_proj = create_conv_layer(layer, name+'_proj', FLAGS.proj_ksize, num_filters,
+                                       stride=stride)
+        res = layer_proj + layer3
+    else:
+        res = layer + layer3
+    return res
+
+
+def inference(layer, n):
+    layer = create_conv_layer(layer, 'conv1_0', 3, 16)
+    layer = tf.nn.relu(batch_norm(layer, scope='conv1_bn'))
+    for i in range(n):
+        layer = res_block(layer, i, 1, 16, preact=(i > 0))
+    for i in range(n):
+        layer = res_block(layer, i, 2, 32)
+    for i in range(n):
+        layer = res_block(layer, i, 3, 64)
+    layer = tf.nn.relu(batch_norm(layer, scope='bn_post'))
+    layer = tf.reduce_mean(layer, [1, 2], keep_dims=True)
+    layer = create_conv_layer(layer, 'conv5', 1, 10)
+    layer = tf.squeeze(layer)
+    return layer
+
+
+if __name__ == '__main__':
+    np.random.seed(42)
+    a = np.random.randn(FLAGS.batch_size, 32, 32, 3)
+    b = np.random.randint(0, 10, size=FLAGS.batch_size)
+
+    sess = tf.Session()
+
+    phase_train = tf.Variable(True, trainable=False, name='phase_train')
+    tf.add_to_collection('is_train', phase_train)
+
+    x = tf.placeholder(tf.float32, shape=(FLAGS.batch_size, 32, 32, 3))
+    y = tf.placeholder(tf.int64, shape=(FLAGS.batch_size))
+    logits = inference(x, FLAGS.res_n)
+    loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits, y))
+
+    opt = tf.train.GradientDescentOptimizer(0.01)
+    train_op = opt.minimize(loss)
+
+    sess.run(tf.initialize_all_variables())
+    sess.run(train_op, feed_dict={x: a, y: b})
+
+It fails with an error cited below (if run on gpu with cudnn).
+What have you tried?
+
+It doesn't look like a memory issue, it still fails with tiny batch size.
+It works on CPU though.
+It works if proj_ksize=3 which again shows it isn't OOM issue and points to recently introduced feature.
+It doesn't fail on a trivial example (just isolated conv2d with stride=2, ksize=1). While writing it, I realize I forgot to check the trivial example with backward pass.
+It works for forward pass even on gpu.
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+$ python3 conv_bug.py
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so locally
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties:
+name: GeForce GTX TITAN Z
+major: 3 minor: 5 memoryClockRate (GHz) 0.8755
+pciBusID 0000:05:00.0
+Total memory: 6.00GiB
+Free memory: 5.91GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:755] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX TITAN Z, pci bus id: 0000:05:00.0)
+F tensorflow/stream_executor/cuda/cuda_dnn.cc:904] failed to enqueue convolution on stream: CUDNN_STATUS_BAD_PARAM
+[1]    10160 abort (core dumped)  python3 conv_bug.py

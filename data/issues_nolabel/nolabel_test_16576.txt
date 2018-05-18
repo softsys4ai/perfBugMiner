@@ -1,0 +1,35 @@
+Feature request: tf.estimator hyperparameter tuning
+
+I'm making an issue here because I'm sure this is being worked on somewhere in this huge repo and I've failed to find it by search.
+Almost all models have hyperparameters that cannot be set by gradient descent (number of layers, for example). These needs to be tuned, preferably programatically with a smart strategy.
+What's the canonical way of doing hyperparameter tuning with the tf.estimator API?
+(also, how can we do early stopping with tf.estimator?)
+I'm currently wrapping around scikit-optimize which is ok, but then I'll never be able to run parallel experiments across workers, and it's a bit tricky to know if the hyperparameters will lead to OOM aside from using tf.profile.
+import os
+
+from skopt import gp_minimize
+from skopt.space import Real, Categorical, Integer
+from skopt.utils import use_named_args
+
+logdir = 'tensorboard/'
+space = [
+    Real(0.0, 0.1, name='learning_rate'),
+    Categorical([True, False], name='skip_connections'),
+    Integer(1, 9, name='layers')]
+
+
+@use_named_args(space)
+def score(**params):
+    model_dir = os.path.join(logdir, str(params))
+    estimator = tf.estimator.Estimator(model_fn, model_dir, params=params)
+    trainspec = tf.estimator.TrainSpec(train_input_fn)
+    evalspec = tf.estimator.EvalSpec(eval_input_fn)
+    try:
+        tf.estimator.train_and_evaluate(estimator, trainspec, evalspec)
+        metrics = estimator.evaluate(test_input_fn)
+        return metrics['loss']
+    except (tf.errors.ResourceExhaustedError, tf.train.NanLossDuringTrainingError):
+        return 1e9
+
+
+gp_minimize(score, space)

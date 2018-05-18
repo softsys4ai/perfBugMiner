@@ -1,0 +1,424 @@
+Nested while_loop does not work for automatic gradient derivation
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes  I have
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): OSX 10.11.6
+TensorFlow installed from (source or binary): conda-forge
+TensorFlow version (use command below): 1.5.0
+Python version: 3.6.0
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:
+
+cell_fw = tf.nn.rnn_cell.GRUCell(num_units=hidden_dim)
+cell_bw = tf.nn.rnn_cell.GRUCell(num_units=hidden_dim)
+def fn(inp):
+    (outputs_fw, outputs_bw), _ = \
+        tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, inp[0], sequence_length=inp[1], dtype=tf.float32)
+        return tf.concat([outputs_fw, outputs_bw], axis=2)
+outputs = tf.map_fn(fn, (embedded, words_length), dtype=tf.float32)
+Describe the problem
+This problem seems having to do with the nested while_loop. I have a 4-D tensor that I want to run through a bidirectional GRU with, so I used tf.map_fn to map the sub tensors (which are 3-D tensor now) to bidirectional_rnn with the same GRU cells. This was going fine until I asked TensorFlow to generate the automatic gradient descent, which threw error suggesting while_loop cannot be inside another while_loop.
+Reproducible code is here:
+num_words = 1000
+embedding_dim = 100
+hidden_dim = 100
+num_class = 20
+
+words = tf.placeholder(tf.int32, [None, None, None], name='words')
+words_length = tf.placeholder(tf.int32, [None, None], name='words_length')
+sentences_length = tf.placeholder(tf.int32, [None], name='sentences_length')
+labels = tf.placeholder(tf.int32, [None], name='labels')
+
+with tf.variable_scope('embeddings'):
+    embedding = \
+        tf.get_variable('parameter', 
+                        shape=(num_words, embedding_dim), 
+                        dtype=tf.float32, trainable=True)
+    embedded  = tf.nn.embedding_lookup(embedding, words, name='lookup')
+with tf.variable_scope('words_lstm'):
+    cell_fw = tf.nn.rnn_cell.GRUCell(num_units=hidden_dim)
+    cell_bw = tf.nn.rnn_cell.GRUCell(num_units=hidden_dim)
+    def fn(inp):
+        (outputs_fw, outputs_bw), _ = \
+            tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, inp[0], sequence_length=inp[1], dtype=tf.float32)
+        return tf.concat([outputs_fw, outputs_bw], axis=2)
+    outputs = tf.map_fn(fn, (embedded, words_length), dtype=tf.float32)
+with tf.variable_scope('words_attention'):
+    hidden = tf.layers.dense(outputs, units=hidden_dim * 2, activation=tf.nn.tanh)
+    attention = tf.layers.dense(outputs, units=1, activation=None)
+    attention = tf.transpose(tf.nn.softmax(tf.transpose(attention, perm=[0, 1, 3, 2])), perm=[0, 1, 3, 2])
+outputs = tf.reduce_sum(outputs * attention, axis=2)
+with tf.variable_scope('sentence_lstm'):
+    cell_fw = tf.nn.rnn_cell.GRUCell(num_units=hidden_dim)
+    cell_bw = tf.nn.rnn_cell.GRUCell(num_units=hidden_dim)
+    (outputs_fw, outputs_bw), _ = \
+        tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, outputs, sequence_length=sentences_length, dtype=tf.float32)
+outputs = tf.concat([outputs_fw, outputs_bw], axis=2)
+with tf.variable_scope('sentence_attention'):
+    hidden = tf.layers.dense(outputs, units=hidden_dim * 2, activation=tf.nn.tanh)
+    attention = tf.layers.dense(hidden, units=1, activation=None)
+    attention = tf.transpose(tf.nn.softmax(tf.transpose(attention, perm=[0, 2, 1])), perm=[0, 2, 1])
+outputs = tf.reduce_sum(outputs * attention, axis=1)
+logits = tf.layers.dense(outputs, units=num_class, activation=None)
+loss = tf.reduce_sum(tf.one_hot(labels, num_class) * tf.nn.softmax(logits), name='loss')
+training_op = tf.train.AdamOptimizer(learning_rate=0.01).minimize(loss)
+Error
+INFO:tensorflow:Cannot use 'words_lstm/map/while/bidirectional_rnn/fw/fw/strided_slice_1' as input to 'gradients/words_lstm/map/while/bidirectional_rnn/fw/fw/while/TensorArrayWrite/TensorArrayWriteV3_grad/TensorArrayReadV3/f_acc' because 'words_lstm/map/while/bidirectional_rnn/fw/fw/strided_slice_1' is in a while loop.
+
+gradients/words_lstm/map/while/bidirectional_rnn/fw/fw/while/TensorArrayWrite/TensorArrayWriteV3_grad/TensorArrayReadV3/f_acc while context: None
+words_lstm/map/while/bidirectional_rnn/fw/fw/strided_slice_1 while context: words_lstm/map/while/while_context
+
+Traceback for gradients/words_lstm/map/while/bidirectional_rnn/fw/fw/while/TensorArrayWrite/TensorArrayWriteV3_grad/TensorArrayReadV3/f_acc:
+  File "/Users/shengc/anaconda/envs/py36/bin/ipython", line 6, in <module>
+    sys.exit(IPython.start_ipython())
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/__init__.py", line 125, in start_ipython
+    return launch_new_instance(argv=argv, **kwargs)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/traitlets/config/application.py", line 658, in launch_instance
+    app.start()
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/terminal/ipapp.py", line 356, in start
+    self.shell.mainloop()
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py", line 480, in mainloop
+    self.interact()
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py", line 471, in interact
+    self.run_cell(code, store_history=True)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2728, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2856, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2910, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-3-cda6375ef3e5>", line 1, in <module>
+    get_ipython().run_line_magic('paste', '')
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2095, in run_line_magic
+    result = fn(*args,**kwargs)
+  File "<decorator-gen-27>", line 2, in paste
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/magic.py", line 187, in <lambda>
+    call = lambda f, *a, **k: f(*a, **k)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/terminal/magics.py", line 199, in paste
+    self.store_or_execute(block, name)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/terminal/magics.py", line 57, in store_or_execute
+    self.shell.run_cell(b)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2728, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2850, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2910, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-3-0176473fb528>", line 40, in <module>
+    training_op = tf.train.AdamOptimizer(learning_rate=0.01).minimize(loss)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/training/optimizer.py", line 355, in minimize
+    grad_loss=grad_loss)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/training/optimizer.py", line 456, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 609, in gradients
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 375, in _MaybeCompile
+    return grad_fn()  # Exit early
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 609, in <lambda>
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_grad.py", line 131, in _TensorArrayWriteGrad
+    grad = g.read(index)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 859, in read
+    return self._implementation.read(index, name=name)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 259, in read
+    name=name)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 4498, in _tensor_array_read_v3
+    dtype=dtype, name=name)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 3160, in create_op
+    op_def=op_def)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1674, in __init__
+    self._control_flow_context.AddOp(self)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2251, in AddOp
+    self._AddOpInternal(op)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2274, in _AddOpInternal
+    real_x = self.AddValue(x)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2207, in AddValue
+    real_val = grad_ctxt.grad_state.GetRealValue(val)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1050, in GetRealValue
+    history_value = cur_grad_state.AddForwardAccumulator(cur_value)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 908, in AddForwardAccumulator
+    name="f_acc")
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 3578, in _stack_v2
+    stack_name=stack_name, name=name)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 3160, in create_op
+    op_def=op_def)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1625, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+Traceback for words_lstm/map/while/bidirectional_rnn/fw/fw/strided_slice_1:
+  File "/Users/shengc/anaconda/envs/py36/bin/ipython", line 6, in <module>
+    sys.exit(IPython.start_ipython())
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/__init__.py", line 125, in start_ipython
+    return launch_new_instance(argv=argv, **kwargs)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/traitlets/config/application.py", line 658, in launch_instance
+    app.start()
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/terminal/ipapp.py", line 356, in start
+    self.shell.mainloop()
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py", line 480, in mainloop
+    self.interact()
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/terminal/interactiveshell.py", line 471, in interact
+    self.run_cell(code, store_history=True)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2728, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2856, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2910, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-3-cda6375ef3e5>", line 1, in <module>
+    get_ipython().run_line_magic('paste', '')
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2095, in run_line_magic
+    result = fn(*args,**kwargs)
+  File "<decorator-gen-27>", line 2, in paste
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/magic.py", line 187, in <lambda>
+    call = lambda f, *a, **k: f(*a, **k)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/terminal/magics.py", line 199, in paste
+    self.store_or_execute(block, name)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/terminal/magics.py", line 57, in store_or_execute
+    self.shell.run_cell(b)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2728, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2850, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/IPython/core/interactiveshell.py", line 2910, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-3-0176473fb528>", line 22, in <module>
+    outputs = tf.map_fn(fn, (embedded, words_length), dtype=tf.float32)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/functional_ops.py", line 409, in map_fn
+    swap_memory=swap_memory)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2934, in while_loop
+    result = loop_context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2720, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2662, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/functional_ops.py", line 399, in compute
+    packed_fn_values = fn(packed_values)
+  File "<ipython-input-3-0176473fb528>", line 20, in fn
+    (outputs_fw, outputs_bw), _ =             tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, inp[0], sequence_length=inp[1], dtype=tf.float32)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/rnn.py", line 414, in bidirectional_dynamic_rnn
+    time_major=time_major, scope=fw_scope)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/rnn.py", line 629, in dynamic_rnn
+    dtype=dtype)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/rnn.py", line 688, in _dynamic_rnn_loop
+    time_steps = input_shape[0]
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/array_ops.py", line 573, in _slice_helper
+    name=name)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/array_ops.py", line 737, in strided_slice
+    shrink_axis_mask=shrink_axis_mask)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gen_array_ops.py", line 5501, in strided_slice
+    name=name)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 3160, in create_op
+    op_def=op_def)
+  File "/Users/shengc/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1625, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py in _MaybeCompile(scope, op, func, grad_fn)
+    369     try:
+--> 370       xla_compile = op.get_attr("_XlaCompile")
+    371       xla_separate_compiled_gradients = op.get_attr(
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in get_attr(self, name)
+   2172         raise ValueError(
+-> 2173             "No attr named '" + name + "' in " + str(self._node_def))
+   2174       x = self._node_def.attr[name]
+
+ValueError: No attr named '_XlaCompile' in name: "words_lstm/map/while/bidirectional_rnn/fw/fw/while/TensorArrayWrite/TensorArrayWriteV3"
+op: "TensorArrayWriteV3"
+input: "words_lstm/map/while/bidirectional_rnn/fw/fw/while/TensorArrayWrite/TensorArrayWriteV3/Enter"
+input: "words_lstm/map/while/bidirectional_rnn/fw/fw/while/Identity_1"
+input: "words_lstm/map/while/bidirectional_rnn/fw/fw/while/Select"
+input: "words_lstm/map/while/bidirectional_rnn/fw/fw/while/Identity_2"
+attr {
+  key: "T"
+  value {
+    type: DT_FLOAT
+  }
+}
+attr {
+  key: "_class"
+  value {
+    list {
+      s: "loc:@words_lstm/map/while/bidirectional_rnn/fw/fw/while/gru_cell/add"
+    }
+  }
+}
+
+
+During handling of the above exception, another exception occurred:
+
+ValueError                                Traceback (most recent call last)
+<ipython-input-3-0176473fb528> in <module>()
+     38 logits = tf.layers.dense(outputs, units=num_class, activation=None)
+     39 loss = tf.reduce_sum(tf.one_hot(labels, num_class) * tf.nn.softmax(logits), name='loss')
+---> 40 training_op = tf.train.AdamOptimizer(learning_rate=0.01).minimize(loss)
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/training/optimizer.py in minimize(self, loss, global_step, var_list, gate_gradients, aggregation_method, colocate_gradients_with_ops, name, grad_loss)
+    353         aggregation_method=aggregation_method,
+    354         colocate_gradients_with_ops=colocate_gradients_with_ops,
+--> 355         grad_loss=grad_loss)
+    356
+    357     vars_with_grad = [v for g, v in grads_and_vars if g is not None]
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/training/optimizer.py in compute_gradients(self, loss, var_list, gate_gradients, aggregation_method, colocate_gradients_with_ops, grad_loss)
+    454         gate_gradients=(gate_gradients == Optimizer.GATE_OP),
+    455         aggregation_method=aggregation_method,
+--> 456         colocate_gradients_with_ops=colocate_gradients_with_ops)
+    457     if gate_gradients == Optimizer.GATE_GRAPH:
+    458       grads = control_flow_ops.tuple(grads)
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py in gradients(ys, xs, grad_ys, name, colocate_gradients_with_ops, gate_gradients, aggregation_method, stop_gradients)
+    607                 # functions.
+    608                 in_grads = _MaybeCompile(
+--> 609                     grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+    610               else:
+    611                 # For function call ops, we add a 'SymbolicGradient'
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py in _MaybeCompile(scope, op, func, grad_fn)
+    373       xla_scope = op.get_attr("_XlaScope").decode()
+    374     except ValueError:
+--> 375       return grad_fn()  # Exit early
+    376
+    377   if not xla_compile:
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py in <lambda>()
+    607                 # functions.
+    608                 in_grads = _MaybeCompile(
+--> 609                     grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+    610               else:
+    611                 # For function call ops, we add a 'SymbolicGradient'
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_grad.py in _TensorArrayWriteGrad(op, flow)
+    129                                     colocate_with_first_write_call=False)
+    130        .grad(source=grad_source, flow=flow))
+--> 131   grad = g.read(index)
+    132   return [None, None, grad, flow]
+    133
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_ops.py in read(self, index, name)
+    857       The tensor at index `index`.
+    858     """
+--> 859     return self._implementation.read(index, name=name)
+    860
+    861   @tf_should_use.should_use_result
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_ops.py in read(self, index, name)
+    257         flow_in=self._flow,
+    258         dtype=self._dtype,
+--> 259         name=name)
+    260     if self._element_shape:
+    261       value.set_shape(self._element_shape[0].dims)
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gen_data_flow_ops.py in _tensor_array_read_v3(handle, index, flow_in, dtype, name)
+   4496     _, _, _op = _op_def_lib._apply_op_helper(
+   4497         "TensorArrayReadV3", handle=handle, index=index, flow_in=flow_in,
+-> 4498         dtype=dtype, name=name)
+   4499     _result = _op.outputs[:]
+   4500     _inputs_flat = _op.inputs
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py in _apply_op_helper(self, op_type_name, name, **keywords)
+    785         op = g.create_op(op_type_name, inputs, output_types, name=scope,
+    786                          input_types=input_types, attrs=attr_protos,
+--> 787                          op_def=op_def)
+    788       return output_structure, op_def.is_stateful, op
+    789
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in create_op(self, op_type, inputs, dtypes, input_types, name, attrs, op_def, compute_shapes, compute_device)
+   3158         input_types=input_types,
+   3159         original_op=self._default_original_op,
+-> 3160         op_def=op_def)
+   3161     self._create_op_helper(ret, compute_shapes=compute_shapes,
+   3162                            compute_device=compute_device)
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in __init__(self, node_def, g, inputs, output_types, control_inputs, input_types, original_op, op_def)
+   1672       control_flow_util.CheckInputFromValidContext(self, input_tensor.op)
+   1673     if self._control_flow_context is not None:
+-> 1674       self._control_flow_context.AddOp(self)
+   1675     self._recompute_node_def()
+   1676
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py in AddOp(self, op)
+   2249             op_input_ctxt._AddOpInternal(op)
+   2250             return
+-> 2251     self._AddOpInternal(op)
+   2252
+   2253   def _AddOpInternal(self, op):
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py in _AddOpInternal(self, op)
+   2272       for index in range(len(op.inputs)):
+   2273         x = op.inputs[index]
+-> 2274         real_x = self.AddValue(x)
+   2275         if real_x != x:
+   2276           op._update_input(index, real_x)
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py in AddValue(self, val)
+   2205               forward_ctxt = forward_ctxt.GetWhileContext()
+   2206           if forward_ctxt == grad_ctxt.grad_state.forward_context:
+-> 2207             real_val = grad_ctxt.grad_state.GetRealValue(val)
+   2208             self._external_values[val.name] = real_val
+   2209             return real_val
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py in GetRealValue(self, value)
+   1048           # Record the history of this value in forward_ctxt.
+   1049           self._grad_context.Exit()
+-> 1050           history_value = cur_grad_state.AddForwardAccumulator(cur_value)
+   1051           self._grad_context.Enter()
+   1052           break
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py in AddForwardAccumulator(self, value, dead_branch)
+    906             max_size=maximum_iterations,
+    907             elem_type=value.dtype.base_dtype,
+--> 908             name="f_acc")
+    909         # pylint: enable=protected-access
+    910       if curr_ctxt: curr_ctxt.Exit()
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/gen_data_flow_ops.py in _stack_v2(max_size, elem_type, stack_name, name)
+   3576     _, _, _op = _op_def_lib._apply_op_helper(
+   3577         "StackV2", max_size=max_size, elem_type=elem_type,
+-> 3578         stack_name=stack_name, name=name)
+   3579     _result = _op.outputs[:]
+   3580     _inputs_flat = _op.inputs
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py in _apply_op_helper(self, op_type_name, name, **keywords)
+    785         op = g.create_op(op_type_name, inputs, output_types, name=scope,
+    786                          input_types=input_types, attrs=attr_protos,
+--> 787                          op_def=op_def)
+    788       return output_structure, op_def.is_stateful, op
+    789
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in create_op(self, op_type, inputs, dtypes, input_types, name, attrs, op_def, compute_shapes, compute_device)
+   3158         input_types=input_types,
+   3159         original_op=self._default_original_op,
+-> 3160         op_def=op_def)
+   3161     self._create_op_helper(ret, compute_shapes=compute_shapes,
+   3162                            compute_device=compute_device)
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py in __init__(self, node_def, g, inputs, output_types, control_inputs, input_types, original_op, op_def)
+   1670     self._control_flow_context = g._get_control_flow_context()  # pylint: disable=protected-access
+   1671     for input_tensor in self.inputs:
+-> 1672       control_flow_util.CheckInputFromValidContext(self, input_tensor.op)
+   1673     if self._control_flow_context is not None:
+   1674       self._control_flow_context.AddOp(self)
+
+~/anaconda/envs/py36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_util.py in CheckInputFromValidContext(op, input_op)
+    198         input_op.name, "".join(traceback.format_list(input_op.traceback)))
+    199     logging.info(log_msg)
+--> 200     raise ValueError(error_msg + " See info log for more details.")
+
+ValueError: Cannot use 'words_lstm/map/while/bidirectional_rnn/fw/fw/strided_slice_1' as input to 'gradients/words_lstm/map/while/bidirectional_rnn/fw/fw/while/TensorArrayWrite/TensorArrayWriteV3_grad/TensorArrayReadV3/f_acc' because 'words_lstm/map/while/bidirectional_rnn/fw/fw/strided_slice_1' is in a while loop. See info log for more details.
+Source code / logs
+source code is here,
+https://github.com/shengc/tf-han/blob/master/hierarchical-attention-network.ipynb
+calling HierarchicalAttentionNetwork()._make_graph_batch(graph) will produce the above error

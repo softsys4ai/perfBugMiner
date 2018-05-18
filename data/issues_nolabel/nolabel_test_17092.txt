@@ -1,0 +1,224 @@
+[BUG] GPU memory is not freed before execution of following operation + report_tensor_allocations_upon_oom is wrong
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): ubuntu 16.04
+TensorFlow installed from (source or binary): both
+TensorFlow version (use command below): 1.4 and 1.6
+Python version: 3.5.4
+Bazel version (if compiling from source): ?
+GCC/Compiler version (if compiling from source): 5.4.0
+CUDA/cuDNN version: 9 / 6
+GPU model and memory: Tesla P100-PCIE-16GB
+Exact command to reproduce:
+
+The following code defines an operation that performs two big multiplications and a sum reduction on the GPU:
+def op(alpha, Xder, Xdertest, i):
+      cols = size #tf.shape(X)[0]
+      first = tf.matmul(Xder, alpha, transpose_a=True, name="first_{}".format(i))            # cols x num_des x 1  
+      with tf.control_dependencies([first]):
+            xdt = tf.tile(tf.expand_dims(Xdertest,0), [cols,1,1], name="xdt_{}".format(i))   # cols x num_dim x num_des
+            third = tf.matmul(xdt, first, name="third_{}".format(i))                         # cols x num_dim x 1
+            total = tf.reduce_sum(third, name="total_{}".format(i))                          # single number
+      return total 
+
+This will run fine if performed once, but if you repeat it with:
+singleExecution = op(alpha, Xder, Xdertest[0,:,:], 0)
+with tf.control_dependencies([singleExecution]):
+      secodExecution = op(alpha, Xder, Xdertest[1,:,:], 1)
+      doubleExecution = singleExecution + secodExecution # this should only add two doubles!
+
+it will produce an OOM-Execption. The expected behavior would be the calculation of the first result, clearing the GPU of all used memory and then calculating the second result.
+Complete Code to reproduce:
+import tensorflow as tf
+from tensorflow.python.client import timeline
+import numpy as np
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('-size', type=int, default=100000)
+parser.add_argument('-displayPlacement',action='store_true', default=False)
+args = parser.parse_args()
+
+rows = 2
+size = args.size
+num_des = 190
+num_dim = 60
+
+def op(alpha, Xder, Xdertest, i):
+      cols = size #tf.shape(X)[0]
+      first = tf.matmul(Xder, alpha, transpose_a=True, name="first_{}".format(i))            # cols x num_des x 1  
+      with tf.control_dependencies([first]):
+            xdt = tf.tile(tf.expand_dims(Xdertest,0), [cols,1,1], name="xdt_{}".format(i))   # cols x num_dim x num_des
+            third = tf.matmul(xdt, first, name="third_{}".format(i))                         # cols x num_dim x 1
+            total = tf.reduce_sum(third, name="total_{}".format(i))                          # single number
+      return total  
+
+
+Xder = tf.placeholder(tf.float64, [None, num_dim, num_des], name="XDerivation")
+Xdertest = tf.placeholder(tf.float64, [None, num_dim, num_des], name="XDerivation2")
+alpha = tf.placeholder(tf.float64, [None, num_dim, 1], name="alpha")
+
+
+singleExecution = op(alpha, Xder, Xdertest[0,:,:], 0)
+with tf.control_dependencies([singleExecution]):
+      secodExecution = op(alpha, Xder, Xdertest[1,:,:], 1)
+      doubleExecution = singleExecution + secodExecution
+
+fdict = {
+      alpha: np.random.rand(size, num_dim, 1),
+      Xder: np.random.rand(size, num_dim, num_des),
+      Xdertest: np.random.rand(rows, num_dim, num_des),
+}
+print("Memory of input:")
+print("alpha: {:.2f} MB".format(size*num_dim * 8. / 1024**2))
+print("Xder: {:.2f} MB".format(size*num_dim*num_des * 8. / 1024**2))
+print("Xdertest: {:.2f} MB".format(rows*num_dim*num_dim * 8. / 1024**2))
+
+print("first operation should need Xder + alpha + result: {:.2f} MB".format(( size*num_dim*num_des + size*num_dim  + size*num_des )* 8. / 1024**2))
+print("result of first operation alone needs: {:.2f} MB".format(( size*num_des )* 8. / 1024**2))
+print("xdt operation should need : {:.2f} MB".format(( size*num_dim*num_des )* 8. / 1024**2))
+print("third operation should need xdt + first + result: {:.2f} MB".format((size*num_dim + size*num_des + size*num_dim*num_des )* 8. / 1024**2))
+
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = False
+config.log_device_placement = args.displayPlacement
+sess = tf.Session(config=config) 
+run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE, report_tensor_allocations_upon_oom = True)
+run_metadata = tf.RunMetadata()
+print(sess.run(singleExecution, feed_dict=fdict, options=run_options, run_metadata=run_metadata))
+print("singleExecution finished!")
+
+fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+chrome_trace = fetched_timeline.generate_chrome_trace_format(show_memory=True)
+with open('timeline_single.json', 'w') as f:
+      f.write(chrome_trace)
+
+run_metadata = tf.RunMetadata()
+print(sess.run(doubleExecution, feed_dict=fdict, options=run_options, run_metadata=run_metadata))
+print("doubleExecution finished!")
+fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+chrome_trace = fetched_timeline.generate_chrome_trace_format(show_memory=True)
+with open('timeline_double.json', 'w') as f:
+      f.write(chrome_trace)
+
+You may have to change the size of the tensor to trigger the OOM if you use a different GPU.
+The test-Code will also produce timelines, one for the single execution and a second for the second execution (only if you choose a size small enough - for example 70000 on the P100)
+The print created by the report_tensor_allocations_upon_oom is not helpful, because it indicates a nearly complete free GPU. Total Log of the execution:
+ $$  CUDA_VISIBLE_DEVICES=1 python gpuMem.py 
+Memory of input:
+alpha: 45.78 MB
+Xder: 8697.51 MB
+Xdertest: 0.05 MB
+first operation should need Xder + alpha + result: 8888.24 MB
+result of first operation alone needs: 144.96 MB
+xdt operation should need : 8697.51 MB
+third operation should need xdt + first + result: 8888.24 MB
+2018-02-17 14:02:30.712016: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1212] Found device 0 with properties: 
+name: Tesla P100-PCIE-16GB major: 6 minor: 0 memoryClockRate(GHz): 1.3285
+pciBusID: 0000:0b:00.0
+totalMemory: 15.89GiB freeMemory: 15.60GiB
+2018-02-17 14:02:30.712072: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-02-17 14:02:31.024207: I tensorflow/core/common_runtime/gpu/gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 15128 MB memory) -> physical GPU (device: 0, name: Tesla P100-PCIE-16GB, pci bus id: 0000:0b:00.0, compute capability: 6.0)
+2018-02-17 14:02:36.312709: I tensorflow/stream_executor/dso_loader.cc:151] successfully opened CUDA library libcupti.so.9.0 locally
+8563879389.460578
+singleExecution finished!
+2018-02-17 14:02:53.755140: W tensorflow/core/common_runtime/bfc_allocator.cc:275] Allocator (GPU_0_bfc) ran out of memory trying to allocate 8.49GiB.  Current allocation summary follows.
+2018-02-17 14:02:53.755215: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (256):   Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755233: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (512):   Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755256: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (1024):  Total Chunks: 1, Chunks in use: 1. 1.2KiB allocated for chunks. 1.2KiB in use in bin. 1.0KiB client-requested in use in bin.
+2018-02-17 14:02:53.755271: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (2048):  Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755285: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (4096):  Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755358: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (8192):  Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755375: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (16384):         Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755390: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (32768):         Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755406: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (65536):         Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755427: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (131072):        Total Chunks: 1, Chunks in use: 1. 178.2KiB allocated for chunks. 178.2KiB in use in bin. 178.1KiB client-requested in use in bin.
+2018-02-17 14:02:53.755445: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (262144):        Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755459: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (524288):        Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755473: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (1048576):       Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755487: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (2097152):       Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755502: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (4194304):       Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755517: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (8388608):       Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755532: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (16777216):      Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755555: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (33554432):      Total Chunks: 1, Chunks in use: 1. 45.78MiB allocated for chunks. 45.78MiB in use in bin. 45.78MiB client-requested in use in bin.
+2018-02-17 14:02:53.755570: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (67108864):      Total Chunks: 0, Chunks in use: 0. 0B allocated for chunks. 0B in use in bin. 0B client-requested in use in bin.
+2018-02-17 14:02:53.755589: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (134217728):     Total Chunks: 1, Chunks in use: 1. 144.96MiB allocated for chunks. 144.96MiB in use in bin. 144.96MiB client-requested in use in bin.
+2018-02-17 14:02:53.755606: I tensorflow/core/common_runtime/bfc_allocator.cc:630] Bin (268435456):     Total Chunks: 2, Chunks in use: 1. 14.59GiB allocated for chunks. 8.49GiB in use in bin. 8.49GiB client-requested in use in bin.
+2018-02-17 14:02:53.755622: I tensorflow/core/common_runtime/bfc_allocator.cc:646] Bin for 8.49GiB was 256.00MiB, Chunk State: 
+2018-02-17 14:02:53.755645: I tensorflow/core/common_runtime/bfc_allocator.cc:652]   Size: 6.09GiB | Requested Size: 781.2KiB | in_use: 0, prev:   Size: 144.96MiB | Requested Size: 144.96MiB | in_use: 1
+2018-02-17 14:02:53.755662: I tensorflow/core/common_runtime/bfc_allocator.cc:665] Chunk at 0x10216400000 of size 1280
+2018-02-17 14:02:53.755676: I tensorflow/core/common_runtime/bfc_allocator.cc:665] Chunk at 0x10216400500 of size 9120000000
+2018-02-17 14:02:53.755688: I tensorflow/core/common_runtime/bfc_allocator.cc:665] Chunk at 0x10435d82d00 of size 48000000
+2018-02-17 14:02:53.755699: I tensorflow/core/common_runtime/bfc_allocator.cc:665] Chunk at 0x10438b49900 of size 182528
+2018-02-17 14:02:53.755711: I tensorflow/core/common_runtime/bfc_allocator.cc:665] Chunk at 0x10438b76200 of size 152000000
+2018-02-17 14:02:53.755723: I tensorflow/core/common_runtime/bfc_allocator.cc:665] Free  at 0x10441c6b800 of size 6543709184
+2018-02-17 14:02:53.755731: I tensorflow/core/common_runtime/bfc_allocator.cc:671]      Summary of in-use Chunks by size: 
+2018-02-17 14:02:53.755746: I tensorflow/core/common_runtime/bfc_allocator.cc:674] 1 Chunks of size 1280 totalling 1.2KiB
+2018-02-17 14:02:53.755759: I tensorflow/core/common_runtime/bfc_allocator.cc:674] 1 Chunks of size 182528 totalling 178.2KiB
+2018-02-17 14:02:53.755772: I tensorflow/core/common_runtime/bfc_allocator.cc:674] 1 Chunks of size 48000000 totalling 45.78MiB
+2018-02-17 14:02:53.755786: I tensorflow/core/common_runtime/bfc_allocator.cc:674] 1 Chunks of size 152000000 totalling 144.96MiB
+2018-02-17 14:02:53.755799: I tensorflow/core/common_runtime/bfc_allocator.cc:674] 1 Chunks of size 9120000000 totalling 8.49GiB
+2018-02-17 14:02:53.755812: I tensorflow/core/common_runtime/bfc_allocator.cc:678] Sum Total of in-use chunks: 8.68GiB
+2018-02-17 14:02:53.755827: I tensorflow/core/common_runtime/bfc_allocator.cc:680] Stats: 
+Limit:                 15863893197
+InUse:                  9320183808
+MaxInUse:               9322583808
+NumAllocs:                      22
+MaxAllocSize:           9120000000
+
+2018-02-17 14:02:53.755846: W tensorflow/core/common_runtime/bfc_allocator.cc:279] ***********************************************************_________________________________________
+2018-02-17 14:02:53.755879: W tensorflow/core/framework/op_kernel.cc:1202] OP_REQUIRES failed at tile_ops.cc:123 : Resource exhausted: OOM when allocating tensor with shape[100000,60,190] and type double on /job:localhost/replica:0/task:0/device:GPU:0 by allocator GPU_0_bfc
+Traceback (most recent call last):
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1361, in _do_call
+    return fn(*args)
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1340, in _run_fn
+    target_list, status, run_metadata)
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py", line 516, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.ResourceExhaustedError: OOM when allocating tensor with shape[100000,60,190] and type double on /job:localhost/replica:0/task:0/device:GPU:0 by allocator GPU_0_bfc
+         [[Node: xdt_0 = Tile[T=DT_DOUBLE, Tmultiples=DT_INT32, _device="/job:localhost/replica:0/task:0/device:GPU:0"](ExpandDims, xdt_0/multiples)]]
+
+Current usage from device: /job:localhost/replica:0/task:0/device:GPU:0, allocator: GPU_0_bfc
+  144.96MiB from first_0
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "gpuMem.py", line 65, in <module>
+    print(sess.run(doubleExecution, feed_dict=fdict, options=run_options, run_metadata=run_metadata))
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 905, in run
+    run_metadata_ptr)
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1137, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1355, in _do_run
+    options, run_metadata)
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1374, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.ResourceExhaustedError: OOM when allocating tensor with shape[100000,60,190] and type double on /job:localhost/replica:0/task:0/device:GPU:0 by allocator GPU_0_bfc
+         [[Node: xdt_0 = Tile[T=DT_DOUBLE, Tmultiples=DT_INT32, _device="/job:localhost/replica:0/task:0/device:GPU:0"](ExpandDims, xdt_0/multiples)]]
+
+Current usage from device: /job:localhost/replica:0/task:0/device:GPU:0, allocator: GPU_0_bfc
+  144.96MiB from first_0
+
+
+Caused by op 'xdt_0', defined at:
+  File "gpuMem.py", line 30, in <module>
+    singleExecution = op(alpha, Xder, Xdertest[0,:,:], 0)
+  File "gpuMem.py", line 19, in op
+    xdt = tf.tile(tf.expand_dims(Xdertest,0), [cols,1,1], name="xdt_{}".format(i))   # cols x num_dim x num_des
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/ops/gen_array_ops.py", line 5587, in tile
+    "Tile", input=input, multiples=multiples, name=name)
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 3271, in create_op
+    op_def=op_def)
+  File "/home/ghiero/anaconda3/envs/tftest/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1650, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+ResourceExhaustedError (see above for traceback): OOM when allocating tensor with shape[100000,60,190] and type double on /job:localhost/replica:0/task:0/device:GPU:0 by allocator GPU_0_bfc
+         [[Node: xdt_0 = Tile[T=DT_DOUBLE, Tmultiples=DT_INT32, _device="/job:localhost/replica:0/task:0/device:GPU:0"](ExpandDims, xdt_0/multiples)]]
+
+Current usage from device: /job:localhost/replica:0/task:0/device:GPU:0, allocator: GPU_0_bfc
+  144.96MiB from first_0

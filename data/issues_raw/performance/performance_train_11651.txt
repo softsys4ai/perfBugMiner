@@ -1,0 +1,44 @@
+Feature Request: tf.extract_image_patches gradients operation for variable size inputs
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Scientific Linux 7.3
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): v1.1.0-rc0-61-g1ec6ed5 1.1.0 GPU
+Python version: 3.6.1
+Bazel version (if compiling from source): n/a
+CUDA/cuDNN version: 8.0.44
+GPU model and memory: n/a
+
+Describe the problem
+I'm using the tf.extract_image_patches operation to extract a number of overlapping frames from an image with variable size. The current gradient operation fails unless the input image dimensions are fixed.
+Specifically, in my case my code fails here
+https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/array_grad.py#L690
+where rows_in, rows_out and cols_out are all None.
+For more background: my application is in speech processing and my "image" is a spectrogram-like array of features which has a fixed height but can vary in length with the duration of the input audio. I'm trying to split it into overlapping windows dynamically to pass to a classifier downstream.
+In my case the input  has shape (1 x None x 128 x 1), where the unknown dimension is typically ~15,000, my image patches are 400x128 and the result has shape (1 x None x None x 51200).
+I feel it should be possible to modify the gradient op to accommodate dynamic input dimensions, would this be a reasonable feature addition?
+The current gradient implementation was added here: #2921
+Perhaps this feature request would tie in with #6847 ?
+Source code/Logs
+I think the information provided explains my problem well enough, let me know if I should provide a more detailed problem description.
+An expanded code snippet can also be found here: https://github.com/PaddyT/waveform-asr/blob/master/waveasr/models/wavenet.py#L455#L495
+extracted = tf.extract_image_patches(images=input_image, ksizes=[1, 400, 128, 1], strides=[1, 160, 1, 1], rates=[1, 1, 1, 1], padding='VALID')
+ File "~/diss/waveform-asr/tests/test_graphs/test_wavenet.py", line 35, in <module>
+    alpha=0.5)
+  File "~/diss/waveform-asr/waveasr/models/wavenet.py", line 321, in __init__
+    self.train_op = self.optimizer.minimize(loss=self.objective, global_step=self.global_step)
+  File "~/miniconda2/envs/diss/lib/python3.6/site-packages/tensorflow/python/training/optimizer.py", line 315, in minimize
+    grad_loss=grad_loss)
+  File "~/miniconda2/envs/diss/lib/python3.6/site-packages/tensorflow/python/training/optimizer.py", line 386, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "~/miniconda2/envs/diss/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 560, in gradients
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "~/miniconda2/envs/diss/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 368, in _MaybeCompile
+    return grad_fn()  # Exit early
+  File "~/miniconda2/envs/diss/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 560, in <lambda>
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "~/miniconda2/envs/diss/lib/python3.6/site-packages/tensorflow/python/ops/array_grad.py", line 610, in _ExtractImagePatchesGrad
+    rows_out = int(ceil((rows_in - ksize_r_eff + 1) / stride_r))
+TypeError: unsupported operand type(s) for -: 'NoneType' and 'int'```

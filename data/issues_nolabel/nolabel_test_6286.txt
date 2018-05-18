@@ -1,0 +1,59 @@
+Problem about get_variable() and variable_scope()
+
+NOTE: Only file GitHub issues for bugs and feature requests.  All other topics will be closed.
+For general support from the community, see StackOverflow.
+To make bugs and feature requests more easy to find and organize, we close issues that are deemed
+out of scope for GitHub Issues and point people to StackOverflow.
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+I retrained the inception-V3 model according to the image_retrain example with one extra conv and pool layers on the top of the original bottleneck layer. The two layers are initialized with get_variable() function
+in a variable_scope() and after training the graph and parameters are stored in a .pb file.
+But when i read the just trained .pb file for test and wanna retrieve the variables in the two layers, with variable_scope() and get_variable(,reuse=true), exception are raised about
+'Variable weights/W does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?'
+Environment info
+Operating System: Ubuntu 14.04
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+cuda 8.0
+cudnn 5.1
+If installed from binary pip package, provide:
+
+A link to the pip package you installed: rc0.12.0
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+0.12.0-rc0
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+I initialize the two extra layer as:
+  with tf.variable_scope('CAM_unit'):
+      CAM_conv = new_conv_layer(bottleneck_input,   [3,3,BOTTLENECK_TENSOR_SIZE,BOTTLENECK_TENSOR_SIZE], 'CAM_CONV')
+      CAM_pool = tf.reduce_mean(tf.nn.relu(CAM_conv), [1,2], name='CAM_AVG_POOL')
+  with tf.variable_scope('weights'):
+      layer_weights = tf.get_variable('W', 
+                                      shape = [BOTTLENECK_TENSOR_SIZE, class_count], 
+                                      initializer = tf.random_normal_initializer(0., 0.01))
+
+And access the weights/W variables as:
+ with tf.variable_scope('weights', reuse=True):
+        label_w = tf.gather(tf.transpose(tf.get_variable('W')), label)
+
+error is
+Variable weights/W does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+What other attempted solutions have you tried?
+I tried to set reuse=None, but the error is
+Shape of a new variable (weights/W) must be fully defined, but instead was <unknown>
+I doubt about the .pb file in which the model converged with a very high accuracy, because when i retrain again with this output .pb file, the accuracy is very low like an untrained one. But i import the model, the new added layers are there as expected, just inaccessible with get_variable()
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+I import the .pb file with code:
+ops = [op.name for op in graph.get_operations() if 'weights/' in op.name]
+    pprint.pprint(ops)
+
+and find the weights/W variables are available:
+[u'weights/W', u'weights/W/read']

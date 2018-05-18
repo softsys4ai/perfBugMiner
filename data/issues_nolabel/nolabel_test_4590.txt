@@ -1,0 +1,18 @@
+Better shape inference for tf.slice and tf.strided_slice
+
+Currently, if any of the values in the size argument is not a constant, the output shape is completely unknown (but the correct rank):
+>>> z = tf.zeros((1, 2, 3))
+>>> z.get_shape().as_list()
+[1, 2, 3]
+>>> m = tf.slice(z, [0, 0, 0], [-1, -1, -1])
+>>> m.get_shape().as_list()
+[1, 2, 3]
+>>> m = tf.slice(z, [0, 0, 0], [tf.constant(1) + 0, -1, -1])
+>>> m.get_shape().as_list()
+[None, None, None]
+The desired behaviour would instead treat the second and third dimensions correctly:
+>>> m = tf.slice(z, [0, 0, 0], [tf.constant(1) + 0, -1, -1])
+>>> m.get_shape().as_list()
+[None, 2, 3]
+Looking briefly at the code, this would requite being a bit more clever in terms of how constant values are computed; right now if anything in a Pack-ed array is unknown at graph construction time, the entire array is unknown (see _ConstantValue's Pack case).
+I guess this request ends up being just a request for a better constant propagation system which supports partially-known tensors. Perhaps you already have other use cases for such a feature, in which case view this as just another request that such a feature would enable.

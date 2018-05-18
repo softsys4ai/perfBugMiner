@@ -1,0 +1,30 @@
+Remove Variables from a TF Server (e.g.)
+
+I have a cluster of long-lived TensorFlow servers  (//tensorflow/core/distributed_runtime/rpc/grpc_tensorflow_server).
+My problem is how to reset variables on these server.
+There is a behavior in distributed TensorFlow in which a variable defined on a worker (e.g. PS) outlives the session which defines it. I understand this behavior is intentional to support between graph model-replica.
+However, In my use case this behavior causes unexpected problem. I have not found a mechanism to override this. It there is, I believe it is helpful to better reflect it in the documentation, if there is not, I hope I can make a case to motivate its existence.
+In my use case different training jobs are ran sequentially (i.e. one training job at a time) on this cluster, each using one client (which connects to only one master).
+The problem I have is if a variable is defined in two training job with a same name but different shape sizes, the latter client gets the following error on "Session" creation:
+InvalidArgumentError (see above for traceback): Assign requires shapes of both tensors to match. lhs shape= [100] rhs shape= [200]%0A%09 [[Node: a/Assign = Assign[T=DT_FLOAT, _class=["loc:@a"], use_locking=true, validate_shape=true, _device="/job:worker/replica:0/task:0/device:GPU:0"](a, a/Initializer/random_uniform)]]
+
+tf.reset_default_graph does not help. The solution to this problem could be a mechanism similar tf.reset_default_graph that resets variables in all the workers.
+To replicate this problem let say we have two workers: (one PS, and on Worker)
+Worker 1:
+#worker 1
+./bazel-bin/tensorflow/core/distributed_runtime/rpc/grpc_tensorflow_server --cluster_spec="ps|localhost:2222,worker|localhost:2223" --job_name=worker --task_id=0 &
+#worker 2
+./bazel-bin/tensorflow/core/distributed_runtime/rpc/grpc_tensorflow_server --cluster_spec="ps|localhost:2222,worker|localhost:2223" --job_name=worker --task_id=0
+(Same result with tf.train.Server workers.)
+Then run the simple code:
+import tensorflow as tf
+var = tf.get_variable("A", shape=(100,))
+with tf.train.MonitoredTrainingSession(master="localhost:2223") as sess:
+   pass
+It should work just fine.
+Then when this code (which is identical except the variable shape) is ran:
+import tensorflow as tf
+var = tf.get_variable("A", shape=(5000,))
+with tf.train.MonitoredTrainingSession(master="localhost:2223") as sess:
+   pass
+This example fails.

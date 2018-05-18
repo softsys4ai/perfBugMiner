@@ -1,0 +1,107 @@
+CudnnLSTM dropout takes no effect
+
+My environment is: Tensorflow 0.11.0rc2, in unbuntu 16.04, cuda8.0, cudnn5.1, GPU is GTX1080.
+I am using the CudnnLSTM from tensorflow.contrib.cudnn_rnn package. I found that the dropout setting in CudnnLSTM seems take no effect, and I checked that there is no test for dropout in op unit test. So I write a simple code to test it, the code is below:
+import tensorflow as tf
+from tensorflow.contrib.cudnn_rnn import CudnnLSTM
+
+class Cudnn_model():
+  def __init__(self,dropout):
+    self.model = CudnnLSTM(
+        num_layers = 1,
+        num_units = 8,
+        input_size = 8,
+        input_mode = "skip_input",
+        direction = "unidirectional",
+        dropout = dropout,
+        )
+
+    params_size_t = self.model.params_size()
+    self.params = tf.Variable(tf.ones([params_size_t]), validate_shape=False)
+
+  def run_step(self,rnn_inputs):
+    outputs, output_h, output_c = self.model(
+                input_data = rnn_inputs,
+                input_h = tf.zeros([1,1,8]),
+                input_c = tf.zeros([1,1,8]),
+                params = self.params,
+                is_training= True
+               )
+    self.outputs = outputs
+    return outputs
+
+def main():
+
+inputs = tf.pack([[[0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0]]])
+m1 = Cudnn_model(dropout = 0.0)
+output1 = m1.run_step(inputs)
+m2 = Cudnn_model(dropout = 0.5)
+output2 = m2.run_step(inputs)
+output3 = tf.nn.dropout(output1,0.5)
+output4 = m1.run_step(tf.nn.dropout(inputs,0.5))
+
+config = tf.ConfigProto(allow_soft_placement=True)
+config.gpu_options.allow_growth = True
+sess = tf.Session(config=config)
+sess.run(tf.initialize_all_variables())
+
+for i in range(5):
+    out1,out2,out3,out4 = sess.run([output1,output2,output3,output4])
+    print " ----- Try time %d -----" % i
+    print "cndnn_dropout=0 : ", out1
+    print "cudnn_dropout=0.5 : ", out2
+    print "tf_out_dropout=0.5 : ", out3
+    print "tf_in_dropout=0.5 : ", out4
+return
+
+And the result is：
+----- Try time 0 -----
+cndnn_dropout=0 [[[ 0.6082834   0.70377535  0.74009657  0.75365263  0.75866807  0.76051712
+0.76119781  0.76144838]]]
+cudnn_dropout=0.5 [[[ 0.6082834   0.70377535  0.74009657  0.75365263  0.75866807  0.76051712
+0.76119781  0.76144838]]]
+tf_out_dropout=0.5 [[[ 1.2165668   0.          0.          0.          0.          1.52103424
+1.52239561  1.52289677]]]
+tf_in_dropout=0.5 [[[ 0.6082834   0.6082834   0.6082834   0.76119781  0.6082834   0.76158684
+0.6082834   0.6082834 ]]]
+
+ ----- Try time 1 -----
+cndnn_dropout=0 [[[ 0.6082834   0.70377535  0.74009657  0.75365263  0.75866807  0.76051712
+0.76119781  0.76144838]]]
+cudnn_dropout=0.5 [[[ 0.6082834   0.70377535  0.74009657  0.75365263  0.75866807  0.76051712
+0.76119781  0.76144838]]]
+tf_out_dropout=0.5 [[[ 0.  0.  0.  0.  0.  0.  0.  0.]]]
+tf_in_dropout=0.5 [[[ 0.6082834   0.74009657  0.6082834   0.76119781  0.6082834   0.76158684
+0.6082834   0.6082834 ]]]
+
+ ----- Try time 2 -----
+cndnn_dropout=0 [[[ 0.6082834   0.70377535  0.74009657  0.75365263  0.75866807  0.76051712
+0.76119781  0.76144838]]]
+cudnn_dropout=0.5 [[[ 0.6082834   0.70377535  0.74009657  0.75365263  0.75866807  0.76051712
+0.76119781  0.76144838]]]
+tf_out_dropout=0.5 [[[ 1.2165668   0.          0.          1.50730526  1.51733613  1.52103424
+1.52239561  0.        ]]]
+tf_in_dropout=0.5 [[[ 0.6082834   0.74009657  0.6082834   0.76119781  0.6082834   0.76158684
+0.6082834   0.761594  ]]]
+
+ ----- Try time 3 -----
+cndnn_dropout=0 [[[ 0.6082834   0.70377535  0.74009657  0.75365263  0.75866807  0.76051712
+0.76119781  0.76144838]]]
+cudnn_dropout=0.5 [[[ 0.6082834   0.70377535  0.74009657  0.75365263  0.75866807  0.76051712
+0.76119781  0.76144838]]]
+tf_out_dropout=0.5 [[[ 0.          0.          1.48019314  0.          0.          0.
+1.52239561  1.52289677]]]
+tf_in_dropout=0.5 [[[ 0.6082834   0.6082834   0.6082834   0.76119781  0.76154053  0.6082834
+0.76159316  0.761594  ]]]
+
+ ----- Try time 4 -----
+cndnn_dropout=0 [[[ 0.6082834   0.70377535  0.74009657  0.75365263  0.75866807  0.76051712
+0.76119781  0.76144838]]]
+cudnn_dropout=0.5 [[[ 0.6082834   0.70377535  0.74009657  0.75365263  0.75866807  0.76051712
+0.76119781  0.76144838]]]
+tf_out_dropout=0.5 [[[ 0.          1.40755069  0.          1.50730526  1.51733613  0.
+1.52239561  1.52289677]]]
+tf_in_dropout=0.5 [[[ 0.6082834   0.74009657  0.75866807  0.76119781  0.6082834   0.76158684
+0.76159316  0.6082834 ]]]
+
+From the result I see that the cudnn_dropout = 0.5 takes no effect, the result is always same with cudnn_dropout = 0.0.

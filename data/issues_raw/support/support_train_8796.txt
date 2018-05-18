@@ -1,0 +1,68 @@
+Distributed mode hangs on in local mode
+
+Looks like the workers do not start their server when using the estimator API and running in local-distributed mode. The minimalist code down helps reproduce: runs fine with only one process, but when launched with TF_CONFIG={"cluster": {"ps":["localhost:5040"], "worker":["localhost:5041"]}, "task":{"type":"ps","index":0}} (resp. worker), it hangs on. After investigating, looks like in
+tensorflow/contrib/learn/python/learn/experiment.py l.250-258:
+# Start the server, if needed. It's important to start the server before
+# we (optionally) sleep for the case where no device_filters are set.
+# Otherwise, the servers will wait to connect to each other before starting
+# to train. We might as well start as soon as we can.
+config = self._estimator.config
+if (config.environment != run_config.Environment.LOCAL and
+    config.environment != run_config.Environment.GOOGLE and
+    config.cluster_spec and config.master):
+  self._start_server()
+
+the server is not started when the environment is local, no matter distributed or not. When I force the _start_server() to be executed though, everything works just fine.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+I wrote a stackoverflow thread here: http://stackoverflow.com/questions/43076035/tensorflow-minimalist-program-fails-on-distributed-mode
+Environment info
+Operating System: Windows-64 bit
+Installed version of CUDA and cuDNN: none, only on CPU
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+If installed from binary pip package, provide:
+
+A link to the pip package you installed: from install in the website (pip install --upgrade tensorflow)
+The output from python -c "import tensorflow; print(tensorflow.__version__)". 1.0.1
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import numpy as np
+import tensorflow as tf
+from tensorflow.contrib.learn.python.learn import learn_runner
+from tensorflow.contrib import layers
+
+DATA_SIZE=10
+DIMENSION=5
+
+def generate_input_fn():
+    def _input_fn():
+        mid = int(DATA_SIZE/2)
+        data = np.array([np.ones(DIMENSION) if x < mid else -np.ones(DIMENSION) for x in range(DATA_SIZE)])
+        labels = ['0' if x < mid else '1' for x in range(DATA_SIZE)]        
+        table = tf.contrib.lookup.string_to_index_table_from_tensor(tf.constant(['0', '1']))
+        label_tensor = table.lookup(tf.convert_to_tensor(labels, dtype=tf.string))
+        return dict(zip(['features'], [tf.convert_to_tensor(data, dtype=tf.float32)])), label_tensor
+    return _input_fn
+
+def build_estimator(model_dir):
+    features = layers.real_valued_column('features', dimension=DIMENSION)
+    return tf.contrib.learn.LinearClassifier(
+        feature_columns=[features],
+        model_dir=model_dir)
+
+def generate_exp_fun():
+    def _exp_fun(output_dir):
+        return tf.contrib.learn.Experiment(
+            build_estimator(output_dir),
+            train_input_fn=generate_input_fn(),
+            eval_input_fn=generate_input_fn(),
+            train_steps=1000)
+    return _exp_fun
+
+if __name__ == '__main__':
+    tf.logging.set_verbosity(tf.logging.DEBUG)
+    learn_runner.run(generate_exp_fun(), 'job_dir')
+
+What other attempted solutions have you tried?
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+If server is not started, hangs on with log: INFO:tensorflow:Create CheckpointSaverHook.

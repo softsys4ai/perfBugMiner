@@ -1,0 +1,37 @@
+tf throws some errors in estimator.train function when I droped additional column in input_fn
+
+sample_weight is instance-based weight, which i wanted to pass to tf.losses.sparse_softmax_cross_entropy,  so I droped this column in the features. However, I still got some errors. If i removed the sample_weight column in data_train, it's OK !
+`
+train_input_fn = tf.estimator.inputs.pandas_input_fn(x=data_train, y=data_train_click, batch_size = 1024, num_epochs=1, shuffle=True)
+classifier.train(input_fn=train_input_fn)  #, steps=500)
+def my_model(features, labels, mode, params):
+if 'order_weight' in features.keys():
+    sample_weight = features.pop('sample_weight')
+
+net = tf.feature_column.input_layer(features, params['feature_columns'])
+
+for units in params['hidden_units']:
+    net = tf.layers.dense(net, units=units, activation=params["activation"])
+
+logits = tf.layers.dense(net, params['n_classes'], activation=None)
+
+if mode == tf.estimator.ModeKeys.PREDICT:
+    predictions = {
+        'probabilities': tf.nn.softmax(logits),
+        'logits': logits
+    }
+    return tf.estimator.EstimatorSpec(mode, predictions=predictions)
+
+loss = tf.losses.sparse_softmax_cross_entropy(labels=labels, logits=logits)
+metrics_auc = tf.metrics.auc(labels=labels, predictions=tf.nn.softmax(logits)[:,1])
+metrics = {'auc': metrics_auc}          #tf.summary.scalar('auc', metrics_auc)
+if mode == tf.estimator.ModeKeys.EVAL:
+    return tf.estimator.EstimatorSpec(mode, loss=loss, eval_metric_ops=metrics)
+
+# Create training op.
+assert mode == tf.estimator.ModeKeys.TRAIN
+optimizer = tf.train.AdagradOptimizer(learning_rate=0.1)
+train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step()) 
+return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=train_op)
+
+`

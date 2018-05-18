@@ -1,0 +1,54 @@
+'colocate_gradients_with_ops' colocate with unused ops
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below):v1.6.0-0-gd2e24b6039 1.6.0
+Python version: 3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 9.0/7
+GPU model and memory: P100
+Exact command to reproduce: here
+
+import tensorflow as tf
+import time
+
+G = tf.get_default_graph()
+
+@tf.RegisterGradient("SummaryGrad")
+def summarize_grad_fn(op, x):
+    my_name_is_not_x = tf.Print(x, [x])
+    return x
+
+def layer(x):
+    l = tf.layers.conv2d(x, 64, 3, data_format='channels_first')
+    l = tf.nn.relu(l)
+    with G.gradient_override_map({"Identity": "SummaryGrad"}):
+        return tf.identity(l)
+
+img = tf.random_normal((64,3, 224,224))
+l = layer(img)
+l = layer(l)
+l = layer(l)
+
+loss = tf.reduce_mean(l)
+
+opt = tf.train.GradientDescentOptimizer(0.1)
+grads = opt.compute_gradients(loss, colocate_gradients_with_ops=True)
+op = opt.apply_gradients(grads)
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+
+    for k in range(20):
+        start = time.time()
+        sess.run(op)
+        if k > 2:
+            print(time.time() - start)
+If I use colocate_gradients_with_ops=False, or remove the tf.Print line, the above code runs with expected speed.
+Otherwise, it places the gradients on CPUs, resulting in 2x slow down, and a lot of H2D/D2H copy shown in profiling.
+Perhaps this colocate option can be made smarter.
+In this case, Print op depends on some gradients, but no other gradients depend on the Print op. i.e., the Print op does not appear on the subgraph which grads depends on. Therefore the colocation seems totally unnecessary here.

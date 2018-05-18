@@ -1,0 +1,57 @@
+Segmentation fault when running optimization step with 3d convolution
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Arch Linux (4.14.13-1 linux kernel version)
+TensorFlow installed from (source or binary): source (using the package here: https://www.archlinux.org/packages/community/x86_64/python-tensorflow-cuda/)
+TensorFlow version (use command below): 1.4.1
+Python version: 3.6.4
+Bazel version (if compiling from source): 0.9.0
+GCC/Compiler version (if compiling from source): 7.2.1
+CUDA/cuDNN version: 9.1.85-1/7.0.5-2
+GPU model and memory: NVidia Quadro K4200, 4028MiB
+Exact command to reproduce: python test.py
+Note that the same code also fails in a Ubuntu docker container (Dockerfile attached).
+
+Describe the problem
+I set up a computation graph with a 3d convolution. I can evaluate the result of this graph, but when I attempt to optimize the parameters of the graph (train_step.run(feed_dict={x: sample, y_: label})), tensorflow segfaults.
+In a jupyterlab notebook running on Ubuntu, if I run the same code, the notebook hangs indefinitely at the same line. In both cases, the last line of the program is never run - "ran train step" is never printed.
+I also tried running this on my CPU with os.environ['CUDA_VISIBLE_DEVICES'] = '-1'. I get the same segfault.
+The segfault goes away if I do any of the following:
+
+Remove the 3d convolution
+Reduce the input size significantly (e.g. 100x smaller to 1 x 41 x 96 x 128 x 1)
+Reduce the kernel size significantly
+
+Source code / logs
+Minimal example code (test.py):
+import numpy as np
+import tensorflow as tf
+
+sample = np.zeros((1, 41, 960, 1280, 1))
+label = np.zeros((1,))
+
+rc_kernel = np.ones((31,))
+
+x = tf.placeholder(tf.float64, shape=[None, 41, 960, 1280, 1])
+y_ = tf.placeholder(tf.float64, shape=[None])
+
+W_conv_r = tf.Variable(rc_kernel.reshape((1, -1, 1, 1, 1)))
+h_blur = tf.nn.conv3d(x, W_conv_r, [1, 1, 1, 1, 1], "VALID")
+
+h_sum = tf.reduce_sum(tf.reduce_sum(tf.reduce_sum(h_blur, axis=3), axis=2), axis=1)
+y = tf.sigmoid(h_sum)
+
+sq_err = (y - y_) ** 2
+
+train_step = tf.train.GradientDescentOptimizer(0.1).minimize(sq_err)
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    E = sq_err.eval(feed_dict={x: sample, y_: label})
+    print(f'E = {E}')
+    train_step.run(feed_dict={x: sample, y_: label})  # fails here
+    print('ran train step')
+Dockerfile:
+Dockerfile.txt

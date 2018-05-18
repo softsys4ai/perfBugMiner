@@ -1,0 +1,114 @@
+Tf lite: Array activation1, which is an input to the Div operator producing the output array dropout/div, is lacking min/max data
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS X High Sierra
+TensorFlow version (use command below): 1.8.0rc1
+Python version: 3.5
+
+I'm trying to save a very simple NN model to tflite format, with weight quantization, following this documentation: https://www.tensorflow.org/performance/quantization.
+However, when converting with toco, I get this error:
+Array Relu, which is an input to the Div operator producing the output array dropout/div, is lacking min/max data, which is necessary for quantization. Either target a non-quantized output format, or change the input graph to contain min/max information, or pass --default_ranges_min= and --default_ranges_max= if you do not care about the accuracy of results.\n"
+This is the graph:
+
+The code to reproduce:
+    inputs = tf.placeholder(tf.float32, shape=(1, train_X.shape[1]), name='inputs')
+    label = tf.placeholder(tf.float32, shape=(1, num_classes), name='labels')
+
+    # First layer
+    hid1_size = 128
+    w1 = tf.Variable(tf.random_normal([hid1_size, train_X.shape[1]], stddev=0.01), name='w1')
+    b1 = tf.Variable(tf.constant(0.1, shape=(hid1_size, 1)), name='b1')
+    y1 = tf.nn.dropout(tf.nn.relu(tf.add(tf.matmul(w1, tf.transpose(inputs)), b1, name="layer1"), "activation1"),
+                       keep_prob=0.5)
+
+    # Second layer
+    hid2_size = 256
+    w2 = tf.Variable(tf.random_normal([hid2_size, hid1_size], stddev=0.01), name='w2')
+    b2 = tf.Variable(tf.constant(0.1, shape=(hid2_size, 1)), name='b2')
+    y2 = tf.nn.dropout(tf.nn.relu(tf.add(tf.matmul(w2, y1), b2, name="layer2"), name="activation2"), keep_prob=0.5)
+
+    # Output layer
+    wo = tf.Variable(tf.random_normal([num_classes, hid2_size], stddev=0.01), name='wo')
+    bo = tf.Variable(tf.random_normal([num_classes, 1]), name='bo')
+    yo = tf.transpose(tf.add(tf.matmul(wo, y2), bo), name="logits")
+
+    # Loss function and optimizer
+    lr = tf.placeholder(tf.float32, shape=(), name='learning_rate')
+    loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=yo, labels=label), name="loss")
+
+    # Call the training rewrite which rewrites the graph in-place with
+    # FakeQuantization nodes and folds batchnorm for training. It is
+    # often needed to fine tune a floating point model for quantization
+    # with this training tool. When training from scratch, quant_delay
+    # can be used to activate quantization after training to converge
+    # with the float graph, effectively fine-tuning the model.
+    #tf.contrib.quantize.create_training_graph(quant_delay=3)
+
+    optimizer = tf.train.GradientDescentOptimizer(lr).minimize(loss)
+
+    # Prediction
+    pred = tf.nn.softmax(yo, name="prediction")
+    pred_label = tf.argmax(pred, 1)
+    correct_prediction = tf.equal(tf.argmax(pred, 1), tf.argmax(label, 1))
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+
+    # Create operation which will initialize all variables
+    init = tf.global_variables_initializer()
+
+    # Configure GPU not to use all memory
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+
+    # Start a new tensorflow session and initialize variables
+    sess = tf.InteractiveSession(config=config)
+
+    writer = tf.summary.FileWriter("tensorboard", sess.graph)
+
+    sess.run(init)
+
+    # This is the main training loop: we train for 50 epochs with a learning rate of 0.05 and another
+    # 50 epochs with a smaller learning rate of 0.01
+    for learning_rate in [0.05, 0.01]:
+        for epoch in range(50):
+            avg_cost = 0.0
+
+            # For each epoch, we go through all the samples we have.
+            for i in range(train_X.shape[0]):
+                # Finally, this is where the magic happens: run our optimizer, feed the current example into X and the current target into Y
+                _, c = sess.run([optimizer, loss], feed_dict={lr: learning_rate,
+                                                              inputs: train_X[i, None],
+                                                              label: train_y[i, None]})
+                avg_cost += c
+            avg_cost /= train_X.shape[0]
+
+            # Print the cost in this epcho to the console.
+            if epoch % 10 == 0:
+                print("Epoch: {:3d}    Train Cost: {:.4f}".format(epoch, avg_cost))
+
+    # Call the eval rewrite which rewrites the graph in-place with
+    # FakeQuantization nodes and fold batchnorm for eval.
+    #tf.contrib.quantize.create_eval_graph()
+
+    writer.close()
+
+    graph_path = os.path.join("models", "model.pbtxt")
+    checkpoint_path = os.path.join("models", "model.ckpt")
+
+    # Save the checkpoint and eval graph proto to disk for freezing and providing to TFLite.
+    with open(graph_path, 'w') as f:
+        f.write(str(sess.graph.as_graph_def()))
+
+    saver = tf.train.Saver()
+    saver.save(sess, checkpoint_path)
+
+    frozen_graphdef = tf.graph_util.convert_variables_to_constants(
+        sess, sess.graph_def, ["prediction"])
+    open("models/frozen_model.pb", "w").write(str(frozen_graphdef))
+
+    tflite_model = tf.contrib.lite.toco_convert(
+        frozen_graphdef, [inputs], [pred], inference_type=tf.contrib.lite.QUANTIZED_UINT8,
+        quantized_input_stats=[(127.5, 127.5)])
+    open("models/converted_model.tflite", "wb").write(tflite_model)
+
+Not sure if this is the problem, but could it be that the quantization scripts (quantize.create_training_graph quantize.create_eval_graph) are not detecting the first layer, not fake quantizing it and for this reason I get an error at activation1 when converting?

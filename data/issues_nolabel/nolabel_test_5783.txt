@@ -1,0 +1,244 @@
+My tensorboard appears many undefined events and charts
+
+I only summary my loss as xentropy_mean in training ,but in tensorboard ,I had not find the xentropy_mean chart but many other charts I dont know. I don't know where I wrote wrong, and what's the matter indeed.
+I wrote the inference(), training() and loss() in this file
+`
+from future import absolute_import
+from future import division
+from future import print_function
+import math
+import tensorflow.python.platform
+import tensorflow as tf
+NUM_CLASSES = 16
+IMAGE_SIZE = 28
+IMAGE_PIXELS = 784
+def inference(images, hidden1_units, hidden2_units):
+with tf.name_scope('hidden1'):
+weights = tf.Variable(
+tf.truncated_normal([IMAGE_PIXELS, hidden1_units],
+stddev=1.0 / math.sqrt(float(IMAGE_PIXELS))),
+name='weights')
+biases = tf.Variable(tf.zeros([hidden1_units]),
+name='biases')
+hidden1 = tf.nn.relu(tf.matmul(images, weights) + biases)
+with tf.name_scope('hidden2'):
+weights = tf.Variable(
+tf.truncated_normal([hidden1_units, hidden2_units],
+stddev=1.0 / math.sqrt(float(hidden1_units))),
+name='weights')
+biases = tf.Variable(tf.zeros([hidden2_units]),
+name='biases')
+hidden2 = tf.nn.relu(tf.matmul(hidden1, weights) + biases)
+with tf.name_scope('softmax_linear'):
+weights = tf.Variable(
+tf.truncated_normal([hidden2_units, NUM_CLASSES],
+stddev=1.0 / math.sqrt(float(hidden2_units))),
+name='weights')
+biases = tf.Variable(tf.zeros([NUM_CLASSES]),
+name='biases')
+logits = tf.matmul(hidden2, weights) + biases
+return logits
+def loss(logits, labels):
+batch_size = tf.size(labels)
+labels = tf.expand_dims(labels, 1)
+indices = tf.expand_dims(tf.range(0, batch_size), 1)
+concated = tf.concat(1, [indices, labels])
+print('Done2')
+onehot_labels = tf.sparse_to_dense(
+concated, tf.pack([batch_size, 16]), 1.0, 0.0)
+print('Done1')
+cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits,
+onehot_labels,
+name='xentropy')
+loss = tf.reduce_mean(cross_entropy, name='xentropy_mean')
+return loss
+def training(loss, learning_rate):
+tf.summary.scalar(loss.op.name, loss)
+optimizer = tf.train.GradientDescentOptimizer(learning_rate)
+global_step = tf.Variable(0, name='global_step', trainable=False)
+train_op = optimizer.minimize(loss, global_step=global_step)
+return train_op
+def evaluation(logits, labels):
+correct = tf.nn.in_top_k(logits, labels, 1)
+return tf.reduce_sum(tf.cast(correct, tf.int32))
+`
+and training process in this file
+`from future import absolute_import
+from future import division
+from future import print_function
+import argparse
+import os.path
+import sys
+import time
+import numpy as np
+import tensorflow as tf
+import mnist
+TRAIN_FILE = 'train.tfrecords'
+VALIDATION_FILE = 'validation.tfrecords'
+TEST_FILE='test.tfrecords'
+flags = tf.app.flags
+FLAGS = flags.FLAGS
+flags.DEFINE_string('train_dir', '/home/queenie/image2tfrecord/tfrecords-28-gray/', 'Directory to put the training data.')
+flags.DEFINE_string('filename', 'train.tfrecords', 'Directory to put the training data.')
+flags.DEFINE_integer('batch_size', 100, 'Batch size.  '
+'Must divide evenly into the dataset sizes.')
+flags.DEFINE_integer('num_epochs', None, 'Batch size.  '
+'Must divide evenly into the dataset sizes.')
+flags.DEFINE_integer('hidden1', 128,'balabala')
+flags.DEFINE_integer('hidden2', 32,'balabala')
+flags.DEFINE_integer('learning_rate', 0.01,'balabala')
+flags.DEFINE_integer('max_steps', 50000,'balabala')
+def placeholder_inputs(batch_size):
+images_placeholder=tf.placeholder(tf.float32,shape=(batch_size,mnist.IMAGE_PIXELS))
+labels_placeholder=tf.placeholder(tf.int32,shape=(batch_size))
+return images_placeholder,labels_placeholder
+def fill_feed_dict(images_feed,labels_feed,images_pl,labels_pl):
+feed_dict={
+images_pl:images_feed,
+labels_pl:labels_feed,
+}
+return feed_dict
+def read_and_decode(filename_queue):
+reader = tf.TFRecordReader()
+_, serialized_example = reader.read(filename_queue)
+features = tf.parse_single_example(
+serialized_example,
+# Defaults are not specified since both keys are required.
+features={
+'image_raw': tf.FixedLenFeature([], tf.string),
+'label': tf.FixedLenFeature([], tf.int64),
+})
+image = tf.decode_raw(features['image_raw'], tf.uint8)
+image.set_shape([mnist.IMAGE_PIXELS])
+image = tf.cast(image, tf.float32) * (1. / 255) - 0.5
+label = tf.cast(features['label'], tf.int32)
+return image, label
+def do_eval(sess,eval_correct):
+true_count=0
+for step in xrange(FLAGS.batch_size):
+#print(sess.run(eval_correct))
+true_count+=sess.run(eval_correct)
+precision=float(true_count)/FLAGS.batch_size/FLAGS.batch_size
+print('  Num examples: %d  Num correct: %d  Precision @ 1: %0.04f' %
+
+(FLAGS.batch_size, true_count, precision))
+return precision
+def inputs(train, batch_size, num_epochs):
+if not num_epochs: num_epochs = None
+if train=='train':
+filename=os.path.join(FLAGS.train_dir,TRAIN_FILE)
+elif train=='validation':
+filename=os.path.join(FLAGS.train_dir,VALIDATION_FILE)
+else:
+filename=os.path.join(FLAGS.train_dir,TEST_FILE)
+with tf.name_scope('input'):
+filename_queue = tf.train.string_input_producer(
+[filename], num_epochs=None)
+image, label = read_and_decode(filename_queue)
+images, sparse_labels = tf.train.shuffle_batch(
+[image, label], batch_size=batch_size, num_threads=2,
+capacity=1000 + 3 * batch_size,
+    min_after_dequeue=1000)
+
+return images, sparse_labels
+
+def run_training():
+with tf.Graph().as_default():
+images, labels = inputs(train='train', batch_size=FLAGS.batch_size,
+num_epochs=FLAGS.num_epochs)
+images_valid,labels_valid=inputs(train='validation', batch_size=FLAGS.batch_size,
+                         num_epochs=FLAGS.num_epochs)
+
+images_test,labels_test=inputs(train='test', batch_size=FLAGS.batch_size,
+                         num_epochs=FLAGS.num_epochs)
+
+logits = mnist.inference(images,
+                         FLAGS.hidden1,
+                         FLAGS.hidden2)
+
+
+valid_prediction=mnist.inference(images_valid,FLAGS.hidden1,FLAGS.hidden2)
+
+test_prediction=mnist.inference(images_test,FLAGS.hidden1,FLAGS.hidden2)
+
+
+
+loss = mnist.loss(logits, labels)
+
+
+train_op = mnist.training(loss, FLAGS.learning_rate)
+
+eval_correct=mnist.evaluation(logits,labels)
+
+eval_correct_valid=mnist.evaluation(valid_prediction,labels_valid)
+
+eval_correct_test=mnist.evaluation(test_prediction,labels_test)
+
+summary_op=tf.merge_all_summaries()
+
+init_op = tf.group(tf.initialize_all_variables(),
+                   tf.initialize_local_variables())
+
+saver = tf.train.Saver()
+sess = tf.Session()
+
+
+
+sess.run(init_op)
+
+summary_writer = tf.train.SummaryWriter(FLAGS.train_dir, sess.graph)
+
+
+coord = tf.train.Coordinator()
+threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+try:
+  step = 0
+  train_precision=0
+  validation_precision=0
+  test_precision=0
+  #while not coord.should_stop():
+  while not coord.should_stop():
+    start_time = time.time()
+
+ 
+    _, loss_value,images_see,labels_see = sess.run([train_op, loss,images,labels])
+
+    duration = time.time() - start_time
+
+
+   
+    if step % 100 == 0:
+      print('Step %d: loss = %.2f (%.3f sec)' % (step, loss_value,
+                                                 duration))
+      precision_tr=do_eval(sess,eval_correct)
+      summary_str=sess.run(summary_op)
+      summary_writer.add_summary(summary_str,step)
+
+
+
+    if (step + 1) % 1000 == 0 or (step + 1) == FLAGS.max_steps:
+      checkpoint_file = os.path.join(FLAGS.train_dir, 'model.ckpt')
+      saver.save(sess, checkpoint_file, global_step=step)
+      print('Train:')
+      do_eval(sess,eval_correct)
+      print('Validation:')
+      do_eval(sess,eval_correct_valid)
+      print('Test:')
+      do_eval(sess,eval_correct_test)
+    
+
+    step += 1
+
+except tf.errors.OutOfRangeError:
+  print('Done training for %d epochs, %d steps.' % (FLAGS.num_epochs, step))
+finally:
+  coord.request_stop()
+
+
+coord.join(threads)
+sess.close()
+
+run_training()
+`
+and the tensorboard is as the picture

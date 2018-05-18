@@ -1,0 +1,80 @@
+Can't find pngwutil.c building tensorflow
+
+I am getting this error when compiling tensorflow on RHEL 6.6.
+[<user>@blah tensorflow]$ ../bazel/output/bazel --output_base=/lvol/<user> build --genrule_strategy=standalone --spawn_strategy=standalone --verbose_failures -j 1 -c opt //tensorflow/cc:tutorials_example_trainer 2>&1|tee compile0.log
+......
+WARNING: Sandboxed execution is not supported on your system and thus hermeticity of actions cannot be guaranteed. See http://bazel.io/docs/bazel-user-manual.html#sandboxing for more information. You can turn off this warning via --ignore_unsupported_sandboxing.
+____Loading package: tensorflow/cc
+____Loading...
+____Loading package: @bazel_tools//tools/cpp
+____Loading package: @local-jdk//
+____Loading package: tensorflow/core/platform/default/build_config
+____Loading package: @png_archive//
+____Loading package: @jpeg_archive//
+____Loading complete.  Analyzing...
+____Found 1 target...
+____Building...
+____[0 / 1] BazelWorkspaceStatusAction stable-status.txt
+____[3 / 28] Compiling google/protobuf/src/google/protobuf/arena.cc
+____[27 / 82] Compiling google/protobuf/src/google/protobuf/any.cc
+____[108 / 169] Compiling google/protobuf/src/google/protobuf/any.cc [for host]
+____[161 / 260] Compiling google/protobuf/src/google/protobuf/compiler/code_generator.cc [for host]
+____[252 / 330] Compiling external/re2/re2/bitstate.cc
+ERROR: missing input file '@png_archive//:libpng-1.2.53/pngwutil.c'.
+ERROR: /lvol/<user>/external/png_archive/BUILD:33:1: @png_archive//:png: missing input file '@png_archive//:libpng-1.2.53/pngwutil.c'.
+____Building complete.
+Target //tensorflow/cc:tutorials_example_trainer failed to build
+ERROR: /lvol/<user>/external/png_archive/BUILD:33:1 1 input file(s) do not exist.
+____Elapsed time: 277.881s, Critical Path: 6.96s
+
+Here is what the tree looks like. All the soft-links point to valid files.
+[<user>@atl4-05 tensorflow]$ ls /lvol/<user>/external/png_archive/
+aclocal.m4      config.guess  example.c          LICENSE        pngbar.jpg  png.h       pngrutil.c   pngwrite.c   test-pngtest.sh
+ANNOUNCE        config.h.in   INSTALL            ltmain.sh      pngbar.png  pngmem.c    pngset.c     pngwtran.c   TODO
+autogen.sh      config.sub    install-sh         Makefile.am    png.c       pngnow.png  pngtest.c    pngwutil.c   WORKSPACE
+BUILD           configure     KNOWNBUG           Makefile.in    pngconf.h   pngpread.c  pngtest.png  projects     Y2KINFO
+CHANGES         configure.ac  libpng-1.2.53.txt  missing        pngerror.c  pngread.c   pngtrans.c   README
+CMakeLists.txt  contrib       libpng.3           mkinstalldirs  pnggccrd.c  pngrio.c    pngvcrd.c    scripts
+compile         depcomp       libpngpf.3         png.5          pngget.c    pngrtran.c  pngwio.c     test-driver
+
+Here is what the /lvol//external/png_archive/BUILD file looks like.
+package(default_visibility = ["//visibility:public"])
+
+prefix_dir = "libpng-1.2.53"
+
+PNG_SOURCES = [
+    "png.c",
+    "pngerror.c",
+    "pngget.c",
+    "pngmem.c",
+    "pngpread.c",
+    "pngread.c",
+    "pngrio.c",
+    "pngrtran.c",
+    "pngrutil.c",
+    "pngset.c",
+    "pngtrans.c",
+    "pngwio.c",
+    "pngwrite.c",
+    "pngwtran.c",
+    "pngwutil.c",
+]
+
+genrule(
+    name = "configure",
+    srcs = glob(
+        ["**/*"],
+        exclude = [prefix_dir + "/config.h", "configure"],
+    ),
+    outs = [prefix_dir + "/config.h"],
+    cmd = "pushd external/png_archive/%s; workdir=$$(mktemp -d -t tmp.XXXXXXXXXX); cp -a * $$workdir; pushd $$workdir; ./configure --enable-shared=no --with-pic=no; popd; popd; cp $$workdir/config.h $(@D); rm -rf $$workdir;" % prefix_dir,
+)
+
+cc_library(
+    name = "png",
+    srcs = [prefix_dir + "/" + source for source in PNG_SOURCES],
+    hdrs = glob(["**/*.h"]) + [":configure"],
+    includes = [prefix_dir],
+    linkopts = ["-lz"],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,87 @@
+Bug while printing parameters and gradients
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary (anaconda)
+TensorFlow version (use command below): v1.4.0-19-ga52c8d9 1.4.1
+Python version: 3.6.4
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: using CPU
+GPU model and memory: using CPU
+Exact command to reproduce: see below
+
+Describe the problem
+The model is very simple, I do digits classification with MNIST. There is only one parameter matrix W, no bias and no non-linearities. The model show convergence since the loss is decreasing. I checked predictions and accuracy but I do not copy paste useless code here. If I print the parameters before and after training they are the same, however, it shouldn't be the case. Moreover, the gradient of the loss w.r.t. parameters are zero but again it shouldn't be the case since the model converges so there should be a non-zero gradient. I cannot explain why and my implementation seems correct, that's why I am posting my code here.
+Source code / logs
+import numpy as np
+import tensorflow as tf
+
+tf.set_random_seed(42)
+
+from tensorflow.examples.tutorials.mnist import input_data
+
+mnist = input_data.read_data_sets('data/', one_hot=True)
+
+x = tf.placeholder(tf.float32, shape=(None, 784))
+y = tf.placeholder(tf.float32, shape=(None, 10))
+
+W = tf.get_variable('W0', (784, 10))
+pred = tf.matmul(x, W)
+loss = tf.reduce_sum((y - pred) ** 2)
+grads = tf.gradients(loss, W)
+train_step = tf.train.AdamOptimizer().minimize(loss)
+
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+
+print(sess.run(W))
+
+>>> [[-0.0823722  -0.01139299 -0.04053238 ... -0.03432762 -0.05707605
+  -0.01042821]
+ [ 0.06725802  0.07879441  0.05811419 ... -0.05443887 -0.03835129
+  -0.0796528 ]
+ [-0.06725079 -0.00356448  0.0823487  ...  0.0006832  -0.01058736
+  -0.04312544]
+ ...
+ [ 0.04159895  0.01873457  0.05547244 ... -0.04325137 -0.00306174
+   0.06578781]
+ [ 0.05061891 -0.07273331  0.06083969 ...  0.0548989  -0.01343339
+  -0.02337921]
+ [ 0.02918045 -0.05145956  0.0042838  ...  0.05564766 -0.04886324
+  -0.02436799]]
+
+for _ in range(1000):
+    x_mb, y_mb = mnist.train.next_batch(32)
+    loss_, _ = sess.run([loss, train_step], {x: x_mb, y: y_mb})
+    print('loss: {:2.5}'.format(loss_))
+
+>>> I won't print uselss log here but the loss is decreasing
+
+print(sess.run(W))
+
+>>> [[-0.0823722  -0.01139299 -0.04053238 ... -0.03432762 -0.05707605
+  -0.01042821]
+ [ 0.06725802  0.07879441  0.05811419 ... -0.05443887 -0.03835129
+  -0.0796528 ]
+ [-0.06725079 -0.00356448  0.0823487  ...  0.0006832  -0.01058736
+  -0.04312544]
+ ...
+ [ 0.04159895  0.01873457  0.05547244 ... -0.04325137 -0.00306174
+   0.06578781]
+ [ 0.05061891 -0.07273331  0.06083969 ...  0.0548989  -0.01343339
+  -0.02337921]
+ [ 0.02918045 -0.05145956  0.0042838  ...  0.05564766 -0.04886324
+  -0.02436799]]
+
+print(sess.run(grads, {x: x_mb, y: y_mb}))
+
+>>> [array([[0., 0., 0., ..., 0., 0., 0.],
+       [0., 0., 0., ..., 0., 0., 0.],
+       [0., 0., 0., ..., 0., 0., 0.],
+       ...,
+       [0., 0., 0., ..., 0., 0., 0.],
+       [0., 0., 0., ..., 0., 0., 0.],
+       [0., 0., 0., ..., 0., 0., 0.]], dtype=float32)]

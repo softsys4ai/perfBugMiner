@@ -1,0 +1,51 @@
+*tf_gen_op_libs* BUILD rule uses host toolchain even when crosstool wrappers are provided.
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes. I have done the following changes.
+
+I pulled the tensorflow branch - v1.0.1
+An ugly hack to compile on Tegra X1 /w Jetpack 2.3.1 release. - Added this for trying to cross compile tensorflow on NVIDIA Jetson Tx1
+Modified BUILD.tpl and CROSSTOOL.tpl in third_party/gpus/crosstool/ for cross building for aarch64 as mentioned in Bazel build wiki for custom toolchain
+
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 16.04.1 - x86_64
+
+
+TensorFlow installed from (source or binary):
+Trying to cross compile for NVIDIA Jetson TX1 from source
+
+
+TensorFlow version (use command below):
+v1.0.1 branch
+
+
+Bazel version (if compiling from source):
+v 0.4.5
+
+
+CUDA/cuDNN version:
+CUDA - 8.0.34
+cuDNN - 5.1.5
+
+
+Exact command to reproduce:
+
+
+Problem description
+I am trying to cross compile tensorflow with GPU support for NVIDIA Jetson TX1. I have setup the crosstool file for using the cross-build tools which I downloaded from the Linaro Website ( I followed the instructions from the bazel wiki on how to do so). My code compiles fine till it reaches the stage where the tf_gen_op_libs BUILD rule is reached (tensorflow/cc/BUILD:314). All of the ops mentioned in the rule fails to build. To be more precise, if fails in the linking stage with the following error
+ /home/jetsontx1/Softwares/tensorflow/tensorflow/cc/BUILD:314:1: Couldn't build file tensorflow/cc/ops/no_op_gen_cc: Linking of rule '//tensorflow/cc:ops/no_op_gen_cc' failed: gcc failed: error executing command 
+  (cd /home/jetsontx1/.cache/bazel/_bazel_jetsontx1/aebd32d6c3050c56aab9d4678f2e4fce/execroot/tensorflow && \
+  exec env - \
+    LD_LIBRARY_PATH=/usr/local/cuda-8.0/lib64: \
+    PATH=/usr/local/cuda-8.0/bin:/home/jetsontx1/bin:/home/jetsontx1/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin \
+  /usr/bin/gcc -o bazel-out/host/bin/tensorflow/cc/ops/no_op_gen_cc -Lbazel-out/host/bin/_solib_k8/_U@local_Uconfig_Ucuda_S_Scuda_Ccudart___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib '-Wl,-rpath,$ORIGIN/../../../_solib_k8/_U@local_Uconfig_Ucuda_S_Scuda_Ccudart___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib' -pthread -Wl,-rpath,../local_config_cuda/cuda/lib64 -Wl,-rpath,../local_config_cuda/cuda/extras/CUPTI/lib64 '-fuse-ld=gold' -Wl,-no-as-needed -Wl,-z,relro,-z,now -B/usr/bin -B/usr/bin '-Wl,--build-id=md5' '-Wl,--hash-style=gnu' -pass-exit-codes -Wl,-S -Wl,--gc-sections -Wl,@bazel-out/host/bin/tensorflow/cc/ops/no_op_gen_cc-2.params): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+/usr/bin/ld.gold: fatal error: bazel-out/host/bin/_solib_k8/_U@local_Uconfig_Ucuda_S_Scuda_Ccudart___Uexternal_Slocal_Uconfig_Ucuda_Scuda_Slib/libcudart.so.8.0: unsupported ELF machine number 183
+collect2: error: ld returned 1 exit status
+
+So what I don't understand is, I have specified my crosstool toolchain to build all the tensorflow libs. But it is using the host compiler (/usr/bin/gcc) for this particular stage alone. Shouldn't it use the wrapper I specified in the crosstool file?
+To put in another way - Why is the rule tf_gen_op_libs building the ops mentioned in the BUILD rule with the host compiler and not my crosstool? Is this a BUG?

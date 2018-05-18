@@ -1,0 +1,84 @@
+RNN Variables mistakenly (?) placed on GPU when doing multi tower training.
+
+I'm trying to do "data parallelism" following the cifar-10 multi gpu example. Main difference is that I am using tensorflow's rnn abstractions. When I run the code ( mgf.tar.gz ) on a CPU machine it works but when I run it on a machine with 1-4 gpus it crashes, reporting that some of the GRU/LSTm variables have not been initialized (on the gpu).
+Traceback (most recent call last):
+  File "trainMultiGPU.py", line 211, in <module>
+    tf.app.run()
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/platform/app.py", line 43, in run
+    sys.exit(main(sys.argv[:1] + flags_passthrough))
+  File "trainMultiGPU.py", line 207, in main
+    train(args)
+  File "trainMultiGPU.py", line 171, in train
+    sess.run(init)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 766, in run
+    run_metadata_ptr)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 964, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+    raise type(e)(node_def, op, message)
+
+
+
+tensorflow.python.framework.errors_impl.FailedPreconditionError: Attempting to use uninitialized value RNN/GRUCell/Gates/Linear/Matrix
+         [[Node: RNN/GRUCell/Gates/Linear/Matrix/_52 = _Send[T=DT_FLOAT, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_149_RNN/GRUCell/Gates/Linear/Matrix", _device="/job:localhost/replica:0/task:0/gpu:0"](RNN/GRUCell/Gates/Linear/Matrix)]]
+         [[Node: init/NoOp_1/_62 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_164_init/NoOp_1", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]`**
+
+
+I've tried this both with the vanilla and dynamic variations of the rnn functions and with LSTM as well as GRU.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Issue #1390
+Environment info
+Operating System:
+RHEL 7.2
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+
+[tal@E8A2-DL380G90-01-1G multi_gpu_lstm_fail]$ ls -l /usr/local/cuda/lib64/libcud*
+-rw-r--r--. 1 root root   558720 Dec  6 10:55 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx. 1 root root       16 Dec  6 10:55 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx. 1 root root       19 Dec  6 10:55 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rwxr-xr-x. 1 root root   415432 Dec  6 10:55 /usr/local/cuda/lib64/libcudart.so.8.0.44
+-rw-r--r--. 1 root root   775162 Dec  6 10:55 /usr/local/cuda/lib64/libcudart_static.a
+-rwxr-xr-x. 1 root root 79337624 Dec 13 10:51 /usr/local/cuda/lib64/libcudnn.so
+-rwxr-xr-x. 1 root root 79337624 Dec 13 10:51 /usr/local/cuda/lib64/libcudnn.so.5
+-rwxr-xr-x. 1 root root 79337624 Dec 13 10:51 /usr/local/cuda/lib64/libcudnn.so.5.1.5
+-rw-r--r--. 1 root root 69756172 Dec 13 10:51 /usr/local/cuda/lib64/libcudnn_static.a
+
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+export TF_BINARY_URL=https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-0.12.0rc1-cp27-none-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+[tal@E8A2-DL380G90-01-1G multi_gpu_lstm_fail]$ python -c "import tensorflow;
+
+
+print(tensorflow.version)"
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+0.12.0-rc1
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+I've attached a tar with a minimal reproducing example. Unfortunately I am behind a corporate proxy and can't push to github.
+[mgf.tar.gz - reproducible example 
+To recreate the example simply run
+
+python trainMultiGPU.py
+It should work fine on a CPU only machine. On a machine with gpus you should see the above traceback.
+
+What other attempted solutions have you tried?
+
+I've tried variants of rnn (dynamic, regular, bidirectional)
+I've tried LSTMCell and GRUCell
+I've tried passing the scope explicitly to the call to rnn
+I've tried wrapping the call to rnn with a device placement on the cpu. This prevents the traceback but I think it places the OP on the cpu as well as processing becomes incredibly slow.
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+device_placements.txt
+nvidia-smi.out.txt
+TRACEBACK.txt

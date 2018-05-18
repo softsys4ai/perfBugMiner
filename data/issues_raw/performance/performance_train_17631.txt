@@ -1,0 +1,78 @@
+Eager mode in multithreaded environment v1.6 generates : "All graphs are building functions, and no eager context was previously active"
+
+The problem
+Scope initialization assumes that the  'context_stack' must be in the same stacktrace thread. while in some cases the user might use the eager context from a different thread. For example, the code below fails in version 1.6  , but not in 1.5.
+Also, in version 1.6 it does not fail if "foo" is called from main thread, or if enable_eager_execution is called from the child thread.
+Source code
+from tensorflow.contrib.eager.python import tfe
+import tensorflow as tf
+from threading import Thread
+
+class MNISTModel(tfe.Network):
+    def __init__(self):
+        super(MNISTModel, self).__init__()
+        self.layer1 = self.track_layer(tf.layers.Dense(units=10))
+        self.layer2 = self.track_layer(tf.layers.Dense(units=10))
+    def call(self, input):
+        result = self.layer1(input)
+        result = self.layer2(result)
+        return result
+
+tfe.enable_eager_execution()
+
+
+def foo():
+    model = MNISTModel()
+    batch = tf.zeros([1, 1, 784])
+    print(batch.shape)
+    result = model(batch)
+    print(result)
+
+
+t1 = Thread(target=foo)
+t1.start()
+t1.join()
+
+
+logs (exception) :
+Traceback (most recent call last):
+  File "/opt/anaconda3/lib/python3.5/threading.py", line 914, in _bootstrap_inner
+    self.run()
+  File "/opt/anaconda3/lib/python3.5/threading.py", line 862, in run
+    self._target(*self._args, **self._kwargs)
+  File "/data/dopamine/dopapy/uriy_tests/dnn4/test_eager_1.py", line 23, in foo
+    result = model(batch)
+  File "/opt/anaconda3/lib/python3.5/site-packages/tensorflow/python/layers/base.py", line 696, in __call__
+    outputs = self.call(inputs, *args, **kwargs)
+  File "/data/dopamine/dopapy/uriy_tests/dnn4/test_eager_1.py", line 11, in call
+    result = self.layer1(input)
+  File "/opt/anaconda3/lib/python3.5/site-packages/tensorflow/python/layers/base.py", line 680, in __call__
+    self.build(input_shapes)
+  File "/opt/anaconda3/lib/python3.5/site-packages/tensorflow/python/layers/core.py", line 134, in build
+    trainable=True)
+  File "/opt/anaconda3/lib/python3.5/site-packages/tensorflow/python/layers/base.py", line 533, in add_variable
+    partitioner=partitioner)
+  File "/opt/anaconda3/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 1297, in get_variable
+    constraint=constraint)
+  File "/opt/anaconda3/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 1093, in get_variable
+    constraint=constraint)
+  File "/opt/anaconda3/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 439, in get_variable
+    constraint=constraint)
+  File "/opt/anaconda3/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 408, in _true_getter
+    use_resource=use_resource, constraint=constraint)
+  File "/opt/anaconda3/lib/python3.5/site-packages/tensorflow/python/ops/variable_scope.py", line 775, in _get_single_variable
+    with ops.init_scope():
+  File "/opt/anaconda3/lib/python3.5/contextlib.py", line 59, in __enter__
+    return next(self.gen)
+  File "/opt/anaconda3/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 5034, in init_scope
+    raise AssertionError("All graphs are building functions, and no "
+AssertionError: All graphs are building functions, and no eager context was previously active.
+
+
+System information
+
+Have I written custom code : no
+OS Platform and Distribution :  Linux Ubuntu 16
+TensorFlow installed from  : binary
+TensorFlow version : v1.6.0-0-gd2e24b6039 1.6.0
+Python version:  3.5

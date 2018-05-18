@@ -1,0 +1,29 @@
+Using replace to evaluate multiple gradients during training in Keras
+
+I am a researcher in optimization and I am interested in testing algorithms for training DNNs using keras, and am now using tensorflow backend.
+In practice, I would like to do something a bit different from the other optimizers, I would like to compute the gradient at a slightly different value of the tensor of parameters than the current one, and the update I will make to the parameters will depend on both the current gradient and this other gradient.
+In practice this has proven more difficult than anticipated.
+See fchollet/keras#6175
+it was suggested I come to here for further suggestions.
+My code is a standard keras python code, the body does
+model = Sequential()
+model.add(Dense(512, input_shape=(784,)))
+...
+model.compile(loss='categorical_crossentropy',
+optimizer = myopt,
+metrics=['accuracy'])
+history = model.fit(X_train, Y_train,
+batch_size=batch_size, nb_epoch=nb_epoch,
+verbose=1, validation_data=(X_test, Y_test))
+In the get_updates call function of my custom optimizer, it begins as usual
+def get_updates(self, params, constraints, loss):
+    grads = self.get_gradients(loss, params)
+
+Now, I want to now get the gradients at a different value of grads. First I tried just defining another tensor of the same structure but different values and take the get_gradients, but of course the loss is a graph depending on params already. Then I tried changing params itself (then copying the old values of the tensor to another one, to replace params after the evaluation) but apparently as the forward pass was not made this was ineffective. As per the advice in the above github conversation in keras, I tried,
+    tempparams = [a+1. for a in params]
+    replace = {p:npm for p, npm in zip(params, tempparams)}
+    gradsn = [tf.contrib.graph_editor.graph_replace(g.op, replace) for g in grads]
+
+but this is still not OK, as I get the error
+TypeError: Expected a type in (<class 'tensorflow.python.framework.ops.Operation'>), got: <class 'tensorflow.python.ops.variables.Variable'
+Thank you

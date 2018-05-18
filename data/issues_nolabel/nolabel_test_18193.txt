@@ -1,0 +1,47 @@
+tf.keras.estimator.model_to_estimator fails with pre-trained models
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 7 x64
+TensorFlow installed from (source or binary): binary (pip)
+TensorFlow version (use command below): 1.7.0 (cpu)
+Python version: 3.6
+Bazel version (if compiling from source): n.a.
+GCC/Compiler version (if compiling from source): n.a.
+CUDA/cuDNN version: n.a.
+GPU model and memory: n.a.
+Exact command to reproduce:
+
+Describe the problem
+Following the example code for Creating Estimators from Keras models, I encountered a problem: the example code runs fine when weights=None is used in the initialization of the InceptionV3 object. But when I change it to weights=imagenet the call to model_to_estimator(...) fails:
+
+FailedPreconditionError: Attempting to use uninitialized value batch_normalization_100/beta
+[[Node: _retval_batch_normalization_100/beta_0_0 = _RetvalT=DT_FLOAT, index=0, _device="/job:localhost/replica:0/task:0/device:CPU:0"]]
+
+This looks like the weights of the model are not correctly initialized. But strangely I can use the keras model to obtain predictions, which should mean that the model is correctly initialized.
+As far as I know there are no information in the documentation that pre-trained models (i.e. models with weights set to anything different than None) are not supported by this function, or that one has to change the workflow somehow. Therefore, this is either a bug in tensorflow or a case of a misleading documentation.
+Source code / logs
+# Instantiate a Keras inception v3 model.
+keras_inception_v3 = tf.keras.applications.inception_v3.InceptionV3(weights="imagenet")
+# Compile model with the optimizer, loss, and metrics you'd like to train with.
+keras_inception_v3.compile(optimizer=tf.keras.optimizers.SGD(lr=0.0001, momentum=0.9),
+                          loss='categorical_crossentropy',
+                          metric='accuracy')
+# Create an Estimator from the compiled Keras model. Note the initial model
+# state of the keras model is preserved in the created Estimator.
+est_inception_v3 = tf.keras.estimator.model_to_estimator(keras_model=keras_inception_v3)
+
+# Treat the derived Estimator as you would with any other Estimator.
+# First, recover the input name(s) of Keras model, so we can use them as the
+# feature column name(s) of the Estimator input function:
+keras_inception_v3.input_names  # print out: ['input_1']
+# Once we have the input name(s), we can create the input function, for example,
+# for input(s) in the format of numpy ndarray:
+train_input_fn = tf.estimator.inputs.numpy_input_fn(
+    x={"input_1": train_data},
+    y=train_labels,
+    num_epochs=1,
+    shuffle=False)
+# To train, we call Estimator's train function:
+est_inception_v3.train(input_fn=train_input_fn, steps=2000)

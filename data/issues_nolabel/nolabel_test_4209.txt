@@ -1,0 +1,82 @@
+tf.concat returns a list not Tensor, is it a bug?
+
+My code is below
+from __future__ import print_function
+import tensorflow as tf
+import numpy as np
+import shutil
+import os
+
+class Model(object):
+    def __init__(self, input_length, input_dim=10, filter_nums=[3,4,5], window_sizes=[2,3,4]):
+        self.filter_nums = filter_nums
+        self.window_sizes = window_sizes
+
+        # placeholder
+        self._inputs = tf.placeholder(tf.float32, shape=[None, input_dim,
+        input_length], name="inputs")
+
+    def _conv2d(self, inputs, filter_num, window_size, init_scale=0.1, data_format="NHWC", name="conv2d"):
+        # Implement a conv2d for nlp task, which in_heigth = filter_height.
+        # assume inputs dim is 4.
+        with tf.variable_scope(name):
+            if data_format == "NHWC":
+                filter_height = int(inputs.get_shape()[1])
+            else:
+                filter_height = int(inputs.get_shape()[2])
+            in_channels = int(inputs.get_shape()[-1])
+            W = tf.get_variable("W", shape=[filter_height, window_size,
+            in_channels, filter_num],
+            initializer=tf.random_uniform_initializer(-init_scale, init_scale))
+            conv = tf.nn.conv2d(inputs, W, [1,1,1,1], "VALID")
+            return conv
+
+    def _max_pool(self, value, name="max_pool"):
+        with tf.variable_scope(name):
+            pool_width = int(value.get_shape()[-2])
+            maxpool = tf.nn.max_pool(value, [1,1,pool_width,1], [1,1,1,1], "VALID")
+            return maxpool
+
+    def multi_conv_pool(self):
+        pooled = []
+        expanded_inputs = tf.expand_dims(self._inputs, -1)
+        for filter_num, window_size in zip(self.filter_nums,
+        self.window_sizes):
+            conv = self._conv2d(expanded_inputs, filter_num, window_size,
+            name="conv2d_width_%d" % window_size)
+            maxpool = self._max_pool(conv)
+            pooled.append(maxpool)
+        concat_pooled = tf.concat(3, pooled)
+        return concat_pooled
+
+    @property
+    def inputs(self):
+        return self._inputs
+
+def main():
+    logdir = 'logdir'
+    if os.path.exists(logdir):
+        shutil.rmtree(logdir)
+
+    model = Model(input_length=9, input_dim=4)
+    concat_pooled = model.multi_conv_pool()
+
+    data = np.random.randn(3, 4, 9)
+
+    sess = tf.Session()
+
+    summary_writer = tf.train.SummaryWriter(logdir, graph=sess.graph)
+
+    sess.run(tf.initialize_all_variables())
+    outputs = sess.run([concat_pooled], feed_dict={model.inputs: data})
+    print("data(shape = (3, 4, 9)):")
+    print(data)
+    print("after multi conv and pool, its output should be (3, 1, 1, 12):")
+    print(outputs)
+    print("outputs' type:", type(outputs))
+
+if __name__ == '__main__':
+    main()
+
+
+Run it and gets a list. outputs here is the return value of tf.concat(). It should be an array but now it's a list. Could anyone tell me why? Thanks!

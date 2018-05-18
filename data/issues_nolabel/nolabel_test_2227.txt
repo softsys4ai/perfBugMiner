@@ -1,0 +1,34 @@
+Fix Issue  #2225 InvalidArgumentError: No OpKernel T=DT_INT32 for log, exp, etc.
+
+This PR fixes  #2225,  InvalidArgumentError: No OpKernel T=DT_INT32 for log, exp, etc.
+Issue
+https://www.tensorflow.org/versions/r0.8/api_docs/python/math_ops.html says, "A Tensor. Must be one of the following types: float32, float64, int32, complex64, int64", but code does not:
+REGISTER4(UnaryOp, CPU, "Cos", functor::cos, float, Eigen::half, double, complex64);
+They don't support int32 and int64. So this simple code fails:
+x = np.array([1], dtype=np.int32)
+sess = tf.Session()
+print(sess.run(tf.log(x)))
+
+Solution
+Thanks to a hint from @yaroslavvb, the patch is rather simple:
+-REGISTER4(UnaryOp, CPU, "Log", functor::log, float, Eigen::half, double,        
+-          complex64);       
++REGISTER6(UnaryOp, CPU, "Log", functor::log, float, Eigen::half, double, int32,
++         int64, complex64);
+
+Tests
+I also added several tests to verify the patch. They all pass in my cpu-only machine:
+...
+//tensorflow/python:math_grad_test                                       PASSED in 2.8s
+//tensorflow/python:math_ops_test                                        PASSED in 1.5s
+//tensorflow/python:matmul_op_test                                       PASSED in 3.1s
+...
+//tensorflow/python:xent_op_test                                         PASSED in 1.4s
+
+Executed 186 out of 187 tests: 187 tests pass.
+
+If I just run math_ops_test without this patch, it fails with InvalidArgumentError:
+//tensorflow/python:math_ops_test                                        FAILED in 1.4s
+  /home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/testlogs/tensorflow/python/math_ops_test/test.log
+
+Executed 186 out of 187 tests: 186 tests pass and 1 fails locally.

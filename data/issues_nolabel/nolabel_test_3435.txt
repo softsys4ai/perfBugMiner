@@ -1,0 +1,80 @@
+Segmentation fault in Diagnostician on MacOS
+
+I get segmentation fault on MacOS on creating new session if GPU is unavailable (ie, through export CUDA_VISIBLE_DEVICES=)
+It's due to this line
+    const char * version = CFStringGetCStringPtr((CFStringRef)CFDictionaryGetValue(cuda_driver_info,   kCFBundleVersionKey), kCFStringEncodingUTF8);
+    CFRelease(kext_infos);
+    return StringToDriverVersion(version);
+
+
+version is a NULL, which causes SEGSERV during conversion to string.
+Documentation for CFStringGetCStringPtr says that one should check for NULL and call CFStringGetCString if so
+bazel build -c dbg --config=cuda //tensorflow/tools/pip_package:build_pip_package
+export CUDA_VISIBLE_DEVICES=
+cat > simple.py
+import tensorflow as tf
+sess = tf.Session()
+^D
+
+lldb python
+(lldb) r simple.py
+
+Process 48123 stopped
+* thread #1: tid = 0x37a6a8, 0x00007fff9b24d152 libsystem_c.dylib`strlen + 18, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0x0)
+    frame #0: 0x00007fff9b24d152 libsystem_c.dylib`strlen + 18
+libsystem_c.dylib`strlen:
+->  0x7fff9b24d152 <+18>: pcmpeqb (%rdi), %xmm0
+    0x7fff9b24d156 <+22>: pmovmskb %xmm0, %esi
+    0x7fff9b24d15a <+26>: andq   $0xf, %rcx
+    0x7fff9b24d15e <+30>: orq    $-0x1, %rax
+
+(lldb) up
+up
+frame #1: 0x00000001036ecb05 _pywrap_tensorflow.so`std::__1::char_traits<char>::length(__s=0x0000000000000000) + 21 at string:640
+   637  
+   638      static inline int compare(const char_type* __s1, const char_type* __s2, size_t __n)
+   639          {return __n == 0 ? 0 : memcmp(__s1, __s2, __n);}
+-> 640      static inline size_t length(const char_type* __s) {return strlen(__s);}
+   641      static inline const char_type* find(const char_type* __s, size_t __n, const char_type& __a)
+   642          {return __n == 0 ? NULL : (const char_type*) memchr(__s, to_int_type(__a), __n);}
+   643      static inline char_type* move(char_type* __s1, const char_type* __s2, size_t __n)
+(lldb) up
+up
+frame #2: 0x0000000107725ac5 _pywrap_tensorflow.so`perftools::gputools::cuda::Diagnostician::FindKernelDriverVersion() [inlined] std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >::basic_string(this="", __s=0x0000000000000000) + 81 at string:2005
+   2002 basic_string<_CharT, _Traits, _Allocator>::basic_string(const value_type* __s)
+   2003 {
+   2004     _LIBCPP_ASSERT(__s != nullptr, "basic_string(const char*) detected nullptr");
+-> 2005     __init(__s, traits_type::length(__s));
+   2006 #if _LIBCPP_DEBUG_LEVEL >= 2
+   2007     __get_db()->__insert_c(this);
+   2008 #endif
+(lldb) up
+up
+frame #3: 0x0000000107725a74 _pywrap_tensorflow.so`perftools::gputools::cuda::Diagnostician::FindKernelDriverVersion() [inlined] std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >::basic_string(this="", __s=0x0000000000000000) + 21 at string:2003
+   2000 template <class _CharT, class _Traits, class _Allocator>
+   2001 inline _LIBCPP_INLINE_VISIBILITY
+   2002 basic_string<_CharT, _Traits, _Allocator>::basic_string(const value_type* __s)
+-> 2003 {
+   2004     _LIBCPP_ASSERT(__s != nullptr, "basic_string(const char*) detected nullptr");
+   2005     __init(__s, traits_type::length(__s));
+   2006 #if _LIBCPP_DEBUG_LEVEL >= 2
+(lldb) up
+up
+frame #4: 0x0000000107725a5f _pywrap_tensorflow.so`perftools::gputools::cuda::Diagnostician::FindKernelDriverVersion() + 287 at cuda_diagnostics.cc:319
+   316      // in kCFBundleVersionKey as is returned by cuDriverGetVersion
+   317      const char * version = CFStringGetCStringPtr((CFStringRef)CFDictionaryGetValue(cuda_driver_info, kCFBundleVersionKey), kCFStringEncodingUTF8);
+   318      CFRelease(kext_infos);
+-> 319      return StringToDriverVersion(version);
+(lldb) frame variable --no-args
+frame variable --no-args
+(CFStringRef [1]) kext_ids = ([0] = 0x0000000108767208)
+(CFArrayRef) kext_id_query = 0x000000013e1f2190
+(CFDictionaryRef) kext_infos = 0x000000013e1f21d0
+(CFDictionaryRef) cuda_driver_info = 0x000000013f322700
+(tensorflow::Status) status = {
+  state_ = 0x000000011ec8000a
+}
+(const char *) version = 0x0000000000000000
+
+
+related #2980

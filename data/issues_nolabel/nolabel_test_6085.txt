@@ -1,0 +1,72 @@
+Tensorflow SVD inaccurate.  U is not orthogonal.
+
+NOTE: Only file GitHub issues for bugs and feature requests.  All other topics will be closed.
+For general support from the community, see StackOverflow.
+To make bugs and feature requests more easy to find and organize, we close issues that are deemed
+out of scope for GitHub Issues and point people to StackOverflow.
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+What related GitHub issues or StackOverflow threads have you found by searching the web for #2207
+Environment info
+Operating System: Linux Mint 17.3 a.k.a. Ubuntu 14.04.4 LTS, Trusty Tahr
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+CUDA 7.5
+cuDNN 5.5
+-rw-r--r-- 1 root root 322936 Aug 15  2015 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 383336 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root 720192 Aug 15  2015 /usr/local/cuda/lib64/libcudart_static.a
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+export TF_BINARY_URL=https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.10.0-cp34-cp34m-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+kps3@newton ~ $ python3 -c "import tensorflow; print(tensorflow.version)"
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+0.10.0
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+The output of bazel version
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import pickle
+import tensorflow as tf
+import numpy as np
+#pickle.dump( u_np, open( "A.txt", "wb" ) )
+A = pickle.load( open( "A.txt", "rb" ) )
+u_np, s, V = np.linalg.svd(A, full_matrices=False)
+np.dot(np.transpose(u_np), u_np)
+#orthogonal in numpy
+array([[  1.00000024e+00,  -9.31322575e-09],
+[ -9.31322575e-09,   1.00000036e+00]], dtype=float32)
+#analysis of orthogonality
+sess = tf.Session()
+A = tf.constant(A)
+S,U,V = tf.svd(A)
+#singular values look ok
+sess.run(S)
+u_np = sess.run(U)
+np.dot(np.transpose(u_np), u_np)
+#This should give the identity but does not, indicating
+#U is not orthonormal
+array([[  9.99998868e-01,  -1.16007868e-07],
+[ -1.16007868e-07,   1.00000167e+00]], dtype=float32)
+What other attempted solutions have you tried?
+I need to obtain orthonormal vectors such as output by a QR decomposition.
+I have tried getting orthonormal vectors using the Cholesky operation to do a QR (still missing in tensorflow).
+L=Cholesky(A^TA)
+U=AL^-1
+In this case the matrix inverse operation introduces stochastic variation into a completely deterministic net with identity weights and the results is slightly not orthonormal.  Additionally using the tf.assign operation (to save L^-1) on the results of the L^-1 output from the cholesky actually changes its value.  tf.assign seems to work in other cases.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+The following is the pickled matrix needed for the example
+A.txt

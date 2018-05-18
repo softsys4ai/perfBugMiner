@@ -1,0 +1,49 @@
+tensorflow batch norm used when rank = 4?
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug or a feature request.
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No custom code
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 14.04
+TensorFlow installed from (source or binary): pip install
+TensorFlow version (use command below): 1.2
+Python version: 3.5
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 8
+GPU model and memory: Titan X Pascal
+Exact command to reproduce: See code snippet
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+I am using slim.batch_norm from layers and trying to understand the code flow in my use case. It looks to me like the logic that decides whether to use _fused_batch_norm() or the base class will only use the _fused_batch_norm() in my case if the input rank is 2. The code description sounds like it should also be used if rank is 4 and the function itself (_fused_batch_norm()) supports rank of 4, but the logic seems to prevent calling it.
+If my input is rank 4, it looks like the code will use the fused implementation in normalization_layers.BatchNormalization Is my understanding of the logic correct?
+Is this the expected and proper behavior? I am wondering if the the condition rank==2 should actually be rank in [2,4]? If the latter is correct, then this would be a potential bug. If the original is correct, then why have rank in [2,4] for determining feature_supported ?
+Issue posted to stack overflow and cited as a bug to report: which tensorflow batch norm..
+Source code / logs
+  # Only use _fused_batch_norm (1) if fused is set True or if it is
+  # possible to use (currently it doesn't support batch weights,
+  # renorm, and the case when rank is neither 2 nor 4),
+  # and (2) if used with zero_debias_moving_mean, or an input shape of rank 2,
+  # or non-default updates_collections (not implemented in
+  # normalization_layers.BatchNormalization yet); otherwise use the fused
+  # implementation in normalization_layers.BatchNormalization.
+  inputs = ops.convert_to_tensor(inputs)
+  rank = inputs.get_shape().ndims
+  feature_supported = batch_weights is None and not renorm and rank in [2, 4]
+  possible_to_fuse = fused is None and feature_supported
+  if (fused or possible_to_fuse) and (
+      zero_debias_moving_mean or rank == 2 or
+      updates_collections is not ops.GraphKeys.UPDATE_OPS):
+      return _fused_batch_norm(...)

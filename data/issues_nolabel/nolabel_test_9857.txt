@@ -1,0 +1,42 @@
+Is there a way to use tensorflow to load a few consecutive frames from a queue of many video frame folders?
+
+System information
+
+**OS Platform and Distribution **: Linux fedora fc25.x86_64
+TensorFlow installed from (source or binary): from pip
+TensorFlow version (use command below): v1.0.0-rc2-15-g47bba63-dirty
+CUDA/cuDNN version: cuda 8.0/cudnn 5
+GPU model and memory: TITAN X (Pascal)
+
+Describe the problem
+I have a file which lists video names. Frames of each video are saved in a separate folder. Now I want to use tensorflow to get a queue from list of video names and then load a subset of consecutive frames from a video folder every time. Is there a way to do that?
+I tried the following way but it does not work.
+Source code / logs
+input_queue is got using tf.train.slice_input_producer.
+def glob_frame_list(video_path):
+     frame_list = gfile.Glob(os.path.join(video_path[0]))
+     return frame_list
+def read_video_sequence_from_disk(input_queue, seq_len, input_size):    
+    frame_list = tf.py_func(glob_frame_list, [input_queue], tf.string) # TensorShape(None)
+    frames = []
+    start_idx = tf.random_uniform([], minval=0, maxval=tf.shape(frame_list)[0]-seq_len, dtype=tf.int32) # TensorShape([])
+    # for i in tf.range(start_idx, start_idx+seq_len): # has a problem of 'tensor is not iterable'
+    def body(i):
+        img_contents = tf.read_file(frame_list[i]) 
+        img = tf.image.decode_jpeg(img_contents, channels=3)        
+        frames.append(tf.expand_dims(img, axis=0))
+        return i+1    
+    i = start_idx
+    while_condition = lambda i: tf.less(i, start_idx+seq_len)
+    new_i = tf.while_loop(while_condition, body, [i])
+    frames = tf.concat(frames, axis=0)
+    return frames
+
+When I run
+threads = tf.train.start_queue_runners(coord=coord, sess=sess)there is the following error.
+"
+InternalError (see above for traceback): Failed to run py callback pyfunc_0: see error log.
+[[Node: create_inputs/PyFunc = PyFuncTin=[DT_STRING], Tout=[DT_STRING], token="pyfunc_0", _device="/job:localhost/replica:0/task:0/cpu:0"]]
+"
+Can anyone help me on this?
+Thanks a lot.

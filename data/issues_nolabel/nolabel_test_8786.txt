@@ -1,0 +1,21 @@
+Problem with processing/displaying RGB images
+
+I just switched to a build of the r1.1 branch of tensorflow (due to a fixed bug in tfdbg present in 1.0) and without any changes to my model, RGB images saved with tf.summary.image are showing up weird in tensorboard, whereas they showed up fine in all previous versions of tensorflow/tensorboard.
+Here's an example of what I mean: http://i.imgur.com/xFoEYzO.png
+Those should be regular MSCOCO color images, but now the colors are all over the place.
+Before being displayed, the images are adjusted as follows:
+    distorted_image = tf.cast(result.image_raw, tf.float32)
+    distorted_image = tf.reshape(distorted_image,
+                                 [self.width, self.height, 3])
+    distorted_image = tf.image.random_brightness(distorted_image,
+                                                 max_delta=35)
+    distorted_image = tf.image.random_contrast(distorted_image,
+                                               lower=0.4, upper=1.4)
+    distorted_image = tf.image.random_hue(distorted_image, max_delta=0.01)
+    float_image = tf.image.per_image_standardization(distorted_image)
+
+and then the bounding boxes are drawn with: tf.image.draw_bounding_boxes
+the images are logged using tf.summary.image('images', preview_images, max_outputs=16)
+I don't know if the issue is exclusive to tensorboard (conv layer activations seem to be displayed just fine, though the first layer conv activations look like they are working on the 'broken' image data as well, so it looks like it's not a tensorboard bug).
+The images are read from a TFRecord file (which wasn't changed) and supplied with a shuffle_batch
+Have any of the image summary/image adjustment ops changed in a way that I'm not aware of, or is this a bug? It looks like it could have something to do with normalization of the image.

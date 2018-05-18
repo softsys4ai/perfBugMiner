@@ -1,0 +1,30 @@
+softmax_cross_entropy_with_logits() behaves differently with it's comment
+
+version: 1.0.1 CPU compiled by cmake from master branch.
+According to the document, softmax_cross_entropy_with_logits() accept inputs with any shape. However, the comments in the source code says:
+logits and labels must have the same shape [batch_size, num_classes]  and the same dtype (either float16, float32, or float64).
+meaning that only rank-2 tensors are allowed.
+I tried the following code to construct a net which performs binary-classify on each pixel of an image :
+    final_two_channel = tf.layers.conv2d(
+        inputs=res_out_iter,
+        filters=2,
+        kernel_size=[1, 1],
+        padding='same',
+        activation=tf.nn.sigmoid
+    )
+    # logits = tf.reshape(tensor=final_two_channel, shape=[-1, 2], name='flatten_net_out')
+    label_one_hot = tf.one_hot(
+        indices=output_field,
+        depth=2,
+        on_value=1, off_value=0,
+        name='label_one_hot'
+    )
+    crs_etp_loss = tf.nn.softmax_cross_entropy_with_logits(labels=label_one_hot, logits=final_two_channel)
+    print(crs_etp_loss.shape)
+    crs_etp_loss = tf.reshape(tensor=crs_etp_loss, shape=[-1, field_width * field_width])
+    crs_etp_loss = tf.reduce_mean(input_tensor=crs_etp_loss, axis=1)
+
+    optimizer = tf.train.AdamOptimizer(learning_rate=0.001).minimize(loss=crs_etp_loss)
+
+The program runs without error and print(crs_etp_loss.shape) gives (?, 512, 128), but I am not sure if it's safe/correct to do like this.
+I posted a question on stackoverflow about this.

@@ -1,0 +1,155 @@
+Dependencies of tensors created within a tf.while_loop() might not be executed
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes. See test case below.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS 'Sierra' Version 10.12.6 (16G1114)
+TensorFlow installed from (source or binary): Both. I have compiled TensorFlow at 136697e with my small change in PR #15823. I have also tried using the pip package.
+TensorFlow version (use command below): ('v1.4.0-19-ga52c8d9b01', '1.4.1') (pip package)
+Python version: 2.7.10
+Bazel version (if compiling from source): 0.9.0-homebrew
+GCC/Compiler version (if compiling from source): Apple LLVM version 8.1.0 (clang-802.0.42)
+CUDA/cuDNN version: CUDA 9.0.176_mac, cuDNN 9.0-osx-x64-v7
+GPU model and memory: NVIDIA GeForce GT 750M with 2048 MB device memory (CUDA Compute Capability 3.0)
+Exact command to reproduce:
+
+python repro.py
+.. where repro.py contains the test case to reproduce, listed below.
+Describe the problem
+Here is my test case:
+# Part I
+from __future__ import division, print_function
+import numpy as np
+import tensorflow as tf
+from tensorflow.python.ops import resource_variable_ops as rr
+
+rs = np.random.RandomState(seed = 2)
+A = rs.normal(size = (10, 10,))
+print('singular values of A: %s' % (np.linalg.svd(A, compute_uv = False),))
+B = rs.normal(size = (10, 10,))
+print('singular values of B: %s' % (np.linalg.svd(B, compute_uv = False),))
+
+
+
+# Part II
+A_var = tf.Variable(B)
+init_A_var_op = tf.assign(A_var, A)
+A_dep = tf.constant(10, tf.int32)
+
+with tf.control_dependencies([init_A_var_op]):
+    A_dep = A_dep + 1
+
+with tf.control_dependencies([A_dep]):
+    var_s = tf.svd(A_var, compute_uv = False)
+with tf.Session() as session:
+    session.run(tf.global_variables_initializer())
+    computed_s, computed_A_dep = session.run([var_s, A_dep])
+print('computed_s = %s, computed_A_dep = %d' % (computed_s, computed_A_dep,))
+
+
+
+# Part III
+A_var = tf.Variable(B)
+init_A_var_op = tf.assign(A_var, A)
+A_dep = tf.constant(9, tf.int32)
+
+def loop_condition(j, A_dep):
+    return j < 1
+def loop_body(j, A_dep):
+    with tf.control_dependencies([init_A_var_op]):
+        A_dep = A_dep + 1
+    return j + 1, A_dep
+
+_, A_dep = tf.while_loop(loop_condition,
+                         loop_body,
+                         loop_vars = [tf.constant(0, tf.int32), A_dep],
+                         parallel_iterations = 1,
+                         back_prop = False)
+
+with tf.control_dependencies([A_dep]):
+    var_s = tf.svd(A_var, compute_uv = False)
+with tf.Session() as session:
+    session.run(tf.global_variables_initializer())
+    computed_s, computed_A_dep = session.run([var_s, A_dep])
+print('computed_s = %s, computed_A_dep = %d' % (computed_s, computed_A_dep,))
+
+
+
+# Part IV
+A_var = rr.ResourceVariable(B)
+init_A_var_op = A_var.assign(A)
+A_dep = tf.constant(8, tf.int32)
+
+def loop_condition(j, A_dep):
+    return j < 1
+def loop_body(j, A_dep):
+    with tf.control_dependencies([init_A_var_op]):
+        A_dep = A_dep + 1
+    return j + 1, A_dep
+
+_, A_dep = tf.while_loop(loop_condition,
+                         loop_body,
+                         loop_vars = [tf.constant(0, tf.int32), A_dep],
+                         parallel_iterations = 1,
+                         back_prop = False)
+
+with tf.control_dependencies([A_dep]):
+    var_s = tf.svd(A_var.read_value(), compute_uv = False)
+with tf.Session() as session:
+    session.run(tf.global_variables_initializer())
+    computed_s, computed_A_dep = session.run([var_s, A_dep])
+print('computed_s = %s, computed_A_dep = %d' % (computed_s, computed_A_dep,))
+Part I is basic setup. I create two random 10×10 matrices and compute their singular values:
+singular values of A: [ 5.65906715  4.9420261   4.40626739  3.73506125  2.70703249  2.57429488
+  1.73387162  1.16000494  0.58836563  0.39101954]
+singular values of B: [ 7.0283055   4.65840063  4.48502098  3.25319445  2.94667168  2.74267484
+  1.86004291  1.6626967   0.63884034  0.27131664]
+
+Part II shows usage of control_dependencies() to guarantee that A has been assigned to A_var before the singular values of A_var are computed. The output from this part is:
+computed_s = [ 5.65906715  4.9420261   4.40626739  3.73506125  2.70703249  2.57429488
+  1.73387162  1.16000494  0.58836563  0.39101954], computed_A_dep = 11
+
+(This is the expected result for Part II.)
+In Part III, I have introduced use of a tf.while_loop(). Now, tf.svd() is returning the singular values of B:
+computed_s = [ 7.0283055   4.65840063  4.48502098  3.25319445  2.94667168  2.74267484
+  1.86004291  1.6626967   0.63884034  0.27131664], computed_A_dep = 10
+
+(This is not the expected result for Part III. I expect that the singular values of A would be printed.)
+In Part IV, based on reading #4663 (comment) , I switched to using ResourceVariable. However, the output is still the same (the singular values of B):
+computed_s = [ 7.0283055   4.65840063  4.48502098  3.25319445  2.94667168  2.74267484
+  1.86004291  1.6626967   0.63884034  0.27131664], computed_A_dep = 9
+
+(This is not the expected result for Part IV. I expect that the singular values of A would be printed.)
+It appears the issue is that tf.control_dependencies() on tensors created by tf.while_loop() might not execute the tensors' own dependencies.
+This used to work okay (around TensorFlow 1.1, if I recall correctly).
+While searching for a previous report of this issue, I found #6087 which appears related, in that the sample code there has a tf.while_loop() that creates tensors with dependencies. When I run the sample code, I consistently get result = 10. This is an unexpected result, in my opinion. What is happening is that update_x runs exactly once, so for each of the 5 loop iterations, x has the value 2.
+I tried rewriting the sample code to use a ResourceVariable, but the output is the same:
+from __future__ import division, print_function
+import tensorflow as tf
+from tensorflow.python.ops import resource_variable_ops as rr
+
+with tf.variable_scope('state'):
+    x = rr.ResourceVariable(tf.constant(1, dtype=tf.float32))
+    update_x = x.assign(x.read_value() + 1)
+
+def iter_fun(i, y):
+    # comment the line below, the program will run without any error
+    # but I need control_dependencies, or at least some way to replace it...
+    with tf.control_dependencies([update_x]):
+        y = y + tf.Print(x.read_value(), ['i = ', i, 'y = ', y, 'x = ', x.read_value()])
+    return (i+1, y,)
+
+with tf.variable_scope('iteration'):
+    num_iterations = 5
+    initial_i = tf.constant(0, dtype=tf.int32)
+    initial_y = tf.constant(0, dtype=tf.float32)
+    _, result = tf.while_loop(
+        cond=lambda i, *_: i < num_iterations,
+        body=iter_fun,
+        loop_vars=(initial_i, initial_y))
+
+init_op = tf.global_variables_initializer()
+
+with tf.Session() as sess:
+    sess.run(init_op)
+    print(sess.run(result))

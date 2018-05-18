@@ -1,0 +1,173 @@
+RMSProp errors with embedding_lookup
+
+I've been trying to train an LSTM with a word embedding and got some errors that seem related to #1117
+Environment info
+Operating System:
+If installed from binary pip package, provide:
+Linux CPU Only
+0.10.0rc0
+Steps to reproduce
+This is the code I've been running, which should repro the issue:
+import tensorflow as tf
+import numpy as np
+import pandas
+import tensorflow as tf
+from tensorflow.contrib import learn
+#from preprocessing import VocabularyProcessor
+VocabularyProcessor = learn.preprocessing.VocabularyProcessor
+
+def partition_length(x_train, y_train):
+  #Partition the training data by length of sequences
+  x_train_dict = {}
+  y_train_dict = {}
+  for i in range(x_train.shape[0]):
+    x = x_train[i]
+    y = y_train[i]
+
+    l = len(x)
+    if l not in x_train_dict:
+      x_train_dict[l] = []
+      y_train_dict[l] = []
+    x_train_dict[l].append(x)
+    y_train_dict[l].append(y)
+
+
+  x_train_np = {}
+  y_train_np = {}
+  for l in x_train_dict:
+    x_train_np[l] = np.asarray(x_train_dict[l])
+    y_train_np[l] = np.asarray(y_train_dict[l])
+
+  return (x_train_np, y_train_np)
+
+n_words = 0
+MAX_DOCUMENT_LENGTH = 10
+EMBEDDING_SIZE = 50
+
+# Prepare training and testing data
+dbpedia = learn.datasets.load_dataset('dbpedia')
+
+x_train = pandas.DataFrame(dbpedia.train.data)[1]
+y_train = dbpedia.train.target
+x_test = pandas.DataFrame(dbpedia.test.data)[1]
+y_test = dbpedia.test.target
+
+print x_train.shape, y_train.shape
+print x_test.shape, y_test.shape
+
+# Process vocabulary
+vocab_processor = VocabularyProcessor(10)
+x_train = np.array(list(vocab_processor.fit_transform(x_train)))
+x_test = np.array(list(vocab_processor.transform(x_test)))
+n_words = len(vocab_processor.vocabulary_)
+print('Total words: %d' % n_words)
+
+print x_train.shape, y_train.shape
+
+(x_train_part, y_train_part) = partition_length(x_train, y_train)
+
+data = tf.placeholder(tf.int32, [None, None], name='data')
+word_vectors = learn.ops.categorical_variable(data, n_classes=n_words,
+  embedding_size=EMBEDDING_SIZE, name='words')
+
+print('data: ', data.get_shape())
+print('word_vectors: ', word_vectors.get_shape())
+print('word_vectors: ', tf.shape(word_vectors))
+
+target = tf.placeholder(tf.int32, [None], name='target')
+one_hot = tf.one_hot(target, 15, 1.0, 0.0, dtype=tf.float32)
+
+print('target: ', target.get_shape())
+print('one_hot: ', one_hot.get_shape())
+
+num_hidden = 250
+
+_, state = tf.nn.dynamic_rnn(
+    tf.nn.rnn_cell.GRUCell(num_hidden),
+    word_vectors,
+    dtype=tf.float32,
+)
+
+print('state: ', state.get_shape())
+
+in_size, out_size = (num_hidden, 15)
+
+weight = tf.Variable(tf.truncated_normal([in_size, out_size], stddev=0.01))
+bias = tf.Variable(tf.constant(0.1, shape=[out_size]))
+
+prediction = tf.nn.softmax(tf.matmul(state, weight) + bias)
+#prediction = tf.contrib.losses.softmax_cross_entropy(logits, onehot_labels, weight=1.0, label_smoothing=0, scope=None)
+prediction_idx = tf.argmax(prediction, 1)
+one_hot_idx = tf.argmax(one_hot, 1)
+
+print('prediction: ', prediction.get_shape())
+print('prediction_idx: ', prediction_idx.get_shape())
+print('one_hot_idx: ', one_hot_idx.get_shape())
+
+mistakes = tf.not_equal(one_hot_idx, prediction_idx)
+error =  tf.reduce_mean(tf.cast(mistakes, tf.float32))
+
+cross_entropy = -tf.reduce_sum(one_hot * tf.log(prediction))
+
+learning_rate = 0.003
+optimizer = tf.train.RMSPropOptimizer(learning_rate)
+optimize = optimizer.minimize(cross_entropy)
+
+sess = tf.Session()
+sess.run(tf.initialize_all_variables())
+
+
+
+batch_size = 5
+for length in x_train_part:
+  x_train = x_train_part[length]
+  y_train = y_train_part[length]
+
+  print "Training on length ", length, " # elements: ", x_train.shape[0]
+
+  error_pct = sess.run(error, {data: x_test, target: y_test})
+  print('Epoch {:2d} error {:3.1f}%'.format(0, 100 * error_pct))
+
+  for epoch in range(10):
+    print('Epoch {:2d}'.format(epoch+1))
+    for i in range(x_train.shape[0]/batch_size):
+      sess.run(optimize, {data: x_train[i:i+batch_size], target: y_train[i:i+batch_size]})
+
+    error_pct = sess.run(error, {data: x_test, target: y_test})
+    print('Epoch {:2d} error {:3.1f}%'.format(epoch + 1, 100 * error_pct))
+
+
+What have you tried?
+Using any non-RMSProp Optimizer works
+Logs or other output that would be helpful
+This is the exception I get:
+Traceback (most recent call last):
+  File "lstm.py", line 131, in <module>
+    sess.run(optimize, {data: x_train[i:i+batch_size], target: y_train[i:i+batch_size]})
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 710, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 908, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 958, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 978, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: var and grad do not have the same shape[7664,50] [50,50]
+         [[Node: RMSProp/update_words/words_embeddings/SparseApplyRMSProp = SparseApplyRMSProp[T=DT_FLOAT, Tindices=DT_INT32, _class=["loc:@words/words_embeddings"], use_locking=false, _device="/job:localhost/replica:0/task:0/cpu:0"](words/words_embeddings, words/words_embeddings/RMSProp, words/words_embeddings/RMSProp_1, RMSProp/learning_rate, RMSProp/decay, RMSProp/momentum, RMSProp/epsilon, gradients/words/embedding_lookup/embedding_lookup_grad/Reshape, gradients/words/embedding_lookup/embedding_lookup_grad/Reshape_1)]]
+Caused by op u'RMSProp/update_words/words_embeddings/SparseApplyRMSProp', defined at:
+  File "lstm.py", line 111, in <module>
+    optimize = optimizer.minimize(cross_entropy)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 198, in minimize
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 313, in apply_gradients
+    update_ops.append(self._apply_sparse(grad, var))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/rmsprop.py", line 122, in _apply_sparse
+    use_locking=self._use_locking)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/gen_training_ops.py", line 664, in sparse_apply_rms_prop
+    use_locking=use_locking, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 703, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2317, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1239, in __init__
+    self._traceback = _extract_stack()

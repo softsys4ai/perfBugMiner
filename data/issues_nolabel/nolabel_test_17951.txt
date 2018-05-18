@@ -1,0 +1,122 @@
+Feature request: Create a function that handles errors for tf.train.SessionRunHook()
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 10 Pro 64-bit (10.0, Build 16299)
+TensorFlow installed from (source or binary):
+Binary
+TensorFlow version (use command below):
+1.6.0
+Python version:
+3.6.4
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+I would like an operation for tf.train.SessionRunHook() that executes when an error is thrown from the sess.run() (it should be able to act upon a single error/multiple errors (in a list)/all errors. The reason I would like this, is because there exists use cases where a hook action should be performed only when an error is raised.
+My current example of this use case is the switch between training and validation loops. I am, in a tf.train.MonitoredTrainingSession() trying to run a training loop and a validation loop that switches between each other. In order to achieve this, I'm using a tf.data.Dataset.iterator that runs in a while loop until a tf.errors.OutOfRangeError is thrown; breaking the while loop and moving on to the next. When this exception is thrown, I would like to perform hook actions, such as saving epoch summaries, print logging on the terminal, etc. My current way of doing this is to write these actions manually in the exception clause, as shown below. It would, however, be cleaner and easier if these actions could be performed in the hooks themselves when an error is thrown.
+Source code / logs
+Example code I am using currently:
+import tensorflow as tf
+from functools import partial
+
+def create_reset_metric(metric, scope='reset_metrics', **metric_args):
+    with tf.variable_scope(scope) as scope:
+        metric_op, update_op = metric(**metric_args)
+        vars = tf.contrib.framework.get_variables(
+                scope, collection=tf.GraphKeys.LOCAL_VARIABLES
+            )
+        reset_op = tf.variables_initializer(vars)
+    return metric_op, update_op, reset_op
+
+dataset_train = tf.data.Dataset.range(100)
+iterator_train = dataset_train.make_initializable_iterator()
+next_elem_train = iterator_train.get_next()
+mean_batch_train, mean_update_train, mean_reset_train = create_reset_metric(
+                                                            metric=tf.metrics.mean,
+                                                            scope='reset_metrics_train',
+                                                            values=next_elem_train)
+summary_train = tf.summary.scalar('train_summary', mean_update_train, collections=['train'])
+
+dataset_test = tf.data.Dataset.range(50)
+iterator_test = dataset_test.make_initializable_iterator()
+next_elem_test = iterator_test.get_next()
+mean_batch_test, mean_update_test, mean_reset_test = create_reset_metric(
+                                                            metric=tf.metrics.mean,
+                                                            scope='reset_metrics_test',
+                                                            values=next_elem_test)
+summary_test = tf.summary.scalar('test_summary', mean_update_test, collections=['test'])
+
+merged_train_summary_op = tf.summary.merge_all('train')
+merged_test_summary_op = tf.summary.merge_all('test')
+
+def step_fn(fetches, feed_dict, step_context):
+    return step_context.session.run(fetches=fetches, feed_dict=feed_dict)
+
+with tf.summary.FileWriter('./tmp/train_test_switch') as writer:
+    with tf.train.MonitoredTrainingSession() as sess:
+        epoch_step = 0
+        while not sess.should_stop():
+            sess.run_step_fn(partial(step_fn, iterator_train.initializer, {}))
+            while True:
+                try:
+                    summary_train_, _ = sess.run([merged_train_summary_op, next_elem_train])
+                except tf.errors.OutOfRangeError:
+                    writer.add_summary(summary_train_, epoch_step)
+                    sess.run_step_fn(partial(step_fn, mean_reset_train, {}))
+                    break
+
+            sess.run_step_fn(partial(step_fn, iterator_test.initializer, {}))
+            while True:
+                try:
+                    summary_test_, _ = sess.run([merged_test_summary_op, next_elem_test])
+                except tf.errors.OutOfRangeError:
+                    writer.add_summary(summary_test_, epoch_step)
+                    sess.run_step_fn(partial(step_fn, mean_reset_test, {}))
+                    break
+            print("epoch_step:", epoch_step)
+            epoch_step += 1
+
+
+Example of how I want the tf.train.MonitoredTrainingSession() to look (the beginning is the same as before):
+...
+
+with tf.summary.FileWriter('./tmp/train_test_switch') as writer:
+    error_catching_hook = ErrorCatchingHook(...)
+    with tf.train.MonitoredTrainingSession(hooks=[error_catching_hook]) as sess:
+        epoch_step = 0
+        while not sess.should_stop():
+            sess.run_step_fn(partial(step_fn, iterator_train.initializer, {}))
+            error_catching_hook.is_training() # Set flag to call correct params when OutOfRangeError
+            while True:
+                try:
+                    summary_train_, _ = sess.run([merged_train_summary_op, next_elem_train])
+                except tf.errors.OutOfRangeError:
+                    # error_catching_hook calls writer.add_summary(...)
+                    # error_catching_hook calls mean_reset_train
+                    break
+
+            sess.run_step_fn(partial(step_fn, iterator_test.initializer, {}))
+            error_catching_hook.is_testing() # Set flag to call correct params when OutOfRangeError
+            while True:
+                try:
+                    summary_test_, _ = sess.run([merged_test_summary_op, next_elem_test])
+                except tf.errors.OutOfRangeError:
+                    # error_catching_hook calls writer.add_summary(...)
+                    # error_catching_hook calls mean_reset_test
+                    break
+            print("epoch_step:", epoch_step)
+            epoch_step += 1
+
+I realize that this might not be the best example of a use case for this, but I hope you get my point, and I'm sure there are other use cases for this.
+After having read my code above, I also hope that this could provide a solution for others trying to gather and summarize epoch-wise data. A common pattern of summarizing train/test data is, after all, to summarize an epoch average after each epoch. This feels like an unnecessarily painful implementation task today, and I hope that this request of mine can at least bring down the pain a little bit. Hopefully, this can lead to a tf.train.EndOfSetHook() or similar, that is only called when a dataset reaches its end!

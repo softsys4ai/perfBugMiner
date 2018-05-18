@@ -1,0 +1,90 @@
+Memory Leak Running simple feed_dict graph
+
+In a series simple tensorflow programs I obtain memory leaks (unbounded growth of CPU memory).
+On original program on a computer with 64GB of RAM this leak is about 640 megabytes per hour (1% of total memory).
+Plots of computer's memory over time:
+Long time scale picture:
+
+short time scale picture:
+
+Problem description
+The original program was more advanced and included RNNs/Saving/Loading etc.. but I "narrowed it down" to a simple for loop with no gradient descent where memory grows over time without bound.
+Tested on Fedora 25 and Mac OSX 10.11.5. Issue occurs when running on single GPU (Titan X Pascal) or on CPU. Varying the sizes of the variables in the graph only changes the degree of growth, but does not prevent the effect from occurring. This issue occurs on tensorflow 0.12 and on current tensorflow 1.0.1. No custom code was used. Tensorflow was installed using pip in both cases (pre-compiled binary. Each time this was pip3 install tensorflow-gpu). Using CUDA 8.0,  CuDNN v5 [though this should not impact the use-case, since no cudnn kernels are being used]. GPU is a Titan X Pascal 12GB of VRAM (not Titan Xp).
+To reproduce:
+import argparse
+import psutil
+
+from os import getpid
+import tensorflow as tf
+import numpy as np
+
+def fc(inputs, output_size):
+    with tf.variable_scope("FC"):
+        input_size = inputs.get_shape()[-1].value
+        W = tf.get_variable("W", shape=[input_size, output_size])
+        b = tf.get_variable("b", shape=[output_size], initializer=tf.constant_initializer(0))
+        out = tf.nn.xw_plus_b(inputs, W, b)
+    return out
+
+def create_model(input_size, output_size):
+    # model placeholders:
+    with tf.variable_scope("Inputs"):
+        input_placeholder = tf.placeholder(
+            tf.float32, [None, input_size], name="input_placeholder"
+        )
+    # meaningless function of inputs
+    op = tf.reduce_mean(tf.reduce_sum(fc(input_placeholder, output_size), 1))
+    return input_placeholder, op
+
+def parse_args(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--max_epochs', type=int, default=1000)
+    parser.add_argument('--batch_size', type=int, default=7000)
+    parser.add_argument('--input_size', type=int, default=100)
+    parser.add_argument('--output_size', type=int, default=100)
+    parser.add_argument('--device', type=str, default="gpu:0")
+    return parser.parse_args(args=args)
+
+def create_batches(inputs, input_size, batch_size, n):
+    batches = []
+    for i in range(n):
+        X = np.random.uniform(-1.0, 1.0, size=(batch_size, input_size))
+        batches.append({inputs: X})
+    return batches
+
+def main():
+    args = parse_args()
+    session_conf = tf.ConfigProto(allow_soft_placement=True)
+    np.random.seed(1234)
+    process = psutil.Process(getpid())
+
+    with tf.Session(config=session_conf) as session, tf.device(args.device):
+        inputs, op = create_model(args.input_size, args.output_size)
+        session.run(tf.global_variables_initializer())
+        batches = create_batches(inputs, args.input_size, args.batch_size, 20)
+
+        for epoch in range(args.max_epochs):
+            before = process.memory_percent()
+            for feed_dict in batches:
+                session.run(op, feed_dict)
+            after = process.memory_percent()
+            print("MEMORY CHANGE %.4f -> %.4f" % (before, after))
+
+if __name__ == "__main__":
+    main()
+
+Output will be (exact numbers are percentages of computer's ram, so should change based on hardware, but main point is that memory continues to grow when the program has no variation between graph runs, batches are all the same size, no randomness is left in the program, etc.):
+MEMORY CHANGE 1.2427 -> 1.3101
+MEMORY CHANGE 1.3101 -> 1.3103
+MEMORY CHANGE 1.3103 -> 1.3104
+MEMORY CHANGE 1.3104 -> 1.3106
+MEMORY CHANGE 1.3106 -> 1.3108
+MEMORY CHANGE 1.3108 -> 1.3108
+MEMORY CHANGE 1.3108 -> 1.3108
+...
+MEMORY CHANGE 1.3108 -> 1.3109
+...
+MEMORY CHANGE 1.3109 -> 1.3110
+...
+
+How can I fix this? I currently suspect a CPU memory pool issue inside tensorflow since the problem is fairly generic, and does not depend on the ops inside the graph (much). From what I've gathered most likely candidate is the tf.asarray/copying of numpy arrays in feed_dict, leading to memory fragmentation etc. Supposing this were the case, I've heard that tcmalloc should alleviate this, but no dice (note: I've also checked that objgraph shows no growth in program over time).

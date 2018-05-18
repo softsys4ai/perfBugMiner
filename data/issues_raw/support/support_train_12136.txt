@@ -1,0 +1,40 @@
+Quantize_training_test fails with matmul operation on Ubuntu 16.04
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below):  'v1.2.1-0-gb4957ff', '1.2.1'
+Python version:  2.7.12
+Bazel version (if compiling from source): 0.4.5
+CUDA/cuDNN version: No GPU
+GPU model and memory: No GPU
+Exact command to reproduce: bazel test -c opt //tensorflow/python:quantize_training_test
+
+The problem
+The testQuantizedSaveRestore from  //tensorflow/python:quantize_training_test is failing on s390x while importing graph here.
+The error message shown is :
+ValueError: Shapes must be equal rank, but are 0 and 2 for 'a/Min/AssignValue' (op: 'Assign') with input shapes: [], [1,1].
+The check for this failure is at Merge function . This Merge is called by Assign Op kernel.
+I tried changing the math_ops.matmul operation from the above test to math_ops.subtract/minimum/multiply. With these operations the test passes after removing asserts for 'a/Min/Variable:0' or 'b/read/Max/Variable:0' etc. I suppose other operations do not create these tensors.
+Could anyone please provide some inputs on this failure? I am not aware about the computations that are happening when graph is imported with the matmul operation.
+Source code / logs
+.E.
+======================================================================
+ERROR: testQuantizedSaveRestore (__main__.PywrapQuantizeTrainingTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/test/.cache/bazel/_bazel_test/24685d064c07f7346b48c2d13ec3ad69/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/quantize_training_test.runfiles/org_tensorflow/tensorflow/python/training/quantize_training_test.py", line 73, in testQuantizedSaveRestore
+    _ = importer.import_graph_def(result, name='')
+  File "/home/test/.cache/bazel/_bazel_test/24685d064c07f7346b48c2d13ec3ad69/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/quantize_training_test.runfiles/org_tensorflow/tensorflow/python/framework/importer.py", line 409, in import_graph_def
+    ops.set_shapes_for_outputs(op)
+  File "/home/test/.cache/bazel/_bazel_test/24685d064c07f7346b48c2d13ec3ad69/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/quantize_training_test.runfiles/org_tensorflow/tensorflow/python/framework/ops.py", line 1873, in set_shapes_for_outputs
+    shapes = shape_func(op)
+  File "/home/test/.cache/bazel/_bazel_test/24685d064c07f7346b48c2d13ec3ad69/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/quantize_training_test.runfiles/org_tensorflow/tensorflow/python/framework/ops.py", line 1823, in call_with_requiring
+    return call_cpp_shape_fn(op, require_shape_fn=True)
+  File "/home/test/.cache/bazel/_bazel_test/24685d064c07f7346b48c2d13ec3ad69/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/quantize_training_test.runfiles/org_tensorflow/tensorflow/python/framework/common_shapes.py", line 610, in call_cpp_shape_fn
+    debug_python_shape_fn, require_shape_fn)
+  File "/home/test/.cache/bazel/_bazel_test/24685d064c07f7346b48c2d13ec3ad69/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/python/quantize_training_test.runfiles/org_tensorflow/tensorflow/python/framework/common_shapes.py", line 676, in _call_cpp_shape_fn_impl
+    raise ValueError(err.message)
+ValueError: Shapes must be equal rank, but are 0 and 2 for 'a/Min/AssignValue' (op: 'Assign') with input shapes: [], [1,1].

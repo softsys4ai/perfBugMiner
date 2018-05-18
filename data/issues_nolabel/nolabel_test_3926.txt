@@ -1,0 +1,108 @@
+Failing to restore net
+
+Environment info
+Operating System:
+Mac OS X 10.11.4
+Tensorflow installed from pre-built pip (no CUDA):
+0.10.0rc0
+Problem
+I have problems with restoring my net (from SO). I have created a short test program that have the same problem as my real program.
+The program train a net, run one inference with it and then checkpoints the model. Then it loads the checkpointed model and run the inference with the same data and compare the result. I expected the results to be very similar but they weren't:
+Restoring graph from /tmp/bugreport/model.ckpt-0
+Inference after training gave 2.40740537643
+Inference after restoring net gave 62579.6210938
+
+import os
+
+import numpy as np
+import tensorflow as tf
+import tensorflow.contrib.layers as contrib
+
+FLAGS = tf.app.flags.FLAGS
+
+tf.app.flags.DEFINE_string('tmp_dir', '/tmp/bugreport', """Temp dir""")
+
+SIZE = 5
+NUM_DATA = 10
+BATCH_SIZE = 1
+DEPTH = 1
+
+def inference(input_tensor, is_training):
+    "Define a stupid net"
+    bn_params = {
+            "is_training": is_training,
+            "center": True,
+            "scale": True
+            }
+    tensor = contrib.convolution2d(input_tensor, 8, 3,
+            normalizer_fn=contrib.batch_norm,
+            normalizer_params=bn_params,
+            scope="conv1")
+    tensor = tf.reduce_sum(tensor)
+    return tensor
+
+def training(input_data, label_data, test_data):
+    """1. Train the net
+    2. Do an inference pass with the trained net
+    3. Checkpoint the trained net
+    """
+    with tf.Graph().as_default():
+        input_tensor = tf.placeholder(tf.float32, [BATCH_SIZE, SIZE, SIZE, DEPT#
+        label_tensor = tf.placeholder(tf.float32, [BATCH_SIZE, DEPTH], name="la#
+
+        output = inference(input_tensor, tf.constant(True))
+        loss = tf.nn.l2_loss(output - label_tensor, name="loss")
+        train_op = tf.train.AdamOptimizer(0.9999).minimize(loss)
+        init = tf.initialize_all_variables()
+        saver = tf.train.Saver(tf.all_variables())
+
+        with tf.Session() as sess:
+            sess.run([init])
+            for i in range(NUM_DATA):
+                _ = sess.run(train_op, { input_tensor: input_data[i],
+                                         label_tensor: label_data[i] })
+            training_out = sess.run(output, { input_tensor: test_data })
+            cp_path = os.path.join(FLAGS.tmp_dir, "model.ckpt")
+            saver.save(sess, cp_path,
+                       global_step=0, write_meta_graph=None)
+    return training_out
+
+def use_restored_net(test_data):
+    """1. Load checkpointed net
+    2. Do an inference pass with the trained net
+    """
+    with tf.Graph().as_default():
+        input_tensor = tf.placeholder(tf.float32, [BATCH_SIZE, SIZE, SIZE, DEPT#
+
+        output = inference(input_tensor, tf.constant(False))
+        init = tf.initialize_all_variables()
+
+        ckpt = tf.train.get_checkpoint_state(FLAGS.tmp_dir)
+        if ckpt and ckpt.model_checkpoint_path:
+            print "Restoring graph from {}".format(ckpt.model_checkpoint_path)
+        else:
+            raise ValueError("Could not find a checkpointed model")
+        saver = tf.train.Saver(tf.all_variables())
+        with tf.Session() as sess:
+            sess.run([init])
+            saver.restore(sess, ckpt.model_checkpoint_path)
+            inference_out = sess.run(output, { input_tensor: test_data })
+    return inference_out
+
+def main(argv):
+    if tf.gfile.Exists(FLAGS.tmp_dir):
+        tf.gfile.DeleteRecursively(FLAGS.tmp_dir)
+    tf.gfile.MakeDirs(FLAGS.tmp_dir)
+
+    input_data = np.random.rand(NUM_DATA, BATCH_SIZE, SIZE, SIZE, DEPTH)
+    label_data = np.random.rand(NUM_DATA, BATCH_SIZE, DEPTH)
+    test_data = np.random.rand(BATCH_SIZE, SIZE, SIZE, DEPTH)
+
+    training_out = training(input_data, label_data, test_data)
+    inference_out = use_restored_net(test_data)
+    print "Inference after training gave {}".format(training_out)
+    print "Inference after restoring net gave {}".format(inference_out)
+
+
+if __name__ == '__main__':
+    tf.app.run()

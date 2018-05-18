@@ -1,0 +1,56 @@
+Uncatchable exception messages when using slice_input_producer and batch
+
+Hello,
+Out of range messages are being thrown by the code below, and they seem to be uncatchable — I even tried enclosing the whole code with try:, except: pass, but the messages are still printed. While they don't really seem to affect the rest of the code, since we are taking the exact amount of examples available, these messages are quite annoying because with a big pipeline they can get really messy and ruin real-time visualization of logs (the number of errors has a relation with the number of threads).
+If I try to evaluate an extra epoch, then TF raises an exception I can catch, because this time I tried to evaluate an example I don't have, but this isn't the case here.
+Operating System: Debian 4.8.15-2
+Installed version of CUDA and cuDNN: CUDA 8, cuDNN 5
+python3 -c "import tensorflow; print(tensorflow.version)": 1.0.0
+Reproducible example
+import tensorflow as tf
+import time
+
+num_epochs = 6
+
+a = ([tf.constant(i) for i in range(2)],[tf.constant(i) for i in range(2)])
+
+q1 = tf.train.slice_input_producer(a, num_epochs=num_epochs, shuffle=True, capacity=4)
+q2 = tf.train.batch(q1, batch_size=2, num_threads=2, enqueue_many=False, capacity=4, allow_smaller_final_batch=True)
+
+init = [tf.global_variables_initializer(), tf.local_variables_initializer()]
+sess = tf.Session()
+coord = tf.train.Coordinator()
+sess.run(init)
+threads = tf.train.start_queue_runners(coord=coord, sess=sess)
+
+test_number = 1
+for i in range(num_epochs):
+	print('Testing %d' % test_number)
+	ignore = sess.run(q2)
+	test_number = test_number + 1
+	time.sleep(3)
+print('Done.')
+
+Output
+(...initialization messages...)
+Testing 1
+W tensorflow/core/framework/op_kernel.cc:993] Out of range: Reached limit of 6
+         [[Node: input_producer/input_producer/fraction_of_4_full/limit_epochs/CountUpTo = CountUpTo[T=DT_INT64, _class=["loc:@input_producer/input_producer/fraction_of_4_full/limit_epochs/epochs"], limit=6, _device="/job:localhost/replica:0/task:0/cpu:0"](input_producer/input_producer/fraction_of_4_full/limit_epochs/epochs)]]
+Testing 2
+Testing 3
+Testing 4
+W tensorflow/core/framework/op_kernel.cc:993] Out of range: FIFOQueue '_0_input_producer/input_producer/fraction_of_4_full/fraction_of_4_full' is closed and has insufficient elements (requested 1, current size 0)
+         [[Node: input_producer/fraction_of_4_full_Dequeue = QueueDequeueV2[component_types=[DT_INT32], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](input_producer/input_producer/fraction_of_4_full/fraction_of_4_full)]]
+W tensorflow/core/framework/op_kernel.cc:993] Out of range: FIFOQueue '_0_input_producer/input_producer/fraction_of_4_full/fraction_of_4_full' is closed and has insufficient elements (requested 1, current size 0)
+         [[Node: input_producer/fraction_of_4_full_Dequeue = QueueDequeueV2[component_types=[DT_INT32], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](input_producer/input_producer/fraction_of_4_full/fraction_of_4_full)]]
+Testing 5
+Testing 6
+Done.
+
+These messages may vary: on multiple runs of the same code, the first one sometimes isn't printed, and the number of messages after Testing 4 also changes.
+The documentation of batch states:
+
+The returned operation is a dequeue operation and will throw tf.errors.OutOfRangeError if the input queue is exhausted. If this operation is feeding another input queue, its queue runner will catch this exception, however, if this operation is used in your main thread you are responsible for catching this yourself.
+
+However, no further instruction is given. And since a try: except: didn't work, I'm guessing this is a bug. Could anyone clarify this behavior?
+Thanks in advance.

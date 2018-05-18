@@ -1,0 +1,60 @@
+control_dependencies throw Frame error when used in while_loop
+
+Hello,
+Problem description
+I need to put InceptionV3 in a while loop to save both GPU and CPU memory usage since I am handling videos, each contains hundreds of images. The problem is, InceptionV3 uses control_dependencies for BatchNorm and TensorFlow throws Frame Error if   control_dependencies function is in the while_loop. It can run without errors if control_dependencies is removed though.
+Below is a minimal snippet that reproduces the error:
+sess = tf.Session()
+
+with tf.variable_scope('state'):
+    x = tf.get_variable('x', shape=(), 
+                             initializer=tf.constant_initializer(1), 
+                             dtype=tf.float32)
+    update_x = tf.assign(x, x+1)
+
+def iter_fun(i, y):
+    # comment the line below, the program will run without any error
+    # but I need control_dependencies, or at least some way to replace it...
+    with tf.control_dependencies([update_x]): 
+        y = y + x
+    return (i+1, y)
+
+with tf.variable_scope('iteration'):
+    num_iterations = 5   
+    initial_i = tf.constant(0, dtype=tf.int32)
+    initial_y = tf.constant(0, dtype=tf.float32)
+    _, result = tf.while_loop(
+        cond=lambda i, *_: i < num_iterations,
+        body=iter_fun,
+        loop_vars=(initial_i, initial_y))
+
+init_op = tf.global_variables_initializer()
+sess.run(init_op)
+sess.run(result)  
+The stack trace of the error:
+Traceback (most recent call last):
+  File "demo.py", line 28, in <module>
+    sess.run(result)
+  File "/workspace/bily/anoaconda2/envs/tensorflow0.12/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 766, in run
+    run_metadata_ptr)
+  File "/workspace/bily/anoaconda2/envs/tensorflow0.12/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 964, in _run
+    feed_dict_string, options, run_metadata)
+  File "/workspace/bily/anoaconda2/envs/tensorflow0.12/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1014, in _do_run
+    target_list, options, run_metadata)
+  File "/workspace/bily/anoaconda2/envs/tensorflow0.12/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1034, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: The node 'iteration/while/add' has inputs from different frames. The input 'iteration/while/add/Enter' is in frame 'iteration/while/iteration/while/'. The input 'state/Assign' is in frame ''.
+
+Environments
+
+CentOS Linux release 7.2.1511
+TensorFlow 0.12 built from source
+Python 2.7.12
+CUDA 7.5 and CUDNN v5.1
+
+Related issues
+
+This issue in tflearn seems to be related to my problem but removing control_denpendencies isn't a solution for me.
+#4478 and #3114 are issues about frame errors but these errors are caused by variables instead of control_dependencies.
+
+Any help will be appreciated : )

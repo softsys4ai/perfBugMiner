@@ -1,0 +1,49 @@
+tf.nn.max_pool memory leak?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+TensorFlow installed from (source or binary): pip install tensorflow-gpu
+TensorFlow version (use command below): 1.2.1
+Python version: 3.6.1
+Bazel version (if compiling from source):
+CUDA/cuDNN version: 5.
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+I'm using a tensorflow graph for offline preprocessing, and I believe I've stumbled onto a memory leak problem with tf.nn.maxpool. After certain amount of feed-forward operations (only inference, no training), I get a Allocator (cuda_host_bfc) ran out of memory trying to allocate ... error. This happens consistently after a number of datapoints fed through the graph, independtly on how those datapoints are spread over batches. e.g. with batchsize 4 I get this after 64 iterations, with batchsize 2 I get this error after 128 iterations.
+The following rough code should reproduce this issue on a Titan XP with 12gb memory, didn't test this due to time constraints.
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+import tensorflow as tf
+from keras import Input
+from keras.layers import AvgPool2D, MaxPool2D, Lambda, Concatenate
+from keras.engine import Model
+import numpy as np
+
+thumb_dim = 8192
+strides = 1
+pooling = 22
+inputs, outputs = [], []
+slide = Input([thumb_dim, thumb_dim, 3])
+mask = Input([thumb_dim, thumb_dim, 1])
+inputs.append(slide)
+inputs.append(mask)
+
+hsv_slide = Lambda(lambda x: tf.image.rgb_to_hsv(x))(slide)
+heatmap = Lambda(
+    lambda x: x[..., 1:2] * tf.cast(x[..., 2:3] > 0.3, 'float32'))(
+    hsv_slide)
+# heatmap = AvgPool2D(4, strides=1, padding='same')(heatmap)
+
+to_pool = Concatenate(axis=-1)([heatmap, mask])
+concat = Lambda(lambda x: tf.stop_gradient(tf.nn.max_pool(x, ksize=(1, pooling, pooling, 1),
+                                                          strides=(1, strides, strides, 1), padding='VALID')))(to_pool)
+
+outputs.append(concat)
+rpn = Model(inputs, outputs)
+rpn.predict_generator(([
+    np.random.random((2, thumb_dim, thumb_dim, 3)),
+    np.random.random((2, thumb_dim, thumb_dim, 1))] for _ in range(200)))

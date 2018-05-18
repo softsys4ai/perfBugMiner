@@ -1,0 +1,87 @@
+Proposal: Making the cmake build distribution friendly
+
+The following is a proposal, and I don't have it fully working yet, so a Pull Request is too early, and I want to gather some feedback. If an issue is not appropriate, let me know and I will look for a different medium.
+System information
+Almost any Linux distribution.
+Describe the problem
+Most Linux distributions have similar policies/limitations:
+
+Not accepting bundling of system libraries (specially those security-sensitive).
+Requiring building the whole from source and allowing patching the sources.
+Requiring building offline (without Internet access).
+Not having enough manpower to package hundred of packages in a dependency chain just to get packages like maven built in these source-chains environments.
+
+Because of 4., cmake makes things easier. It is a build tool with a few dependencies that does not need complex bootstrapping. Building bazel itself will bring you into the Java maven dependency chain which we already proved in openSUSE to expand into hundred of packages.
+Both the bazel and cmake build files do not play well with 1. 2. 3., but cmake already improves 4.
+The cmake build files, also pull the sources of different projects. That is because the top CMakeLists.txt includes:
+set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/external)
+into the load path.
+that external/ directory is full of snippets like:
+
+tensorflow/contrib/cmake/external/jpeg.cmake
+tensorflow/contrib/cmake/external/gif.cmake
+...
+etc
+
+Those snippets use the external project cmake api to build directly from git or tarballs upstream. This clashes with
+1., 2., 3.
+It is a bit sad that things like curl used to be looked up in the system and developers deliberately bundled them without making the cmake snippet first look for it, and if not, configure the bundled one.
+Proposal
+The proposal is to make the cmake build support both the Google/Mac user type of build with bundled sources, and the classical Linux distribution build.
+This would be a gradual refactoring. Steps could be:
+
+Add to CMakeLists.txt an option:
+
+option(tensorflow_SYSTEM_LIBRARIES "Use system libraries" ON)
+
+Replicate the external/ directory as platform/ and conditionally make it use one or the other:
+
+if(tensorflow_SYSTEM_LIBRARIES)
+ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/platform)
+else()
+  set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/external)
+endif()
+So that then the part that does:
+# External dependencies
+include(zlib)
+include(gif)
+include(png)
+include(jpeg)
+would just work...
+
+Replace incrementaly and one by one the $dep.cmake snippets in platform/.
+
+Example with gif.cmake:
+Using the standard /usr/share/cmake/Modules/FindGIF.cmake included in cmake, which may use pkg-config for some modules. The module itself documents it would then set: GIF_LIBRARIES, GIF_INCLUDE_DIR, etc.
+Unfortunately the variable that the original set is called gif_STATIC_LIBRARIES, because it assumes it would be static. I think we could fix that later so that naming ends making sense, but lets not focus on that for now.
+The gif.cmake I cited above would become a simple:
+find_package(GIF REQUIRED)
+# dummy targets other targets depend on.
+add_custom_target(gif)
+# These can be removed if we fix CMakeLists
+add_custom_target(gif_copy_headers_to_destination)
+
+set(gif_STATIC_LIBRARIES ${GIF_LIBRARIES})
+set(gif_INCLUDE_DIR ${GIF_INCLUDE_DIR})
+And that is more or less enough to move forward with this dependency... repeat.
+It may need some hacks also in the top level cmake files however...
+I think this approach is doable, and could be turned into making the cmake build fully Linux distro enabled upstream. Slowly cleaning the naming, etc, removing these copy_headers targets so that the platform/ version of the .cmake files do not need to create dummy targets, etc.
+
+Similarly, the sqlite one becomes:
+
+find_package(SQLite3)
+set(sqlite_STATIC_LIBRARIES ${SQLITE3_LIBRARIES})
+set(sqlite_HEADERS ${SQLITE3_INCLUDE_DIR})
+add_custom_target(sqlite)
+add_custom_target(sqlite_copy_headers_to_destination)
+With the only difference is that the Find module was not included in cmake, so I just copied it into
+platform from https://raw.githubusercontent.com/LuaDist/libsqlite3/master/cmake/FindSQLite3.cmake somewhere.
+
+With this method I have been able to move forward and forward with the build.
+
+Current blockers
+
+cmake build does not work out of the box PR
+Issue with Missing tensorflow/core/debug/debug_service.grpc.pb.h
+
+//cc @meaksh @dincamihai @ncounter

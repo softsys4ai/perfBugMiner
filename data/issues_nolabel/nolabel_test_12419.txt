@@ -1,0 +1,163 @@
+Non-fused batch norm with NCHW is mush slower than with NHWC
+
+Describe the problem
+I noticed that in my environment, non-fused batch norm with "NCHW" format  run significantly slower
+Environment info
+Environment
+
+GPU: 8x NVIDIA® Tesla® M40/P40
+OS: Ubuntu 16.04 LTS with tests run via Docker
+CUDA / cuDNN: 8.0 / 5.1
+Tensorflow Version: 1.2.1
+Docker Images: docker pull tensorflow/tensorflow:1.2.1-gpu
+DataSet: Synthetic images
+Source code / logs
+Here is my source code
+import time 
+import tensorflow as tf
+import pdb 
+
+data_format = "NCHW"
+fused=False
+batch_size=512
+nclass = 1001
+num_steps = 100 
+
+with tf.device("/gpu:0"):
+    images = tf.truncated_normal(
+            shape=[batch_size, 227, 227, 3], 
+            dtype=tf.float32,
+            stddev=1e-1,
+            name="fake_images")
+    images = tf.contrib.framework.local_variable(images, name='images')
+with tf.device("/cpu:0"):
+    labels = tf.random_uniform(
+            [batch_size],
+            dtype=tf.int32,
+            minval=1,
+            maxval=nclass,
+            name="fake_labels")
+    labels = tf.contrib.framework.local_variable(labels, name='labels')
+    labels -= 1
+
+with tf.device("/gpu:0"):
+    images *=  1. / 256
+    images = tf.subtract(images, 0.5)
+    images = tf.multiply(images, 2.0)
+    if data_format == "NCHW":
+        images = tf.transpose(images, [0, 3, 1, 2])
+    logits = tf.contrib.layers.conv2d(images, 64, [11, 11], [4, 4],
+                                      padding="VALID", biases_initializer=None,
+                                      data_format=data_format)
+    logits = tf.contrib.layers.max_pool2d(logits, [3, 3], 2, data_format=data_format)
+    logits = tf.contrib.layers.batch_norm(logits, fused=fused, data_format=data_format)
+
+    logits = tf.contrib.layers.conv2d(logits, 192, [5, 5],
+                                      biases_initializer=None,
+                                      data_format=data_format)
+    logits = tf.contrib.layers.batch_norm(logits, fused=fused, data_format=data_format)
+    logits = tf.contrib.layers.max_pool2d(logits, [3, 3], 2, data_format=data_format)
+
+    logits = tf.contrib.layers.conv2d(logits, 384, [3, 3],
+                                      biases_initializer=None,
+                                      data_format=data_format)
+    logits = tf.contrib.layers.batch_norm(logits, fused=fused, data_format=data_format)
+    logits = tf.contrib.layers.conv2d(logits, 384, [3, 3],
+                                      biases_initializer=None,
+                                      data_format=data_format)
+    logits = tf.contrib.layers.conv2d(logits, 256, [3, 3],
+                                      biases_initializer=None,
+                                      data_format=data_format)
+    logits = tf.contrib.layers.max_pool2d(logits, [3, 3], 2, data_format=data_format)
+
+    logits = tf.contrib.layers.flatten(logits)
+    logits = tf.contrib.layers.fully_connected(logits, 4096)
+    logits = tf.nn.dropout(logits, 0.5)
+    logits = tf.contrib.layers.fully_connected(logits, 4096)
+    logits = tf.nn.dropout(logits, 0.5)
+    logits = tf.contrib.layers.fully_connected(logits, nclass, activation_fn=None)
+
+    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+            logits=logits, labels=labels, name='xentropy')
+    loss = tf.reduce_mean(cross_entropy, name='xentropy_mean')
+
+    opt = tf.train.GradientDescentOptimizer(0.005)
+    training_op = opt.minimize(loss)
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    train_op = tf.group(*([training_op] + update_ops))
+
+    step_train_times = []
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        sess.run(tf.local_variables_initializer())
+
+        for local_step in xrange(num_steps):
+            batch_start = time.time()
+            sess.run(train_op)
+            step_train_times.append(time.time() - batch_start)
+            images_per_sec = batch_size / step_train_times[-1]
+            print "local step %d, %.2f images/sec" % (
+                    local_step+1, images_per_sec)
+
+And my tested results:
+
+
+
+data format
+fused/non-fused batch norm
+images/sec
+
+
+
+
+NHWC
+fused
+1085.5
+
+
+NHWC
+non-fused
+969.1
+
+
+NCHW
+fused
+1315.6
+
+
+NCHW
+non-fused
+301.1
+
+I test benchmarks with model resnet50 on P40 and get similar results
+
+
+
+data format
+fused/non-fused batch norm
+images/sec
+
+
+
+
+NHWC
+fused
+65.7
+
+
+NHWC
+non-fused
+51.0
+
+
+NCHW
+fused
+84.4
+
+
+NCHW
+non-fused
+7.5
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+I found issue #7551 similar with my problem but  with opposite result

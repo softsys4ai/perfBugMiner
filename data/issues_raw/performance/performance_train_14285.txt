@@ -1,0 +1,132 @@
+TF 1.4.0 on MacOSX: crash, object was probably modified after being freed
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): MacOSX 10.13
+TensorFlow installed from (source or binary): binary, via pip3.6 install tensorflow
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version:  3.6.3, via Homebrew
+
+Describe the problem
+TensorFlow crashes in some cases. This occurred only now with version TF 1.4.0. It is a test of my test suite (this one). I can try to come up with a reduced test case but maybe the current information is already enough to identify the problem.
+On the terminal, I see this:
+Python(60770,0x70000fafb000) malloc: *** error for object 0x7fb861518b48: incorrect checksum for freed object - object was probably modified after being freed.
+*** set a breakpoint in malloc_error_break to debug
+fish: Job 1, 'python3 tests/test_TFEngine.py test_engine_train_simple_attention' terminated by signal SIGABRT (Abort)
+
+The crashed thread stacktrace:
+Thread 15 Crashed:
+0   libsystem_kernel.dylib        	0x00007fff7c559fce __pthread_kill + 10
+1   libsystem_pthread.dylib       	0x00007fff7c697150 pthread_kill + 333
+2   libsystem_c.dylib             	0x00007fff7c4b632a abort + 127
+3   libsystem_malloc.dylib        	0x00007fff7c5beb28 szone_error + 596
+4   libsystem_malloc.dylib        	0x00007fff7c5c9ea5 tiny_free_no_lock + 2439
+5   libsystem_malloc.dylib        	0x00007fff7c5ca254 free_tiny + 628
+6   libtensorflow_framework.so    	0x00000001091927c2 tensorflow::Tensor::~Tensor() + 50
+7   libtensorflow_framework.so    	0x00000001095d1b2e tensorflow::(anonymous namespace)::ExecutorState::Process(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long) + 5646
+8   libtensorflow_framework.so    	0x00000001095d9d90 std::__1::__function::__func<std::__1::__bind<void (tensorflow::(anonymous namespace)::ExecutorState::*)(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long), tensorflow::(anonymous namespace)::ExecutorState*, tensorflow::(anonymous namespace)::ExecutorState::TaggedNode const&, long long&>, std::__1::allocator<std::__1::__bind<void (tensorflow::(anonymous namespace)::ExecutorState::*)(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long), tensorflow::(anonymous namespace)::ExecutorState*, tensorflow::(anonymous namespace)::ExecutorState::TaggedNode const&, long long&> >, void ()>::operator()() + 80
+9   libtensorflow_framework.so    	0x0000000109277fc2 Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) + 1922
+10  libtensorflow_framework.so    	0x0000000109277734 std::__1::__function::__func<tensorflow::thread::EigenEnvironment::CreateThread(std::__1::function<void ()>)::'lambda'(), std::__1::allocator<tensorflow::thread::EigenEnvironment::CreateThread(std::__1::function<void ()>)::'lambda'()>, void ()>::operator()() + 52
+11  libtensorflow_framework.so    	0x000000010929a9c0 void* std::__1::__thread_proxy<std::__1::tuple<std::__1::function<void ()> > >(void*) + 96
+12  libsystem_pthread.dylib       	0x00007fff7c6946c1 _pthread_body + 340
+13  libsystem_pthread.dylib       	0x00007fff7c69456d _pthread_start + 377
+14  libsystem_pthread.dylib       	0x00007fff7c693c5d thread_start + 13
+
+Alternatively, I sometimes get this crashed thread stacktrace:
+Thread 12 Crashed:
+0   libtensorflow_framework.so    	0x000000010e9fd5b7 tensorflow::Tensor::CheckTypeAndIsAligned(tensorflow::DataType) const + 71
+1   _pywrap_tensorflow_internal.so	0x0000000108b16932 tensorflow::(anonymous namespace)::CheckNumericsOp<Eigen::ThreadPoolDevice, float>::Compute(tensorflow::OpKernelContext*) + 98
+2   libtensorflow_framework.so    	0x000000010ee6d88d tensorflow::ThreadPoolDevice::Compute(tensorflow::OpKernel*, tensorflow::OpKernelContext*) + 301
+3   libtensorflow_framework.so    	0x000000010ee3c82b tensorflow::(anonymous namespace)::ExecutorState::Process(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long) + 4875
+4   libtensorflow_framework.so    	0x000000010ee44d90 std::__1::__function::__func<std::__1::__bind<void (tensorflow::(anonymous namespace)::ExecutorState::*)(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long), tensorflow::(anonymous namespace)::ExecutorState*, tensorflow::(anonymous namespace)::ExecutorState::TaggedNode const&, long long&>, std::__1::allocator<std::__1::__bind<void (tensorflow::(anonymous namespace)::ExecutorState::*)(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long), tensorflow::(anonymous namespace)::ExecutorState*, tensorflow::(anonymous namespace)::ExecutorState::TaggedNode const&, long long&> >, void ()>::operator()() + 80
+5   libtensorflow_framework.so    	0x000000010eae2fc2 Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) + 1922
+6   libtensorflow_framework.so    	0x000000010eae2734 std::__1::__function::__func<tensorflow::thread::EigenEnvironment::CreateThread(std::__1::function<void ()>)::'lambda'(), std::__1::allocator<tensorflow::thread::EigenEnvironment::CreateThread(std::__1::function<void ()>)::'lambda'()>, void ()>::operator()() + 52
+7   libtensorflow_framework.so    	0x000000010eb059c0 void* std::__1::__thread_proxy<std::__1::tuple<std::__1::function<void ()> > >(void*) + 96
+8   libsystem_pthread.dylib       	0x00007fff7c6946c1 _pthread_body + 340
+9   libsystem_pthread.dylib       	0x00007fff7c69456d _pthread_start + 377
+10  libsystem_pthread.dylib       	0x00007fff7c693c5d thread_start + 13
+
+Maybe the main thread stacktrace is also relevant:
+Thread 0:: Dispatch queue: com.apple.main-thread
+0   libsystem_kernel.dylib        	0x00007fff7c559e7e __psynch_cvwait + 10
+1   libsystem_pthread.dylib       	0x00007fff7c695662 _pthread_cond_wait + 732
+2   libc++.1.dylib                	0x00007fff7a449cb0 std::__1::condition_variable::wait(std::__1::unique_lock<std::__1::mutex>&) + 18
+3   _pywrap_tensorflow_internal.so	0x000000010dc2d23b nsync::nsync_mu_semaphore_p_with_deadline(nsync::nsync_semaphore_s_*, timespec) + 363
+4   _pywrap_tensorflow_internal.so	0x000000010dc29c97 nsync::nsync_cv_wait_with_deadline_generic(nsync::nsync_cv_s_*, void*, void (*)(void*), void (*)(void*), timespec, nsync::nsync_note_s_*) + 423
+5   _pywrap_tensorflow_internal.so	0x000000010dc2a3d1 nsync::nsync_cv_wait(nsync::nsync_cv_s_*, nsync::nsync_mu_s_*) + 49
+6   _pywrap_tensorflow_internal.so	0x000000010dc3771b tensorflow::DirectSession::WaitForNotification(tensorflow::Notification*, long long) + 107
+7   _pywrap_tensorflow_internal.so	0x000000010dc332a6 tensorflow::DirectSession::WaitForNotification(tensorflow::DirectSession::RunState*, tensorflow::CancellationManager*, long long) + 38
+8   _pywrap_tensorflow_internal.so	0x000000010dc2fe3e tensorflow::DirectSession::Run(tensorflow::RunOptions const&, std::__1::vector<std::__1::pair<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, tensorflow::Tensor>, std::__1::allocator<std::__1::pair<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, tensorflow::Tensor> > > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > > const&, std::__1::vector<tensorflow::Tensor, std::__1::allocator<tensorflow::Tensor> >*, tensorflow::RunMetadata*) + 3438
+9   _pywrap_tensorflow_internal.so	0x000000010bf0827e TF_Run_Helper(tensorflow::Session*, char const*, TF_Buffer const*, std::__1::vector<std::__1::pair<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, tensorflow::Tensor>, std::__1::allocator<std::__1::pair<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, tensorflow::Tensor> > > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > > const&, TF_Tensor**, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > > const&, TF_Buffer*, TF_Status*) + 750
+10  _pywrap_tensorflow_internal.so	0x000000010bf07eb6 TF_Run + 1286
+11  _pywrap_tensorflow_internal.so	0x000000010bc990b3 tensorflow::TF_Run_wrapper_helper(TF_DeprecatedSession*, char const*, TF_Buffer const*, _object*, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, TF_Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) + 1683
+12  _pywrap_tensorflow_internal.so	0x000000010bc997e4 tensorflow::TF_Run_wrapper(TF_DeprecatedSession*, TF_Buffer const*, _object*, tensorflow::gtl::InlinedVector<char const*, 8> const&, tensorflow::gtl::InlinedVector<char const*, 8> const&, TF_Status*, tensorflow::gtl::InlinedVector<_object*, 8>*, TF_Buffer*) + 52
+13  _pywrap_tensorflow_internal.so	0x000000010bc5b885 _wrap_TF_Run(_object*, _object*) + 1861
+14  org.python.python             	0x000000010797b5dd _PyCFunction_FastCallDict + 166
+...
+
+The full MacOSX crash report with the stacktrace of all threads can be seen here.
+On another run, I also got this stacktrace:
+Crashed Thread:        0  Dispatch queue: com.apple.main-thread
+
+Exception Type:        EXC_BAD_ACCESS (SIGSEGV)
+Exception Codes:       EXC_I386_GPFLT
+Exception Note:        EXC_CORPSE_NOTIFY
+
+Termination Signal:    Segmentation fault: 11
+Termination Reason:    Namespace SIGNAL, Code 0xb
+Terminating Process:   exc handler [0]
+
+Thread 0 Crashed:: Dispatch queue: com.apple.main-thread
+0   libtensorflow_framework.so    	0x0000000115d21a1e tensorflow::(anonymous namespace)::AddArgToSig(tensorflow::NodeDef const&, tensorflow::OpDef_ArgDef const&, tensorflow::gtl::InlinedVector<tensorflow::DataType, 4>*) + 78
+1   libtensorflow_framework.so    	0x0000000115d21942 tensorflow::InOutTypesForNode(tensorflow::NodeDef const&, tensorflow::OpDef const&, tensorflow::gtl::InlinedVector<tensorflow::DataType, 4>*, tensorflow::gtl::InlinedVector<tensorflow::DataType, 4>*) + 82
+2   libtensorflow_framework.so    	0x0000000115d22829 tensorflow::ValidateNodeDef(tensorflow::NodeDef const&, tensorflow::OpDef const&) + 1881
+3   _pywrap_tensorflow_internal.so	0x0000000110f83e16 tensorflow::graph::ValidateGraphDef(tensorflow::GraphDef const&, tensorflow::OpRegistryInterface const&) + 134
+4   _pywrap_tensorflow_internal.so	0x0000000110eef9c3 tensorflow::GraphExecutionState::Extend(tensorflow::GraphDef const&, std::__1::unique_ptr<tensorflow::GraphExecutionState, std::__1::default_delete<tensorflow::GraphExecutionState> >*) const + 2147
+5   _pywrap_tensorflow_internal.so	0x0000000110d18e03 tensorflow::DirectSession::ExtendLocked(tensorflow::GraphDef const&) + 131
+6   _pywrap_tensorflow_internal.so	0x0000000110d18eb3 tensorflow::DirectSession::Extend(tensorflow::GraphDef const&) + 67
+7   _pywrap_tensorflow_internal.so	0x000000010eff04f6 TF_ExtendGraph + 102
+8   _pywrap_tensorflow_internal.so	0x000000010ed43b71 _wrap_TF_ExtendGraph(_object*, _object*) + 273
+9   org.python.python             	0x000000010d57d5dd _PyCFunction_FastCallDict + 166
+...
+
+And yet another stacktrace:
+Thread 13 Crashed:
+0   _pywrap_tensorflow_internal.so	0x0000000107a4016a tensorflow::TTypes<int, 3ul, long>::ConstTensor tensorflow::Tensor::bit_casted_shaped<int, 3ul>(tensorflow::gtl::ArraySlice<long long>) const + 42
+1   _pywrap_tensorflow_internal.so	0x0000000107a45a6e void tensorflow::HandleStridedSliceGradCase<Eigen::ThreadPoolDevice, float, 3>(tensorflow::OpKernelContext*, tensorflow::gtl::ArraySlice<long long> const&, tensorflow::gtl::ArraySlice<long long> const&, tensorflow::gtl::ArraySlice<long long> const&, tensorflow::TensorShape const&, bool, tensorflow::Tensor*) + 302
+2   _pywrap_tensorflow_internal.so	0x00000001079ff7ac tensorflow::StridedSliceGradOp<Eigen::ThreadPoolDevice, float>::Compute(tensorflow::OpKernelContext*) + 2556
+3   libtensorflow_framework.so    	0x000000010644788d tensorflow::ThreadPoolDevice::Compute(tensorflow::OpKernel*, tensorflow::OpKernelContext*) + 301
+4   libtensorflow_framework.so    	0x000000010641682b tensorflow::(anonymous namespace)::ExecutorState::Process(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long) + 4875
+5   libtensorflow_framework.so    	0x000000010641ed90 std::__1::__function::__func<std::__1::__bind<void (tensorflow::(anonymous namespace)::ExecutorState::*)(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long), tensorflow::(anonymous namespace)::ExecutorState*, tensorflow::(anonymous namespace)::ExecutorState::TaggedNode const&, long long&>, std::__1::allocator<std::__1::__bind<void (tensorflow::(anonymous namespace)::ExecutorState::*)(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long), tensorflow::(anonymous namespace)::ExecutorState*, tensorflow::(anonymous namespace)::ExecutorState::TaggedNode const&, long long&> >, void ()>::operator()() + 80
+6   libtensorflow_framework.so    	0x00000001060bcfc2 Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) + 1922
+7   libtensorflow_framework.so    	0x00000001060bc734 std::__1::__function::__func<tensorflow::thread::EigenEnvironment::CreateThread(std::__1::function<void ()>)::'lambda'(), std::__1::allocator<tensorflow::thread::EigenEnvironment::CreateThread(std::__1::function<void ()>)::'lambda'()>, void ()>::operator()() + 52
+8   libtensorflow_framework.so    	0x00000001060df9c0 void* std::__1::__thread_proxy<std::__1::tuple<std::__1::function<void ()> > >(void*) + 96
+9   libsystem_pthread.dylib       	0x00007fff7c6946c1 _pthread_body + 340
+10  libsystem_pthread.dylib       	0x00007fff7c69456d _pthread_start + 377
+11  libsystem_pthread.dylib       	0x00007fff7c693c5d thread_start + 13
+
+Or this:
+Thread 12 Crashed:
+0   libsystem_kernel.dylib        	0x00007fff7c55a1ea __semwait_signal_nocancel + 10
+1   libsystem_c.dylib             	0x00007fff7c460097 nanosleep$NOCANCEL + 188
+2   libsystem_c.dylib             	0x00007fff7c488931 usleep$NOCANCEL + 53
+3   libsystem_c.dylib             	0x00007fff7c4b6334 abort + 137
+4   libsystem_malloc.dylib        	0x00007fff7c5beb28 szone_error + 596
+5   libsystem_malloc.dylib        	0x00007fff7c5b3658 tiny_malloc_from_free_list + 1155
+6   libsystem_malloc.dylib        	0x00007fff7c5b2403 szone_malloc_should_clear + 422
+7   libsystem_malloc.dylib        	0x00007fff7c5b2201 malloc_zone_malloc + 103
+8   libsystem_malloc.dylib        	0x00007fff7c5b150b malloc + 24
+9   libc++abi.dylib               	0x00007fff7a49b628 operator new(unsigned long) + 40
+10  _pywrap_tensorflow_internal.so	0x0000000108c9bc16 tensorflow::ApplyAdamOp<Eigen::ThreadPoolDevice, float>::Compute(tensorflow::OpKernelContext*) + 70
+11  libtensorflow_framework.so    	0x000000010e45488d tensorflow::ThreadPoolDevice::Compute(tensorflow::OpKernel*, tensorflow::OpKernelContext*) + 301
+12  libtensorflow_framework.so    	0x000000010e42382b tensorflow::(anonymous namespace)::ExecutorState::Process(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long) + 4875
+13  libtensorflow_framework.so    	0x000000010e42bd90 std::__1::__function::__func<std::__1::__bind<void (tensorflow::(anonymous namespace)::ExecutorState::*)(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long), tensorflow::(anonymous namespace)::ExecutorState*, tensorflow::(anonymous namespace)::ExecutorState::TaggedNode const&, long long&>, std::__1::allocator<std::__1::__bind<void (tensorflow::(anonymous namespace)::ExecutorState::*)(tensorflow::(anonymous namespace)::ExecutorState::TaggedNode, long long), tensorflow::(anonymous namespace)::ExecutorState*, tensorflow::(anonymous namespace)::ExecutorState::TaggedNode const&, long long&> >, void ()>::operator()() + 80
+14  libtensorflow_framework.so    	0x000000010e0c9fc2 Eigen::NonBlockingThreadPoolTempl<tensorflow::thread::EigenEnvironment>::WorkerLoop(int) + 1922
+15  libtensorflow_framework.so    	0x000000010e0c9734 std::__1::__function::__func<tensorflow::thread::EigenEnvironment::CreateThread(std::__1::function<void ()>)::'lambda'(), std::__1::allocator<tensorflow::thread::EigenEnvironment::CreateThread(std::__1::function<void ()>)::'lambda'()>, void ()>::operator()() + 52
+16  libtensorflow_framework.so    	0x000000010e0ec9c0 void* std::__1::__thread_proxy<std::__1::tuple<std::__1::function<void ()> > >(void*) + 96
+17  libsystem_pthread.dylib       	0x00007fff7c6946c1 _pthread_body + 340
+18  libsystem_pthread.dylib       	0x00007fff7c69456d _pthread_start + 377
+19  libsystem_pthread.dylib       	0x00007fff7c693c5d thread_start + 13
+
+This might be related to our own C++ operation which has worked fine so far (we used it since TF 0.8), although of course this might be triggered only now by some race condition. Is there anything new I need to take care of? I think this NSync stuff is new?

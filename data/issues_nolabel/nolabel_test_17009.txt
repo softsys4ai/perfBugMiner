@@ -1,0 +1,124 @@
+Failed to call cudnnRNNBackwardData: CUDNN_STATUS_INTERNAL_ERROR
+
+System information
+
+Have I written custom code: Yes
+OS Platform and Distribution: Ubuntu 16.04
+TensorFlow installed from: binary
+TensorFlow version: 1.4.1
+Python version: 3.5.2
+Bazel version: Not compiled from source
+GCC/Compiler version: Not compiled from source
+CUDA/cuDNN version: 8.0/v6
+GPU model and memory: GeForce GTX 1080 (8GB x 4)
+Exact command to reproduce: Code as per below
+
+The code starts training and after an arbitrary number of iterations on batches, it gives the following error:
+2018-02-14 23:51:31.591963: E tensorflow/stream_executor/cuda/cuda_event.cc:49] Error polling for event status: failed to query event: CUDA_ERROR_ILLEGAL_ADDRESS
+2018-02-14 23:51:31.592000: F tensorflow/core/common_runtime/gpu/gpu_event_mgr.cc:203] Unexpected Event status: 1
+2018-02-14 23:51:31.592023: E tensorflow/stream_executor/cuda/cuda_dnn.cc:1679] Failed to call cudnnRNNBackwardData: CUDNN_STATUS_INTERNAL_ERROR
+Aborted (core dumped)
+
+I'm using cudnn_gru in a tf.while_loop control flow operation and using initializers from outside the tf.while scope since variables aren't allowed to be instantiated within the tf.while scope:
+import tensorflow as tf
+
+gru_fw = tf.contrib.cudnn_rnn.CudnnGRU(num_layers=1, num_units=150, input_size=500)
+gru_fw_1 = tf.contrib.cudnn_rnn.CudnnGRU(num_layers=1, num_units=150, input_size=1800)
+e = tf.random_uniform([gru_fw.params_size()], -0.1, 0.1)
+f = tf.random_uniform([gru_fw.params_size()], -0.1, 0.1)
+g = tf.zeros([1, 4, 150])
+h = tf.zeros([1, 4, 150])
+zeros_i = tf.zeros([4, 150])
+
+class cudnn_gru:
+	def __init__(self, num_layers, num_units, batch_size, input_size, keep_prob=1.0, is_train=None, scope=None):
+		self.num_layers = num_layers
+		self.grus = []
+		self.params = []
+		self.inits = []
+		self.dropout_mask = []
+		for layer in range(num_layers):
+			input_size_ = input_size if layer == 0 else 2 * num_units
+			gru_fw = tf.contrib.cudnn_rnn.CudnnGRU(
+				num_layers=1, num_units=num_units, input_size=input_size_)
+			gru_bw = tf.contrib.cudnn_rnn.CudnnGRU(
+				num_layers=1, num_units=num_units, input_size=input_size_)
+			with tf.variable_scope('CUDNN_GRU', reuse=tf.AUTO_REUSE):
+				param_fw = tf.get_variable("param_fw",initializer=e,validate_shape=False)
+				param_bw = tf.get_variable("param_bw",initializer=f,validate_shape=False)
+				init_fw = tf.get_variable("init_fw", initializer=g)
+				init_bw = tf.get_variable("init_bw", initializer=h)
+	def __call__(self, inputs, seq_len, keep_prob=1.0, is_train=None, concat_layers=True):
+		outputs = [tf.transpose(inputs, [1, 0, 2])]
+		for layer in range(self.num_layers):
+			gru_fw, gru_bw = self.grus[layer]
+			param_fw, param_bw = self.params[layer]
+			init_fw, init_bw = self.inits[layer]
+			mask_fw, mask_bw = self.dropout_mask[layer]
+			with tf.variable_scope("fw"):
+				out_fw, _ = gru_fw(outputs[-1] * mask_fw, init_fw, param_fw)
+			with tf.variable_scope("bw"):
+				inputs_bw = tf.reverse_sequence(
+					outputs[-1] * mask_bw, seq_lengths=seq_len, seq_dim=0, batch_dim=1)
+				out_bw, _ = gru_bw(inputs_bw, init_bw, param_bw)
+				out_bw = tf.reverse_sequence(
+					out_bw, seq_lengths=seq_len, seq_dim=0, batch_dim=1)
+			outputs.append(tf.concat([out_fw, out_bw], axis=2))
+		if concat_layers:
+			res = tf.concat(outputs[1:], axis=2)
+		else:
+			res = outputs[-1]
+		res = tf.transpose(res, [1, 0, 2])
+		return res
+
+class native_gru:
+	def __init__(self, num_layers, num_units, batch_size, input_size, keep_prob=1.0, is_train=None, scope="native_gru"):
+		self.num_layers = num_layers
+		self.grus = []
+		self.inits = []
+		self.dropout_mask = []
+		self.scope = scope
+		for layer in range(num_layers):
+			input_size_ = input_size if layer == 0 else 2 * num_units
+			gru_fw = tf.contrib.rnn.GRUCell(num_units)
+			gru_bw = tf.contrib.rnn.GRUCell(num_units)
+			with tf.variable_scope('native_GRU', reuse=tf.AUTO_REUSE):
+
+				init_fw = tf.get_variable("init_fw", initializer=zeros_i)
+				init_bw = tf.get_variable("init_bw", initializer=zeros_i)
+				
+			#init_fw = tf.Variable(tf.zeros([batch_size, num_units]))
+			#init_bw = tf.Variable(tf.zeros([batch_size, num_units]))
+			mask_fw = dropout(tf.ones([batch_size, 1, input_size_], dtype=tf.float32),
+							  keep_prob=keep_prob, is_train=is_train, mode=None)
+			mask_bw = dropout(tf.ones([batch_size, 1, input_size_], dtype=tf.float32),
+							  keep_prob=keep_prob, is_train=is_train, mode=None)
+			self.grus.append((gru_fw, gru_bw, ))
+			self.inits.append((init_fw, init_bw, ))
+			self.dropout_mask.append((mask_fw, mask_bw, ))
+
+	def __call__(self, inputs, seq_len, keep_prob=1.0, is_train=None, concat_layers=True):
+		outputs = [inputs]
+		with tf.variable_scope(self.scope):
+			for layer in range(self.num_layers):
+				gru_fw, gru_bw = self.grus[layer]
+				init_fw, init_bw = self.inits[layer]
+				mask_fw, mask_bw = self.dropout_mask[layer]
+				with tf.variable_scope("fw_{}".format(layer)):
+					out_fw, _ = tf.nn.dynamic_rnn(
+						gru_fw, outputs[-1] * mask_fw, seq_len, initial_state=init_fw, dtype=tf.float32)
+				with tf.variable_scope("bw_{}".format(layer)):
+					inputs_bw = tf.reverse_sequence(
+						outputs[-1] * mask_bw, seq_lengths=seq_len, seq_dim=1, batch_dim=0)
+					out_bw, _ = tf.nn.dynamic_rnn(
+						gru_fw, inputs_bw, seq_len, initial_state=init_bw, dtype=tf.float32)
+					out_bw = tf.reverse_sequence(
+						out_bw, seq_lengths=seq_len, seq_dim=1, batch_dim=0)
+				outputs.append(tf.concat([out_fw, out_bw], axis=2))
+		if concat_layers:
+			res = tf.concat(outputs[1:], axis=2)
+		else:
+			res = outputs[-1]
+		return res
+
+This has not happened before, when the project structure was sequential and not within a control flow mechanism. Also, if I change the implementation to use native GRU instead of cudnn_gru, it works perfectly fine.

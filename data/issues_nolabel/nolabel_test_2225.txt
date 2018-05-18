@@ -1,0 +1,103 @@
+InvalidArgumentError: No OpKernel T=DT_INT32 for log, exp, etc.
+
+Environment info
+Operating System: Mac/Ubuntu
+Installed version of CUDA and cuDNN: None
+commit b8883a2
+Steps to reproduce
+Thanks to http://stackoverflow.com/questions/37027762:
+import tensorflow as tf
+import numpy as np
+x = np.array([1], dtype=np.int32)
+sess = tf.Session()
+print(sess.run(tf.log(x)))
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+https://www.tensorflow.org/versions/r0.8/api_docs/python/math_ops.html#log says "x: A Tensor. Must be one of the following types: float32, float64, int32, complex64, int64", but int32 and in64 throws InvalidArgumentError:
+InvalidArgumentError: No OpKernel was registered to support Op 'Log' with these attrs
+[[Node: Log_4 = LogT=DT_INT32]].
+I haven't checked all, but exp, cos and sin have the same issue.
+I added a simple test:
+--- a/tensorflow/python/ops/math_ops_test.py
++++ b/tensorflow/python/ops/math_ops_test.py
+@@ -28,6 +28,21 @@ from tensorflow.python.platform import googletest
+ exp = np.exp
+ log = np.log
+
++class LogTest(test_util.TensorFlowTestCase):
++
++  def testLog(self):
++    x = np.array([1], dtype=np.int32)
++    with self.test_session():
++      y_tf = math_ops.log(x).eval()
++      self.assertEqual(y_tf, 0)
+
+
+which clearly reveals this issue:
+exec ${PAGER:-/usr/bin/less} "$0" || exit 1
+-----------------------------------------------------------------------------
+..E..........
+======================================================================
+ERROR: testLog (__main__.LogTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/ops/math_ops_test.py", line 44, in testLog
+    y_tf = math_ops.log(x).eval()
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/framework/ops.py", line 502, in eval
+    return _eval_using_default_session(self, feed_dict, self.graph, session)
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/framework/ops.py", line 3352, in _eval_using_default_session
+    return session.run(tensors, feed_dict)
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/client/session.py", line 343, in run
+    run_metadata_ptr)
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/client/session.py", line 578, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/client/session.py", line 651, in _do_run
+    target_list, options, run_metadata)
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/client/session.py", line 673, in _do_call
+    e.code)
+InvalidArgumentError: No OpKernel was registered to support Op 'Log' with these attrs
+     [[Node: Log = Log[T=DT_INT32, _device="/device:CPU:0"](Log/x)]]
+Caused by op u'Log', defined at:
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/ops/math_ops_test.py", line 110, in <module>
+    googletest.main()
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/platform/googletest.py", line 84, in main
+    benchmark.benchmarks_main(true_main=g_main)
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/platform/benchmark.py", line 301, in benchmarks_main
+    true_main()
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/platform/googletest.py", line 58, in g_main
+    return unittest_main(*args, **kwargs)
+  File "/usr/lib/python2.7/unittest/main.py", line 95, in __init__
+    self.runTests()
+  File "/usr/lib/python2.7/unittest/main.py", line 232, in runTests
+    self.result = testRunner.run(self.test)
+  File "/usr/lib/python2.7/unittest/runner.py", line 151, in run
+    test(result)
+  File "/usr/lib/python2.7/unittest/suite.py", line 70, in __call__
+    return self.run(*args, **kwds)
+  File "/usr/lib/python2.7/unittest/suite.py", line 108, in run
+    test(result)
+  File "/usr/lib/python2.7/unittest/suite.py", line 70, in __call__
+    return self.run(*args, **kwds)
+  File "/usr/lib/python2.7/unittest/suite.py", line 108, in run
+    test(result)
+  File "/usr/lib/python2.7/unittest/case.py", line 395, in __call__
+    return self.run(*args, **kwds)
+  File "/usr/lib/python2.7/unittest/case.py", line 331, in run
+    testMethod()
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/ops/math_ops_test.py", line 44, in testLog
+    y_tf = math_ops.log(x).eval()
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/ops/gen_math_ops.py", line 843, in log
+    return _op_def_lib.apply_op("Log", x=x, name=name)
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/ops/op_def_library.py", line 694, in apply_op
+    op_def=op_def)
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/framework/ops.py", line 2153, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/hunkim/.cache/bazel/_bazel_hunkim/6785122ce03f8c29e79889062219c7d3/tensorflow/bazel-out/local-fastbuild/bin/tensorflow/python/math_ops_test.runfiles/tensorflow/python/framework/ops.py", line 1153, in __init__
+    self._traceback = _extract_stack()
+
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.144s
+
+FAILED (errors=1)

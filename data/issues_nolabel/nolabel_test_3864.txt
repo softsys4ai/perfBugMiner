@@ -1,0 +1,116 @@
+Tensorflow r.0.10, CUDA 8.0, cuDNN 5.1 core dumped, CUDA_ERROR_OUT_OF_MEMORY
+
+On running a benchmark with MNIST data on a CNN (source below) tensorflow first complains about memory allocation and then appears to have trouble using cuDNN 5.1
+Detailed script and output at the bottom.
+Problem appears to affect cuDNN specifically as I could run CUDA examples as well as matmul on tensorflow without problems.
+Environment info
+Operating System: ubuntu 16.04
+uname -a
+Linux  4.4.0-34-generic #53-Ubuntu SMP Wed Jul 27 16:06:39 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+Installed version of CUDA and cuDNN:
+ls -l $CUDA_HOME/lib64/libcud*
+-rw-r--r-- 1 root root   560184 Aug 15 22:51 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Aug 15 22:51 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root       19 Aug 15 22:51 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.27
+-rwxr-xr-x 1 root root   394472 Aug 15 22:51 /usr/local/cuda/lib64/libcudart.so.8.0.27
+-rw-r--r-- 1 root root   737516 Aug 15 22:51 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 root root       13 Aug 15 23:39 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 root root       17 Aug 15 23:39 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+-rwxr-xr-x 1 root root 79337624 Aug 15 23:39 /usr/local/cuda/lib64/libcudnn.so.5.1.5
+-rw-r--r-- 1 root root 69756172 Aug 15 23:39 /usr/local/cuda/lib64/libcudnn_static.a
+Environment variables
+echo $LD_LIBRARY_PATH
+/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64
+echo $CUDA_HOME
+/usr/local/cuda
+echo $PATH
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/local/cuda/bin/:/usr/local/cuda/bin/
+Tensorflow version
+Compiled from source, r0.10, built into pip package and installed this pip wheel
+Configured with cuDNN path and version set to system default
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+see /// OUTPUT /// at the end
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+n.a.
+version r0.10
+The output of bazel version
+bazel version
+Build label: 0.3.1-2016-08-15 (@936c2c2)
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Sun Aug 14 23:07:32 2016 (1471216052)
+Build timestamp: 1471216052
+Build timestamp as int: 1471216052
+
+Steps to reproduce: run this script
+import numpy
+from keras.datasets import mnist
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import Dropout
+from keras.layers import Flatten
+from keras.layers.convolutional import Convolution2D
+from keras.layers.convolutional import MaxPooling2D
+from keras.utils import np_utils
+fix random seed for reproducibility
+seed = 7
+numpy.random.seed(seed)
+load data
+(X_train, y_train), (X_test, y_test) = mnist.load_data()
+reshape to be [samples][channels][width][height]
+X_train = X_train.reshape(X_train.shape[0], 1, 28, 28).astype('float32')
+X_test = X_test.reshape(X_test.shape[0], 1, 28, 28).astype('float32')
+normalize inputs from 0-255 to 0-1
+X_train = X_train / 255
+X_test = X_test / 255
+one hot encode outputs
+y_train = np_utils.to_categorical(y_train)
+y_test = np_utils.to_categorical(y_test)
+num_classes = y_test.shape[1]
+define a simple CNN model
+def baseline_model():
+##### create model
+model = Sequential()
+model.add(Convolution2D(32, 5, 5, border_mode='valid', input_shape=(1, 28, 28), activation='relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+model.add(Dropout(0.2))
+model.add(Flatten())
+model.add(Dense(128, activation='relu'))
+model.add(Dense(num_classes, activation='softmax'))
+##### Compile model
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+return model
+build the model
+model = baseline_model()
+Fit the model
+model.fit(X_train, y_train, validation_data=(X_test, y_test), nb_epoch=10, batch_size=200, verbose=2)
+Final evaluation of the model
+scores = model.evaluate(X_test, y_test, verbose=0)
+print("CNN Error: %.2f%%" % (100-scores[1]*100))
+///////////// OUTPUT /////////////////
+Using TensorFlow backend.
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so.8.0 locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties:
+name: GeForce GTX 1070
+major: 6 minor: 1 memoryClockRate (GHz) 1.683
+pciBusID 0000:01:00.0
+Total memory: 7.91GiB
+Free memory: 148.69MiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:840] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1070, pci bus id: 0000:01:00.0)
+E tensorflow/stream_executor/cuda/cuda_driver.cc:965] failed to allocate 148.69M (155910144 bytes) from device: CUDA_ERROR_OUT_OF_MEMORY
+Train on 60000 samples, validate on 10000 samples
+Epoch 1/10
+E tensorflow/stream_executor/cuda/cuda_dnn.cc:354] could not create cudnn handle: CUDNN_STATUS_INTERNAL_ERROR
+E tensorflow/stream_executor/cuda/cuda_dnn.cc:321] could not destroy cudnn handle: CUDNN_STATUS_BAD_PARAM
+F tensorflow/core/kernels/conv_ops.cc:457] Check failed: stream->parent()->GetConvolveAlgorithms(&algorithms)
+Aborted (core dumped)

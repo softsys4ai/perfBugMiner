@@ -1,0 +1,14 @@
+sess.run hangs forever despite operation_timeout_in_ms being set
+
+sess.run waits indefinitely on worker when one of the parameter server machines in the cluster fails despite operation_timeout_in_ms being set.
+Because waiting happens inside TensorFlow runtime, there's no way for client to regain control to provide a helpful error message/fix the situation.
+sess=tf.Session(config=...operation_timeout_in_ms=1000)  # succeeds even though TF cluster is partially dead
+sess.run(remote_op)       # hangs forever
+
+You see this during worker's session.run
+2017-11-11 16:06:12.524442: I tensorflow/core/distributed_runtime/master.cc:221] CreateSession still waiting for response from worker: /job:ps/replica:0/task:0
+2017-11-11 16:06:22.525582: I tensorflow/core/distributed_runtime/master.cc:221] CreateSession still waiting for response from worker: /job:ps/replica:0/task:0
+2017-11-11 16:06:32.525718: I tensorflow/core/distributed_runtime/master.cc:221] CreateSession still waiting for response from worker: /job:ps/replica:0/task:0
+
+Suggestion: since CreateSession happens during session.run, make it subject to .operation_timeout_in_ms deadline
+cc @mrry

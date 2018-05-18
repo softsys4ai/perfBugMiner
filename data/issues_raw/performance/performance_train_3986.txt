@@ -1,0 +1,95 @@
+Freeze graph: node is not in graph (even though it's been named)
+
+Environment info
+Operating System: Ubuntu 14.04 LTS 64-bit
+Installed version of CUDA and cuDNN: none
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD): fc91629
+The output of bazel version
+
+Build label: 0.3.0
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Fri Jun 10 11:38:23 2016 (1465558703)
+Build timestamp: 1465558703
+Build timestamp as int: 1465558703
+
+Steps to reproduce
+
+Copy the IPython Notebook for Assignment 6 of Udacity's deep learning course (here)
+Change saved_sample_output = tf.Variable(tf.zeros([1, num_nodes])) to saved_sample_output = tf.Variable(tf.zeros([1, num_nodes]), name="saved_sample_output")
+Modify the code like so:
+
+with tf.Session(graph=graph) as session:
+  tf.initialize_all_variables().run()
+  print('Initialized')
+  mean_loss = 0
+  # code omitted (no changes)
+  # new code below:
+  saver = tf.train.Saver(tf.all_variables())
+  saver.save(session, '/home/me/Documents/checkpoint.ckpt', write_meta_graph=False)
+  tf.train.write_graph(graph.as_graph_def(), '/home/me/Documents', 'graph.pb')
+
+Run.
+Verify that checkpoint.ckpt and graph.pb have been successfully created in the directory.
+In the tensorflow source directory, run:
+
+bazel build tensorflow/python/tools:freeze_graph && bazel-bin/tensorflow/python/tools/freeze_graph --input_graph=/home/me/Documents/graph.pb --input_checkpoint=/home/me/Documents/checkpoint.ckpt --output_graph=/home/me/Documents/frozen_graph.pb --output_node_names=saved_sample_output
+
+What have you tried?
+Checked the graph.pb file to make sure that node had actually been named properly. Seems like it was:
+# other stuff
+node {
+  name: "saved_sample_output"
+  op: "Variable"
+  attr {
+    key: "container"
+    value {
+      s: ""
+    }
+  }
+  attr {
+    key: "dtype"
+    value {
+      type: DT_FLOAT
+    }
+  }
+  attr {
+    key: "shape"
+    value {
+      shape {
+        dim {
+          size: 1
+        }
+        dim {
+          size: 64
+        }
+      }
+    }
+  }
+  attr {
+    key: "shared_name"
+    value {
+      s: ""
+    }
+  }
+}
+# etc.
+
+I'm pretty much stumped with this one since this issue on StackOverflow says to pass in a name parameter for the node you want, which is what I did, to no avail (even without the name parameter, it still gave the same error).
+Edit: Got freeze_graph to run successfully with the sample_prediction node (changed sample_prediction = tf.nn.softmax(tf.nn.xw_plus_b(sample_output, w, b)) to sample_prediction = tf.nn.softmax(tf.nn.xw_plus_b(sample_output, w, b), name="sample_prediction")). However, I still haven't figured out why that worked, and this didn't.
+Logs or other output that would be helpful
+Traceback (most recent call last):
+  File "/home/me/tf_m/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/tools/freeze_graph.py", line 134, in <module>
+    tf.app.run()
+  File "/home/me/tf_m/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/platform/app.py", line 30, in run
+    sys.exit(main(sys.argv))
+  File "/home/me/tf_m/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/tools/freeze_graph.py", line 131, in main
+    FLAGS.output_graph, FLAGS.clear_devices, FLAGS.initializer_nodes)
+  File "/home/me/tf_m/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/tools/freeze_graph.py", line 120, in freeze_graph
+    sess, input_graph_def, output_node_names.split(","))
+  File "/home/me/tf_m/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/framework/graph_util.py", line 232, in convert_variables_to_constants
+    inference_graph = extract_sub_graph(input_graph_def, output_node_names)
+  File "/home/me/tf_m/tensorflow/bazel-bin/tensorflow/python/tools/freeze_graph.runfiles/org_tensorflow/tensorflow/python/framework/graph_util.py", line 156, in extract_sub_graph
+    assert d in name_to_node_map, "%s is not in graph" % d
+AssertionError: saved_sample_output is not in graph

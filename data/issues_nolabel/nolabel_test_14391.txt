@@ -1,0 +1,59 @@
+MonitoredTrainingSession does not initialize after restore
+
+Describe the problem
+local_init_op can be passed to the SessionManager through the scaffold argument in MonitoredTrainingSession. From the doc's from session manager: The local_init_op is an Operation that is run always after a new session was created. This does not work as expected in the below example.
+Exact command to reproduce
+global_step = tf.contrib.framework.get_or_create_global_step()
+a1 = tf.Variable([1,2,3], name='a1')
+a2 = tf.Variable([1,2,3], name='a2')
+train = tf.assign(global_step, global_step +1)
+saver = tf.train.Saver(var_list=[a1],
+                        reshape = False,
+                        sharded = False,
+                        max_to_keep = 100,
+                        keep_checkpoint_every_n_hours = 10000.0,
+                        name = "CheckpointSaver",
+                        restore_sequentially = False,
+                        saver_def = None,
+                        builder = None,
+                        defer_build = False,
+                        allow_empty = False,
+                        write_version = tf.train.SaverDef.V2,
+                        pad_step_number = False,
+                        save_relative_paths = False)
+hooks = [tf.train.CheckpointSaverHook(checkpoint_dir = "ckpt/",
+                         save_secs = None,
+                         save_steps = 1,
+                         saver = saver,
+                         checkpoint_basename = 'model_to_test.ckpt',
+                         scaffold = None,
+                         listeners = None)]
+scaffold = tf.train.Scaffold(saver=saver, local_init_op = tf.variables_initializer([a2]))
+with tf.train.MonitoredTrainingSession(master = '',
+                         is_chief = True,
+                         checkpoint_dir = "ckpt/",
+                         scaffold=scaffold,
+                         hooks = hooks,
+                         chief_only_hooks = [],
+                         save_checkpoint_secs=None,
+                         save_summaries_steps=None,
+                         save_summaries_secs=None,
+                         config=None,
+                         stop_grace_period_secs=120,
+                         log_step_count_steps=100) as mon_sess:
+    print(mon_sess.run(a1))
+    print(mon_sess.run(a2))
+    mon_sess.run(train)
+
+The first time you run this, two variables a1 and a2 will be initialized by the implied (default) initializer from the MonitoredTrainingSession and a checkpoint file will be written to disk for only a1; expected behavior, no errors. The second time you run this, it should load a1 from the previous checkpoint and initialize a2 through the local_init_op given through the scaffold. But it doesn't, instead:
+
+RuntimeError: Init operations did not make model ready for local_init.  Init op: group_deps, init fn: None, error: Variables not initialized: global_step, a2
+
+A hack that circumvents the problem by not using local_init_op is suggested here (as well as a reiteration of the expected behavior):
+https://stackoverflow.com/questions/43336553/how-to-use-tf-train-monitoredtrainingsession-to-restore-only-certain-variables
+System information
+
+TensorFlow version (use command below):
+('v1.2.0-rc2-21-g12f033d', '1.2.0')
+Python version:
+2.7.10

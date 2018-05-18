@@ -1,0 +1,52 @@
+Memory leak when using `tf.layers`
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.2.1
+Python version: 3.5
+Exact command to reproduce:
+
+import os
+
+import tensorflow as tf
+import matplotlib.pyplot as plt
+import numpy as np
+import psutil
+
+
+def memory():
+    pid = os.getpid()
+    py = psutil.Process(pid)
+    memory_use = py.memory_info()[0] / 2. ** 30
+    return memory_use
+
+
+memory_usage = []
+for i in range(1000):
+    memory_usage.append(memory())
+    print("iter", i, memory_usage[-1])
+
+    with tf.Graph().as_default():
+        x = tf.constant(np.ones((100, 1000), dtype=np.float32))
+
+        # memory leak
+        x = tf.layers.dense(x, units=1000)
+
+        # no memory leak
+        # with tf.variable_scope("layer", reuse=False):
+        #     x = tf.matmul(x, tf.get_variable(
+        #         "w", shape=(1000, 1000), dtype=tf.float32,
+        #         initializer=tf.ones_initializer()))
+
+plt.figure()
+plt.plot(memory_usage)
+plt.xlabel("iterations")
+plt.ylabel("memory usage")
+plt.show()
+Describe the problem
+There is some kind of memory leak when repeatedly building graphs containing tf.layers elements.  The example above shows the memory usage comparing what I think should be roughly equivalent implementations, one using tf.layers.dense and the other using manually created kernels/matmul ops.  When using tf.layers.dense the memory usage continually increases, whereas the manual approach shows memory being periodically cleaned up by garbage collection.  So my guess would be that there is some internal reference to the tf.layers elements that is preventing them from being garbage collected.
+not using tf.layers.dense:
+
+using tf.layers.dense:

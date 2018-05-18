@@ -1,0 +1,75 @@
+Export Model For Serving But Tensor Type Dismatch
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+I am trying to export the model for serving , but it's report type error about inputs tensor.
+but in the export and predict part , the inputs are the same type.
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+here is a sample code for my exporting
+            named_graph_signature = {
+                'inputs': exporter.generic_signature({
+                              'sparse_index': tf.placeholder(tf.int64, name="feature_index")
+                              'sparse_ids': tf.placeholder(tf.int64,name = "feature_ids"),
+                              'sparse_values':tf.placeholder(tf.int64, name ="feature_values"),
+                              'sparse_shape':tf.placeholder(tf.int64, name="feature_shape")
+                }),
+                'outputs': exporter.generic_signature({
+                    'prob': inference_softmax
+                })}
+            model_exporter.init(
+                sess.graph.as_graph_def(),
+                #default_graph_signature=named_graph_signature,
+                named_graph_signatures=named_graph_signature,
+                init_op=init_op)
+            model_exporter.export(export_path, tf.constant(export_version), sess)
+            print('Done exporting!')
+
+here is my code for predicting
+  ins = "0 142635:1 250810:1 335229:1 375278:1 392970:1 506983:1 554566:1 631968:1 647823:1 658803:1 733446:1 856305:1 868202:1"
+  FEATURE_SIZE = 1000000
+  tokens = ins.split(" ")
+  feature_num = 0
+  feature_ids = []
+  feature_values = []
+  feature_index = []
+
+  for feature in tokens[1:]:
+      feature_id, feature_value = feature.split(":")
+      feature_ids.append(int(feature_id))
+      feature_values.append(float(feature_value))
+      feature_index.append([1, feature_num])
+      feature_num += 1
+
+  feature_shape = [1, FEATURE_SIZE]
+
+  sparse_index = tf.contrib.util.make_tensor_proto(numpy.asarray(feature_index), dtype=tf.int64)
+  sparse_ids = tf.contrib.util.make_tensor_proto(numpy.asarray(feature_ids), dtype=tf.int64)
+  sparse_values = tf.contrib.util.make_tensor_proto(numpy.asarray(feature_values), dtype=tf.float32)
+  sparse_shape= tf.contrib.util.make_tensor_proto(numpy.asarray(feature_shape), dtype=tf.int64)
+
+  channel = implementations.insecure_channel(host, port)
+  stub = prediction_service_pb2.beta_create_PredictionService_stub(channel)
+  request = predict_pb2.PredictRequest()
+  request.model_spec.name = model_name
+  request.model_spec.version.value = model_version
+  print model_name,model_version
+
+  request.inputs['sparse_index'].CopyFrom(sparse_index)
+  request.inputs['sparse_ids'].CopyFrom(sparse_ids)
+  request.inputs['sparse_values'].CopyFrom(sparse_values)
+  request.inputs['sparse_shape'].CopyFrom(sparse_shape)
+  # Send request
+
+  result = stub.Predict(request, request_timeout)
+
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+Traceback (most recent call last):
+  File "run.py", line 63, in <module>
+    main()
+  File "run.py", line 59, in main
+    result = stub.Predict(request, request_timeout)
+  File "/home/serving/.local/lib/python2.7/site-packages/grpc/beta/_client_adaptations.py", line 305, in __call__
+    self._request_serializer, self._response_deserializer)
+  File "/home/serving/.local/lib/python2.7/site-packages/grpc/beta/_client_adaptations.py", line 203, in _blocking_unary_unary
+    raise _abortion_error(rpc_error_call)
+grpc.framework.interfaces.face.face.AbortionError: AbortionError(code=StatusCode.INVALID_ARGUMENT, details="input size does not match signature")

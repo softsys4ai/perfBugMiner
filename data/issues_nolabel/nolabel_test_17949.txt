@@ -1,0 +1,61 @@
+incorrect description of num_sampled parameter in tf.nn.nce_loss() function: num_sampled is number of negative examples per 1 positive example (NOT per batch)
+
+Hi all,
+Looks like parameter num_sampled in  tf.nn.nce_loss function defines the number of negative examples per a positive example but not per a batch as described in tensorflow documentation (https://www.tensorflow.org/api_docs/python/tf/nn/nce_loss)
+(see the next code)
+import tensorflow as tf
+import numpy as np
+# `_compute_sampled_logits` is invoked in nce_loss to generate negative sample and calculate logits
+from tensorflow.python.ops.nn_impl import _compute_sampled_logits
+
+embedding_size = 10
+words_number = 300
+batch_size = 3
+num_sampled = 3
+
+graph = tf.Graph()
+with graph.as_default():
+    # Input data.
+    train_inputs = tf.placeholder(tf.int32, shape=[batch_size])
+    train_labels = tf.placeholder(tf.int64, shape=[batch_size, 1])
+
+    with tf.device('/cpu:0'):
+        embeddings = tf.Variable(
+                tf.random_uniform([words_number, embedding_size], -4., 4.))
+        embed = tf.nn.embedding_lookup(embeddings, train_inputs)
+        nce_weights = tf.Variable(
+                tf.random_uniform([words_number, embedding_size], -4., 4.))
+        nce_biases = tf.Variable(tf.zeros([words_number]))
+        
+    logits, labels = _compute_sampled_logits(
+                       weights=nce_weights,
+                       biases=nce_biases,
+                       inputs=embed,
+                       labels=train_labels,
+                       num_true=1,
+                       num_sampled=num_sampled,
+                       num_classes=words_number,
+                       remove_accidental_hits = False)
+    init = tf.global_variables_initializer()
+
+
+session = tf.InteractiveSession(graph=graph)
+init.run(session=session)
+
+batch_inputs = np.array([0,1,2], dtype=np.int32)
+batch_labels = np.array([[3],[4],[5]], dtype=np.int32)
+
+feed_dict = {train_inputs : batch_inputs, train_labels : batch_labels}
+logits_val, labels_val = session.run([logits, labels], feed_dict=feed_dict)
+
+print ("logits_val = {}".format(logits_val))
+print ("labels_val = {}".format(labels_val))
+
+
+As a result, _compute_sampled_logits function generated num_sampled examples per 1 positive example:
+logits_val = [[ -8.18727493   2.02518415  14.18676853   0.51900673]
+ [ -8.97232056   5.60003376   4.52866602   3.68161726]
+ [ -0.36226368  -5.84330416  -3.39891291   5.58423615]]
+labels_val = [[ 1.  0.  0.  0.]
+ [ 1.  0.  0.  0.]
+ [ 1.  0.  0.  0.]]

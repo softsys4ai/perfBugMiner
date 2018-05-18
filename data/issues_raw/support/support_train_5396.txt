@@ -1,0 +1,55 @@
+tf.train.range_input_producer(epoch_size, shuffle=True) does not terminate
+
+Hey guys,
+While working on language modeling using PTB dataset  (as shown in TensorFlow tutorial) I had an issue with ptb_producer(see on StackOverflow).
+Long story short, it turns out that ptb_producer never terminates.
+To debug, I tried to 'manually' run ptb_producer with the code below.
+import tensorflow as tf
+
+learning_rate = 1.0
+num_layers = 2
+num_steps = 20
+hidden_size = 2
+epochs = 50
+batch_size = 20
+vocab_size = 10000
+
+# Loading data
+import tensorflow.models.rnn.ptb.reader as reader
+
+ptb_data_path = '<path>/tensorflow/ptb_data/simple-examples/data/'
+(train, valid, test, _) = reader.ptb_raw_data(ptb_data_path)
+
+raw_data = train
+name = None
+
+# Exact content of PTBProducer
+with tf.name_scope(name, "PTBProducer", [raw_data, batch_size, num_steps]):
+    raw_data = tf.convert_to_tensor(raw_data, name="raw_data", dtype=tf.int32)
+
+    data_len = tf.size(raw_data)
+    batch_len = data_len // batch_size
+    data = tf.reshape(raw_data[0 : batch_size * batch_len],
+                      [batch_size, batch_len])
+
+    epoch_size = (batch_len - 1) // num_steps
+    assertion = tf.assert_positive(
+        epoch_size,
+        message="epoch_size == 0, decrease batch_size or num_steps")
+    with tf.control_dependencies([assertion]):
+        epoch_size = tf.identity(epoch_size, name="epoch_size")
+
+    i = tf.train.range_input_producer(epoch_size, shuffle=False).dequeue()
+    x = tf.slice(data, [0, i * num_steps], [batch_size, num_steps])
+    y = tf.slice(data, [0, i * num_steps + 1], [batch_size, num_steps])
+
+And then running to find out where thing is getting into troubles
+sess = tf.Session() then sess.run(epoch_size) gives 2323
+Running sess.run(tf.train.range_input_producer(epoch_size, shuffle=True).dequeue()) just waits (it does not terminate nor induce CPU load, i.e. same problem than when I run the whole code).
+In fact, even queue = tf.train.range_input_producer(epoch_size, shuffle=True) (which can be intermediate step for previous syntax) does nothing. There is the problem line, still don't know why
+I am not sure how this issue could be related to be, thus it might be a bug.
+Config Information
+
+tf.__version__ = '0.11.0rc2'
+python 3.5.2
+Ubuntu 16.04

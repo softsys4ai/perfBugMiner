@@ -1,0 +1,33 @@
+Train DNN model efficiently with sparse features and missing data
+
+We have used TensorFlow for recommend systems to replace the logistic regression model. The train data is quite sparse and we have to do it efficiently. Now we have the problem to train the model without sparse tensor's multiplication.
+We have read word2vec and the example of wide_n_deep models. Their inputs are sparse but not suitable for general recommend systems. Our inputs are sparse and we need to encode the features like ages, colleges with one-hot encoding. The examples may have different number of valid features because of unknown values and the train data looks like this.
+label         gender        age        college       
+------------------------------------------------
+0             2:1           8:1       (unknown)
+1             1:1           5:1         25:1
+0             1:1           8:1       (unknown)
+
+With this dataset, we have to build SparseTensor object for each example data like this.
+example1 = tf.SparseTensor(indices=[[2], [8]], values=[1, 1], shape=[100])
+example2 = tf.SparseTensor(indices=[[1], [5], [25]], values=[1, 1, 1], shape=[100])
+example3 = tf.SparseTensor(indices=[[1], [8]], values=[1, 1], shape=[100])
+
+For word2vec and wide_n_deep models, we can use tf.nn.embedding_lookup() to lookup the variables to train and no need to fill up the whole matrix with zeros. This works for each example but we have problems if using batch because the valid ids has different shape to train. The code  looks like this.
+vocabulary_size = 100
+embedding_size = 1
+embeddings = tf.Variable(tf.ones([vocabulary_size, embedding_size]))
+
+batch_size = 3
+feature_number = 3 # ERROR: should be 2 or 3
+train_inputs = tf.placeholder(tf.int32, shape=[batch_size, feature_number])
+
+batch_data = np.array([[2, 8], [1, 5, 25], [1, 8]]) # EROOR: should be dense
+
+with tf.Session() as sess:
+    sess.run(tf.initialize_all_variables())
+    print(sess.run(embed, feed_dict={train_inputs: batch_data}))
+
+The code could not work until we make example1, example2 and example3 have the same number of valid featue, such as 3 in this case. This is one solution but we have to fill up the examples with zeros(notice that this is different from filling up the one-hot encoding).
+Maybe supporting sparse tensor's multiplication is quit more efficient. Now we have only embedding_lookup op for SpareTensor and I don't know how to use embedding_lookup_sparse or safe_embedding_lookup_sparse for this scenario. It could be great if anyone has any suggestion for this use case.
+Related to #1241

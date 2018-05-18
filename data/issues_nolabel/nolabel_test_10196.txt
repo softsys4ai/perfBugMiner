@@ -1,0 +1,49 @@
+tf.contrib.ffmpeg.decode_audio causes kernel crash w/ multi-threading
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow version (use command below): v1.1.0 - gpu
+CUDA/cuDNN version: 8.0
+Exact command to reproduce:
+
+I have noticed that attempting to run the 'tf.contrib.ffmpeg.decode_audio' function with multiple threads causes the kernel to crash. This occurs when trying to create batches of data from audio binaries.
+The code underlying 'tf.contrib.ffmpeg.decode_audio' appears to a basic reference to functions outside of tensorflow so I am unsure there is a solution inside of the tensorflow domain. Nonetheless I wanted to bring this up in case someone had a solution. This is probably not a bug report and more of a low priority feature request.
+The code below will run without error when num_threads=1 for tf.train.batch but the kernel will crash for num_threads=2 or more.
+`
+graph = tf.Graph()
+
+with graph.as_default():
+
+    
+    batch_size=2
+
+    queue = tf.train.slice_input_producer([paths, labels], 
+                                          num_epochs=2, shuffle=True, capacity=32)
+    
+    
+    audio_binary = tf.read_file(queue[0])
+    signal = tf.contrib.ffmpeg.decode_audio(audio_binary, file_format='mp3', 
+                                        samples_per_second=22500,  
+                                        channel_count=1)[:450000,0]
+    y_ = tf.one_hot(queue[1], 16, dtype=tf.float32)
+
+
+    batch_sig, batch_y_ = tf.train.batch([signal, y_], batch_size=batch_size, 
+                                         shapes=[(450000,), (16,)], 
+                                         num_threads=1, capacity=64)
+    
+    
+    with tf.Session(config=tf.ConfigProto(operation_timeout_in_ms=500)) as sess:
+        sess.run(tf.global_variables_initializer())
+        sess.run(tf.local_variables_initializer())
+
+        
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+        
+        
+        for i in range(2):
+            print(tf.reduce_max(batch_sig, axis=1).eval())
+            
+        coord.request_stop()
+        coord.join(threads)            
+        `

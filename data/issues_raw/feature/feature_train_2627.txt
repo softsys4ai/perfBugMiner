@@ -1,0 +1,82 @@
+Complex Gradients in gather
+
+Environment info
+Operating System: Linux Ubuntu 14.04 LTS (64bit)
+Installed version of CUDA and cuDNN: CUDA 7.5.18 and CUDNN 5.0.4
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+ls -l /usr/local/cuda/lib64/libcud*
+-rw-r--r-- 1 root root 322936 Aug 15  2015 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 383336 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root 720192 Aug 15  2015 /usr/local/cuda/lib64/libcudart_static.a
+
+If installed from binary pip package, provide:
+
+Which pip package you installed. Tensorflow 0.8.0 Nightly Python2.7 Linux (GPU) Build 118
+
+Steps to reproduce
+I tried to run the following code using the tensorflow pip package  storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.8.0-cp27-none-linux_x86_64.whl
+import tensorflow as tf
+
+W = tf.Variable(tf.random_uniform( (10,1) ), tf.float32)
+W = tf.complex(W, 1.0)
+C = tf.constant(1.0, dtype=tf.float32, shape=(3,1))
+
+views = tf.gather(W, [2,1,5])
+loss = tf.reduce_mean(tf.square( tf.complex_abs(views) - C))
+
+optimizer = tf.train.GradientDescentOptimizer(learning_rate = 0.1)
+train = optimizer.minimize(loss)
+
+init = tf.initialize_all_variables()
+sess = tf.Session()
+sess.run(init)
+I got
+TypeError: DataType complex64 for attr 'T' not in list of allowed values: float32, float64, int32, int64, uint8, int16, int8, uint16
+I looked it up and found issue #2255 so I installed the nightly build 118, and now I get this when trying to run the same code snippet
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-1-0671dcd6f73e> in <module>()
+      9 
+     10 optimizer = tf.train.GradientDescentOptimizer(learning_rate = 0.1)
+---> 11 train = optimizer.minimize(loss)
+     12 
+     13 init = tf.initialize_all_variables()
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.pyc in minimize(self, loss, global_step, var_list, gate_gradients, aggregation_method, colocate_gradients_with_ops, name, grad_loss)
+    191         aggregation_method=aggregation_method,
+    192         colocate_gradients_with_ops=colocate_gradients_with_ops,
+--> 193         grad_loss=grad_loss)
+    194     return self.apply_gradients(grads_and_vars, global_step=global_step,
+    195                                 name=name)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.pyc in compute_gradients(self, loss, var_list, gate_gradients, aggregation_method, colocate_gradients_with_ops, grad_loss)
+    248         gate_gradients=(gate_gradients == Optimizer.GATE_OP),
+    249         aggregation_method=aggregation_method,
+--> 250         colocate_gradients_with_ops=colocate_gradients_with_ops)
+    251     if gate_gradients == Optimizer.GATE_GRAPH:
+    252       grads = control_flow_ops.tuple(grads)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients.pyc in gradients(ys, xs, grad_ys, name, colocate_gradients_with_ops, gate_gradients, aggregation_method)
+    503           if in_grad is not None:
+    504             if isinstance(in_grad, ops.Tensor):
+--> 505               in_grad.set_shape(t_in.get_shape())
+    506             _SetGrad(grads, t_in, in_grad)
+    507         if loop_state:
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.pyc in set_shape(self, shape)
+    402         this tensor.
+    403     """
+--> 404     self._shape = self._shape.merge_with(shape)
+    405 
+    406   @property
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_shape.pyc in merge_with(self, other)
+    568       except ValueError:
+    569         raise ValueError("Shapes %s and %s are not compatible" %
+--> 570                          (self, other))
+    571 
+    572   def concatenate(self, other):
+
+ValueError: Shapes (?, 1) and () are not compatible

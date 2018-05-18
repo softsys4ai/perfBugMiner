@@ -1,0 +1,29 @@
+Synchronous distributed tensorflow training doesn't synchronize among workers
+
+System Information:
+
+Debian 4.5.5
+TF installed from binary (pip3 install tensorflow-gpu==1.0.1 --user)
+TF version: v1.0.0-65-g4763edf-dirty 1.0.1
+Bazel version: N.A.
+CUDA 8.0 cuDNN v5.1
+
+Steps to reproduce
+
+Make a directory and download the following files into it:
+training.py run.sh
+Run the command ./run.sh to simply reproduce this issue.
+
+Detailed descriptions for the bug
+Recently, I tried to deploy the synchronous distributed tensorflow training on the cluster. I followed the tutorial and the inception example to write my own program. The training.py is from other user's implementation, which follows the same API usage as the official example. I modified it to enable it running on a single machine with multiple GPUs by making them communicate through localhost and mapping each worker to see only one GPU.
+The run.sh launched three processes. One of them is the parameter server and the others are two workers implemented by between-graph replication. I created the training supervisor by tf.train.Supervisor() to manage multiple sessions in the distributed training for the initialization and synchronization.
+I expect these two workers would synchronize each batch and work in the same epoch. However, the worker 0, which is launched prior to the worker 1, completed the whole training set without waiting for the worker 1. After that, the process of the worker 0 finished training process and exited normally while worker 1 behaved like falling into the deadlock and keep near 0% utilization of CPU and GPU for several hours.
+Based on my observation, I suspect these two workers didn't communicate and synchronize at all for the data they passed. I report this problem as a bug because I create the optimizer tf.train.SyncReplicasOptimizer as suggested by the official website and the inception example. However, it seems that the synchronization behaviors, if any, are very strange and the program can not exit normally.
+Source code / logs
+Two files:
+training.py: This file contains the source code for the parameter server and workers created to use synchronous distributed optimizers (tf.train.SyncReplicasOptimizer).
+run.sh: This file launched the parameter server and the workers.
+Log:
+Please produce according to the steps and look at worker_0_log and worker_1_log
+Update
+To ensure that two workers don't synchronize with each other, I write another training.py by making the worker 1 exist after the first time output information. Then the worker 0 continue to execute without waiting for the worker 1 and obtain the final trained model. This kind of behavior surely disobeys the definition of the synchronous distributed training.

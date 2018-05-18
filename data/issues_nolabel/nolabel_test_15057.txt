@@ -1,0 +1,104 @@
+gpu is slower than cpu
+
+Have I written custom code：No
+OS Platform and Distribution: win10
+TensorFlow installed from: pip install tensorflow-gpu or pip install tensorflow
+TensorFlow version: 1.4 and 1.3
+Bazel version: None
+CUDA/cuDNN version: cuda8.0 and cudnn 6.0
+GPU model and memory: GTX1050 2GB
+Exact command to reproduce: no
+I have trained a cnn+lstm mode, and use the model to predict one image, however, I find the GPU is slowly than CPU. I have test the tensorflow-gpu 1.4, tensorflow-gpu 1.3， tensorflow 1.4 and tensorflow 1.4
+the code is
+# -*- coding: utf-8 -*-
+# @Time    : 2017/10/26 14:09
+# @Author  : zhoujun
+
+import tensorflow as tf
+from scipy.misc import imread
+import time
+import os
+
+class PredictionModel:
+    
+    def __init__(self, model_dir, session=None):
+        if session:
+            self.session = session
+        else:
+            self.session = tf.get_default_session()
+        start = time.time()
+        self.model = tf.saved_model.loader.load(self.session, ['serve'], model_dir)
+        print('load_model_time:', time.time() - start)
+
+        self._input_dict, self._output_dict = _signature_def_to_tensors(self.model.signature_def['predictions'])
+
+    def predict(self, image):
+        output = self._output_dict
+        # 运行predict  op
+        start = time.time()
+        result = self.session.run(output, feed_dict={self._input_dict['images']: image})
+        print('predict_time:',time.time()-start)
+        return result
+
+
+def _signature_def_to_tensors(signature_def):  # from SeguinBe
+    g = tf.get_default_graph()
+    return {k: g.get_tensor_by_name(v.name) for k, v in signature_def.inputs.items()}, \
+           {k: g.get_tensor_by_name(v.name) for k, v in signature_def.outputs.items()}
+
+
+def predict(model_dir, image,gpu_id = 0):
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+
+    with tf.Session() as sess:
+        start = time.time()
+        model = PredictionModel(model_dir,session=sess)
+        predictions = model.predict(image)
+        transcription = predictions['words']
+        score = predictions['score']
+        return [transcription[0].decode(), score, time.time() - start]
+
+
+if __name__ == '__main__':
+    model_dir = 'model/'
+    image = imread('3_song.jpg', mode='L')[:, :, None]
+    result = predict(model_dir, image,0)
+    print(tf.__version__)
+    print(result)
+tensorflow-gpu 1.4 log
+2017-12-02 22:30:30.147490: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\platform\cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX AVX2
+2017-12-02 22:30:31.083045: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1030] Found device 0 with properties:
+name: GeForce GTX 1050 major: 6 minor: 1 memoryClockRate(GHz): 1.493
+pciBusID: 0000:01:00.0
+totalMemory: 2.00GiB freeMemory: 1.62GiB
+2017-12-02 22:30:31.083203: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 1050, pci bus id: 0000:01:00.0, compute capability: 6.1)
+load_model_time: 2.9134938716888428
+predict_time: 4.135322570800781
+1.4.0
+tensorflow-gpu 1.3 log
+2017-12-02 22:39:46.346092: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\platform\cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-12-02 22:39:46.346191: W C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\platform\cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-12-02 22:39:47.187559: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:955] Found device 0 with properties:
+name: GeForce GTX 1050
+major: 6 minor: 1 memoryClockRate (GHz) 1.493
+pciBusID 0000:01:00.0
+Total memory: 2.00GiB
+Free memory: 1.62GiB
+2017-12-02 22:39:47.187717: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:976] DMA: 0
+2017-12-02 22:39:47.188099: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:986] 0:   Y
+2017-12-02 22:39:47.188224: I C:\tf_jenkins\home\workspace\rel-win\M\windows-gpu\PY\36\tensorflow\core\common_runtime\gpu\gpu_device.cc:1045] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 1050, pci bus id: 0000:01:00.0)
+load_model_time: 2.595602512359619
+predict_time: 1.6665771007537842
+1.3.0
+tensorflow 1.4 log
+2017-12-02 22:47:21.368827: I C:\tf_jenkins\home\workspace\rel-win\M\windows\PY\36\tensorflow\core\platform\cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX AVX2
+load_model_time: 2.340376853942871
+predict_time: 3.538094997406006
+1.4.0
+tensorflow 1.3 log
+2017-12-02 22:51:33.877932: W C:\tf_jenkins\home\workspace\rel-win\M\windows\PY\36\tensorflow\core\platform\cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-12-02 22:51:33.878031: W C:\tf_jenkins\home\workspace\rel-win\M\windows\PY\36\tensorflow\core\platform\cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+load_model_time: 2.2079925537109375
+predict_time: 0.5485155582427979
+1.3.0
+As can be seen from the log, tensorflow1.4 slower than 1.3 #14942, and gpu mode slower than cpu. If needed, I can provide models and test images

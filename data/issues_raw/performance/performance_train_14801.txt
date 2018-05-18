@@ -1,0 +1,30 @@
+On the way to latest CMake, VS2017, CUDA 9, cudNN 7, Win10
+
+As many of us (#14126,#14691,#12052), I am trying to get TF1.4 build successfully on windows using the latest version of everything. As far as I can judge I could do it but with some hacks. As it is too long for me to complete, I would like to share what I did for help finalizing. It is too early for a PR.
+I am using CMake 3.9.6 (though 3.10 came out). I have low cmake skill level.
+I am not trying the python bindings.
+VS2017 is the community edition.
+Without GPU it is easy. The only issue is the heap overflow (C1002 or C1006 #11096). The trick is to reduce parallel build by msbuild /m:4 /p:CL_MPCount=2 ... such that 4*2 is approximately the number of core you really have (at least it worked for me). Using /Zm2000 did not work for me, despite a lot of available memory (32G).
+With GPU it is more tricky: the tf_core_gpu_kernels.vcxproj does not compile at all. AFAIU, the CMake strategy changed from v3.6, to allow parallel computing. CUDA is now treated as another language. Without modifications nvcc simply returns with code error 1 (or nothing happen I am not sure). Here are my modifications (from v1.4).
+From tensorflow/tensorflow/contrib/cmake/
+1/ adapt cmakelists.txt a little:
+
+Change CUDA 8.0 to CUDA 9.0 l.223.
+Add enable_language("CUDA") l.224.
+The set(CUDA_NVCC_FLAGS ...) directives do not work anymore. See below.
+Add capabilities 6.0 and 6.1 in l.232, as well l.246. Might not be needed (it is only for performance).
+Change 64_80 to 64_90 and 64_6 to 64_7 l.247 and 248, similarly in l.272-276.
+
+2/ in tf_core_kernels.cmake:
+
+Add set_source_files_properties(${tf_core_gpu_kernels_srcs} PROPERTIES LANGUAGE CUDA) to recognize '.cu.cc' extensions as cuda files in l.209.
+Rename cuda_add_library(...) as add_library(...) l.210.
+
+3/ edit (this is the trick) tf_core_gpu_kernels.vcxproj, in the release section:
+
+Encompass cl.exe flags, ie /bigobj /nologo ... -Ob2  with the -Xcompiler="/bigobj ... -Ob2" directive l.147. These former flags are for the c++ compiler not for nvcc and result in the crash.
+Add just before --expt-relaxed-constexpr, still in the AdditionalOptions.
+Switch PerformDeviceLinkfrom false to true l.164.
+
+Then everything compile (msbuild on  tf_tutorials_example_trainer.vcxproj) (and this tuto works). The remaining point before PR is to avoid third step, i.e. give the right directives to nvcc, by understanding how the CUDA_NVCC_FLAGS works, and add the linking. Hope this solution will work without missing symbols (#6396).
+Otherwise it is a nightmare: both CUDA 8 and CMake 3.6 are not aware of VS2017. CMake compilation is not incremental (#14194) and takes about 4-5H (could use precompiled headers especially in tf_core_kernels)...

@@ -1,0 +1,70 @@
+scan in theano and tensorflow
+
+There is a function written with theano:
+`import numpy as np
+import theano as theano
+import theano.tensor as T
+
+def forward_prop_step(x_t, s_t1_prev, s_t2_prev):
+            # This is how we calculated the hidden state in a simple RNN. No longer!
+            # s_t = T.tanh(U[:,x_t] + W.dot(s_t1_prev))
+
+            # Word embedding layer
+            x_e = E[:,x_t]
+
+            # GRU Layer 1
+            z_t1 = T.nnet.hard_sigmoid(U[0].dot(x_e) + W[0].dot(s_t1_prev) + b[0])
+            r_t1 = T.nnet.hard_sigmoid(U[1].dot(x_e) + W[1].dot(s_t1_prev) + b[1])
+            c_t1 = T.tanh(U[2].dot(x_e) + W[2].dot(s_t1_prev * r_t1) + b[2])
+            s_t1 = (T.ones_like(z_t1) - z_t1) * c_t1 + z_t1 * s_t1_prev
+
+            # GRU Layer 2
+            z_t2 = T.nnet.hard_sigmoid(U[3].dot(s_t1) + W[3].dot(s_t2_prev) + b[3])
+            r_t2 = T.nnet.hard_sigmoid(U[4].dot(s_t1) + W[4].dot(s_t2_prev) + b[4])
+            c_t2 = T.tanh(U[5].dot(s_t1) + W[5].dot(s_t2_prev * r_t2) + b[5])
+            s_t2 = (T.ones_like(z_t2) - z_t2) * c_t2 + z_t2 * s_t2_prev
+
+            # Final output calculation
+            # Theano's softmax returns a matrix with one row, we only need the row
+            o_t = T.nnet.softmax(V.dot(s_t2) + c)[0]
+
+return [o_t, s_t1, s_t2]`
+
+I have tried to rewrite it with tensorflow:
+`import numpy as np, tensorflow as tf, operator
+
+def forward_prop_step(x_t, s_t1_prev, s_t2_prev):
+                        # This is how we calculated the hidden state in a simple RNN. No longer!
+                        # s_t = T.tanh(U[:,x_t] + W.dot(s_t1_prev))
+
+                        # Word embedding layer
+                        x_e = E[:,x_t]
+
+                        # GRU Layer 1
+                        z_t1 = tf.nn.sigmoid(tf.reduce_sum(tf.multiply(U[0], x_e)) + tf.reduce_sum(tf.multiply(W[0], s_t1_prev)) + b[0])
+                        r_t1 = tf.nn.sigmoid(tf.reduce_sum(tf.multiply(U[1], x_e)) + tf.reduce_sum(tf.multiply(W[1], s_t1_prev)) + b[1])
+                        c_t1 = tf.nn.tanh(tf.reduce_sum(tf.multiply(U[2], x_e)) + tf.reduce_sum(tf.multiply(W[2], (s_t1_prev * r_t1))) + b[2])
+                        s_t1 = (tf.ones_like(z_t1) - z_t1) * c_t1 + z_t1 * s_t1_prev
+
+                        # GRU Layer 2
+                        z_t2 = tf.nn.sigmoid(tf.reduce_sum(tf.multiply(U[3], s_t1)) + tf.reduce_sum(tf.multiply(W[3], s_t2_prev)) + b[3])
+                        r_t2 = tf.nn.sigmoid(tf.reduce_sum(tf.multiply(U[4], s_t1)) + tf.reduce_sum(tf.multiply(W[4], s_t2_prev)) + b[4])
+                        c_t2 = tf.nn.tanh(tf.reduce_sum(tf.multiply(U[5], s_t1)) + tf.reduce_sum(tf.multiply(W[5], (s_t2_prev * r_t2))) + b[5])
+                        s_t2 = (tf.ones_like(z_t2) - z_t2) * c_t2 + z_t2 * s_t2_prev
+
+                        # Final output calculation
+                        # Tensorflow's softmax returns a matrix with one row, we only need the row
+                        o_t = tf.nn.softmax(tf.reduce_sum(tf.multiply(V, s_t2)) + c)[0]
+
+                        return [o_t, s_t1, s_t2]`
+
+In theano, scan function is called to perform "forward_prep_step" function in a loop:
+`[o, s, s2], updates = theano.scan(
+            forward_prop_step,
+            sequences=x,
+            truncate_gradient=self.bptt_truncate,
+            outputs_info=[None, 
+                          dict(initial=T.zeros(self.hidden_dim)),
+dict(initial=T.zeros(self.hidden_dim))])`
+
+There is a scan function in tensorflow as well, but they don't get the same parameters. How could be the transformation of scan function above, into tensorflow scan function?

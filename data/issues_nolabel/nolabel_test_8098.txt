@@ -1,0 +1,116 @@
+ValueError: setting an array element with a sequence. (tf 1.0.0's invalid use of np)
+
+Using tf 1.0.0 I get the following error.
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-153-fcd2318ab5dc> in <module>()
+     56         batch_ys = labels[randidx, :]
+     57         # Fit training using batch data
+---> 58         sess.run(optm, feed_dict={x: batch_xs, y: batch_ys})
+     59         # Compute average loss
+     60         avg_cost += sess.run(cost, 
+
+/opt/conda/lib/python3.5/site-packages/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+    765     try:
+    766       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 767                          run_metadata_ptr)
+    768       if run_metadata:
+    769         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/opt/conda/lib/python3.5/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    936                 ' to a larger type (e.g. int64).')
+    937 
+--> 938           np_val = np.asarray(subfeed_val, dtype=subfeed_dtype)
+    939 
+    940           if not subfeed_t.get_shape().is_compatible_with(np_val.shape):
+
+/opt/conda/lib/python3.5/site-packages/numpy/core/numeric.py in asarray(a, dtype, order)
+    529 
+    530     """
+--> 531     return array(a, dtype, copy=False, order=order)
+    532 
+    533 
+
+ValueError: setting an array element with a sequence.
+
+This is a minimal example that should replicate this. I came across this problem also using several higher level abstractions to tf but not until I got to barebones tf I believed that this is a bug and not just an error on my part.
+from sklearn.preprocessing import LabelEncoder
+from keras.utils import np_utils
+labels = ['Male', 'Female'] * 5 
+encoder = LabelEncoder()
+encoder.fit(labels)
+labels = encoder.transform(labels)
+labels = np_utils.to_categorical(labels)
+labels.shape
+
+results = np.ndarray(shape=(10,2623))
+
+tf.set_random_seed(0)
+# Parameters
+learning_rate   = 0.001
+training_epochs = 200
+batch_size      = 5
+display_step    = 5
+ntrain =  10
+
+# Network Parameters
+n_hidden_1 = 50 # 1st layer num features
+n_input    = 2623 # data input 
+n_classes  = 2 # total classes (0-9 digits)
+
+# tf Graph input
+x = tf.placeholder("float", [None, n_input])
+y = tf.placeholder("float", [None, n_classes])
+
+# Create model
+def multilayer_perceptron(_X, _weights, _biases):
+    layer_1 = tf.nn.relu(tf.add(tf.matmul(_X, _weights['h1']), _biases['b1'])) 
+    return tf.matmul(layer_1, _weights['out']) + _biases['out']
+    
+# Store layers weight & bias
+stddev = 0.1 # <== This greatly affects accuracy!! 
+weights = {
+    'h1': tf.Variable(tf.random_normal([n_input, n_hidden_1], stddev=stddev)),
+    'out': tf.Variable(tf.random_normal([n_hidden_1, n_classes], stddev=stddev))
+}
+biases = {
+    'b1': tf.Variable(tf.random_normal([n_hidden_1])),
+    'out': tf.Variable(tf.random_normal([n_classes]))
+}
+print ("Network Ready to Go!")
+
+pred = multilayer_perceptron(x, weights, biases)
+
+# Define loss and optimizer
+cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=pred, labels=y)) 
+optm = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+corr = tf.equal(tf.argmax(pred, 1), tf.argmax(y, 1))    
+accr = tf.reduce_mean(tf.cast(corr, "float"))
+
+# Initializing the variables
+init = tf.initialize_all_variables()
+print ("Functions ready")
+sess = tf.Session()
+sess.run(init)
+# Training cycle
+for epoch in range(training_epochs):
+    avg_cost = 0.
+    total_batch = int(ntrain/batch_size)
+    # Loop over all batches
+    for i in range(total_batch):
+        randidx = np.random.randint(ntrain, size=batch_size)
+        batch_xs = results[randidx, :]
+        batch_ys = labels[randidx, :]   
+        # Fit training using batch data
+        sess.run(optm, feed_dict={x: batch_xs, y: batch_ys})
+        # Compute average loss
+        avg_cost += sess.run(cost, 
+                feed_dict={x: batch_xs, y: batch_ys})/total_batch
+        # Display logs per epoch step
+    if epoch % display_step == 0:
+        print ("Epoch: %03d/%03d cost: %.9f" % 
+               (epoch, training_epochs, avg_cost))
+        train_acc = sess.run(accr, feed_dict={x: batch_xs, y: batch_ys})
+        print (" Training accuracy: %.3f" % (train_acc))
+
+        print ("Optimization Finished!")

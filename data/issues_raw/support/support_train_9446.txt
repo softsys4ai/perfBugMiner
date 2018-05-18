@@ -1,0 +1,33 @@
+dynamic_rnn: session.run with train_step behaves differently than train_step run alone
+
+System information
+
+4.4.0-72-generic #93-Ubuntu SMP Fri Mar 31 14:07:41 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+via pip
+1.0.0-65-g4763edf-dirty 1.0.1
+cuda-8.0 + cudnn-5.1.10
+GeForce GTX 760 + 1996MiB
+
+Describe the problem
+Consider the following pieces of code:
+Variant 1
+loop:
+    feed_dict = {c_state: current_state.c, h_state: current_state.h, ...}
+    loss_sum, current_state, _ = sess.run([reduce_sum(loss), final_state, train_step], feed_dict=feed_dict)
+
+Variant 2
+loop:
+    feed_dict = {...}
+    loss_sum, current_state = sess.run([reduce_sum(loss), final_state], feed_dict=feed_dict)
+    train_step.run(feed_dict)
+
+Variant 3
+loop:
+    feed_dict = {...}
+    loss_sum, current_state = sess.run([reduce_sum(loss), final_state], feed_dict=feed_dict)
+    sess.run([train_step], feed_dict=feed_dict)
+
+Variant 1 breaks after a couple of iterations (15 in my case) by raising a "ResourceExhaustedError (see above for traceback): OOM when allocating tensor with shape[200,10,25600]" exception whereas Variant 2 and Variant 3 do not.
+train_step is a minimize operation (optimizer doesn't matter) on a dynamic_rnn with a given initial_state and a single layer of LSTM cells.
+I cannot imagine the reason why Variant 1 needs more and more memory whereas the other both don't. Seems like something's wrong here.
+SO question: http://stackoverflow.com/questions/43620353/resourceexhaustederror-when-using-session-run-instead-of-train-step-run-in-a-loo

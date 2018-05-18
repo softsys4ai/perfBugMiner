@@ -1,0 +1,107 @@
+Computing gradients of loop variables return None
+
+Problem description
+I got None when computing gradient of the two loop variables that are supposed to have gradient..
+Minimum code to reproduce the error
+def loop_cond(i, *_):
+    with tf.control_dependencies([tf.Print(i, [i])]):
+        return i < 5
+
+def loop_body(i, a, b):
+    c = tf.gradients(b, a)[0]
+    b = b + c
+    return i + 1, b,  b ** 2
+        
+a = tf.constant(3.0)
+f_i, f_a, f_b = tf.while_loop(loop_cond, loop_body, [0, a, a])
+It seems to have failed in the first iteration as there was no output from print statement.
+Complete logs
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-23-a766942a3da2> in <module>()
+      9 
+     10 a = tf.constant(3.0)
+---> 11 f_i, f_a, f_b = tf.while_loop(loop_cond, loop_body, [0, a, a])
+
+~/.conda/envs/conda-local/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py in while_loop(cond, body, loop_vars, shape_invariants, parallel_iterations, back_prop, swap_memory, name)
+   2814     loop_context = WhileContext(parallel_iterations, back_prop, swap_memory)  # pylint: disable=redefined-outer-name
+   2815     ops.add_to_collection(ops.GraphKeys.WHILE_CONTEXT, loop_context)
+-> 2816     result = loop_context.BuildLoop(cond, body, loop_vars, shape_invariants)
+   2817     return result
+   2818 
+
+~/.conda/envs/conda-local/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py in BuildLoop(self, pred, body, loop_vars, shape_invariants)
+   2638       self.Enter()
+   2639       original_body_result, exit_vars = self._BuildLoop(
+-> 2640           pred, body, original_loop_vars, loop_vars, shape_invariants)
+   2641     finally:
+   2642       self.Exit()
+
+~/.conda/envs/conda-local/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py in _BuildLoop(self, pred, body, original_loop_vars, loop_vars, shape_invariants)
+   2588         structure=original_loop_vars,
+   2589         flat_sequence=vars_for_body_with_tensor_arrays)
+-> 2590     body_result = body(*packed_vars_for_body)
+   2591     if not nest.is_sequence(body_result):
+   2592       body_result = [body_result]
+
+<ipython-input-23-a766942a3da2> in loop_body(i, a, b)
+      5 def loop_body(i, a, b):
+      6     c = tf.gradients(b, a)[0]
+----> 7     b = b + c
+      8     return i + 1, b,  b ** 2
+      9 
+
+~/.conda/envs/conda-local/lib/python3.5/site-packages/tensorflow/python/ops/math_ops.py in binary_op_wrapper(x, y)
+    883       if not isinstance(y, sparse_tensor.SparseTensor):
+    884         try:
+--> 885           y = ops.convert_to_tensor(y, dtype=x.dtype.base_dtype, name="y")
+    886         except TypeError:
+    887           # If the RHS is not a tensor, it might be a tensor aware object
+
+~/.conda/envs/conda-local/lib/python3.5/site-packages/tensorflow/python/framework/ops.py in convert_to_tensor(value, dtype, name, preferred_dtype)
+    834       name=name,
+    835       preferred_dtype=preferred_dtype,
+--> 836       as_ref=False)
+    837 
+    838 
+
+~/.conda/envs/conda-local/lib/python3.5/site-packages/tensorflow/python/framework/ops.py in internal_convert_to_tensor(value, dtype, name, as_ref, preferred_dtype, ctx)
+    924 
+    925     if ret is None:
+--> 926       ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+    927 
+    928     if ret is NotImplemented:
+
+~/.conda/envs/conda-local/lib/python3.5/site-packages/tensorflow/python/framework/constant_op.py in _constant_tensor_conversion_function(v, dtype, name, as_ref)
+    227                                          as_ref=False):
+    228   _ = as_ref
+--> 229   return constant(v, dtype=dtype, name=name)
+    230 
+    231 
+
+~/.conda/envs/conda-local/lib/python3.5/site-packages/tensorflow/python/framework/constant_op.py in constant(value, dtype, shape, name, verify_shape)
+    206   tensor_value.tensor.CopyFrom(
+    207       tensor_util.make_tensor_proto(
+--> 208           value, dtype=dtype, shape=shape, verify_shape=verify_shape))
+    209   dtype_value = attr_value_pb2.AttrValue(type=tensor_value.tensor.dtype)
+    210   const_tensor = g.create_op(
+
+~/.conda/envs/conda-local/lib/python3.5/site-packages/tensorflow/python/framework/tensor_util.py in make_tensor_proto(values, dtype, shape, verify_shape)
+    369   else:
+    370     if values is None:
+--> 371       raise ValueError("None values not supported.")
+    372     # if dtype is provided, forces numpy array to be the type
+    373     # provided if possible.
+
+ValueError: None values not supported.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Debian GNU/Linux 7.11 (wheezy)
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.4.0-4-g9283868 1.4.0
+Python version:  3.5.4
+Bazel version (if compiling from source):
+CUDA/cuDNN version: NA
+GPU model and memory: NA

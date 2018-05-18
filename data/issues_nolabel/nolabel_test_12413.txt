@@ -1,0 +1,70 @@
+FIFOQueue '_1_input_producer' is closed.
+
+I'm using an input_pipeline in a tf.managed_session(), and encountered the following error message:
+Traceback (most recent call last):
+  File "/home/darth/GitHub Projects/gru_svm/model/gru_svm.py", line 206, in <module>
+    main()
+  File "/home/darth/GitHub Projects/gru_svm/model/gru_svm.py", line 193, in main
+    coord.join(threads)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/coordinator.py", line 389, in join
+    six.reraise(*self._exc_info_to_raise)
+  File "/usr/lib/python3/dist-packages/six.py", line 686, in reraise
+    raise value
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/queue_runner_impl.py", line 238, in _run
+    enqueue_callable()
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1063, in _single_operation_run
+    target_list_as_strings, status, None)
+  File "/usr/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.CancelledError: FIFOQueue '_1_input_producer' is closed.
+	 [[Node: input_producer/input_producer_EnqueueMany = QueueEnqueueManyV2[Tcomponents=[DT_STRING], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](input_producer, input_producer/limit_epochs)]]
+
+Here's the session block I wrote:
+sv = tf.train.Supervisor(logdir=CHECKPOINT_PATH, summary_op=None)
+
+    with sv.managed_session() as sess:
+
+        sess.run(init_op)
+
+        checkpoint = tf.train.get_checkpoint_state(CHECKPOINT_PATH)
+
+        if checkpoint and checkpoint.model_checkpoint_path:
+            saver.restore(sess, checkpoint.model_checkpoint_path)
+
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(coord=coord, sess=sess)
+
+        try:
+            step = 0
+            while not coord.should_stop():
+                example_batch, label_batch = sess.run([examples, labels])
+
+                feed_dict = {x_input: example_batch, y_input: label_batch, state: current_state,
+                             learning_rate: LEARNING_RATE, p_keep: DROPOUT_P_KEEP}
+
+                summary, _, epoch_loss, next_state = sess.run([merged, optimizer, cost, states], feed_dict=feed_dict)
+
+                accuracy_ = sess.run(accuracy, feed_dict=feed_dict)
+
+                current_state = next_state
+
+                if step % 100 == 0:
+                    print('step [{}] loss : {}, accuracy : {}'.format(step, epoch_loss, accuracy_))
+                    writer.add_summary(summary, step)
+                    saver.save(sess, CHECKPOINT_PATH + MODEL_NAME, global_step=step)
+
+                step += 1
+        except tf.errors.OutOfRangeError:
+            print('EOF -- training done at step {}'.format(step))
+        finally:
+            writer.close()
+            coord.request_stop()
+
+        coord.join(threads)
+
+        saver = tf.train.Saver()
+        saver.save(sess, CHECKPOINT_PATH + MODEL_NAME, global_step=step)
+
+Thank you in advance for your help!

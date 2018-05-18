@@ -1,0 +1,73 @@
+Inf/Nan in MSE/CE with very simple demo
+
+Hi there,
+I would use a very simple LSTM demo with only forward without any BP tuning to clear the question. I pass one random batch of size (2,2,3) to a rnn_cell.LSTMcell, using 100 hidden layer, and output the mse/ce between the output and the last time step (:, -1, :). What strike me is the both the SE/CE are very strange (too large or even inf).
+Below is my code.
+import tensorflow as tf
+import numpy as np
+
+
+n_steps = 2
+n_visible = 3
+n_hidden = 100
+
+x = tf.placeholder(tf.float64, [None, n_steps, n_visible])
+x_ = tf.placeholder(tf.float64, [None, n_steps, n_visible])
+batch_size = tf.placeholder(tf.int32)
+
+low = - 4 * np.sqrt(6. / (n_hidden + n_visible))
+high = 4 * np.sqrt(6. / (n_hidden + n_visible))
+
+
+W2 = tf.Variable(tf.random_uniform([n_hidden ,n_visible], minval=low, maxval=high, dtype=tf.float64))
+
+b2 = tf.Variable(tf.zeros(n_visible, dtype = tf.float64))
+
+
+lstm_cell = tf.nn.rnn_cell.LSTMCell(n_hidden, state_is_tuple = True, forget_bias=1.)
+initial_state = lstm_cell.zero_state(batch_size, tf.float64)
+state = initial_state
+
+inputs = [tf.squeeze(input_, [1])  for input_ in tf.split(1, n_steps, x)]
+encoder = tf.nn.rnn(lstm_cell, inputs, initial_state=initial_state)
+decoder = tf.nn.sigmoid(tf.matmul(encoder[-1][0], W2) + b2)
+
+ce = -x[:,-1,:] * tf.log(decoder)+(1-x[:,-1,:])*tf.log(1 - decoder)
+se = (x[:,-1,:] - decoder)**2
+mse = tf.reduce_mean(se)
+rmse = tf.sqrt(mse)
+
+
+sess = tf.Session()
+sess.run(tf.initialize_all_variables())
+x_train_batch = np.random.rand(2,2,3)
+feed_dict = {x: x_train_batch, x_:x_train_batch, batch_size: 2}
+encoder_, decoder_, se_, mse_, rmse_, ce_=  sess.run([encoder, decoder, se, mse, rmse, ce], feed_dict=feed_dict)
+
+
+The outputs are:
+ce_
+Out[2]: 
+array([[ -9.30480083e-001,  -7.45718134e-001,   1.65488117e+243],
+       [ -8.92276217e-001,  -7.66764460e-001,   5.43823895e+064]])
+
+se_
+Out[3]: 
+array([[  3.66794556e-001,   2.76262193e-001,               inf],
+       [  3.48428030e-001,   2.86745693e-001,   1.23185516e+129]])
+
+decoder_
+Out[4]: 
+array([[ 0.60563566,  0.5256065 ,  0.62439037],
+       [ 0.59027793,  0.53548641,  0.69399984]])
+
+x_train_batch[:,-1,:]
+Out[5]: 
+array([[ 0.93217308,  0.28895401,  0.31784797],
+       [ 0.57656244,  0.73494513,  0.57125778]])
+
+
+The value of decoder and x seems well, but why ce_ and se_ has inf and some weird value like 1.23E+129?
+It is running on a Mac OS EI Captain 64 bit without GPU support.
+tf.__version__
+Out[6]: '0.10.0'

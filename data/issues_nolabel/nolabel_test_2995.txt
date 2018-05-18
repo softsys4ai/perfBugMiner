@@ -1,0 +1,52 @@
+Multiple (Bidirectional)LSTM layers leads to nan in loss when time step is large
+
+I've tried to implement a deep LSTM network and tested it on an autoencoder task in recovering audio magnitude spectrogram. At first I set the number of frames in spectrogram (i.e. time step in LSTM) to be small, and both LSTM and BLSTM worked well. However, when the time step is large, both LSTM and BLSTM began to generate nan loss. To be more specific, when I used a time step of 20 frames, BLSTM worked well with 4 layers and can successfully recover the input; but when I increased it to 100, a 3 layer BLSTM network began to generate nan in two training steps.
+I think there might be some problem within the code for rnn and bidirectional_rnn function (maybe due to unrolling?), but I'm not sure if I did anything wrong.
+The codes for (B)LSTM I use are:
+def LSTM(lstm_hidden, batch_size, X, chunk_size, name='LSTM', seq_len=None):
+    initializer = tf.random_uniform_initializer(-1, 1)
+
+    cell = tf.nn.rnn_cell.LSTMCell(lstm_hidden, initializer=initializer, 
+                                   use_peepholes=True, state_is_tuple=True)
+
+    initial_state = cell.zero_state(batch_size, tf.float32)
+
+    if seq_len is not None:     
+        output, _ = tf.nn.rnn(cell, X, initial_state=initial_state,
+                                             sequence_length=seq_len, scope=name)
+    else:
+        output, _ = tf.nn.rnn(cell, X, initial_state=initial_state, scope=name)
+
+    return output
+def BLSTM(lstm_hidden, batch_size, X, chunk_size, name='BLSTM', seq_len=None):
+    initializer = tf.random_uniform_initializer(-1, 1)
+
+    cell_fw = tf.nn.rnn_cell.LSTMCell(lstm_hidden, initializer=initializer, 
+                                      use_peepholes=True, state_is_tuple=True)
+    cell_bw = tf.nn.rnn_cell.LSTMCell(lstm_hidden, initializer=initializer, 
+                                      use_peepholes=True, state_is_tuple=True)
+
+    # initial states
+    initial_state_fw = cell_fw.zero_state(batch_size, tf.float32)
+    initial_state_bw = cell_bw.zero_state(batch_size, tf.float32)
+
+    # BLSTM
+    if seq_len is not None:     
+        output, _, _ = tf.nn.bidirectional_rnn(cell_fw, cell_bw, X, 
+                                               initial_state_fw=initial_state_fw,
+                                               initial_state_bw=initial_state_bw, 
+                                               sequence_length=seq_len, 
+                                               scope=name)
+
+    else:
+        output, _, _ = tf.nn.bidirectional_rnn(cell_fw, cell_bw, X, 
+                                               initial_state_fw=initial_state_fw,
+                                               initial_state_bw=initial_state_bw, 
+                                               scope=name)
+    return output
+and the loss function is the L2-loss between the recovered magnitude spectrogram and the input, so there might not be a divide-by-zero problem (anyway it works well when time step is small, so I think it's not due to the loss function).
+Environment info
+Operating System: Ubuntu 14.04.3
+Python version: 2.7.6
+Tensorflow version: r0.9
+CUDA version: 7.5

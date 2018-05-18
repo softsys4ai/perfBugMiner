@@ -1,0 +1,41 @@
+Crashing when trying distributed implementation
+
+Hi, I start saying that I'm a new Tensorflow user :-)
+I was trying to test the potential speed-up due to a distributed implementation vs. a sequential one, so I came up with the following:
+
+A script sequentially computing matmul of two matrices with themselves and then adding them up
+A script that distributes the two computations to different devices and then sum them up in a third device
+
+The problem is the following: if I run the code below with matrices' dimensions of 100x100, it works. If I run the same with dimensions 1000x1000, the following error occurs:
+
+tensorflow.python.framework.errors_impl.InternalError: {"created":"@1490890419.097000000","description":"RST_STREAM","file":"C:\tf_jenkins\home\workspace\release-win\DEVICE\cpu\OS\windows\cmake_build\grpc\src\grpc\src\core\ext\transport\chttp2\transport\frame_rst_stream.c","file_line":107,"http2_error":1}
+
+I can't figure it out, so any help would be appreciated...
+Here is the distributed code (after 3 local Servers have been created):
+import tensorflow as tf
+import time
+
+cluster = tf.train.ClusterSpec({"local": ["localhost:2222", "localhost:2223", "localhost:2224"]})
+
+with tf.device("/job:local/task:1"):
+    print('task 1')
+    x1 = tf.Variable(tf.zeros([1000,1000])+10, dtype=tf.float32, name=None)
+    _matmul_1 = tf.matmul(x1,x1)
+
+with tf.device("/job:local/task:0"):
+    print('task 0')
+    x0 = tf.Variable(tf.zeros([1000,1000])+10, dtype=tf.float32, name=None)
+    _matmul_0 = tf.matmul(x0, x0)
+
+with tf.device("/job:local/task:2"):
+    print('task 2')
+    _matmul_ = tf.add(_matmul_0,_matmul_1)
+
+time4 = time.clock()
+sess = tf.Session("grpc://localhost:2222")
+print('session')
+init = tf.global_variables_initializer()
+sess.run(init)
+print(sess.run(_matmul_))
+time5 = time.clock()
+print(time5-time4)

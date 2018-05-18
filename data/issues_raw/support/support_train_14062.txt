@@ -1,0 +1,39 @@
+Possible Memory Leak with Pet-variant Detection model on Android
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS Sierra+Ubuntu 16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.3.0
+Python version: Python 3.6.1 :: Anaconda custom (64-bit)
+Bazel version (if compiling from source): Build label: 0.5.4-homebrew
+CUDA/cuDNN version: Not used
+GPU model and memory: Not used
+Exact command to reproduce: X
+
+Describe the problem
+When loading a trained-from-scratch sdd_mobilenet_v1 (frozen_inference_graph.pb) in place of "file:///android_asset/ssd_mobilenet_v1_android_export.pb" for the TF Detect app, the screen goes blank white and crashes, without an error logged. I have been following the pet example and have gotten passed the GraphDef Invalid error(s). In my case, the problem occurs after:
+I/TensorFlowInferenceInterface: TensorFlow native methods not found, attempting to load via tensorflow_inference
+I/TensorFlowInferenceInterface: Successfully loaded TensorFlow native methods (RunStats error may be ignored)
+When loading my custom ssd mobilenet model (5621 labels), I assume the model fails to load because it hangs on the white screen before crashing and I dont see:
+I/TensorFlowInferenceInterface: Model load took 502ms, TensorFlow version: 1.4.0-rc1
+I/TensorFlowInferenceInterface: Successfully loaded model from 'file:///android_asset/ssd_mobilenet_v1_android_export.pb'
+One notable difference is my model file is 432M while the example is 28M
+432M Oct 26 22:34 frozen_inference_graph.pb
+28M Oct 20 23:04 ssd_mobilenet_v1_android_export.pb
+When loading my model (I've enabled large heap), the Android profiler shows the memory used increases to around 2GB until the crash. I have tried using the transform_graph util, though any produced pb file gives GraphDef invalid or doesn't fix the issue.
+
+Here is a summary of the pb file:
+bazel-bin/tensorflow/tools/graph_transforms/summarize_graph --in_graph=frozen_inference_graph.pb
+Found 1 possible inputs: (name=image_tensor, type=uint8(4), shape=[?,?,?,3]) No variables spotted. Found 4 possible outputs: (name=detection_boxes, op=Identity) (name=detection_scores, op=Identity) (name=detection_classes, op=Identity) (name=num_detections, op=Identity) Found 87826925 (87.83M) const parameters, 0 (0) variable parameters, and 90093 control_edges Op types used: 85323 Const, 33735 Gather, 28107 Minimum, 22484 Maximum, 16964 Reshape, 11281 Cast, 11265 Sub, 11248 Greater, 11242 Split, 11242 Where, 5696 Slice, 5683 ConcatV2, 5682 Mul, 5675 StridedSlice, 5659 Pack, 5658 Shape, 5654 Add, 5628 Squeeze, 5624 Unpack, 5621 ZerosLike, 5621 NonMaxSuppression, 229 Identity, 48 Fill, 45 ExpandDims, 37 Tile, 35 Relu6, 35 FusedBatchNorm, 34 Conv2D, 28 RealDiv, 28 Range, 28 Switch, 23 Enter, 13 Merge, 13 DepthwiseConv2dNative, 12 BiasAdd, 9 TensorArrayV3, 7 NextIteration, 6 Sqrt, 5 TensorArrayWriteV3, 5 TensorArrayGatherV3, 5 Exit, 5 TensorArraySizeV3, 5 Assert, 4 TensorArrayScatterV3, 4 Equal, 4 TensorArrayReadV3, 3 Rank, 3 Transpose, 2 All, 2 Exp,2 GreaterEqual, 2 LoopCond, 2 Less, 1 LogicalAnd, 1 TopKV2, 1 Size, 1 ResizeBilinear, 1 Placeholder, 1 Sigmoid
+To use with tensorflow/tools/benchmark:benchmark_model try these arguments: bazel run tensorflow/tools/benchmark:benchmark_model -- --graph=frozen_inference_graph.pb --show_flops --input_layer=image_tensor --input_layer_type=uint8 --input_layer_shape=-1,-1,-1,3 --output_layer=detection_boxes,detection_scores,detection_classes,num_detections
+Is this a memory leak? I don't think the app should be in the GB's
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+tensorflow/examples/android/src/org/tensorflow/demo/TensorFlowObjectDetectionAPIModel.java
+tensorflow/examples/android/src/org/tensorflow/demo/DetectorActivity.java
+(from models)
+models/research/object_detection/create_pet_tf_record.py
+models/research/object_detection/export_inference_graph.py
+ssd_mobilenet_v1.config

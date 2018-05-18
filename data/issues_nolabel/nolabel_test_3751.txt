@@ -1,0 +1,334 @@
+Grid3LSTMCell running out of memory
+
+Here are my specs:
+
+NVIDIA GTX 1070
+Tensorflow from source (bazel 0.3.0)
+CUDA 8.0
+Cudnn 5
+
+I am trying to implement a 3D Grid LSTM network. My network is actually a CNN-LSTM end-to-end system, but I know that the Grid3LSTMCell is what is causing the issue (I have tested without and it functions fine).
+Typically this would be an appropriate SO post, but I think I have exhausted my GPU options so maybe this is a bug in the GridRNNCell itself. I have included...
+# Initializing the variables
+with tf.name_scope("initialize-and-config") as scope:
+    init = tf.initialize_all_variables()
+    saver = tf.train.Saver()
+    #gpu_options = tf.GPUOptions()
+    #config = tf.ConfigProto(gpu_options=gpu_options)
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    #config.gpu_options.per_process_gpu_memory_fraction = 0.1
+
+# Launch the graph
+with tf.Session(config=config) as sess:
+
+I commented out config.gpu_options.per_process_gpu_memory_fraction = 0.1 because I have tried including it. I have tried excluding config.gpu_options.allow_growth and including config.gpu_options.per_process_gpu_memory_fraction = 0.1. I have tried different fraction values. And I have tried including both GPU options
+I have also tried finalizing the graph before sess.run() by using tf.get_default_graph().finalize()
+I should note that the RNN initialization step alone takes roughly 10 minutes to intialize -- outputs, states = rnn.rnn(lstm_cell, x, dtype=tf.float32).
+I am able to run the network on a cropped image of size 20x20, but when I train the network on the full 396x396 image I get the following...
+ totalling 86.14MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 1 Chunks of size 301086720 totalling 287.14MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] Sum Total of in-use chunks: 6.57GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:698] Stats: 
+Limit:                  7531433165
+InUse:                  7054675456
+MaxInUse:               7054689536
+NumAllocs:                  369387
+MaxAllocSize:            301086720
+
+W tensorflow/core/common_runtime/bfc_allocator.cc:270] ****************************************************************************************************
+W tensorflow/core/common_runtime/bfc_allocator.cc:271] Ran out of memory trying to allocate 768.0KiB.  See logs for memory state.
+W tensorflow/core/framework/op_kernel.cc:940] Resource exhausted: OOM when allocating tensor with shape[384,512]
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 0 get requests, put_count=140010 evicted_count=140000 eviction_rate=0.999929 and unsatisfied allocation rate=0
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 0 get requests, put_count=150010 evicted_count=150000 eviction_rate=0.999933 and unsatisfied allocation rate=0
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 0 get requests, put_count=160010 evicted_count=160000 eviction_rate=0.999938 and unsatisfied allocation rate=0
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 0 get requests, put_count=170010 evicted_count=170000 eviction_rate=0.999941 and unsatisfied allocation rate=0
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:244] PoolAllocator: After 0 get requests, put_count=180010 evicted_count=180000 eviction_rate=0.999944 and unsatisfied allocation rate=0
+Traceback (most recent call last):
+  File "3D-CNN-LSTM-reg.py", line 225, in <module>
+    keep_prob: dropout})
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 710, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 908, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 958, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 978, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.ResourceExhaustedError: OOM when allocating tensor with shape[396,128]
+     [[Node: opt/gradients/net/RNN/Grid3LSTMCell_537/MatMul_1_grad/MatMul_1 = MatMul[T=DT_FLOAT, transpose_a=true, transpose_b=false, _device="/job:localhost/replica:0/task:0/gpu:0"](net/RNN/Grid3LSTMCell_537/split, opt/gradients/net/RNN/Grid3LSTMCell_537/concat_4_grad/tuple/control_dependency)]]
+Caused by op u'opt/gradients/net/RNN/Grid3LSTMCell_537/MatMul_1_grad/MatMul_1', defined at:
+  File "3D-CNN-LSTM-reg.py", line 191, in <module>
+    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 196, in minimize
+    grad_loss=grad_loss)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.py", line 253, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients.py", line 476, in gradients
+    in_grads = _AsList(grad_fn(op, *out_grads))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/math_grad.py", line 637, in _MatMulGrad
+    math_ops.matmul(op.inputs[0], grad, transpose_a=True))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/math_ops.py", line 1352, in matmul
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_math_ops.py", line 1296, in _mat_mul
+    transpose_b=transpose_b, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 703, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2317, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1239, in __init__
+    self._traceback = _extract_stack()
+
+...which was originally created as op u'net/RNN/Grid3LSTMCell_537/MatMul_1', defined at:
+  File "3D-CNN-LSTM-reg.py", line 176, in <module>
+    pred = conv_net(x, weights, biases, keep_prob)
+  File "3D-CNN-LSTM-reg.py", line 135, in conv_net
+    outputs, states = rnn.rnn(lstm_cell, x, dtype=tf.float32)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.py", line 219, in rnn
+    (output, state) = call_cell()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.py", line 206, in <lambda>
+    call_cell = lambda: cell(input_, state)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/grid_rnn/python/ops/grid_rnn_cell.py", line 150, in __call__
+    c_prev[j] = math_ops.matmul(input_splits[i], input_project_c)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/math_ops.py", line 1352, in matmul
+    name=name)
+
+The full code is as follows...
+
+#Kendall Weihe
+#This is a CNN that handles 3D data
+#Adjust network parameters below, also adjust data directory
+
+import tensorflow as tf
+import pdb
+import numpy as np
+from numpy import genfromtxt
+from PIL import Image
+from tensorflow.python.ops import rnn, rnn_cell
+from tensorflow.contrib.grid_rnn.python.ops import grid_rnn_cell
+from tensorflow.tensorflow.scroll import scroll_data
+
+# Parameters
+learning_rate = 0.001
+training_iters = 1000000
+batch_size = 3
+display_step = 1
+
+# Network Parameters
+n_input_x = 396 # Input image x-dimension
+n_input_y = 396 # Input image y-dimension
+n_input_z = 5
+n_hidden = 128
+n_classes = 2 # Binary classification -- on a surface or not
+n_output = n_input_x * n_classes
+
+dropout = 0.75 # Dropout, probability to keep units
+
+# tf Graph input
+x = tf.placeholder(tf.float32, [batch_size, n_input_z, n_input_x, n_input_y])
+temp_x = tf.placeholder(tf.float32, [1, n_input_z, n_input_x, n_input_y])
+y = tf.placeholder(tf.float32, [batch_size, n_input_z, n_input_x, n_input_y, n_classes], name="ground_truth")
+keep_prob = tf.placeholder(tf.float32) #dropout (keep probability)
+
+# This function converts the ground truth data into a
+    #2 channel classification -- n_input_x x n_input_y x 2
+    # one layer for 0's and the other for 1's
+def convert_to_2_channel(x):
+    #assume input has dimension (batch_size,x,y)
+    #output will have dimension (batch_size,x,y,2)
+    output = np.empty((batch_size, n_input_z, n_input_x, n_input_y, n_classes))
+    for i in range(batch_size):
+        for j in range(n_input_z):
+            for k in range(n_input_x):
+                for l in range(n_input_y):
+                    for m in range(n_classes):
+                        if m == 0:
+                            output[i][j][k][l][m] = x[i][j][k][l]
+                        else:
+                            output[i][j][k][l][m] = 1 - x[i][j][k][l]
+
+    return output
+
+
+# Create some wrappers for simplicity
+def conv3d(x, W, b, strides=1):
+    # Conv2D wrapper, with bias and relu activation
+    x = tf.nn.conv3d(x, W, strides=[1, strides, strides, strides, 1], padding='SAME')
+    x = tf.nn.bias_add(x, b)
+    return tf.nn.relu(x)
+
+def maxpool3d(x, k=2):
+    # MaxPool2D wrapper
+    return tf.nn.max_pool3d(x, ksize=[1, k, k, k, 1], strides=[1, k, k, k, 1],
+                          padding='SAME')
+
+def deconv3d(prev_layer, w, b, output_shape, strides):
+    # Deconv layer
+    deconv = tf.nn.conv3d_transpose(prev_layer, w, output_shape=output_shape, strides=strides, padding="VALID")
+    deconv = tf.nn.bias_add(deconv, b)
+    deconv = tf.nn.relu(deconv)
+    return deconv
+
+# Create model
+def conv_net(x, weights, biases, dropout):
+    # Reshape input picture
+    x = tf.reshape(x, shape=[batch_size, n_input_z, n_input_x, n_input_y, 1])
+
+    with tf.name_scope("conv1") as scope:
+    # Convolution Layer
+        conv1 = conv3d(x, weights['wc1'], biases['bc1'])
+        # Max Pooling (down-sampling)
+        #conv1 = tf.nn.local_response_normalization(conv1)
+        conv1 = maxpool3d(conv1, k=2)
+
+    # Convolution Layer
+    with tf.name_scope("conv2") as scope:
+        conv2 = conv3d(conv1, weights['wc2'], biases['bc2'])
+        # Max Pooling (down-sampling)
+        # conv2 = tf.nn.local_response_normalization(conv2)
+        conv2 = maxpool3d(conv2, k=2)
+
+    # Convolution Layer
+    with tf.name_scope("conv3") as scope:
+        conv3 = conv3d(conv2, weights['wc3'], biases['bc3'])
+        # Max Pooling (down-sampling)
+        # conv3 = tf.nn.local_response_normalization(conv3)
+        conv3 = maxpool3d(conv3, k=2)
+
+    # pdb.set_trace()
+
+    temp_batch_size = tf.shape(x)[0] #batch_size shape
+    with tf.name_scope("deconv1") as scope:
+        output_shape = [temp_batch_size, 2, n_input_x / 4, n_input_y / 4, 64]
+        strides = [1,2,2,2,1]
+        #conv4 = deconv3d(conv3, weights['wdc1'], biases['bdc1'], output_shape, strides)
+        # conv4 = tf.nn.local_response_normalization(conv4)
+        conv4 = tf.nn.conv3d_transpose(conv3, weights['wdc1'], output_shape=output_shape, strides=strides, padding="SAME")
+        conv4 = tf.nn.bias_add(conv4, biases['bdc1'])
+        conv4 = tf.nn.relu(conv4)
+
+    with tf.name_scope("deconv2") as scope:
+        output_shape = [temp_batch_size, 3, n_input_x / 2, n_input_y / 2, 32]
+        strides = [1,1,2,2,1]
+        conv5 = deconv3d(conv4, weights['wdc2'], biases['bdc2'], output_shape, strides)
+        # conv5 = tf.nn.local_response_normalization(conv5)
+
+    with tf.name_scope("deconv3") as scope:
+        output_shape = [temp_batch_size, 5, n_input_x, n_input_y, 1]
+        #this time don't use ReLu -- since output layer
+        conv6 = tf.nn.conv3d_transpose(conv5, weights['wdc3'], output_shape=output_shape, strides=[1,1,2,2,1], padding="VALID")
+        x = tf.nn.bias_add(conv6, biases['bdc3'])
+        x = tf.reshape(x, [batch_size, n_input_z, n_input_x, n_input_y])
+        # conv6 = tf.nn.relu(conv6)
+
+    # pdb.set_trace()
+
+    x = tf.reshape(conv6, [batch_size * n_input_y * n_input_z, n_input_x])
+    x = tf.split(0, n_input_y * n_input_z, x)
+
+    lstm_cell = grid_rnn_cell.Grid3LSTMCell(n_hidden)
+
+    outputs, states = rnn.rnn(lstm_cell, x, dtype=tf.float32)
+
+    output = []
+    for i in xrange(n_input_y * n_input_z):
+        output.append(tf.matmul(outputs[i], lstm_weights[i]) + lstm_biases[i])
+
+    return output
+
+weights = {
+    # 5x5 conv, 1 input, 32 outputs
+    'wc1' : tf.Variable(tf.random_normal([5, 5, 5, 1, 32])),
+    # 5x5 conv, 32 inputs, 64 outputs
+    'wc2' : tf.Variable(tf.random_normal([3, 5, 5, 32, 64])),
+    # 5x5 conv, 32 inputs, 64 outputs
+    'wc3' : tf.Variable(tf.random_normal([2, 5, 5, 64, 128])),
+
+    'wdc1' : tf.Variable(tf.random_normal([2, 2, 2, 64, 128])),
+
+    'wdc2' : tf.Variable(tf.random_normal([2, 2, 2, 32, 64])),
+
+    'wdc3' : tf.Variable(tf.random_normal([3, 2, 2, 1, 32])),
+}
+
+biases = {
+    'bc1': tf.Variable(tf.random_normal([32])),
+    'bc2': tf.Variable(tf.random_normal([64])),
+    'bc3': tf.Variable(tf.random_normal([128])),
+    'bdc1': tf.Variable(tf.random_normal([64])),
+    'bdc2': tf.Variable(tf.random_normal([32])),
+    'bdc3': tf.Variable(tf.random_normal([n_input_z])),
+}
+
+lstm_weights = {}
+lstm_biases = {}
+
+for i in xrange(n_input_y * n_input_z):
+    lstm_weights[i] = tf.Variable(tf.random_normal([n_hidden, n_output]))
+    lstm_biases[i] = tf.Variable(tf.random_normal([n_output]))
+
+# Construct model
+with tf.name_scope("net") as scope:
+    pred = conv_net(x, weights, biases, keep_prob)
+    # pdb.set_trace()
+    pred = tf.transpose(tf.pack(pred),[1,0,2])
+    pred = tf.reshape(pred, [-1, n_input_z, n_input_x, n_input_y, n_classes])
+
+    # Define loss and optimizer
+    # Reshape for cost function
+    temp_pred = tf.reshape(pred, [-1, 2])
+    temp_y = tf.reshape(y, [-1, 2])
+
+with tf.name_scope("loss") as scope:
+    # cost = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(pred, y))
+    cost = (tf.nn.sigmoid_cross_entropy_with_logits(temp_pred, temp_y))
+
+with tf.name_scope("opt") as scope:
+    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+
+# Evaluate model
+with tf.name_scope("acc") as scope:
+    # accuracy is the difference between prediction and ground truth matrices
+    correct_pred = tf.equal(0,tf.cast(tf.sub(tf.nn.sigmoid(temp_pred),temp_y), tf.int32))
+    accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+
+# Initializing the variables
+with tf.name_scope("initialize-and-config") as scope:
+    init = tf.initialize_all_variables()
+    saver = tf.train.Saver()
+    gpu_options = tf.GPUOptions()
+    config = tf.ConfigProto(gpu_options=gpu_options)
+    config.gpu_options.allow_growth = True
+    #config.gpu_options.per_process_gpu_memory_fraction = 0.1
+
+# Launch the graph
+with tf.Session(config=config) as sess:
+    sess.run(init)
+    summary = tf.train.SummaryWriter('/tmp/logdir/', sess.graph) #initialize graph for tensorboard
+    step = 1
+1
+    # Import data
+    data = scroll_data.read_data('/home/volcart/Documents/Data/', 100, n_input_x, n_input_y)
+    # Keep training until reach max iterations
+    while step * batch_size < training_iters:
+        batch_x, batch_y = data.train.next_batch(batch_size * n_input_z)
+        # Run optimization op (backprop)
+        batch_x = batch_x.reshape((batch_size, n_input_z, n_input_x, n_input_y))
+        batch_y = batch_y.reshape((batch_size, n_input_z, n_input_x, n_input_y))
+        batch_y = convert_to_2_channel(batch_y) # Converts the 3960x3960 ground truth to a 3960x3960x2 classification
+        batch_y = batch_y.reshape(batch_size, n_input_z, n_input_x, n_input_y, n_classes)
+        sess.run(optimizer, feed_dict={x: batch_x, y: batch_y,
+                                       keep_prob: dropout})
+
+        step = step + 1
+        if step % display_step == 0:
+            batch_y = batch_y.reshape(batch_size, n_input_z, n_input_x, n_input_y, n_classes)
+            loss, acc = sess.run([cost, accuracy], feed_dict={x: batch_x,
+                                                              y: batch_y,
+                                                              keep_prob: 1.0})
+            print "Step = " + str(step) + " Accuracy = " + str(acc)
+            #print "Loss = " + str(loss)
+            # Save network
+            if step % 50 == 0:
+                save_path = "/home/volcart/Documents/3D-CNN-LSTM-reg-model/3D-CNN-LSTM-seg-step-" + str(step) + "-model.ckpt"
+                saver.save(sess, save_path)

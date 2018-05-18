@@ -1,0 +1,178 @@
+run own model on android
+
+question:
+i run tensorflow SSD model on android. The android studio didn't throw error. But i can't detect anything.I test my pb file, it's seems right. I don't know why. Anyone who can help me? Thanks!!
+code:
+because the model is based on tensorflow demo. so i just paste own code.
+public List<Recognition> recognizeImage(final Bitmap bitmap) {
+    final SplitTimer timer = new SplitTimer("recognizeImage");
+
+    // Log this method so that it can be analyzed with systrace.
+    Trace.beginSection("recognizeImage");
+
+    Trace.beginSection("preprocessBitmap");
+    // Preprocess the image data from 0-255 int to normalized float based
+    // on the provided parameters.
+    bitmap.getPixels(intValues, 0, bitmap.getWidth(), 0, 0, bitmap.getWidth(), bitmap.getHeight());
+
+    for (int i = 0; i < intValues.length; ++i) {
+      floatValues[i * 3 + 0] = ((intValues[i] >> 16) & 0xFF) / 255.0f;
+      floatValues[i * 3 + 1] = ((intValues[i] >> 8) & 0xFF) / 255.0f;
+      floatValues[i * 3 + 2] = (intValues[i] & 0xFF) / 255.0f;
+    }
+    Trace.endSection(); // preprocessBitmap
+
+    // Copy the input data into TensorFlow.
+    Trace.beginSection("fillNodeFloat");
+    inferenceInterface.fillNodeFloat(
+            inputName, new int[] {1, inputSize, inputSize, 3}, floatValues);
+    Trace.endSection();
+
+    timer.endSplit("ready for inference");
+
+    // Run the inference call.
+    Trace.beginSection("runInference");
+    final int resultCode = inferenceInterface.runInference(outputNames);
+    if (resultCode != 0) {
+      throw new RuntimeException("Bad result code from inference: " + resultCode);
+    }
+    Trace.endSection();
+
+    timer.endSplit("ran inference");
+
+    // Copy the output Tensor back into the output array.
+    Trace.beginSection("readNodeFloat");
+    //推理得到的结果
+
+    final float[] outputs=new float[feat_shapes[0][0] * feat_shapes[0][1] * (anchor_sizes[0].length+anchor_ratios[0].length) * 4+
+                                          feat_shapes[1][0] * feat_shapes[1][1] * (anchor_sizes[1].length+anchor_ratios[1].length) * 4+
+                                          feat_shapes[2][0] * feat_shapes[2][1] * (anchor_sizes[2].length+anchor_ratios[2].length) * 4+
+                                          feat_shapes[3][0] * feat_shapes[3][1] * (anchor_sizes[3].length+anchor_ratios[3].length) * 4+
+                                          feat_shapes[4][0] * feat_shapes[4][1] * (anchor_sizes[4].length+anchor_ratios[4].length) * 4+
+                                          feat_shapes[5][0] * feat_shapes[5][1] * (anchor_sizes[5].length+anchor_ratios[5].length) * 4+
+                                          feat_shapes[0][0] * feat_shapes[0][1] * (anchor_sizes[0].length+anchor_ratios[0].length) * NUM_CLASSES+
+                                          feat_shapes[1][0] * feat_shapes[1][1] * (anchor_sizes[1].length+anchor_ratios[1].length) * NUM_CLASSES+
+                                          feat_shapes[2][0] * feat_shapes[2][1] * (anchor_sizes[2].length+anchor_ratios[2].length) * NUM_CLASSES+
+                                          feat_shapes[3][0] * feat_shapes[3][1] * (anchor_sizes[3].length+anchor_ratios[3].length) * NUM_CLASSES+
+                                          feat_shapes[4][0] * feat_shapes[4][1] * (anchor_sizes[4].length+anchor_ratios[4].length) * NUM_CLASSES+
+                                          feat_shapes[5][0] * feat_shapes[5][1] * (anchor_sizes[5].length+anchor_ratios[5].length) * NUM_CLASSES];
+
+    inferenceInterface.readNodeFloat(outputNames[0], outputs);
+    LOGGER.i("recognizeImage: "+outputs);
+    Trace.endSection();
+
+    // Find the best detections.
+    final PriorityQueue<Recognition> pq =
+            new PriorityQueue<Recognition>(
+                    1,
+                    new Comparator<Recognition>() {
+                      @Override
+                      public int compare(final Recognition lhs, final Recognition rhs) {
+                        // Intentionally reversed to put high confidence at the head of the queue.
+                        return Float.compare(rhs.getConfidence(), lhs.getConfidence());
+                      }
+                    });
+
+    int num=0,offest=0;
+    float cx,cy,cw,ch,xpos,ypos,h,w;
+    for(int i=0;i<6;i++)
+    {
+      for(int y=0;y<feat_shapes[i][0];y++)
+      {
+        for(int x=0;x<feat_shapes[i][1];x++)
+        {
+          ypos=(y+anchor_offset)*anchor_steps[i]/img_shape[0];
+          xpos=(x+anchor_offset)*anchor_steps[i]/img_shape[1];
+          //预测框
+          for(int l=0;l<(anchor_ratios[i].length+2);l++)
+          {
+            if(l==0)
+            {
+              h=anchor_sizes[i][0]/img_shape[0];
+              w=anchor_sizes[i][0]/img_shape[1];
+            }
+            else if(l==1)
+            {
+              h=Float.parseFloat(String.valueOf(Math.sqrt(anchor_sizes[i][0]*anchor_sizes[i][1])/img_shape[0]));
+              w=Float.parseFloat(String.valueOf(Math.sqrt(anchor_sizes[i][0]*anchor_sizes[i][1])/img_shape[1]));
+            }
+            else
+            {
+              h=Float.parseFloat(String.valueOf(anchor_sizes[i][0]/img_shape[0]/Math.sqrt(anchor_ratios[i][l-2])));
+              w=Float.parseFloat(String.valueOf(anchor_sizes[i][0]/img_shape[1]/Math.sqrt(anchor_ratios[i][l-2])));
+            }
+            //解码
+            cx=outputs[offest]*w*prior_scaling[0]+xpos;
+            offest++;
+            cy=outputs[offest]*h*prior_scaling[1]+ypos;
+            offest++;
+            cw=Float.parseFloat(String.valueOf(w*Math.exp(outputs[offest]*prior_scaling[2])));
+            offest++;
+            ch=Float.parseFloat(String.valueOf(h*Math.exp(outputs[offest]*prior_scaling[3])));
+            offest++;
+            final RectF rect =
+                    new RectF(
+                            Math.max(0, cx - cw / 2),
+                            Math.max(0, cy - ch / 2),
+                            Math.min(1, cx + cw / 2),
+                            Math.min(1, cy + ch / 2));
+            //挑选大于select_threshold的框
+            offest++;
+            for(int m=1;m<NUM_CLASSES;m++)
+            {
+              if(outputs[offest]>select_threshold)
+              {
+                LOGGER.i(
+                        "%s (%d) %f %s", LABELS[m], m, outputs[offest], rect);
+                pq.add(new Recognition("" + num, LABELS[m], outputs[offest], rect));
+                num++;
+              }
+              offest++;
+            }
+          }
+        }
+      }
+    }
+    timer.endSplit("decoded results");
+
+    final ArrayList<Recognition> sort = new ArrayList<Recognition>();
+    for (int i = 0; i < Math.min(pq.size(), top_k); ++i) {
+      sort.add(pq.poll());
+    }
+    timer.endSplit("sorted results");
+
+    final ArrayList<Recognition> nms = new ArrayList<Recognition>();
+    float []keep_bboxes=new float[sort.size()];
+    for(int i=0;i<sort.size();i++)
+    {
+      keep_bboxes[i]=1;
+    }
+    float overlap;
+    for(int i=0;i<sort.size();i++)
+    {
+      if(keep_bboxes[i]==1)
+      {
+        for(int j=i+1;j<sort.size();j++)
+        {
+          overlap=bboxes_jaccard(sort.get(i).getLocation(),sort.get(j).getLocation());
+          if(overlap<nms_threshold||sort.get(i).getTitle()!=sort.get(j).getTitle())
+          {
+            nms.add(sort.get(i));
+          }
+          else
+            keep_bboxes[j]=0;
+        }
+      }
+    }
+    timer.endSplit("nms results");
+
+    final ArrayList<Recognition> recognitions = new ArrayList<Recognition>();
+    for (int i = 0; i < Math.min(nms.size(), MAX_RESULTS); ++i) {
+      recognitions.add(nms.get(i));
+    }
+    Trace.endSection(); // "recognizeImage"
+
+    timer.endSplit("processed results");
+
+    return recognitions;
+  }

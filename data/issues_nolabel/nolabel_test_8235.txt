@@ -1,0 +1,117 @@
+RuntimeError: Graph is finalized and cannot be modified. when I use tf.train.Supervisor
+
+In [1]: import tensorflow as tf
+In [2]: g = tf.Variable(0, name="g")
+In [3]: def pre_load(sess):
+...:     print("load")
+...:     sess.run(g.assign(1))
+...:
+In [4]: sv = tf.train.Supervisor(logdir="/tmp/2/", init_fn=pre_load)
+In [5]: with sv.managed_session() as sess:
+...:     sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+...:     print(sess.run(g))
+when I run this code in ipython,
+I got an execption below
+INFO:tensorflow:Error reported to Coordinator: <type 'exceptions.RuntimeError'>, Graph is finalized and cannot be modified.
+RuntimeError                              Traceback (most recent call last)
+ in ()
+----> 1 with sv.managed_session() as sess:
+2     sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+3     print(sess.run(g))
+4
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/contextlib.pyc in enter(self)
+15     def enter(self):
+16         try:
+---> 17             return self.gen.next()
+18         except StopIteration:
+19             raise RuntimeError("generator didn't yield")
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/training/supervisor.pyc in managed_session(self, master, config, start_standard_services, close_summary_writer)
+971         # threads which are not checking for should_stop().  They
+972         # will be stopped when we close the session further down.
+--> 973         self.stop(close_summary_writer=close_summary_writer)
+974       finally:
+975         # Close the session to finish up all pending calls.  We do not care
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/training/supervisor.pyc in stop(self, threads, close_summary_writer)
+799       # reported.
+800       self._coord.join(threads,
+--> 801                        stop_grace_period_secs=self._stop_grace_secs)
+802     finally:
+803       # Close the writer last, in case one of the running threads was using it.
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/training/coordinator.pyc in join(self, threads, stop_grace_period_secs)
+384       self._registered_threads = set()
+385       if self._exc_info_to_raise:
+--> 386         six.reraise(*self._exc_info_to_raise)
+387       elif stragglers:
+388         raise RuntimeError(
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/training/supervisor.pyc in managed_session(self, master, config, start_standard_services, close_summary_writer)
+960       sess = self.prepare_or_wait_for_session(
+961           master=master, config=config,
+--> 962           start_standard_services=start_standard_services)
+963       yield sess
+964     except Exception as e:
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/training/supervisor.pyc in prepare_or_wait_for_session(self, master, config, wait_for_checkpoint, max_wait_secs, start_standard_services)
+717           checkpoint_dir=self._logdir, wait_for_checkpoint=wait_for_checkpoint,
+718           max_wait_secs=max_wait_secs, config=config,
+--> 719           init_feed_dict=self._init_feed_dict, init_fn=self._init_fn)
+720       self._write_graph()
+721       if start_standard_services:
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/training/session_manager.pyc in prepare_session(self, master, init_op, saver, checkpoint_dir, checkpoint_filename_with_path, wait_for_checkpoint, max_wait_secs, config, init_feed_dict, init_fn)
+262         sess.run(init_op, feed_dict=init_feed_dict)
+263       if init_fn:
+--> 264         init_fn(sess)
+265
+266     local_init_success, msg = self._try_run_local_init_op(sess)
+ in pre_load(sess)
+1 def pre_load(sess):
+2     print("load")
+----> 3     sess.run(g.assign(1))
+4
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/ops/variables.pyc in assign(self, value, use_locking)
+549       the assignment has completed.
+550     """
+--> 551     return state_ops.assign(self._variable, value, use_locking=use_locking)
+552
+553   def assign_add(self, delta, use_locking=False):
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/ops/gen_state_ops.pyc in assign(ref, value, validate_shape, use_locking, name)
+45   result = _op_def_lib.apply_op("Assign", ref=ref, value=value,
+46                                 validate_shape=validate_shape,
+---> 47                                 use_locking=use_locking, name=name)
+48   return result
+49
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.pyc in apply_op(self, op_type_name, name, **keywords)
+489                 dtype=dtype,
+490                 as_ref=input_arg.is_ref,
+--> 491                 preferred_dtype=default_dtype)
+492           except TypeError as err:
+493             if dtype is None:
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/framework/ops.pyc in internal_convert_to_tensor(value, dtype, name, as_ref, preferred_dtype)
+714
+715         if ret is None:
+--> 716           ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+717
+718         if ret is NotImplemented:
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/framework/constant_op.pyc in _constant_tensor_conversion_function(v, dtype, name, as_ref)
+174                                          as_ref=False):
+175   _ = as_ref
+--> 176   return constant(v, dtype=dtype, name=name)
+177
+178
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/framework/constant_op.pyc in constant(value, dtype, shape, name, verify_shape)
+167   const_tensor = g.create_op(
+168       "Const", [], [dtype_value.type],
+--> 169       attrs={"value": tensor_value, "dtype": dtype_value}, name=name).outputs[0]
+170   return const_tensor
+171
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/framework/ops.pyc in create_op(self, op_type, inputs, dtypes, input_types, name, attrs, op_def, compute_shapes, compute_device)
+2352
+2353     """
+-> 2354     self._check_not_finalized()
+2355     for idx, a in enumerate(inputs):
+2356       if not isinstance(a, Tensor):
+/Users/lonica/anaconda3/envs/py2/lib/python2.7/site-packages/tensorflow/python/framework/ops.pyc in _check_not_finalized(self)
+2075     """
+2076     if self._finalized:
+-> 2077       raise RuntimeError("Graph is finalized and cannot be modified.")
+2078
+2079   def _add_op(self, op):
+RuntimeError: Graph is finalized and cannot be modified.

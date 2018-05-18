@@ -1,0 +1,35 @@
+tf.contrib.signal.stft: Incompatible gradient shape
+
+Fails on TF 1.5.0 and 1.6.0rc1
+I need to compute gradients of a signal through a STFT with a smaller frame length than FFT length. Assumed this would truncate the window in the gradient computation or fail on some assertion but this fails ungracefully.
+Sample code
+def test_gradient_computation(frame_length, fft_length):
+    graph = tf.Graph()
+    with graph.as_default():
+        x = tf.get_variable('input', [1, 16000], tf.float32)
+        x = tf.contrib.signal.stft(
+            x,
+            frame_length=frame_length,
+            frame_step=frame_length // 2,
+            fft_length=fft_length
+        )
+
+        x = tf.abs(x)
+        y = tf.ones_like(x)
+
+        loss = tf.losses.mean_squared_error(x, y)
+
+        optimizer = tf.train.GradientDescentOptimizer(1e-3)
+        train_op = optimizer.minimize(loss)
+        with tf.Session() as session:
+            session.run(tf.global_variables_initializer())
+            session.run(train_op)
+This works:
+n = 1024
+test_gradient_computation(frame_length=n, fft_length=n)
+test_gradient_computation(frame_length=n, fft_length=n*2)
+But this fails:
+n = 1024
+test_gradient_computation(frame_length=n*2, fft_length=n)
+
+ValueError: Incompatible shapes between op input and calculated input gradient.  Forward operation: stft/rfft.  Input index: 0. Original input shape: (1, 14, 2048).  Calculated input gradient shape: (1, 14, 1024)

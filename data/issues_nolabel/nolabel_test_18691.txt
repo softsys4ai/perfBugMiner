@@ -1,0 +1,153 @@
+Periodic overhead when using tensorflow dataset for model training on GPU
+
+As you can see it in the following code, I am trying to train a simple model on Tensorflow with a Tensorflow Dataset. The dataset is pretty huge (2000 exemples of each 300*2000 elements). I shuffle, repeat and batch the dataset in order to do a stochastic gradient descent for training my model.
+But I can observe a period overhead of the optimisation step (it is sess.run(train) in my code).
+As you can see it here, every 5 steps, it needs 3s instead of 0.5 to do the optimisation.
+Step 105 duration : 3.5233473777770996
+Step 106 duration : 0.5653283596038818
+Step 107 duration : 0.5391891002655029
+Step 108 duration : 0.5480048656463623
+Step 109 duration : 0.0415492057800293
+Step 110 duration : 3.032115936279297
+Step 111 duration : 0.5407207012176514
+Step 112 duration : 0.5276811122894287
+Step 113 duration : 0.5448746681213379
+Step 114 duration : 0.04253268241882324
+Step 115 duration : 3.1273345947265625
+Moreover my GPU is almost all the time at 0% utilisation with around 90% of the memory used.
+It seems that this overhead arrived when the Iterator finish to see all the dataset.
+Do you have any idea how I can speed up my training ?
+It is due to the fact that my model is really simple ?
+Best,
+
+System information
+
+**Have I written custom code **:  named Test_TimeDataset.py
+**OS Platform and Distribution **:  Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Binary
+**TensorFlow version **: 1.4
+Python version: 3.6
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: CUDA 8.0 and cuDNN 6.0.21
+GPU model and memory: GeForce 1080 with 11Go
+Exact command to reproduce: python Test_TimeDataset.py
+
+I also reproduce it with
+
+TensorFlow installed from (source or binary): Binary
+**TensorFlow version **: 1.8
+Python version: 3.6
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: CUDA 9.0 and cuDNN 7.1.3.16
+On the same machine (I have both versions on the same Ubuntu session).
+
+But I am not sure that Tensorflow use the cuDNN library.
+You can also found the code here
+Source code
+``
+import tensorflow as tf
+import numpy as np
+import os, time, multiprocessing
+import matplotlib.pyplot as plt
+def _floats_feature(value):
+return tf.train.Feature(float_list=tf.train.FloatList(value=value.reshape(-1)))
+def parser(record):
+num_features = 2000
+size_group = 300
+num_classes= 10
+class_indice = 0
+keys_to_features={
+'X': tf.FixedLenFeature([size_group*num_features],tf.float32),
+'label' : tf.FixedLenFeature([num_classes],tf.float32)}
+parsed = tf.parse_single_example(record, keys_to_features)
+label = parsed['label']
+label = tf.slice(label,[class_indice],[1])
+label = tf.squeeze(label) # To get a vector one dimension
+X = parsed['X']
+X= tf.reshape(X, [size_group,num_features])
+return X, label
+
+def test_train_w_dataset():
+num_features = 2000
+num_ex = 2000
+size_group = 300
+num_classes = 10
+batch_size= 480
+max_iters = 300
+buffer_size = 10000
+# Creation of the Dataset 
+filename_tfrecords = 'tmp.tfrecords'
+if not(os.path.isfile(filename_tfrecords)): # If the file doesn't exist we will create it
+    print("Start creating the Dataset")
+    writer = tf.python_io.TFRecordWriter(filename_tfrecords)
+    
+    for i in range(num_ex):
+        if i % 1000 == 0: print("Step :",i)
+        X = np.random.normal(size=(size_group,num_features))
+        vectors =  2*np.random.randint(0,2,(num_classes,1))-1
+        features=tf.train.Features(feature={
+                    'X': _floats_feature(X),
+                    'label' : _floats_feature(vectors)})
+        example = tf.train.Example(features=features)       
+        writer.write(example.SerializeToString())
+    writer.close()
+else:
+    print("The dataset tfrecords already exist")
+ 
+train_dataset = tf.data.TFRecordDataset(filename_tfrecords)
+num_proc = multiprocessing.cpu_count()
+train_dataset = train_dataset.map(parser,
+                                    num_parallel_calls=num_proc)
+dataset_shuffle = train_dataset.shuffle(buffer_size=buffer_size,
+                                             reshuffle_each_iteration=True) 
+dataset_shuffle = dataset_shuffle.batch(batch_size)
+dataset_shuffle = dataset_shuffle.repeat() 
+dataset_shuffle = dataset_shuffle.prefetch(batch_size) 
+shuffle_iterator = dataset_shuffle.make_initializable_iterator()
+X_, y_ = shuffle_iterator.get_next()
+
+W=tf.Variable(tf.random_normal([num_features], stddev=1.),name="weights")
+W=tf.reshape(W,(1,1,num_features))
+Prod=tf.reduce_sum(tf.multiply(W,X_),axis=2)
+Max=tf.reduce_max(Prod,axis=1)
+Tan= tf.reduce_sum(tf.multiply(tf.tanh(Max),y_))
+loss= tf.add(Tan,tf.reduce_sum(tf.multiply(W,W)))
+
+LR = 0.01
+restarts = 1
+optimizer = tf.train.GradientDescentOptimizer(LR) 
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+train = optimizer.minimize(loss)  
+print("The graph is defined")
+sess = tf.Session(config=config)
+    
+durationTab = []
+
+for essai in range(restarts+1):
+    t0 = time.time()
+    sess.run(tf.global_variables_initializer())
+    sess.run(tf.local_variables_initializer())
+    sess.run(shuffle_iterator.initializer)
+    t1 = time.time()
+    duration = t1 - t0
+    print('Duration of initialization : ',duration)
+    for step in range(max_iters):
+        t0 = time.time()
+        sess.run(train)
+        t1 = time.time()
+        duration = t1 - t0
+        print("Step ",str(step),' duration : ',duration)
+        durationTab += [duration]
+        
+
+plt.plot(durationTab)
+plt.ylabel('Duration')
+plt.xlabel('Iteration')
+plt.show()
+
+if name == 'main':
+test_train_w_dataset()
+``

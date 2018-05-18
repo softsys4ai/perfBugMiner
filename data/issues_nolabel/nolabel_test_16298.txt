@@ -1,0 +1,82 @@
+Bug of tf.data.TFRecordDataset? or my codes wrong?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):  Windows 10
+TensorFlow installed from (source or binary):  binary
+TensorFlow version (use command below):  1.4
+Python version: 3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 8.0/6.0
+GPU model and memory: Nvidia Quadro K4000
+Exact command to reproduce:
+
+I tested to write dynamic numbers of variables into tfrecord. But when I use the tf.data.TFRecordDataset to read VarLenFeature, the program crashes. However, if I do not use dataset, but just tf.python_io.tf_record_iterator. The program works without problem. I wonder whether this is a bug of tf.data.TFRecordDataset, or there is something wrong in my codes?
+My writing codes are
+def test_write():
+  writer = tf.python_io.TFRecordWriter('test.tfrecord')
+
+  for i in range(3):
+    val_list = []
+    for j in range(i+1):
+      val_list.append(i+j)
+    feature_dict = {
+      'val': tf.train.Feature(int64_list=tf.train.Int64List(value=val_list)),
+    }
+
+    example = tf.train.Example(features=tf.train.Features(feature=feature_dict))
+    writer.write(example.SerializeToString())
+
+  writer.close()
+
+The reading codes using tf.data.TFRecordDataset and causing error are
+def parse_test(example):
+  features = {
+	'val': tf.VarLenFeature(dtype=tf.int64)
+  }
+  parsed_features = tf.parse_single_example(example, features)
+
+  return parsed_features
+
+def test_read():
+  dataset = tf.data.TFRecordDataset(['test.tfrecord'])
+  dataset = dataset.map(parse_test)
+  dataset = dataset.batch(1)
+
+  iterator = dataset.make_one_shot_iterator()
+  feature_dict =  iterator.get_next()
+
+  with tf.Session() as sess:
+	for _ in range(3):
+	  curr_dict = sess.run(feature_dict)
+	  print([curr_dict['val']])
+
+The error message is:
+TypeError: Failed to convert object of type <class 'tensorflow.python.framework.sparse_tensor.SparseTensor'> to Tensor. Contents: SparseTensor(indices=Tensor("ParseSingleExample/Slice_Indices_val:0", shape=(?, 1), dtype=int64), values=Tensor("ParseSingleExample/ParseExample/ParseExample:1", shape=(?,), dtype=int64), dense_shape=Tensor("ParseSingleExample/Squeeze_Shape_val:0", shape=(1,), dtype=int64)). Consider casting elements to a supported type.
+
+The successful reading codes without using tf.data.TFRecordDataset are as below
+def test_read2():
+  with tf.Session() as sess:
+	for serialized_example in tf.python_io.tf_record_iterator('test.tfrecord'):
+	  features = tf.parse_single_example(serialized_example,
+		features={
+		  'val': tf.VarLenFeature(dtype=tf.int64),
+		}
+	  )
+
+	  temp = features['val']
+
+	  values = sess.run(temp)
+	  print(values)
+
+This code successfully print out
+SparseTensorValue(indices=array([[0]], dtype=int64), values=array([0], dtype=int64), dense_shape=array([1], dtype=int64))
+SparseTensorValue(indices=array([[0],
+	   [1]], dtype=int64), values=array([1, 2], dtype=int64), dense_shape=array([2], dtype=int64))
+SparseTensorValue(indices=array([[0],
+	   [1],
+	   [2]], dtype=int64), values=array([2, 3, 4], dtype=int64), dense_shape=array([3], dtype=int64))
+
+However, I am still hoping to use the dataset structure to deal with the VarLenFeature. Is there anything wrong with my reading codes or there is a bug in tf.data.TFRecordDataset? Thank you.

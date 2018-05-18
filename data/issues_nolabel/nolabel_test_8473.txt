@@ -1,0 +1,60 @@
+Segmentation Fault in Shape Function When Accessing Attr
+
+Adding this to shape function causes segfault (full example below):
+      string data_format;
+      Status s = c->GetAttr("test_str", &data_format);
+On OS X:
+$ bazel version
+Build label: 0.4.3-homebrew
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Dec 22 15:20:22 2016 (1482420022)
+Build timestamp: 1482420022
+Build timestamp as int: 1482420022
+
+$git rev-parse
+07bb8ea2379bd459832b23951fb20ec47f3fdbd4
+
+Using the ZeroOut op but modifying the shape function:
+#include "tensorflow/core/framework/op.h"
+#include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/shape_inference.h"
+
+using namespace tensorflow;
+
+REGISTER_OP("ZeroOut")
+    .Input("to_zero: int32")
+    .Output("zeroed: int32")
+    .Attr("test_str: {'alex', 'bob'} = 'alex'")
+    .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      string data_format;
+      Status s = c->GetAttr("test_str", &data_format);
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    });
+
+class ZeroOutOp : public OpKernel {
+ public:
+  explicit ZeroOutOp(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    // Grab the input tensor
+    const Tensor& input_tensor = context->input(0);
+
+    // Create an output tensor
+    Tensor* output_tensor = NULL;
+    OP_REQUIRES_OK(context, context->allocate_output(0, input_tensor.shape(),
+                                                     &output_tensor));
+
+  }
+};
+
+REGISTER_KERNEL_BUILDER(Name("ZeroOut").Device(DEVICE_CPU), ZeroOutOp);
+and then running (within tf.TestCase):
+class Alex(tf.test.TestCase):
+    def test_alex(self):
+        so_path = (cur_dir + "/../../../../" +
+            "bazel-bin/tensorflow/core/user_ops/zero.so")
+        my_module = tf.load_op_library(so_path)
+        with self.test_session():
+            print my_module.zero_out([1,1,2,1]).eval()
+The segfault it self seems to be coming from protobuf. I filed a ticket there as well: google/protobuf#2863.

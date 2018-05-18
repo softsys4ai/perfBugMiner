@@ -1,0 +1,30 @@
+Make sklearn adapter to use LabelBinarizer by default
+
+TensorFlowDNNClassifier doesn't handle cases, when target labels are not in {0, 1}. Usually scikit-learn models transform labels internally using LabelBinarizer so this is slightly misleading.
+from sklearn import datasets, metrics, cross_validation
+from tensorflow.contrib import skflow
+
+## Load dataset and select only first two classes
+iris = datasets.load_iris()
+ids = np.where((iris.target==0) | (iris.target==1))
+iris.data = iris.data[ids]
+iris.target = iris.target[ids]
+
+## Change labels from 0/1 to -1/1
+## Comment out the following line to get 1.0 accuracy
+iris.target[iris.target==0] = -1 
+
+## Train and predict on iris (copied from example)
+X_train, X_test, y_train, y_test = cross_validation.train_test_split(iris.data, iris.target,
+    test_size=0.2, random_state=42)
+
+classifier = skflow.TensorFlowDNNClassifier(hidden_units=[10, 20, 10],
+    n_classes=3, steps=200)
+
+# Fit and predict.
+classifier.fit(X_train, y_train)
+score = metrics.accuracy_score(y_test, classifier.predict(X_test))
+print('Accuracy: {0:f}'.format(score)) # Prints 0.4, but prints 1.0 without label change
+TF version is 0.8.0rc0
+EDIT:
+What happens is that classifier.predict(X_test) is in [1,2] instead of [-1, 1]

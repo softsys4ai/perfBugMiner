@@ -1,0 +1,83 @@
+A bug with a default initialiser and tf.nn.rnn_cell.LSTMCell/tf.contrib.rnn.LSTMFusedCell
+
+Environment info
+Operating System:
+Mac OS X 10.9.5
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+No CUDA
+If installed from binary pip package, provide:
+pip install http://ci.tensorflow.org/view/Nightly/job/nightly-matrix-cpu/TF_BUILD_CONTAINER_TYPE=CPU,TF_BUILD_IS_OPT=OPT,TF_BUILD_IS_PIP=PIP,TF_BUILD_PYTHON_VERSION=PYTHON2,label=mac1-slave/lastSuccessfulBuild/artifact/pip_test/whl/tensorflow-0.10.0rc0-py2-none-any.whl
+
+Which pip package you installed.
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.10.0rc0
+
+Steps to reproduce
+
+A minimum example to reproduce the bug:
+
+import numpy as np
+import tensorflow as tf
+
+with tf.variable_scope("rnn", initializer=tf.contrib.layers.xavier_initializer()):
+    out_cell = tf.nn.rnn_cell.LSTMCell(num_units=100, state_is_tuple=True, use_peepholes=True)
+    #out_cell = tf.contrib.rnn.LSTMFusedCell(num_units=100)
+    input_var = tf.placeholder(dtype=tf.float32, shape=(32, 50, 100))
+
+    d, _ = tf.nn.dynamic_rnn(out_cell, input_var, dtype=tf.float32, parallel_iterations=32,
+                                 scope="output_rnn")
+    init = tf.initialize_all_variables()
+    with tf.Session() as sess:
+        input = np.random.uniform(-1.0, 1.0, [32, 50, 100])
+        sess.run(init)
+        o = sess.run([d], {input_var: input})
+
+
+
+The same bug if you comment LSTMCell and uncomment LSTMFusedCell which was renamed to LSTMBlockCell recently
+If I remove ", initializer=tf.contrib.layers.xavier_initializer()" in tf.variable_scope code will work without errrors with normal distribution by default. Or if I remove use_peepholes=True in LSTMCell the bug will disappear too.
+
+What have you tried?
+
+
+
+Logs or other output that would be helpful
+Traceback (most recent call last):
+....
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 848, in dynamic_rnn
+dtype=dtype)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 1015, in _dynamic_rnn_loop
+swap_memory=swap_memory)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1992, in while_loop
+result = context.BuildLoop(cond, body, loop_vars)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1877, in BuildLoop
+pred, body, original_loop_vars, loop_vars)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1827, in _BuildLoop
+body_result = body(*packed_vars_for_body)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 1000, in _time_step
+(output, new_state) = call_cell()
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 986, in 
+call_cell = lambda: cell(input_t, state)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/contrib/rnn/python/ops/lstm_ops.py", line 443, in call
+wci = vs.get_variable("wci", [self._num_units])
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 830, in get_variable
+custom_getter=custom_getter)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 673, in get_variable
+custom_getter=custom_getter)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 217, in get_variable
+validate_shape=validate_shape)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 202, in _true_getter
+caching_device=caching_device, validate_shape=validate_shape)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 536, in _get_single_variable
+validate_shape=validate_shape)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/variables.py", line 211, in init
+dtype=dtype)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/variables.py", line 281, in _init_from_args
+self._initial_value = ops.convert_to_tensor(initial_value(),
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/python/ops/variable_scope.py", line 526, in 
+init_val = lambda: initializer(shape.as_list(), dtype=dtype)
+File "/Users/vostryakov/projects/senses/env/lib/python2.7/site-packages/tensorflow/contrib/layers/python/layers/initializers.py", line 114, in _initializer
+fan_in = float(shape[-2])
+IndexError: list index out of range
+Exception TypeError: TypeError("'NoneType' object is not callable",) in <function _remove at 0x10248b6e0> ignored

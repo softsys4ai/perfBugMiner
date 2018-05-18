@@ -1,0 +1,63 @@
+GrpcRemoteMaster was chosen instead of LocalMaster
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+none.
+Environment info
+Operating System:
+Windows 10
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+none
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+9570f0f
+The output of bazel version
+(compiled by cmake)
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+from tensorflow.python.client import session
+
+def main(_):
+  # Create a cluster from the parameter server and worker hosts.
+  cluster = tf.train.ClusterSpec({
+    "worker": [
+        "127.0.0.1:10000"        
+    ],
+    "ps": [
+        "127.0.0.1:10001"
+    ]})
+
+  # Create and start a server for the local task.
+  server = tf.train.Server(cluster,
+                           job_name="worker",
+                           task_index=0)
+  with tf.device("/job:ps/task:0"):
+    weights = tf.Variable(tf.random_normal([10], stddev=0.35), name="weights")  
+  init_op = tf.global_variables_initializer()
+  with tf.Session("grpc://127.0.0.1:10000") as sess:
+    sess.run(init_op)
+    w  = sess.run(weights)
+    print(w)
+
+if __name__ == "__main__":
+  tf.app.run()
+
+What other attempted solutions have you tried?
+change
+  with tf.Session("grpc://127.0.0.1:10000") as sess:
+
+to
+  with tf.Session("grpc://localhost:10000") as sess:
+
+solved it.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+The reason is:
+In tensorflow\core\distributed_runtime\rpc\grpc_server_lib.cc: GrpcServer::target() function, the host part of target is hardcoded to "localhost"
+const string GrpcServer::target() const {
+  return strings::StrCat("grpc://localhost:", bound_port_);
+}
+
+So, if the session was created with another address string, e.g. 127.0.0.1, (localip), etc. GrpcRemoteMaster  will be used instead of LocalMaster. I suggest LocalMaster class should have a isLocalIP() function to deal with this.

@@ -1,0 +1,103 @@
+When using placeholder in MonitoredTrainingSession, summary called at first and not feed placeholder error
+
+System information
+== cat /etc/issue ===============================================
+VERSION="16.04.3 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+== are we in docker =============================================
+No
+== compiler =====================================================
+c++ (Ubuntu 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+== check pips ===================================================
+numpy (1.13.3)
+protobuf (3.4.0)
+tensorflow-gpu (1.3.0)
+tensorflow-tensorboard (0.1.5)
+== check for virtualenv =========================================
+True
+== tensorflow import ============================================
+tf.VERSION = 1.3.0
+tf.GIT_VERSION = v1.3.0-rc2-20-g0787eee
+tf.COMPILER_VERSION = v1.3.0-rc2-20-g0787eee
+Sanity check: array([1], dtype=int32)
+== env ==========================================================
+LD_LIBRARY_PATH :/usr/local/cuda-8.0/lib64
+DYLD_LIBRARY_PATH is unset
+== nvidia-smi ===================================================
+Fri Oct  6 11:16:46 2017
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 375.66                 Driver Version: 375.66                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX TIT...  Off  | 0000:01:00.0     Off |                  N/A |
+|  0%   54C    P0    52W / 250W |      0MiB / 12205MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+== cuda libs  ===================================================
+/usr/local/cuda-8.0/lib64/libcudart_static.a
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0.44
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+Describe the problem
+I am using MonitoredTrainingSession. With both tf.summary.scalar('test', d) in graph and checkpoint_dir='/temp', as param, the error occurs. I assume it tries to summary all at the first and run tf.summary.scalar('test', d). But I just want to run a and b to get the value, not activate any things relate to placeholder h. For people who will ask why you can't just feed a int, code of real I want to do is at last.
+I think this is a bug, or I do it in a wrong way?
+Source code / logs
+import tensorflow as tf
+    
+with tf.Graph().as_default():
+    global_step = tf.contrib.framework.get_or_create_global_step()
+
+    a = tf.constant(1, dtype=tf.int64)
+    b = tf.constant(2, dtype=tf.int64)
+    c = tf.add(a, b)
+
+    h = tf.placeholder(tf.int64)
+    d = tf.multiply(c, h)
+    tf.summary.scalar('test', d)
+
+    with tf.train.MonitoredTrainingSession(
+            checkpoint_dir='/temp',
+    ) as sess:
+        a_val, b_val = sess.run([a, b])
+
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'Placeholder' with dtype int64
+	 [[Node: Placeholder = Placeholder[dtype=DT_INT64, shape=<unknown>, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+	 [[Node: Const/_35 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_16_Const", tensor_type=DT_INT64, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+
+Code I real want to do
+import tensorflow as tf
+
+with tf.Graph().as_default():
+    global_step = tf.contrib.framework.get_or_create_global_step()
+    dataset_train = tf.contrib.data.Dataset.range(10)
+    dataset_val = tf.contrib.data.Dataset.range(90, 100)
+
+    iter_train_handle = dataset_train.make_one_shot_iterator().string_handle()
+    iter_val_handle = dataset_val.make_one_shot_iterator().string_handle()
+
+    handle = tf.placeholder(tf.string, shape=[])
+    iterator = tf.contrib.data.Iterator.from_string_handle(
+        handle, dataset_train.output_types, dataset_train.output_shapes)
+    next_batch = iterator.get_next()
+    tf.summary.scalar('test', next_batch)
+
+    with tf.train.MonitoredTrainingSession(
+            checkpoint_dir='/temp',
+    ) as sess:
+        handle_train, handle_val = sess.run([iter_train_handle, iter_val_handle])
+        for step in range(10):
+            print('train', sess.run(next_batch, feed_dict={handle: handle_train}))
+            if step % 3 == 0:
+                print('val', sess.run(next_batch, feed_dict={handle: handle_val}))

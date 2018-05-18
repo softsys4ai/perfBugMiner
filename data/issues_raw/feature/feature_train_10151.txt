@@ -1,0 +1,76 @@
+Support dictionaries of tensors in tf.contrib.data.Dataset
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary (nightly build)
+TensorFlow version (use command below): v1.2.0-rc0-172-g9e25de3
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: python3 test.py
+
+Describe the problem
+With the new tf.contrib.data.Dataset, it is possible to work with tuples and lists of tensors, but not with dictionaries. Using dictionary structures is supported for things like tf.batch, and it would make migrating to Dataset easier if it also supported it.
+Source code / logs
+test.py
+import tensorflow as tf
+
+dataset = tf.contrib.data.Dataset.range(3)
+
+# Using tuples works
+dataset_tup = dataset.map(lambda x: (x, x * 10))
+# Using lists works
+dataset_list = dataset.map(lambda x: [x, x * 10])
+# Using dicts doesn't work
+# dataset_dict = dataset.map(lambda x: {'a': x, 'b': x * 10})
+
+# Select dataset_tup, dataset_list or dataset_struct to output the values
+dataset_out = dataset_tup
+
+iterator = dataset_tup.make_one_shot_iterator()
+next_element = iterator.get_next()
+
+sess = tf.Session()
+
+for _ in range(3):
+    print(sess.run(next_element))
+When trying to use structs, I get this error
+Traceback (most recent call last):
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/tensor_util.py", line 460, in make_tensor_proto
+    str_values = [compat.as_bytes(x) for x in proto_values]
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/tensor_util.py", line 460, in <listcomp>
+    str_values = [compat.as_bytes(x) for x in proto_values]
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/python/util/compat.py", line 65, in as_bytes
+    (bytes_or_text,))
+TypeError: Expected binary or unicode string, got {'a': <tf.Tensor 'arg0:0' shape=() dtype=int64>, 'b': <tf.Tensor 'mul:0' shape=() dtype=int64>}
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/ede/test/test3.py", line 10, in <module>
+    dataset_dict = dataset.map(lambda x: {'a': x, 'b': x * 10})
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.py", line 813, in map
+    return MapDataset(self, map_func, num_threads, output_buffer_size)
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.py", line 1436, in __init__
+    self._map_func.add_to_graph(ops.get_default_graph())
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/function.py", line 619, in add_to_graph
+    self._create_definition_if_needed()
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/contrib/data/python/framework/function.py", line 167, in _create_definition_if_needed
+    outputs = self._func(*inputs)
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.py", line 1427, in tf_map_func
+    flattened_ret = [ops.convert_to_tensor(t) for t in nest.flatten(ret)]
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.py", line 1427, in <listcomp>
+    flattened_ret = [ops.convert_to_tensor(t) for t in nest.flatten(ret)]
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 676, in convert_to_tensor
+    as_ref=False)
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 741, in internal_convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/constant_op.py", line 113, in _constant_tensor_conversion_function
+    return constant(v, dtype=dtype, name=name)
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/constant_op.py", line 102, in constant
+    tensor_util.make_tensor_proto(value, dtype=dtype, shape=shape, verify_shape=verify_shape))
+  File "/home/ede/tensorflow/lib/python3.5/site-packages/tensorflow/python/framework/tensor_util.py", line 464, in make_tensor_proto
+    "supported type." % (type(values), values))
+TypeError: Failed to convert object of type <class 'dict'> to Tensor. Contents: {'a': <tf.Tensor 'arg0:0' shape=() dtype=int64>, 'b': <tf.Tensor 'mul:0' shape=() dtype=int64>}. Consider casting elements to a supported type.

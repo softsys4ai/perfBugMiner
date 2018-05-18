@@ -1,0 +1,34 @@
+Support for mixed precision gradients
+
+To save memory while keeping precision it's useful to be allow functions that store activations as fp16, but compute gradients in fp32. We are working on custom ops that compute gradients in mixed mode, but it requires hacks on Python gradient type checks side to working. The feature request is to relax these checks.
+Here's an example computation graph with mixed precision gradient. Forward propagation is done in fp16, and backprop is in fp32 as in the graph below
+
+Here's a toy example that creates such a g
+Graph:
+import tensorflow as tf
+from tensorflow.python.framework import function
+
+@function.Defun(tf.float16, tf.float32)
+def custom_grad(x, grad):
+    return 2*tf.cast(x, tf.float32)*grad
+
+@function.Defun(tf.float16, grad_func=custom_grad)
+def custom(x):
+    return tf.square(x)
+
+x = tf.Variable(1., dtype=tf.float16)
+
+# override cast to keep first backprop in fp32 
+with tf.get_default_graph().gradient_override_map({"Cast": "Identity"}):
+    loss = tf.cast(custom(x, name="mycustom_apply"), tf.float32)
+    
+gradient = tf.gradients(loss, x)
+
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+sess.run(gradient)
+
+Currently the example above crashes because various places in code assumes that grad function output matches type of incoming activation.
+in particular:
+
+tensorflow/python/ops/gradients_impl.py, line 264, in _VerifyGeneratedGradients: enforces that gradient output type is the same as activation input type

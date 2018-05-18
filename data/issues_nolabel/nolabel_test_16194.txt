@@ -1,0 +1,199 @@
+Cannot interpret feed_dict key as Tensor: The name 'DecodeJpeg/contents:0' refers to a Tensor which does not exist. The operation, 'DecodeJpeg/contents', does not exist in the graph.
+
+Hello,
+I try to get the output of each layer of my CNN. Here is the full example:
+`from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import argparse
+import sys
+import tempfile
+import os
+import DatasetReader as dr
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+import tensorflow as tf
+import utils
+FLAGS = None
+PLOT_DIR = './output/plots'
+
+
+def deepnn(x):
+
+  with tf.name_scope('reshape'):
+
+    x_image = tf.reshape(x, [-1, 100, 100, 1])#(x, [-1, 28, 28, 1])
+
+  # First convolutional layer - maps one grayscale image to 32 feature maps.
+  with tf.name_scope('conv1'):
+    W_conv1 = weight_variable([5, 5, 1, 32])#([5, 5, 1, 32])
+    b_conv1 = bias_variable([32])
+    # conv1dis = conv2d(x_image, W_conv1) + b_conv1
+    h_conv1 = tf.nn.relu(conv2d(x_image, W_conv1) + b_conv1)
+    tf.add_to_collection('conv_weights', conv2d(x_image, W_conv1))
+
+  # Pooling layer - downsamples by 2X.
+  with tf.name_scope('pool1'):
+    h_pool1 = max_pool_2x2(h_conv1)
+
+  # Second convolutional layer -- maps 32 feature maps to 64.
+  with tf.name_scope('conv2'):
+    W_conv2 = weight_variable([5, 5, 32, 64])
+    b_conv2 = bias_variable([64])
+    # conv2dis = conv2d(h_pool1, W_conv2) + b_conv2
+    h_conv2 = tf.nn.relu(conv2d(h_pool1, W_conv2) + b_conv2)
+    # tf.add_to_collection('conv_weights', h_conv2)
+
+  # Second pooling layer.
+  with tf.name_scope('pool2'):
+    h_pool2 = max_pool_2x2(h_conv2)
+
+  # Fully connected layer 1 -- after 2 round of downsampling, our 28x28 image
+  # is down to 7x7x64 feature maps -- maps this to 1024 features.
+  with tf.name_scope('fc1'):
+    W_fc1 = weight_variable([25 * 25 * 64, 1024])
+    b_fc1 = bias_variable([1024])
+    h_pool2_flat = tf.reshape(h_pool2, [-1, 25*25*64])
+    h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
+    # tf.add_to_collection('conv_weights', W_fc1)
+
+  # Dropout - controls the complexity of the model, prevents co-adaptation of
+  # features.
+  with tf.name_scope('dropout'):
+    keep_prob = tf.placeholder(tf.float32)
+    h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
+
+  # Map the 1024 features to 10 classes, one for each digit
+  with tf.name_scope('fc2'):
+    W_fc2 = weight_variable([1024, 2])
+    b_fc2 = bias_variable([2])
+
+  y_conv = tf.matmul(h_fc1_drop, W_fc2) + b_fc2
+
+  return y_conv, keep_prob
+
+
+def conv2d(x, W):
+  """conv2d returns a 2d convolution layer with full stride."""
+  return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+
+
+def max_pool_2x2(x):
+  """max_pool_2x2 downsamples a feature map by 2X."""
+  return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
+                        strides=[1, 2, 2, 1], padding='SAME')
+
+
+def weight_variable(shape):
+  """weight_variable generates a weight variable of a given shape."""
+  initial = tf.truncated_normal(shape, stddev=0.1)
+  return tf.Variable(initial)
+
+
+def bias_variable(shape):
+  """bias_variable generates a bias variable of a given shape."""
+  initial = tf.constant(0.1, shape=shape)
+  return tf.Variable(initial)
+
+
+def main(_):
+  # Import data
+  V0Dataset = dr.read_data_sets(FLAGS.data_dir, one_hot=True)
+
+  datasize = 10000
+  # Create the model
+  x = tf.placeholder(tf.float32, [None, datasize])#224*172])
+
+  # Define loss and optimizer
+  y_ = tf.placeholder(tf.float32, [None, 2])
+  print("logits shape {}".format(y_))
+
+
+  # # Build the graph for the deep net
+  y_conv, keep_prob = deepnn(x)
+
+  with tf.name_scope('loss'):
+    cross_entropy = tf.nn.softmax_cross_entropy_with_logits(labels=y_,
+                                                            logits=y_conv)
+  cross_entropy = tf.reduce_mean(cross_entropy)
+
+  with tf.name_scope('adam_optimizer'):
+    train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
+
+  with tf.name_scope('accuracy'):
+    correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
+    correct_prediction = tf.cast(correct_prediction, tf.float32)
+
+  accuracy = tf.reduce_mean(correct_prediction)
+
+  print('cross_entropy {}'.format(cross_entropy))
+  print('accuracy {}'.format(accuracy))
+
+
+
+  with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    for i in range(2):#500):
+      batch = V0Dataset.train.next_batch(10)
+      a = batch[1];
+      a = a.reshape(10,2)
+      train_step.run(feed_dict={x: batch[0], y_: a, keep_prob: 0.5})
+
+
+
+    graph_location = tempfile.mkdtemp()
+    print('Saving graph to: %s' % graph_location)
+    train_writer = tf.summary.FileWriter("/tmp/tensorflow/")
+    train_writer.add_graph(tf.get_default_graph())
+
+    conv0 = sess.graph.get_tensor_by_name('conv1/Conv2D:0')
+    print("conv0 {}".format(conv0))
+
+    predictions0 = sess.run(conv0,
+                           {'DecodeJpeg/contents:0': batch[0]}) # Error!!!!
+    print("predictions0 {}".format(predictions0))
+    print("predictions0 {}".format(predictions0.size))
+
+
+Here are the errors I get:
+`Traceback (most recent call last):
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1064, in _run
+    allow_operation=False)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 3035, in as_graph_element
+    return self._as_graph_element_locked(obj, allow_tensor, allow_operation)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 3077, in _as_graph_element_locked
+    "graph." % (repr(name), repr(op_name)))
+KeyError: "The name 'DecodeJpeg/contents:0' refers to a Tensor which does not exist. The operation, 'DecodeJpeg/contents', does not exist in the graph."
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "./deep_charging_station_train.py", line 309, in <module>
+    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "./deep_charging_station_train.py", line 297, in main
+    {'DecodeJpeg/contents:0': batch[0]})
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 889, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1067, in _run
+    + e.args[0])
+TypeError: Cannot interpret feed_dict key as Tensor: The name 'DecodeJpeg/contents:0' refers to a Tensor which does not exist. The operation, 'DecodeJpeg/contents', does not exist in the graph.
+`
+
+
+
+
+I don't understand why this appends. I looked with Tensorboard I don't know where should I get the DecodeJpeg informations of the layer
+Edit:
+Have I written custom code : I use deep mnist tutorial example and I modify the size of the input image
+OS Platform and Distribution : Ubuntu 16.04
+TensorFlow installed from
+TensorFlow version 1.4.0
+Bazel version N/A
+CUDA/cuDNN version N/A
+GPU model and memory N/A
+Exact command to reproduce

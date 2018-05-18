@@ -1,0 +1,58 @@
+Add an option to enable CORS in TensorBoard
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below):  b'unknown' 1.1.0
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: CUDA 8, cuDNN 5.1
+GPU model and memory: 1080ti 11GB
+Exact command to reproduce: N/A
+
+Describe the problem
+The DeepDream notebook example in TensorFlow provides a snippet that uses https://tensorboard.appspot.com to embed <iframe>s inside a Jupyter notebook. Changing this snippet to point to a local instance of TensorBoard fails with a CORS error
+
+Having the option to enable CORS when starting TensorBoard, or enabling it by default, would make it really easy to use the snippet to visualize directly in Jupyter using a local instance of TensorBoard.
+Source code / logs
+Here's the snippet in its whole, with modified URL to point to http://localhost:6006 instead of https://tensorboard.appspot.com
+# TensorFlow Graph visualizer code
+import numpy as np
+from IPython.display import clear_output, Image, display, HTML
+
+def strip_consts(graph_def, max_const_size=32):
+    """Strip large constant values from graph_def."""
+    strip_def = tf.GraphDef()
+    for n0 in graph_def.node:
+        n = strip_def.node.add() 
+        n.MergeFrom(n0)
+        if n.op == 'Const':
+            tensor = n.attr['value'].tensor
+            size = len(tensor.tensor_content)
+            if size > max_const_size:
+                tensor.tensor_content = "<stripped %d bytes>"%size
+    return strip_def
+
+def show_graph(graph_def, max_const_size=32):
+    """Visualize TensorFlow graph."""
+    if hasattr(graph_def, 'as_graph_def'):
+        graph_def = graph_def.as_graph_def()
+    strip_def = strip_consts(graph_def, max_const_size=max_const_size)
+    code = """
+        <script src="//cdnjs.cloudflare.com/ajax/libs/polymer/0.3.3/platform.js"></script>
+        <script>
+          function load() {{
+            document.getElementById("{id}").pbtxt = {data};
+          }}
+        </script>
+        <link rel="import" href="http://localhost:6006/tf-graph-basic.build.html" onload=load()>
+        <div style="height:600px">
+          <tf-graph-basic id="{id}"></tf-graph-basic>
+        </div>
+    """.format(data=repr(str(strip_def)), id='graph'+str(np.random.rand()))
+
+    iframe = """
+        <iframe seamless style="width:1200px;height:620px;border:0" srcdoc="{}"></iframe>
+    """.format(code.replace('"', '&quot;'))
+    display(HTML(iframe))

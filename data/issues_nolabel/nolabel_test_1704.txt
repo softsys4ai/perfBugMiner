@@ -1,0 +1,52 @@
+"Setting up TensorFlow for Development" no longer works with recent TF versions
+
+Environment info
+Operating System: OS X 10.11, Ubuntu 15.10
+Source build, commit hash: e39d8fe
+Steps to reproduce
+I have TF as a submodule and build it local to the project. I use more or less the exact same commands in the development setup. The only minor change is that I don't run python setup.py develop (under OS X, this breaks my Anaconda python installation completely via screwing with the site-packages). So the steps are (in Makefile syntax):
+git submodule update --init --recursive
+cd $(TF_DIR) && ./configure
+cd $(TF_DIR) && bazel build -c opt //tensorflow/tools/pip_package:build_pip_package
+cd $(TF_INSTALL_DIR) && ln -s $(addprefix ../../,$(wildcard $(TF_DIR)/bazel-bin/tensorflow/tools/pip_package/build_pip_package.runfiles/*)) .
+$(TF_INSTALL_DIR) && ln -s $(addprefix ../../,$(wildcard $(TF_DIR)/tensorflow/tools/pip_package/*)) .
+The prefix commands are for making globs work in Make. I have confirmed they expand to the same symlink commands.
+Issue
+Importing tensorflow no longer works using development guidelines. Specifically, assuming tensorflow is cloned into $TF_DIR, symlinked into $TF_INSTALL_DIR, and built by bazel in $BAZEL_TMP, this no longer works: (output sanitized manually)
+$ PYTHONPATH=$TF_INSTALL_DIR python
+Python 2.7.10 (default, Oct 14 2015, 16:09:02) 
+[GCC 5.2.1 20151010] on linux2
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import tensorflow as tf
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "$TF_INSTALL_DIR/tensorflow/__init__.py", line 23, in <module>
+    from tensorflow.python import *
+  File "$TF_INSTALL_DIR/tensorflow/python/__init__.py", line 49, in <module>
+    from tensorflow.core.framework.graph_pb2 import *
+  File "$TF_INSTALL_DIR/tensorflow/core/framework/graph_pb2.py", line 6, in <module>
+    from google.protobuf import descriptor as _descriptor
+  File "$BAZEL_TMP/tensorflow/bazel-out/local_linux-opt/bin/tensorflow/tools/pip_package/build_pip_package.runfiles/google/protobuf/descriptor.py", line 46, in <module>
+    from google.protobuf.pyext import _message
+  File "$BAZEL_TMP/tensorflow/bazel-out/local_linux-opt/bin/tensorflow/tools/pip_package/build_pip_package.runfiles/google/protobuf/pyext/__init__.py", line 2, in <module>
+    __import__('pkg_resources').declare_namespace(__name__)
+  File "/usr/local/lib/python2.7/dist-packages/pkg_resources/__init__.py", line 2226, in declare_namespace
+    _handle_ns(packageName, path_item)
+  File "/usr/local/lib/python2.7/dist-packages/pkg_resources/__init__.py", line 2195, in _handle_ns
+    path.sort(key=sort_key)
+  File "/usr/local/lib/python2.7/dist-packages/pkg_resources/__init__.py", line 2193, in sort_key
+    return sys_path.index(_normalize_cached(os.sep.join(parts)))
+ValueError: '$BAZEL_TMP/tensorflow/bazel-out/local_linux-opt/bin/tensorflow/tools/pip_package/build_pip_package.runfiles' is not in list
+
+Linux output shown, but OS X also fails with a similar exception.
+What have you tried?
+I believe the issue comes down to the same one as #1535. I am creating this issue separately so that if it turns out to be a different problem, it isn't muddled. If it's the same, we can close it.
+The exception is a result of namespace package resolution in google.protobuf trying to find $BAZEL_TMP/tensorflow/bazel-out/local_linux-opt/bin/tensorflow/tools/pip_package/build_pip_package.runfiles/google/protobuf/pyext. It is trying to find it in a list of system paths which includes $TF_INSTALL_DIR. Recall that due to the development setup rules, the files in $TF_INSTALL_DIR are symlinks to files in $BAZEL_TMP. Specifically, $TF_INSTALL_DIR/google/protobuf is the same directory as $BAZEL_TMP/google/protobuf. (I have verified this with pwd -P.
+What seems to be going on is that Python is attempting to unify the protobuf namespace package, but its filename ($BAZEL_TMP/google/protobuf/pyext) does not match the sys.path entry ($TF_INSTALL_DIR).
+Note: This only appears to be a problem when trying to use the development install rules, and it only appears to be a problem when there's another tensorflow or protobuf installed in the system somewhere else. At least on OS X; the other version of tensorflow on my Linux machine is in use by other users, so I can't uninstall it safely. I have not attempted to create a clean virtual environment just for my development directory (for one, because virtual environments are a pain in the neck; and two, that's part of the whole point of having a local build of tensorflow).
+Workaround: Replacing the symlinks with a recursive copy (from $BAZEL_TMP to $TF_INSTALL_DIR) is apparently sufficient to convince Python that it's unified the namespace packages correctly, and it chooses the $TF_INSTALL_DIR specified in $PYTHONPATH.
+So I don't know what the appropriate solution here is, but the problem seems to be the result of a convergence of semi-hacky solutions, any one of which alone might not be an issue, but work together to cause problems:
+
+There's no clean way to extract the necessary files from a built tensorflow without going through pip install. Perhaps there's a method using pip I'm not aware of (maybe something with --target?).
+Python namespace packages have poor path resolution semantics. It looks like this ship has sailed.
+The symlink approach is kind of coarse and tricky to script around.

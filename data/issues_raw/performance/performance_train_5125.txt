@@ -1,0 +1,38 @@
+InvalidArgumentError : input must be 4-dimensional[100,100,3]
+
+I am trying to use inception V1 model to predict single image. The example on the tensor flow website uses inception V3, which needs 1.7s-1.9s on a single Tian X GPU. This is not fast.
+I use the following python code to test V3 performance, which by changing classify_image.py
+ #... above code is for load graph and read image
+
+t1=time.time()
+
+softmax_tensor = sess.graph.get_tensor_by_name('softmax:0') 
+predictions = sess.run(softmax_tensor,{'DecodeJpeg/contents:0': image_data}) 
+predictions= np.squeeze(fpredictions)
+
+delta=time.time()-t1
+print(delta)
+
+I think the major reason is V3 has 42 layers, which is too large.
+However, when i change the above code for V1 model. I meet errors. First I get the node names from V1 model .pb file as below:
+input
+conv2d0_w
+conv2d0_b
+conv2d1_w
+...
+...
+...
+softmax2
+output
+output1
+output2
+So the entry point of V1 model is input. The entry point of V3 is DecodeJpeg/contents, which accept image buffer from tf.gfile.FastGFile(image, 'rb').read() function directly. But V1 does not. So i use the code below to get the image and return as an array.
+image_data=cv2.imread(image)
+Now the code for V1 model become for prediction become
+softmax_tensor = sess.graph.get_tensor_by_name('softmax2:0')
+predictions = sess.run(softmax_tensor, {'input:0': image_data})
+
+However, I get error below when i run the code.
+InvalidArgumentError (see above for traceback): input must be 4-dimensional[100,100,3]
+[[Node: conv2d0_pre_relu/conv = Conv2D[T=DT_FLOAT, data_format="NHWC", padding="SAME", strides=[1, 2, 2, 1], use_cudnn_on_gpu=true, _device="/job:localhost/replica:0/task:0/cpu:0"](_recv_input_0, conv2d0_w)]]
+It says it need a 4-dimensional input. My image array has width, height and channel only. So how can i create a 4D tensor from a single image for V1 model as input data?

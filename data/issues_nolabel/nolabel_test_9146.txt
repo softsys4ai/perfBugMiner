@@ -1,0 +1,94 @@
+Cannot move checkpoint files saved with an absolute path
+
+When the checkpoint save path is an absolute path, moving the checkpoint results in a failure.
+TensorFlow was installed from source branch v1.0.1
+Python script to reproduce:
+#!/usr/bin/env python
+from __future__ import print_function
+
+import sys
+
+import os
+import tensorflow as tf
+
+
+def load_and_save(saver, session, model_dir):
+    print("Looking for models in : " + model_dir)
+    incumbent = tf.train.latest_checkpoint(model_dir)
+    if incumbent is not None:
+        print("Loading incumbent: " + incumbent)
+        saver.restore(session, incumbent)
+    else:
+        print("No incumbent found...")
+        tf.global_variables_initializer().run()
+
+    out_path = os.path.join(model_dir, 'model')
+    print("Saving to: " + out_path)
+    saver.save(session, out_path)
+
+
+def test(first_dir, second_dir):
+    # clean up for idempotence
+    os.system('rm -rf {}'.format(second_dir))
+
+    if not os.path.exists(first_dir):
+        os.makedirs(first_dir)
+
+    with tf.Graph().as_default(), tf.Session() as session:
+        test_var = tf.get_variable('test', [50, 50], dtype=tf.float32, initializer=tf.random_normal_initializer())
+        saver = tf.train.Saver([test_var])
+
+        # save to the first abs path dir
+        load_and_save(saver, session, first_dir)
+
+        # move to to the second dir
+        mv_command = 'mv {} {}'.format(first_dir, second_dir)
+        print(mv_command)
+        os.system(mv_command)
+
+        # attempt to load from the second dir
+        load_and_save(saver, session, second_dir)
+
+
+def main():
+    # WORKS
+    test('./FIRST_DIR', './SECOND_DIR')
+
+    # BUG?
+    test(os.path.abspath('./FIRST_DIR'), './SECOND_DIR')
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+Log output
+Looking for models in : ./FIRST_DIR
+No incumbent found...
+Saving to: ./FIRST_DIR/model
+mv ./FIRST_DIR ./SECOND_DIR
+Looking for models in : ./SECOND_DIR
+Loading incumbent: ./SECOND_DIR/model
+Saving to: ./SECOND_DIR/model
+Looking for models in : /home/rklopfer/REPORT/FIRST_DIR
+No incumbent found...
+Saving to: /home/rklopfer/REPORT/FIRST_DIR/model
+mv /home/rklopfer/REPORT/FIRST_DIR ./SECOND_DIR
+Looking for models in : ./SECOND_DIR
+Traceback (most recent call last):
+  File "./bug_report.py", line 57, in <module>
+    sys.exit(main())
+  File "./bug_report.py", line 53, in main
+    test(os.path.abspath('./FIRST_DIR'), './SECOND_DIR')
+  File "./bug_report.py", line 45, in test
+    load_and_save(saver, session, second_dir)
+  File "./bug_report.py", line 12, in load_and_save
+    incumbent = tf.train.latest_checkpoint(model_dir)
+  File "/home/rklopfer/.virtualenvs/tf/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1482, in latest_checkpoint
+    if file_io.get_matching_files(v2_path) or file_io.get_matching_files(
+  File "/home/rklopfer/.virtualenvs/tf/local/lib/python2.7/site-packages/tensorflow/python/lib/io/file_io.py", line 269, in get_matching_files
+    compat.as_bytes(filename), status)]
+  File "/usr/lib/python2.7/contextlib.py", line 24, in __exit__
+    self.gen.next()
+  File "/home/rklopfer/.virtualenvs/tf/local/lib/python2.7/site-packages/tensorflow/python/framework/errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.NotFoundError: /home/rklopfer/REPORT/FIRST_DIR

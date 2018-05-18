@@ -1,0 +1,49 @@
+Using grid_rnn_cell.Grid1LSTMCell makes stack_bidirectional_dynamic_rnn Throw different shape errors
+
+I encountered a problem using grid_rnn_cell.Grid1LSTMCell. I have no problems using it on contrib static_rnn and contrib static_bidirectional_rnn.
+class GridRNNTest(tf.test.TestCase):
+    def setUp(self):
+        self.num_features = 1
+        self.time_steps = 1
+        self.batch_size = 1
+        tf.reset_default_graph()
+        self.input_layer = tf.placeholder(tf.float32, [self.batch_size, self.time_steps, self.num_features])
+        self.cell = grid_rnn_cell.Grid1LSTMCell(num_units=8)
+
+    def test_simple_grid_rnn(self):
+        self.input_layer = tf.unstack(self.input_layer, self.time_steps, 1)
+        rnn.static_rnn(self.cell, self.input_layer, dtype=tf.float32)
+
+class BidirectionalGridRNNTest(tf.test.TestCase):
+    def setUp(self):
+        self.num_features = 1
+        self.time_steps = 1
+        self.batch_size = 1
+        tf.reset_default_graph()
+        self.input_layer = tf.placeholder(tf.float32, [self.batch_size, self.time_steps, self.num_features])
+        self.cell_fw = grid_rnn_cell.Grid1LSTMCell(num_units=8)
+        self.cell_bw = grid_rnn_cell.Grid1LSTMCell(num_units=8)
+
+    def test_simple_bidirectional_grid_rnn(self):
+        self.input_layer = tf.unstack(self.input_layer, self.time_steps, 1)
+        rnn.static_bidirectional_rnn(self.cell_fw, self.cell_bw, self.input_layer, dtype=tf.float32)
+
+However, when I test it on contrib stack_bidirectional_dynamic_rnn:
+class StackBidirectionalGridRNNTest(tf.test.TestCase):
+    def setUp(self):
+        self.num_features = 1
+        self.time_steps = 1
+        self.batch_size = 1
+        tf.reset_default_graph()
+        self.input_layer = tf.placeholder(tf.float32, [self.batch_size, self.time_steps, self.num_features])
+        self.cells_fw = [grid_rnn_cell.Grid1LSTMCell(num_units=8) for _ in range(2)]
+        self.cells_bw = [grid_rnn_cell.Grid1LSTMCell(num_units=8) for _ in range(2)]
+
+    def test_stack_bidirectional_grid_rnn(self):
+        self.input_layer = tf.unstack(self.input_layer, self.time_steps, 1)
+        rnn.stack_bidirectional_dynamic_rnn(self.cells_fw, self.cells_fw, self.input_layer, dtype=tf.float32)
+
+I encounter these shape errors:
+(1) When the input_layer is unstacked: Shape (1, 1) must have rank at least 3
+(2) When the input_layer is not unstacked: Shape (1, 2, 8) must have rank 2
+Which are, apparently,  conflicting with each other.

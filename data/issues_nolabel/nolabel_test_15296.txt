@@ -1,0 +1,76 @@
+variable_scopes_count miscalculates when reentering variable_scope again
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): mac 10.11
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4
+Python version:  3.5
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A
+
+Describe the problem
+The unexpected results are fund when I  investigates #14703, see code here:
+
+  
+    
+      tensorflow/tensorflow/python/ops/variable_scope.py
+    
+    
+        Lines 1621 to 1623
+      in
+      4806cb0
+    
+    
+    
+    
+
+        
+          
+           if isinstance(self._name_or_scope, VariableScope): 
+        
+
+        
+          
+             self._var_store.variable_scopes_count = self._old_subscopes 
+        
+
+        
+          
+           else: 
+        
+    
+  
+
+
+variable_scope always restores its old variable_scopes_count after exit, unfortunately, it seems that we forget reentering case. I am not sure whether the behavior is a bug.
+Source code / logs
+import tensorflow as tf
+from tensorflow.python.ops import variable_scope
+
+def print_scope(scope):
+    print("scope: {}, variable_scopes_count: {}".format(
+        scope.name,
+        variable_scope._get_default_variable_store().variable_scopes_count))
+
+with tf.variable_scope("a") as scope:
+    print_scope(scope)
+
+with tf.variable_scope(scope) as scope2:
+    print_scope(scope2)
+    with tf.variable_scope(scope2) as scope3:
+        print_scope(scope3)
+
+print("===============")
+print_scope(tf.get_variable_scope())
+output:
+~/Downloads ❯❯❯ python var_store_test.py
+scope: a, variable_scopes_count: {'a': 1}
+scope: a, variable_scopes_count: {'a': 2}
+scope: a, variable_scopes_count: {'a': 3}
+===============
+scope: , variable_scopes_count: {'a': 2}

@@ -1,0 +1,632 @@
+Tensorflow reimplementation performs significantly worse than original POC
+
+Intro
+I have asked this question several times on stackoverflow using different wording and level of details yet didn't get a single answer. Given the nature of the problem it is understandable, you cannot debug the network without training data and code. Still, maybe there is something obvious that I am missing here. We are trying to rewrite successful Torch POC binary classifier using Tensorflow to put it into production.
+Torch POC
+Torch model is a sequential binary classifier that works on word sequences and attempts to predict if the current word belongs to class 1 or 0. The model is quite simple, we have embedding layer and a special feature layer which we sum together before feeding the result vector into LSTM / GRU cell. At the output we do linear transform with sigmoid, compute binary cross entropy loss and update our parameters. Depending on the vocabulary size the model consists of 700k - 1000k params.
+Tensorflow reimplementation
+We have been using standard Tensorflow language model trainable on Penn Treebank dataset as our code base. We have adapted it to the point where it looks identical to our Torch POC (same hyperparams and equal number of parameters) and started training.
+Problem
+It quickly became clear that Tensorflow reimplemetation does not learn anything even though the loss drops and test dataset shows error decrease: Test loss reduced: 97690.06433105469 --> 9929.968887329102. Loading the trained model and quering it with words showed that the model predictions are garbage. Besides the loss values are different for Torch and Tensorflow.
+Tensorflow implementation (main part):
+#################### PLACEHOLDERS ####################
+# We use placeholders for the word, feature inputs and corresponding targets
+self.words_input = tf.placeholder(tf.int32, [config.batch_size, config.seq_length])
+self.feats_input = tf.placeholder(tf.float32, [config.batch_size, config.seq_length, config.nfeats])
+self.targets_input = tf.placeholder(tf.float32, [config.batch_size, config.seq_length])
+
+#################### VARIABLES ####################
+# We use variables for trainable network params like word embeddings, weights and biases
+# select params initialization
+if self.init_method == "xavier":
+    self.initer = tf.contrib.layers.xavier_initializer(uniform=False)
+
+elif self.init_method == "uniform":
+    self.initer = tf.random_uniform_initializer(-config.init_scale, config.init_scale)
+
+elif self.init_method == "normal":
+    self.initer = tf.random_normal_initializer()
+
+else:
+    self.initer = tf.zeros_initializer()
+
+# word embeddings
+with tf.variable_scope("input_layer"):
+    self.embedding = tf.get_variable("embedding", [self.vocab_size, self.input_size],
+                                     initializer=self.initer, trainable=True)
+    # feature weights for linear transform
+    self.feature_weight = tf.get_variable("feature_weigths", [config.nfeats, config.input_size],
+                                          initializer=self.initer, trainable=True)
+    # feature biases for linear transform
+    self.feature_bias = tf.get_variable("feature_bias", [config.input_size],
+                                        initializer=self.initer, trainable=True)
+
+# weights and biases of output layer (follows hidden layer(s))
+with tf.variable_scope("output_layer"):
+    # this is where we define out linear + sigmoid sizes [hidden_size x 1 or several classes]
+    self.output_w = tf.get_variable("output_w", [self.last_layer_size, self.pay_type],
+                                    initializer=self.initer, trainable=True)
+
+    self.output_b = tf.get_variable("output_b", [self.pay_type], initializer=self.initer,
+                                    trainable=True)
+
+
+#################### GRAPH ####################
+# create embedding lookup table with embedding variable and word inputs placeholder
+word_embeddings = tf.nn.embedding_lookup(self.embedding, self.words_input)  # [32 x 25 x 100]
+
+# create feature linear transform layer with feature inputs placeholder
+# first we need to swap tensor dims from [0, 1, 2] --> [1, 0, 2] to make seq_length first
+_feats_trans = tf.transpose(self.feats_input, [1, 0, 2])  # [25 x 32 x 4]
+
+# apply linear transform without activation in order
+# to expand feature vectors [batch_size x nfeats] -> [batch_size x input_size]
+# this is needed to sum them with word embeddings before recurrent layer
+#_feats_exp = tf.map_fn(self._linear, _feats_trans, dtype=tf.float32, back_prop=True)  # [25 x 32 x 100]
+_feats_exp = [tf.nn.xw_plus_b(s, self.feature_weight, self.feature_bias)
+              for s in tf.unstack(_feats_trans, axis=0)]
+
+# now stack the list of tensors and transpose back to [batch_size x seq_length x input_size]
+feats_exp = tf.transpose(tf.stack(_feats_exp, axis=0), [1, 0, 2])  # [32 x 25 x 100]
+
+# sum the outputs of the embedding and linear ops
+inputs_sum = tf.add(word_embeddings, feats_exp)  # [32 x 25 x 100]
+
+# apply dropout here if needed
+#if self.training and self.input_keep_prob < 1:
+#    inputs_sum = tf.nn.dropout(inputs_sum, self.input_keep_prob)
+
+# split the input matrices vertically into separate tensors
+_inputs_spl = tf.split(inputs_sum, config.seq_length, axis=1)
+# remove single tensor dimensions
+inputs = [tf.squeeze(split, [1]) for split in _inputs_spl]  # [25 * [32 x 100]]
+
+# build recurrent cells
+self.cell = self._create_recurrent_cell(config)
+
+# initialize the hidden (recurrent) state to zero
+self.initial_state = self.cell.zero_state(config.batch_size, tf.float32)
+
+# create recurrent network using rnn cell and return outputs and final state
+_outputs, self.final_state = self._apply_rec_cell(inputs, self.initial_state, self.cell, config)  # [800 x 200]
+
+# apply dropout here if needed
+if self.training and self.input_keep_prob < 1:
+    cell_output = tf.nn.dropout(_outputs, self.input_keep_prob)
+
+# the hidden layer output is fed into matmul(x, weights) + biases function
+logits = tf.nn.xw_plus_b(cell_output, self.output_w, self.output_b)  # [800 x 1]
+
+# transform logits into [seq_length x batch_size x 1]
+_logits = tf.reshape(logits, [config.seq_length, config.batch_size, config.pay_type])  # [25 x 32 x 1]
+
+self.logits = _logits
+
+# add single dim to target tensor [32 x 25] --> [32 x 25 x 1]
+_targets = tf.expand_dims(self.targets_input, axis=2)
+# transform targets tensor [32 x 25 x 1] --> [25 x 32 x 1] for loss computation
+_targets = tf.transpose(_targets, [1, 0, 2])
+
+#################### LOSS CALCULATION ####################
+# unstack logits and targets along seq_length dimension
+_logits_uns = tf.unstack(_logits, axis=0)
+_targets_uns = tf.unstack(_targets, axis=0)
+
+# apply loss function to each sequence and compute individual losses
+loss_fn = tf.losses.sigmoid_cross_entropy
+#loss_fn = tf.nn.sigmoid_cross_entropy_with_logits
+individual_losses = []
+
+for t, o in zip(_targets_uns, _logits_uns):  # [32 x 1], [32 x 1]
+    _loss = loss_fn(t, o, weights=1.0, label_smoothing=0, scope="sigmoid_cross_entropy",
+                    loss_collection=tf.GraphKeys.LOSSES, reduction=tf.losses.Reduction.NONE)
+    #_loss = loss_fn(labels=t, logits=o, name="sigmoid_cross_entropy")
+    individual_losses.append(_loss)
+
+# calculate the loss sum of individual losses
+with tf.name_scope('loss'):
+    self.loss = tf.reduce_sum(individual_losses)
+
+#################### TRAINING ####################
+if self.training:
+    self.lr = tf.Variable(0.0, trainable=False)
+    tvars = tf.trainable_variables()
+
+    # print model shapes and total params
+    print("MODEL params:")
+    for t in tvars:
+        print(t.shape)
+    print("TOTAL params:", np.sum([np.prod(t.shape) for t in tvars]))
+
+    # clip the gradient by norm
+    if config.grad_clip > 0:
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), config.grad_clip)
+    else:
+        grads = tf.gradients(self.loss, tvars)
+
+    # update variables (weights, biases, embeddings...)
+    with tf.name_scope("optimizer"):
+        optimizer = tf.train.AdamOptimizer(self.lr)
+        #optimizer = tf.train.GradientDescentOptimizer(self.lr)
+        # compute grads/vars for tensorboard
+        self.grads_and_vars = optimizer.compute_gradients(self.loss)
+
+        self.train_op = optimizer.apply_gradients(zip(grads, tvars),          global_step=tf.train.get_or_create_global_step())
+Recurrent cell creation
+    def _create_recurrent_cell(self, config):
+        """
+        Define and return recurrent cell.
+        """
+            cell = rnn.GRUCell(self.hidden_size,
+                                           kernel_initializer=self.initer,
+                                           bias_initializer=self.initer,
+                                           activation=tf.nn.tanh)
+
+            # apply dropout if required
+            if self.training and self.output_keep_prob < 1.0:
+                cell = rnn.DropoutWrapper(cell, output_keep_prob=self.output_keep_prob)
+
+        # we might use several rnn cells in future
+        return rnn.MultiRNNCell(cell, state_is_tuple=True)
+Recurrent cell application
+    def _apply_rec_cell(self, inputs, initial_state, cell, config):
+        """
+        Apply recurrence cell to each input sequence.
+        """
+
+        with variable_scope.variable_scope("recurrent_cell"):
+            state = initial_state
+            _outputs = []
+            for i, inp in enumerate(inputs):  # 25 * [32 x 100]
+                if i > 0:
+                    variable_scope.get_variable_scope().reuse_variables()
+                output, state = cell(inp, state)  # [32 x 200]
+                _outputs.append(output)
+
+        # concat the outputs and reshape them into 2D tensor (for xw_plus_b)
+        outputs = tf.reshape(tf.concat(_outputs, 1), [-1, self.recurrent_state_size]) 
+        return outputs, state
+Torch POC training analysis
+We first take a look at our Torch model and see how it trains during first 10 epochs. We use batch_size=32, seq_length=25, word embedding and feature vectors of size 100 and GRU cell size = 200.
+nn.Sequential {
+  [input -> (1) -> (2) -> (3) -> (4) -> output]
+  (1): nn.ParallelTable {
+    input
+      |`-> (1): nn.Sequential {
+      |      [input -> (1) -> (2) -> output]
+      |      (1): nn.LookupTable
+      |      (2): nn.SplitTable
+      |    }
+       `-> (2): nn.Sequential {
+             [input -> (1) -> (2) -> output]
+             (1): nn.SplitTable
+             (2): nn.MapTable {
+               nn.Linear(4 -> 100)
+             }
+           }
+       ... -> output
+  }
+  (2): nn.ZipTable
+  (3): nn.MapTable {
+    nn.CAddTable
+  }
+  (4): nn.Sequencer @ nn.Recursor @ nn.Sequential {
+    [input -> (1) -> (2) -> (3) -> (4) -> output]
+    (1): nn.RecGRU(100 -> 200)
+    (2): nn.Dropout(0.5, busy)
+    (3): nn.Linear(200 -> 1)
+    (4): nn.Sigmoid
+  }
+}
+
+Epoch #1	
+training...	
+8.5397211080362e-08	embeddings grads	
+0.020771607756615	feature weights grads	
+0.00044380914187059	feature bias grads	
+8.6396757978946e-06	gru grads	
+5.7720841141418e-05	gru bias grads	
+0.022520124912262	output_w grads	
+0.32349386811256	output_b grads	
+learning rate:	0.0497500005	
+Elapsed time: 3.190759	
+Speed: 0.000019 sec/batch	
+Training ERR: 959.54436812177	
+validating...	
+Validation ERR: 121.4889880009	
+check early-stopping...	
+Found new minima. Saving 
+Last best epoch: 1, ERR: 121.488988	
+	
+Epoch #2	
+training...	
+5.9534809082606e-08	embeddings grads	
+0.010755381546915	feature weights grads	
+0.00030940235592425	feature bias grads	
+2.632729774632e-05	gru grads	
+8.1771839177236e-05	gru bias grads	
+0.044476393610239	output_w grads	
+0.37297031283379	output_b grads	
+learning rate:	0.049500001	
+Elapsed time: 2.988541	
+Speed: 0.000018 sec/batch	
+Training ERR: 862.21877676807	
+validating...	
+Validation ERR: 115.8837774843	
+check early-stopping...	
+Found new minima. Saving
+Last best epoch: 2, ERR: 115.883777	
+	
+Epoch #3	
+training...	
+1.9829073494293e-08	embeddings grads	
+0.0085931243374944	feature weights grads	
+0.00010305171599612	feature bias grads	
+-2.4194558136514e-05	gru grads	
+-4.8788820095069e-06	gru bias grads	
+0.0073388875462115	output_w grads	
+0.40312686562538	output_b grads	
+learning rate:	0.0492500015	
+Elapsed time: 2.969960	
+Speed: 0.000018 sec/batch	
+Training ERR: 820.93807517737	
+validating...	
+Validation ERR: 110.50921051018	
+check early-stopping...	
+Found new minima. Saving 
+Last best epoch: 3, ERR: 110.509211	
+	
+Epoch #4	
+training...	
+-7.4974275676709e-09	embeddings grads	
+0.0028696460649371	feature weights grads	
+-3.8964077248238e-05	feature bias grads	
+-3.4580276405904e-05	gru grads	
+-3.2265303161694e-05	gru bias grads	
+0.049573861062527	output_w grads	
+0.4097863137722	output_b grads	
+learning rate:	0.049000002	
+Elapsed time: 3.005452	
+Speed: 0.000018 sec/batch	
+Training ERR: 783.27910768799	
+validating...	
+Validation ERR: 107.62939401716	
+check early-stopping...	
+Found new minima. Saving
+Last best epoch: 4, ERR: 107.629394	
+	
+Epoch #5	
+training...	
+-3.623286559673e-08	embeddings grads	
+-0.01051034592092	feature weights grads	
+-0.00018830213230103	feature bias grads	
+4.4970302042202e-06	gru grads	
+3.8041966035962e-05	gru bias grads	
+0.0042808093130589	output_w grads	
+0.13134820759296	output_b grads	
+learning rate:	0.0487500025	
+Elapsed time: 2.966464	
+Speed: 0.000018 sec/batch	
+Training ERR: 753.93339692801	
+validating...	
+Validation ERR: 108.99283232633	
+check early-stopping...	
+Last best epoch: 4, ERR: 107.629394	
+	
+Epoch #6	
+training...	
+-1.7328080303969e-08	embeddings grads	
+-0.0070463065057993	feature weights grads	
+-9.0054127213079e-05	feature bias grads	
+2.1397584077931e-06	gru grads	
+6.5339445427526e-05	gru bias grads	
+0.0060789352282882	output_w grads	
+0.13912197947502	output_b grads	
+learning rate:	0.048500003	
+Elapsed time: 2.984332	
+Speed: 0.000018 sec/batch	
+Training ERR: 727.82390461024	
+validating...	
+Validation ERR: 101.84884516429	
+check early-stopping...	
+Found new minima. Saving 
+Last best epoch: 6, ERR: 101.848845	
+	
+Epoch #7	
+training...	
+-2.1446611597753e-08	embeddings grads	
+-0.0099087124690413	feature weights grads	
+-0.000111457935418	feature bias grads	
+4.289226126275e-06	gru grads	
+9.2848667918588e-06	gru bias grads	
+0.033868614584208	output_w grads	
+0.36384600400925	output_b grads	
+learning rate:	0.0482500035	
+Elapsed time: 2.971069	
+Speed: 0.000018 sec/batch	
+Training ERR: 693.15547975153	
+validating...	
+Validation ERR: 89.342911911197	
+check early-stopping...	
+Found new minima. Saving
+Last best epoch: 7, ERR: 89.342912	
+	
+Epoch #8	
+training...	
+-2.4536879195125e-08	embeddings grads	
+-0.019674839451909	feature weights grads	
+-0.00012751790927723	feature bias grads	
+2.5825884222286e-06	gru grads	
+2.7131845854456e-06	gru bias grads	
+0.021293396130204	output_w grads	
+0.52193140983582	output_b grads	
+learning rate:	0.048000004	
+Elapsed time: 2.977743	
+Speed: 0.000018 sec/batch	
+Training ERR: 662.76471467828	
+validating...	
+Validation ERR: 85.326015817933	
+check early-stopping...	
+Found new minima. Saving 
+Last best epoch: 8, ERR: 85.326016	
+	
+Epoch #9	
+training...	
+-4.5795339076449e-08	embeddings grads	
+-0.019793825224042	feature weights grads	
+-0.00023799829068594	feature bias grads	
+-6.2910985434428e-06	gru grads	
+-2.7645726731862e-05	gru bias grads	
+-0.0087647764012218	output_w grads	
+0.11675848066807	output_b grads	
+learning rate:	0.0477500045	
+Elapsed time: 3.058577	
+Speed: 0.000018 sec/batch	
+Training ERR: 630.08797416603	
+validating...	
+Validation ERR: 81.433456174098	
+check early-stopping...	
+Found new minima. Saving 
+Last best epoch: 9, ERR: 81.433456	
+	
+Epoch #10	
+training...	
+-1.2227498302764e-07	embeddings grads	
+-0.079100400209427	feature weights grads	
+-0.00063546327874064	feature bias grads	
+2.7701785256795e-06	gru grads	
+-3.344654396642e-05	gru bias grads	
+-0.0030312589369714	output_w grads	
+0.41179794073105	output_b grads	
+learning rate:	0.047500005	
+Elapsed time: 3.000976	
+Speed: 0.000018 sec/batch	
+Training ERR: 603.50259356992	
+validating...	
+Validation ERR: 79.982634914108	
+check early-stopping...	
+Found new minima. Saving 
+Last best epoch: 10, ERR: 79.982635	
+
+You can well see that during first 10 epochs Torch POC loss dropped significantly. Now let's take a look at idential Tensorflow implementation that uses the same dataset, same hyperparameters and has the same number of parameters as well as optimizer.
+Tensorflow version training analysis
+MODEL params:
+(5197, 100)
+(4, 100)
+(100,)
+(200, 1)
+(1,)
+(300, 400)
+(400,)
+(300, 200)
+(200,)
+TOTAL params: 701001
+2018-04-06 11:26:30.534418: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2018-04-06 11:26:30.592130: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:895] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2018-04-06 11:26:30.592438: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1105] Found device 0 with properties: 
+name: GeForce GTX 1070 major: 6 minor: 1 memoryClockRate(GHz): 1.695
+pciBusID: 0000:01:00.0
+totalMemory: 7.92GiB freeMemory: 7.61GiB
+2018-04-06 11:26:30.592470: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1195] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 1070, pci bus id: 0000:01:00.0, compute capability: 6.1)
+
+ERROR: unable to remove saved_model dir!
+saved_model does not exist or locked, remove manually
+
+>>> Start test loss: 143462.57397460938
+
+Epoch: 1
+> lr update: 0.0497500005
+#################### DEBUGGING ####################
+-8.42829e-09 	 Model/input_layer/embedding:0_grads
+-1.0331846e-05 	 Model/input_layer/feature_weigths:0_grads
+-6.7426217e-06 	 Model/input_layer/feature_bias:0_grads
+0.32880843 	 Model/output_layer/output_w:0_grads
+-18.802212 	 Model/output_layer/output_b:0_grads
+-2.583741e-07 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/kernel:0_grads
+2.0594268e-06 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/bias:0_grads
+1.7847007e-06 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/kernel:0_grads
+-1.2758308e-05 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/bias:0_grads
+
+==================== debug_var ====================
+> Train loss: 41251.31823730469
+> Valid loss: 4779.414421081543
+> Best valid loss so far: 143462.57397460938
+Stopping in (35) epochs if no new minima!
+!!! NEW local minima found, saving the model...
+
+Epoch: 2
+> lr update: 0.049500001
+#################### DEBUGGING ####################
+4.380058e-12 	 Model/input_layer/embedding:0_grads
+-1.5687052e-09 	 Model/input_layer/feature_weigths:0_grads
+3.5040453e-09 	 Model/input_layer/feature_bias:0_grads
+1.0858363 	 Model/output_layer/output_w:0_grads
+-24.059809 	 Model/output_layer/output_b:0_grads
+9.927889e-11 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/kernel:0_grads
+-1.6885447e-09 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/bias:0_grads
+7.744753e-11 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/kernel:0_grads
+-1.343922e-09 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/bias:0_grads
+
+==================== debug_var ====================
+> Train loss: 36458.438621520996
+> Valid loss: 4771.496253967285
+> Best valid loss so far: 4779.414421081543
+Stopping in (35) epochs if no new minima!
+!!! NEW local minima found, saving the model...
+
+Epoch: 3
+> lr update: 0.0492500015
+#################### DEBUGGING ####################
+-9.34557e-13 	 Model/input_layer/embedding:0_grads
+-2.8814911e-18 	 Model/input_layer/feature_weigths:0_grads
+-7.4764217e-10 	 Model/input_layer/feature_bias:0_grads
+1.0264161 	 Model/output_layer/output_w:0_grads
+-28.068089 	 Model/output_layer/output_b:0_grads
+-3.470961e-10 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/kernel:0_grads
+3.2109366e-09 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/bias:0_grads
+-3.8721065e-10 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/kernel:0_grads
+3.5263255e-09 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/bias:0_grads
+
+==================== debug_var ====================
+> Train loss: 36571.039489746094
+> Valid loss: 5612.627830505371
+> Best valid loss so far: 4771.496253967285
+Stopping in (35) epochs if no new minima!
+
+Epoch: 4
+> lr update: 0.049000002
+#################### DEBUGGING ####################
+-1.5510707e-08 	 Model/input_layer/embedding:0_grads
+-1.9394596e-05 	 Model/input_layer/feature_weigths:0_grads
+-1.2408569e-05 	 Model/input_layer/feature_bias:0_grads
+0.4255897 	 Model/output_layer/output_w:0_grads
+-15.242744 	 Model/output_layer/output_b:0_grads
+-2.0200261e-09 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/kernel:0_grads
+1.8209105e-08 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/bias:0_grads
+2.867294e-07 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/kernel:0_grads
+-2.1903145e-06 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/bias:0_grads
+
+==================== debug_var ====================
+> Train loss: 37006.26306152344
+> Valid loss: 4739.623916625977
+> Best valid loss so far: 4771.496253967285
+Stopping in (34) epochs if no new minima!
+!!! NEW local minima found, saving the model...
+
+Epoch: 5
+> lr update: 0.0487500025
+#################### DEBUGGING ####################
+1.2948664e-11 	 Model/input_layer/embedding:0_grads
+4.020792e-08 	 Model/input_layer/feature_weigths:0_grads
+1.035893e-08 	 Model/input_layer/feature_bias:0_grads
+-0.23937465 	 Model/output_layer/output_w:0_grads
+-4.5712795 	 Model/output_layer/output_b:0_grads
+-1.2125412e-10 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/kernel:0_grads
+1.2779661e-09 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/bias:0_grads
+-5.819682e-10 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/kernel:0_grads
+3.9421697e-09 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/bias:0_grads
+
+==================== debug_var ====================
+> Train loss: 35687.37390899658
+> Valid loss: 4758.33650970459
+> Best valid loss so far: 4739.623916625977
+Stopping in (35) epochs if no new minima!
+
+Epoch: 6
+> lr update: 0.048500003
+#################### DEBUGGING ####################
+8.107671e-14 	 Model/input_layer/embedding:0_grads
+0.0 	 Model/input_layer/feature_weigths:0_grads
+6.486137e-11 	 Model/input_layer/feature_bias:0_grads
+0.86348265 	 Model/output_layer/output_w:0_grads
+-19.398884 	 Model/output_layer/output_b:0_grads
+2.4077628e-12 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/kernel:0_grads
+-2.4667464e-11 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/bias:0_grads
+-1.07752e-15 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/kernel:0_grads
+9.429133e-15 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/bias:0_grads
+
+==================== debug_var ====================
+> Train loss: 34959.51641845703
+> Valid loss: 4720.412452697754
+> Best valid loss so far: 4739.623916625977
+Stopping in (34) epochs if no new minima!
+!!! NEW local minima found, saving the model...
+
+Epoch: 7
+> lr update: 0.0482500035
+#################### DEBUGGING ####################
+1.1791363e-14 	 Model/input_layer/embedding:0_grads
+0.0 	 Model/input_layer/feature_weigths:0_grads
+9.433085e-12 	 Model/input_layer/feature_bias:0_grads
+0.46038043 	 Model/output_layer/output_w:0_grads
+-18.42015 	 Model/output_layer/output_b:0_grads
+-5.90758e-14 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/kernel:0_grads
+6.253203e-13 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/bias:0_grads
+-1.6275301e-15 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/kernel:0_grads
+1.5087512e-14 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/bias:0_grads
+
+==================== debug_var ====================
+> Train loss: 35122.075828552246
+> Valid loss: 4872.291694641113
+> Best valid loss so far: 4720.412452697754
+Stopping in (35) epochs if no new minima!
+
+Epoch: 8
+> lr update: 0.048000004
+#################### DEBUGGING ####################
+1.5793947e-14 	 Model/input_layer/embedding:0_grads
+0.0 	 Model/input_layer/feature_weigths:0_grads
+1.26351585e-11 	 Model/input_layer/feature_bias:0_grads
+-0.23440647 	 Model/output_layer/output_w:0_grads
+-17.745054 	 Model/output_layer/output_b:0_grads
+6.400091e-13 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/kernel:0_grads
+-6.770721e-12 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/bias:0_grads
+-7.499852e-14 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/kernel:0_grads
+6.953364e-13 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/bias:0_grads
+
+==================== debug_var ====================
+> Train loss: 35376.37155151367
+> Valid loss: 4934.555885314941
+> Best valid loss so far: 4720.412452697754
+Stopping in (34) epochs if no new minima!
+
+Epoch: 9
+> lr update: 0.0477500045
+#################### DEBUGGING ####################
+-1.2424676e-13 	 Model/input_layer/embedding:0_grads
+0.0 	 Model/input_layer/feature_weigths:0_grads
+-9.939738e-11 	 Model/input_layer/feature_bias:0_grads
+0.5383458 	 Model/output_layer/output_w:0_grads
+-21.300901 	 Model/output_layer/output_b:0_grads
+-7.6299974e-13 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/kernel:0_grads
+8.020704e-12 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/bias:0_grads
+-7.250712e-16 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/kernel:0_grads
+6.68652e-15 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/bias:0_grads
+
+==================== debug_var ====================
+> Train loss: 35422.02657318115
+> Valid loss: 4915.4898681640625
+> Best valid loss so far: 4720.412452697754
+Stopping in (33) epochs if no new minima!
+
+Epoch: 10
+> lr update: 0.047500005
+#################### DEBUGGING ####################
+4.3053272e-14 	 Model/input_layer/embedding:0_grads
+0.0 	 Model/input_layer/feature_weigths:0_grads
+3.4442636e-11 	 Model/input_layer/feature_bias:0_grads
+-0.4148861 	 Model/output_layer/output_w:0_grads
+-16.681393 	 Model/output_layer/output_b:0_grads
+-3.3981418e-12 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/kernel:0_grads
+3.5677305e-11 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/gates/bias:0_grads
+-1.0744528e-14 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/kernel:0_grads
+9.898426e-14 	 Model/recurrent_cell/multi_rnn_cell/cell_0/gru_cell/candidate/bias:0_grads
+
+==================== debug_var ====================
+> Train loss: 35475.495765686035
+> Valid loss: 4763.377861022949
+> Best valid loss so far: 4720.412452697754
+Stopping in (32) epochs if no new minima!
+
+You can well see the gradients are very low in comparison to Torch POC up to the point that  some of them become zero or very close. Additionally, binary cross entropy loss is much higher and basically does not drop. Using standard tf.train.GradientDescentOptimizer(self.lr) does not make the gradients that small and is more stable in general but produces the same garbage predictions after training. We have been trying to figure out the reason for several weeks now and are simply out of clue what could cause such a drastic difference.  We checked our data preprocessing up to the point where we printed out the input matrix values and compared them side by side with Torch. They are identical so it is highly unlikely to be the data feeding mechanism. There is something not right with backpropagation it seems but our lack of experience with Tensorflow does not allow us to proceed further. Maybe somebody here could give us an advice on what could be the reason?
+Addtionally attaching Tensorboard output as well.

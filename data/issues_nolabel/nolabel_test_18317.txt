@@ -1,0 +1,54 @@
+[bug] FtrlOptimizer with l2_shrinkage_regularization_strength is incorrect
+
+The result of accum in FtrlOptimizer with l2_shrinkage_regularization_strength seems incorrect.
+Test code:
+import tensorflow as tf
+
+from tensorflow.python.framework import constant_op
+from tensorflow.python.ops import variables
+from tensorflow.python.training import ftrl
+
+dtype = "float32"
+
+with tf.Session() as sess:
+  var0 = variables.Variable([1.0], dtype=dtype)
+  grads0 = constant_op.constant([0.1], dtype=dtype)
+  opt = ftrl.FtrlOptimizer(
+      3.0,
+      initial_accumulator_value=0.0,
+      l1_regularization_strength=0.0,
+      l2_regularization_strength=0.0,
+      l2_shrinkage_regularization_strength=0.5)
+  update = opt.apply_gradients(zip([grads0], [var0]))
+  variables.global_variables_initializer().run()
+
+  v0_val = sess.run(var0)
+
+  update.run()
+
+  v0_val = sess.run(var0)
+  print (sess.run(opt._slots))
+  print (v0_val)
+
+My result is
+{'accum': {(<tensorflow.python.framework.ops.Graph object at 0x7f1d1221a990>, u'Variable'): array([3.61], dtype=float32)}, 'linear': {(<tensorflow.python.framework.ops.Graph object at 0x7f1d1221a990>, u'Variable'): array([0.73333335], dtype=float32)}}
+[-2.]
+
+OS Platform and Distribution
+OS: Ubuntu 16.04
+Tensorflow version: 1.7.0
+CPU: i7 4790
+TensorFlow installed from
+pypi
+According to comments of apply_ftrl_v2 in gen_training_ops.py
+grad_with_shrinkage = grad + 2 * l2_shrinkage * var
+accum_new = accum + grad_with_shrinkage * grad_with_shrinkage
+linear += grad_with_shrinkage +
+      (accum_new^(-lr_power) - accum^(-lr_power)) / lr * var
+quadratic = 1.0 / (accum_new^(lr_power) * lr) + 2 * l2
+var = (sign(linear) * l1 - linear) / quadratic if |linear| > l1 else 0.0
+accum = accum_new
+
+grad_with_shrinkage should be [0.1] + 2 * 0.5 * [1.0] = 1.1
+accum_new should be [0.0] + [1.1] * [1.1] = [1.21]
+so accum should be [1.21], but the result of accum from the test code is [3.61] ???

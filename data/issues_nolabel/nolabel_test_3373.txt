@@ -1,0 +1,109 @@
+Cannot use more than 50% of available memory for a single variable
+
+I'm running Tensorflow 0.9.0 on a K40m (with 12GB of memory) with CUDA 7.5.0.
+I'm attempting to preload data as described here: https://www.tensorflow.org/versions/r0.9/how_tos/reading_data/index.html#preloaded-data
+Treating the data as a constant doesn't work because constants are limited to 2GB, and a minibatch approach does not make sense for my application.
+Perhaps Tensorflow wants to allocate space for the placeholder on GPU, allocate space for the variable, copy from host to placeholder (on GPU), and then copy from placeholder to variable?
+Here's a minimal failing test case.
+The following program:
+import numpy as np
+import tensorflow as tf
+
+# allocate 6GB of zeros                                                                                                                                                                                                                                                                   
+_data = np.zeros(1536 * (1 << 20), dtype=np.float32)
+
+data_init = tf.placeholder(tf.float32, shape=_data.shape)
+data = tf.Variable(data_init, trainable=False, collections=[])
+
+with tf.Session() as sess:
+    sess.run(data.initializer, feed_dict={data_init: _data})
+produces the following output:
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties: 
+name: Tesla K40m
+major: 3 minor: 5 memoryClockRate (GHz) 0.745
+pciBusID 0000:04:00.0
+Total memory: 11.25GiB
+Free memory: 11.12GiB
+W tensorflow/stream_executor/cuda/cuda_driver.cc:572] creating context when one is currently active; existing: 0x16034f0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 1 with properties: 
+name: Tesla K40m
+major: 3 minor: 5 memoryClockRate (GHz) 0.745
+pciBusID 0000:42:00.0
+Total memory: 11.25GiB
+Free memory: 11.12GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:59] cannot enable peer access from device ordinal 0 to device ordinal 1
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:59] cannot enable peer access from device ordinal 1 to device ordinal 0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0 1 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y N 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 1:   N Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:806] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla K40m, pci bus id: 0000:04:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:806] Creating TensorFlow device (/gpu:1) -> (device: 1, name: Tesla K40m, pci bus id: 0000:42:00.0)
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (256):       Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (512):       Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (1024):      Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (2048):      Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (4096):      Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (8192):      Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (16384):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (32768):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (65536):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (131072):    Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (262144):    Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (524288):    Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (1048576):   Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (2097152):   Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (4194304):   Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (8388608):   Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (16777216):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (33554432):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (67108864):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (134217728):         Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:639] Bin (268435456):         Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/bfc_allocator.cc:656] Bin for 6.00GiB was 256.00MiB, Chunk State: 
+I tensorflow/core/common_runtime/bfc_allocator.cc:674] Chunk at 0x4208f40000 of size 11344840448
+I tensorflow/core/common_runtime/bfc_allocator.cc:689]      Summary of in-use Chunks by size: 
+I tensorflow/core/common_runtime/bfc_allocator.cc:692] 1 Chunks of size 11344840448 totalling 10.57GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] Sum Total of in-use chunks: 10.57GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:698] Stats: 
+Limit:                 11344840295
+InUse:                 11344840448
+MaxInUse:              11344840448
+NumAllocs:                       1
+MaxAllocSize:          11344840448
+
+W tensorflow/core/common_runtime/bfc_allocator.cc:270] *********************************************************xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+W tensorflow/core/common_runtime/bfc_allocator.cc:271] Ran out of memory trying to allocate 6.00GiB.  See logs for memory state.
+W tensorflow/core/framework/op_kernel.cc:909] Resource exhausted: OOM when allocating tensor with shape[1610612736]
+Traceback (most recent call last):
+  File "tf_fail.py", line 11, in <module>
+    sess.run(data.initializer, feed_dict={data_init: _data})
+  File "/software/rhel7/tensorflow-0.9.0/lib/tensorflow/python/client/session.py", line 372, in run
+    run_metadata_ptr)
+  File "/software/rhel7/tensorflow-0.9.0/lib/tensorflow/python/client/session.py", line 636, in _run
+    feed_dict_string, options, run_metadata)
+  File "/software/rhel7/tensorflow-0.9.0/lib/tensorflow/python/client/session.py", line 708, in _do_run
+    target_list, options, run_metadata)
+  File "/software/rhel7/tensorflow-0.9.0/lib/tensorflow/python/client/session.py", line 728, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.ResourceExhaustedError: OOM when allocating tensor with shape[1610612736]
+         [[Node: Variable/Assign = Assign[T=DT_FLOAT, _class=["loc:@Variable"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/gpu:0"](Variable, _recv_Placeholder_0/_2)]]
+Caused by op u'Variable/Assign', defined at:
+  File "tf_fail.py", line 8, in <module>
+    data = tf.Variable(data_init, trainable=False, collections=[])
+  File "/software/rhel7/tensorflow-0.9.0/lib/tensorflow/python/ops/variables.py", line 211, in __init__
+    dtype=dtype)
+  File "/software/rhel7/tensorflow-0.9.0/lib/tensorflow/python/ops/variables.py", line 309, in _init_from_args
+    validate_shape=validate_shape).op
+  File "/software/rhel7/tensorflow-0.9.0/lib/tensorflow/python/ops/gen_state_ops.py", line 45, in assign
+    use_locking=use_locking, name=name)
+  File "/software/rhel7/tensorflow-0.9.0/lib/tensorflow/python/ops/op_def_library.py", line 704, in apply_op
+    op_def=op_def)
+  File "/software/rhel7/tensorflow-0.9.0/lib/tensorflow/python/framework/ops.py", line 2260, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/software/rhel7/tensorflow-0.9.0/lib/tensorflow/python/framework/ops.py", line 1230, in __init__
+    self._traceback = _extract_stack()

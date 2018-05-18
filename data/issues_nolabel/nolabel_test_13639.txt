@@ -1,0 +1,76 @@
+Invoke get_shape() on sparse_tensor leads to feeding error
+
+If I invoke get_shape method on sparse_tensor, the shape tensor will be added into the _unfeedable_tensors set of the current graph. Then when I feed the sparse tensor, an error occurs.
+The codes below show this error
+import tensorflow as tf
+import numpy as np
+
+shape = np.array([7, 9, 2], dtype=np.int64)
+indices = np.array([[3, 2, 0], [4, 5, 1]], dtype=np.int64)
+values = np.array([1.0, 2.0], dtype=np.float32)
+x = tf.sparse_placeholder(tf.float32, shape=shape)
+
+with tf.Session() as sess:
+    x.get_shape() # <-- Troublemaker
+    # This line leads to the exception:
+    # 	   Tensor Tensor("Const:0", shape=(3,), dtype=int64) may not be fed.
+    # The side effection of this line is that 
+    # it adds the 'shape' tensor into Graph._unfeedable_tensors, 
+
+    print(sess.run(x, feed_dict={
+    	x: tf.SparseTensorValue(indices, values, shape)}))
+The stacktrace
+ValueError                                Traceback (most recent call last)
+<ipython-input-1-baac6f49a954> in <module>()
+     10     x.get_shape()
+     11     print(sess.run(x, feed_dict={
+---> 12     	x: tf.SparseTensorValue(indices, values, shape)}))
+
+/Users/liqimai/anaconda3/lib/python3.5/site-packages/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+    765     try:
+    766       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 767                          run_metadata_ptr)
+    768       if run_metadata:
+    769         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/Users/liqimai/anaconda3/lib/python3.5/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+    944                 % (np_val.shape, subfeed_t.name, str(subfeed_t.get_shape())))
+    945           if not self.graph.is_feedable(subfeed_t):
+--> 946             raise ValueError('Tensor %s may not be fed.' % subfeed_t)
+    947           subfeed_name = compat.as_bytes(subfeed_t.name)
+    948           feed_dict_string[subfeed_name] = np_val
+
+ValueError: Tensor Tensor("Const:0", shape=(3,), dtype=int64) may not be fed.
+
+
+System information
+I do not think this bug is related to my environment.
+== cat /etc/issue ===============================================
+Darwin liqimaideMacBook-Pro.local 16.7.0 Darwin Kernel Version 16.7.0: Thu Jun 15 17:36:27 PDT 2017; root:xnu-3789.70.16~2/RELEASE_X86_64 x86_64
+Mac OS X 10.12.6
+== are we in docker =============================================
+No
+== compiler =====================================================
+Apple LLVM version 9.0.0 (clang-900.0.37)
+Target: x86_64-apple-darwin16.7.0
+Thread model: posix
+InstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+== uname -a =====================================================
+Darwin MacBook-Pro.local 16.7.0 Darwin Kernel Version 16.7.0: Thu Jun 15 17:36:27 PDT 2017; root:xnu-3789.70.16~2/RELEASE_X86_64 x86_64
+== check pips ===================================================
+numpy (1.11.3)
+protobuf (3.2.0)
+tensorflow (1.0.0)
+== check for virtualenv =========================================
+False
+== tensorflow import ============================================
+tf.VERSION = 1.0.0
+tf.GIT_VERSION = v1.0.0-rc2-15-g47bba63-dirty
+tf.COMPILER_VERSION = v1.0.0-rc2-15-g47bba63-dirty
+Sanity check: array([1], dtype=int32)
+== env ==========================================================
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+== nvidia-smi ===================================================
+tf_env_collect.sh: line 105: nvidia-smi: command not found
+== cuda libs  ===================================================

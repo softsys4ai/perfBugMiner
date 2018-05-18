@@ -1,0 +1,82 @@
+testAvgPoolSamePadding fails on ppc64le. Attempting to root cause, have some info need some help
+
+Please go to Stack Overflow for help and support.
+http://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug or a feature request.
+The form below must be filled out.
+
+Here's why we have that policy: TensorFlow developers respond to issues.
+We want to focus on work that benefits the whole community, e.g., fixing
+bugs and adding features. Support only helps individuals. GitHub also notifies
+thousands of people when issues are filed. We want them to see you communicating
+an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu 16.04 ppc64le
+TensorFlow installed from (source or binary):
+From source
+TensorFlow version (use command below):
+'v1.0.1-0-ge895d5c-dirty'
+Bazel version (if compiling from source):
+Build label: 0.4.4-2017-04-13 (@80a07b5)
+CUDA/cuDNN version:
+No GPU
+GPU model and memory:
+No GPU
+Exact command to reproduce:
+bazel test //tensorflow/compiler/tests:pooling_ops_test_cpu
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+
+You can collect the TensorFlow version with
+python -c "import tensorflow as tf; print (tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+pooling_ops_test_cpu fails on ppc64le, the test failing is testAvgPoolSamePadding
+I am making an attempt to root cause the issue, need some help with understanding the code flow (i am new to tensorflow code but interested/would-like-to debug & help 😄 )
+First i tried to understand the input parameters being passed to the avg_pool function (this is after understanding what avg_pool does)
+The input tensor for this test case is
+[[[1 2 3],[4 5 6],[7 8 9],[10 11 12],[13 14 15],[16 17 18]]]   (4-d tensor)
+The test expects avg_pool o/p as [  7. ,   8. ,   9. ,  11.5,  12.5,  13.5] but gets [  7. ,   8. ,   9. ,  11.5,   9. ,  13.5] (4th entry is different)
+Then i tried to trace the code to see why the entry differs (only for ppc64le, x86 the test passes)
+Test case calls avg_pool in python/ops/nn_ops.py, which ultimately drops into core/kernels/avgpooling_op.cc. The AvgPoolingOp class "compute" func calls SpatialAvgPool which i tried to find/grep, could find it in core/kernels/eigen_pooling.h.
+This is where i am getting lost. I am suspecting an int overflow or sign type issue and my goal is to pinpoint the exact location where this could be happening, however seeing the code in avgpooling_op.cc (or eigen_pooling.h) i cant seem to find any good places where i can debug further
+Any help or pointers where i can go from here (or if i am following the right trail) would help
+Thanks!
+Vaibhav
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem.
+If including tracebacks, please include the full traceback. Large logs and files
+should be attached. Try to provide a reproducible test case that is the minimum
+necessary to generate the problem.
+Failure assertion snippet
+exec ${PAGER:-/usr/bin/less} "$0" || exit 1
+I tensorflow/compiler/xla/service/platform_util.cc:58] platform Host present with 16 visible devices
+I tensorflow/compiler/xla/service/service.cc:180] XLA service executing computations on platform Host. Devices:
+I tensorflow/compiler/xla/service/service.cc:187]   StreamExecutor device (0): , 
+F.
+FAIL: testAvgPoolSamePadding (main.PoolingTest)
+File "/root/.cache/bazel/_bazel_root/68a62076e91007a7908bc42a32e4cff9/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/compiler/tests/pooling_ops_test_cpu.runfiles/org_tensorflow/tensorflow/compiler/tests/pooling_ops_test.py", line 288, in testAvgPoolSamePadding
+expected=expected_output)
+File "/root/.cache/bazel/_bazel_root/68a62076e91007a7908bc42a32e4cff9/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/compiler/tests/pooling_ops_test_cpu.runfiles/org_tensorflow/tensorflow/compiler/tests/pooling_ops_test.py", line 125, in _VerifyValues
+data_format, expected)
+File "/root/.cache/bazel/_bazel_root/68a62076e91007a7908bc42a32e4cff9/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/compiler/tests/pooling_ops_test_cpu.runfiles/org_tensorflow/tensorflow/compiler/tests/pooling_ops_test.py", line 108, in _VerifyOneTest
+self.assertAllClose(expected, actual.flatten(), rtol=1e-5, atol=1e-6)
+File "/root/.cache/bazel/_bazel_root/68a62076e91007a7908bc42a32e4cff9/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/compiler/tests/pooling_ops_test_cpu.runfiles/org_tensorflow/tensorflow/python/framework/test_util.py", line 485, in assertAllClose
+np.testing.assert_allclose(a, b, rtol=rtol, atol=atol)
+File "/usr/lib64/python2.7/site-packages/numpy/testing/utils.py", line 1411, in assert_allclose
+verbose=verbose, header=header, equal_nan=equal_nan)
+File "/usr/lib64/python2.7/site-packages/numpy/testing/utils.py", line 796, in assert_array_compare
+raise AssertionError(msg)
+AssertionError:
+Not equal to tolerance rtol=1e-05, atol=1e-06
+(mismatch 16.6666666667%)
+x: array([  7. ,   8. ,   9. ,  11.5,  12.5,  13.5])
+y: array([  7. ,   8. ,   9. ,  11.5,   9. ,  13.5], dtype=float32)
+
+Ran 2 tests in 0.514s

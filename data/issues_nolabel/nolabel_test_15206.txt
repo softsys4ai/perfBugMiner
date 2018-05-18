@@ -1,0 +1,65 @@
+Unusual memory allocation while running "tf.assign"
+
+System information
+
+Have I written custom code: Yes
+OS Platform and Distribution: Linux Ubuntu 16.04
+TensorFlow installed from: binary
+TensorFlow version: 1.4.0
+Python version: 2.7
+Bazel version: 0.8.1
+CUDA/cuDNN version: 8.0.61 / 6.0.21
+GPU model and memory: Tesla K80
+Exact command to reproduce: run the script attached below
+
+Describe the problem
+In the minimal example below, I am observing an increase in RAM usage when calling assign_new_values. Strangely, the extend depends on the dataset size.
+I see no obvious connection between the dataset and the variables that get assigned. Commenting out either the iterator or the sess.run(assign_op, ...) prevents additional memory allocation.
+How is this possible?
+Source code / logs
+import numpy as np
+import tensorflow as tf
+
+DATASET_SIZE = 1000000
+
+
+def create_dataset():
+    image_paths = tf.constant(DATASET_SIZE * ['image.jpg'])
+    labels = tf.constant(DATASET_SIZE * [0])
+    dataset = tf.data.Dataset.from_tensor_slices((image_paths, labels))
+    return dataset
+
+
+def create_variables():
+    for i in range(20):
+       tf.get_variable('var_%d' % i, shape=[3, 3, 3, 32])
+
+
+def create_assign_ops():
+    for var in tf.global_variables():
+        name = var.op.name
+        placeholder = tf.placeholder(tf.float32, shape=var.shape, name=name + '/placeholder')
+        tf.assign(var, placeholder, name=name + '/assign_op')
+
+
+def assign_new_values(sess):
+    for var in tf.global_variables():
+        name = var.op.name
+        assign_op = tf.get_default_graph().get_tensor_by_name(name + '/assign_op:0')
+        sess.run(assign_op, feed_dict={name + '/placeholder:0': np.random.random(var.shape)})
+
+
+if __name__ == '__main__':
+    with tf.Graph().as_default():
+        with tf.device('/cpu:0'):
+            dataset = create_dataset()
+            iterator = dataset.make_one_shot_iterator()
+
+        create_variables()
+        create_assign_ops()
+
+        with tf.Session() as sess:
+            sess.run(tf.global_variables_initializer())
+            # Check RAM usage before
+            assign_new_values(sess)
+            # Check RAM usage after

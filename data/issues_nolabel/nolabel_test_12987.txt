@@ -1,0 +1,42 @@
+fix ExponentialMovingAverage documentation regarding control_dependencies
+
+This PR fixes the documentation for ExponentialMovingAverage so that ema.apply([var0, var1]) is evaluated within tf.control_dependencies([opt_op]).
+The documentation for ExponentialMovingAverage contains the following code:
+var0 = tf.Variable(...)
+var1 = tf.Variable(...)
+opt_op = opt.minimize(my_loss, [var0, var1])
+ema = tf.train.ExponentialMovingAverage(decay=0.9999)
+
+maintain_averages_op = ema.apply([var0, var1])
+with tf.control_dependencies([opt_op]):
+    training_op = tf.group(maintain_averages_op)
+However, according to my understanding, the last three lines are actually equivalent to
+maintain_averages_op = ema.apply([var0, var1])
+training_op = tf.group(opt_op, maintain_averages_op)
+for which the evaluation order of opt_op and maintain_averages_op is undefined.
+I think the last three lines should be replaced with
+with tf.control_dependencies([opt_op]):
+    training_op = ema.apply([var0, var1])
+so that opt_op is evaluated before ema.apply([var0, var1]), which is what the current documentation is suggestive of. This PR makes this correction.
+This issue was previously brought up in P.S. in #2131, but was ignored because it was posed as a question more appropriate for StackOverflow.
+It is easy to test that this makes a difference. Below we calculate the moving average of a variable that gets incremented by 1 for each step. We do this 5 times using 5 different sessions. When follow_doc = True, we follow the current documentation's example and each of the 5 sessions returns a different moving average (on my computer). However, the moving averages should all be the same, which is achieved using follow_doc = False, which instead follows the (correct) documentation written in this PR.
+import tensorflow as tf
+follow_doc = True
+avgs = []
+for i in range(5):
+    var = tf.Variable(0., dtype=tf.float32)
+    ema = tf.train.ExponentialMovingAverage(decay=0.75)
+    opt_op = var.assign_add(1)
+    if follow_doc:
+        maintain_averages_op = ema.apply([var])
+        with tf.control_dependencies([opt_op]):
+            training_op = tf.group(maintain_averages_op)
+    else:
+        with tf.control_dependencies([opt_op]):
+            training_op = ema.apply([var])
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        for i in range(10):
+            sess.run(training_op)
+        avgs.append(sess.run(ema.average(var)))
+print(avgs)

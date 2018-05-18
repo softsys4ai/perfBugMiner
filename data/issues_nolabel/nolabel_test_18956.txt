@@ -1,0 +1,107 @@
+Fail to build cmake with gpu for _lstm and _rnn ops in windows
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): github master (should be 1.8?)
+Python version:  3.6
+Bazel version (if compiling from source): CMake build
+GCC/Compiler version (if compiling from source): MSVC2015
+CUDA/cuDNN version:  CUDA 9.0 with CUDNN 7.0.5
+GPU model and memory: GTX 1060 6GB
+Exact command to reproduce:
+
+cmake 
+-DCMAKE_INSTALL_PREFIX=../install/ 
+-DCMAKE_BUILD_TYPE=Release 
+-Dtensorflow_BUILD_SHARED_LIB=ON 
+-Dtensorflow_BUILD_ALL_KERNELS=ON 
+-Dtensorflow_BUILD_CONTRIB_KERNELS=ON 
+-Dtensorflow_BUILD_CC_EXAMPLE=ON 
+-Dtensorflow_BUILD_PYTHON_BINDINGS=ON 
+-Dtensorflow_ENABLE_GRPC_SUPPORT=ON 
+-Dtensorflow_ENABLE_SSL_SUPPORT=OFF 
+-Dtensorflow_BUILD_CC_TESTS=OFF 
+-Dtensorflow_BUILD_PYTHON_TESTS=OFF 
+-Dtensorflow_ENABLE_GPU=ON ..
+Describe the problem
+In the contrib/rnn build, the gpu resource requires blas_gemm.h . I found this is missed in the cmake
+relevent position
+I have built pass in older version of tensorflow release (1.5) but not in 1.8. The cuda object built in rnn should be linked with blas_gemm? How can I modified the cmake files to do this?
+Source code / logs
+The cmake file that fails to build
+if(WIN32)
+    # include contrib/rnn as .so
+    #
+    set(tf_gru_srcs
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/kernels/blas_gemm.cc"
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/kernels/blas_gemm.h"
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/kernels/gru_ops.cc"
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/kernels/gru_ops.h"
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/ops/gru_ops.cc"
+    )
+    set(tf_gru_gpu_srcs
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/kernels/gru_ops_gpu.cu.cc"
+    )
+
+    set(tf_lstm_srcs
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/kernels/blas_gemm.cc"
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/kernels/blas_gemm.h"
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/kernels/lstm_ops.cc"
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/kernels/lstm_ops.h"
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/ops/lstm_ops.cc"
+    )
+    set(tf_lstm_gpu_srcs
+        "${tensorflow_source_dir}/tensorflow/contrib/rnn/kernels/lstm_ops_gpu.cu.cc"
+    )
+
+    AddUserOps(TARGET _gru_ops
+        SOURCES "${tf_gru_srcs}"
+        GPUSOURCES ${tf_gru_gpu_srcs}
+        DEPENDS pywrap_tensorflow_internal tf_python_ops
+        DISTCOPY ${CMAKE_CURRENT_BINARY_DIR}/tf_python/tensorflow/contrib/rnn/python/ops/)
+
+    AddUserOps(TARGET _lstm_ops
+        SOURCES "${tf_lstm_srcs}"
+        GPUSOURCES ${tf_lstm_gpu_srcs}
+        DEPENDS pywrap_tensorflow_internal tf_python_ops
+        DISTCOPY ${CMAKE_CURRENT_BINARY_DIR}/tf_python/tensorflow/contrib/rnn/python/ops/)
+endif(WIN32)
+Bazel BUILD file in contrib/rnn:
+tf_custom_op_library(
+    name = "python/ops/_lstm_ops.so",
+    srcs = [
+        "kernels/blas_gemm.cc",
+        "kernels/blas_gemm.h",
+        "kernels/lstm_ops.cc",
+        "kernels/lstm_ops.h",
+        "ops/lstm_ops.cc",
+    ],
+    gpu_srcs = [
+        "kernels/blas_gemm.h",
+        "kernels/lstm_ops_gpu.cu.cc",
+        "kernels/lstm_ops.h",
+    ],
+    deps = ["//tensorflow/core/kernels:eigen_helpers"],
+)
+
+...
+
+tf_custom_op_library(
+    name = "python/ops/_gru_ops.so",
+    srcs = [
+        "kernels/blas_gemm.cc",
+        "kernels/blas_gemm.h",
+        "kernels/gru_ops.cc",
+        "kernels/gru_ops.h",
+        "ops/gru_ops.cc",
+    ],
+    gpu_srcs = [
+        "kernels/blas_gemm.h",
+        "kernels/gru_ops_gpu.cu.cc",
+        "kernels/gru_ops.h",
+    ],
+    deps = ["//tensorflow/core/kernels:eigen_helpers"],
+)

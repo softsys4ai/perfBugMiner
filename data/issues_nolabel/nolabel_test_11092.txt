@@ -1,0 +1,93 @@
+conv2d on CPU does not pass numerical gradient check, possibly because the forward has an offset but the backward not when padding values are negative.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): ('v1.2.0-rc2-21-g12f033d', '1.2.0')
+Bazel version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+conv2d (CPU version) gradient function does not pass my gradient check tests when performing 'SAME' convolution in some special cases.
+See my code below for details.
+TensorFlow uses eigen_spatial_convolution.h and eigen_backward_spatial_convolution.h for performaing conv2d on CPU.
+The possible reason is that in this case the padding will be negative. During forward the eigen function SpatialConvolution will apply this negative padding as an offset. However, in backward, it does not apply this offset -- the forward and backward are inconsistent.
+Source code / logs
+import tensorflow as tf
+import numpy as np
+bH = 4 
+bW = 4 
+H = 2 
+W = 2    
+in_c = 2 
+out_c = 3 
+
+stride = 4 
+batch_size = 2 
+batch_data  = np.ones([batch_size, bH, bW, in_c])
+for n in range(batch_size):
+  for c in range(in_c):
+    for h in range(bH):
+      for w in range(bW):
+        batch_data[n, h, w, c] = n*0.001 + c*0.002 + h*0.003 + w*0.004   
+    
+batch = tf.placeholder(tf.float32, [2, bH, bW, 2]) 
+f = tf.placeholder(tf.float32, [H, W, in_c, out_c])
+output = tf.nn.conv2d(batch, f, strides = [1, stride, stride, 1], padding = 'SAME')
+s = tf.reduce_sum(output)
+grad_y = tf.gradients(s, f)
+init = tf.global_variables_initializer()
+
+alpha = 5e-4 
+with tf.Session() as sess:
+  sess.run(init)
+  filters = np.ones([H, W, in_c, out_c], dtype = float)
+  result, grads = sess.run([s, grad_y], feed_dict = {batch: batch_data, f: filters})
+  print(result)
+  for n in range(out_c):
+    for c in range(in_c):
+      for h in range(H):
+        for w in range(W):
+          old = filters[h, w, c, n]
+          filters[h, w, c, n] = old - alpha
+          [result_left] = sess.run([s], feed_dict = {batch: batch_data, f: filters}) 
+          filters[h, w, c, n] = old + alpha
+          [result_right] = sess.run([s], feed_dict = {batch: batch_data, f: filters})
+          filters[h, w, c, n] = old 
+          grad_est = (result_right - result_left) / (2 * alpha)
+          grad_act = grads[0][h, w, c, n]
+          print("(%d,%d,%d,%d): %f, %f" % (n, c, h, w, grad_act, grad_est))
+2017-06-27 18:16:36.858424: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-06-27 18:16:36.858460: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-06-27 18:16:36.858464: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-06-27 18:16:36.858468: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-06-27 18:16:36.858472: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+0.576
+(0,0,0,0): 0.001000, 0.014961
+(0,0,0,1): 0.009000, 0.023007
+(0,0,1,0): 0.007000, 0.020981
+(0,0,1,1): 0.015000, 0.028968
+(0,1,0,0): 0.005000, 0.018954
+(0,1,0,1): 0.013000, 0.027061
+(0,1,1,0): 0.011000, 0.024974
+(0,1,1,1): 0.019000, 0.033021
+(1,0,0,0): 0.001000, 0.014961
+(1,0,0,1): 0.009000, 0.023007
+(1,0,1,0): 0.007000, 0.020981
+(1,0,1,1): 0.015000, 0.028968
+(1,1,0,0): 0.005000, 0.018954
+(1,1,0,1): 0.013000, 0.027001
+(1,1,1,0): 0.011000, 0.024974
+(1,1,1,1): 0.019000, 0.033021
+(2,0,0,0): 0.001000, 0.014961
+(2,0,0,1): 0.009000, 0.023007
+(2,0,1,0): 0.007000, 0.020981
+(2,0,1,1): 0.015000, 0.028968
+(2,1,0,0): 0.005000, 0.018954
+(2,1,0,1): 0.013000, 0.027001
+(2,1,1,0): 0.011000, 0.024974
+(2,1,1,1): 0.019000, 0.033021

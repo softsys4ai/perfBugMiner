@@ -1,0 +1,40 @@
+tensorflow-terminate called after throwing an instance of 'std::system_error'
+
+Hi
+I am training a resNet50 with tensorflow, using a shared server with these properties:
+ubuntu 16.04
+3 gtx 1080 gpus
+tensorflow 1.3
+python 2.7
+CUDA 8.0.4
+CUDNN 6
+but always after two epochs, and during the third epoch, I encounter this error:
+terminate called after throwing an instance of 'std::system_error' what(): Resource temporarily unavailable Aborted (core dumped)
+with adding some print in my code, I have found where is the problem:
+this is convert tfrecord to dataset:
+`filenames = ["balanced_t.tfrecords"]
+dataset = tf.contrib.data.TFRecordDataset(filenames)
+def parser(record):
+keys_to_features = {
+# "label": tf.FixedLenFeature((), tf.string, default_value=""),
+"mhot_label_raw": tf.FixedLenFeature((), tf.string, default_value=""),
+"mel_spec_raw": tf.FixedLenFeature((), tf.string, default_value=""),
+}
+parsed = tf.parse_single_example(record, keys_to_features)
+mel_spec1d = tf.decode_raw(parsed['mel_spec_raw'], tf.float64)
+# label = tf.cast(parsed["label"], tf.string)
+mhot_label = tf.decode_raw(parsed['mhot_label_raw'], tf.float64)
+mel_spec = tf.reshape(mel_spec1d, [96, 64])
+# aa=mel_spec
+return {"mel_data": mel_spec}, mhot_label
+dataset = dataset.map(parser)
+dataset = dataset.batch(batch_size)
+dataset = dataset.repeat(3)
+iterator = dataset.make_one_shot_iterator()`
+
+and this is my input pipline:
+while True: try: (features, labels) = sess.run(iterator.get_next()) except tf.errors.OutOfRangeError: print("end of training dataset")
+due to my prints output,the error is for this line:
+(features, labels) = sess.run(iterator.get_next())
+but I dont see any problem,can you help me now?
+reproduce:replace any tfrecord with mine

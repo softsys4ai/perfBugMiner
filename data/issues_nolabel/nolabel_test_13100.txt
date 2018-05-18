@@ -1,0 +1,86 @@
+- NEON XLA CPU runtime is not compiling because of missing plog function in Eigen
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 14.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): ('v1.3.0-0-g9e76bf324', '1.3.0')
+Python version: 3.4.3
+Bazel version (if compiling from source): 0.5.4
+CUDA/cuDNN version: no
+GPU model and memory: no
+Exact command to reproduce:
+WORKSPACE correctly configure for Android NDK (r12b) and SDK(latest).
+bazel build -c opt --cxxopt='-std=c++11' --crosstool_top=//external:android/crosstool --host_crosstool_top=@bazel_tools//tools/cpp:toolchain --cpu=armeabi-v7a //tensorflow/compiler/xla/service/cpu:cpu_runtime_neon
+
+Describe the problem
+I use Tensorflow compiled from source to use XLA aot binaries for Arm. For XLA to work, it needs to have runtime support for that architecture but with the above command it fails complaining for a missing function in Eigen.
+I fixed the bug in Eigen and submitted a pull request for integration:
+https://bitbucket.org/eigen/eigen/pull-requests/334/add-support-for-neon-plog-packetmath/diff
+with the following patch, the compilation completes successfully. Once the pull request is accepted I will submit a pull request here to use the new Eigen version with the fix.
+Source code / logs
+For the record, this is the error i get:
+bazel build -c opt --cxxopt='-std=c++11' --crosstool_top=//external:android/crosstool --host_crosstool_top=@bazel_tools//tools/cpp:toolchain --cpu=armeabi-v7a //tensorflow/compiler/xla/service/cpu:cpu_runtime_neon
+Extracting Bazel installation...
+...........
+INFO: Analysed target //tensorflow/compiler/xla/service/cpu:cpu_runtime_neon (17 packages loaded).
+INFO: Found 1 target...
+ERROR: /home/gmichel/work/tensorflow/tensorflow/compiler/xla/service/cpu/BUILD:333:1: C++ compilation of rule '//tensorflow/compiler/xla/service/cpu:cpu_runtime_neon' failed (Exit 1)
+In file included from external/eigen_archive/Eigen/Core:372:0,
+from ./third_party/eigen3/Eigen/Core:1,
+from tensorflow/compiler/xla/service/cpu/cpu_runtime_neon.cc:20:
+external/eigen_archive/Eigen/src/Core/GenericPacketMath.h: In instantiation of 'Packet Eigen::internal::plog(const Packet&) [with Packet = __vector(4) __builtin_neon_sf]':
+tensorflow/compiler/xla/service/cpu/cpu_runtime_neon.cc:32:33:   required from here
+external/eigen_archive/Eigen/src/Core/GenericPacketMath.h:411:60: error: no matching function for call to 'log(const __vector(4) __builtin_neon_sf&)'
+Packet plog(const Packet& a) { using std::log; return log(a); }
+^
+external/eigen_archive/Eigen/src/Core/GenericPacketMath.h:411:60: note: candidates are:
+In file included from external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/cmath:44:0,
+from external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/complex:44,
+from external/eigen_archive/Eigen/Core:78,
+from ./third_party/eigen3/Eigen/Core:1,
+from tensorflow/compiler/xla/service/cpu/cpu_runtime_neon.cc:20:
+external/androidndk/ndk/platforms/android-14/arch-arm/usr/include/math.h:218:8: note: double log(double)
+double log(double) NDK_FPABI_MATH;
+^
+external/androidndk/ndk/platforms/android-14/arch-arm/usr/include/math.h:218:8: note:   no known conversion for argument 1 from 'const __vector(4) __builtin_neon_sf' to 'double'
+In file included from external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/complex:44:0,
+from external/eigen_archive/Eigen/Core:78,
+from ./third_party/eigen3/Eigen/Core:1,
+from tensorflow/compiler/xla/service/cpu/cpu_runtime_neon.cc:20:
+external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/cmath:357:3: note: constexpr float std::log(float)
+log(float __x)
+^
+external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/cmath:357:3: note:   no known conversion for argument 1 from 'const __vector(4) __builtin_neon_sf' to 'float'
+external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/cmath:361:3: note: constexpr long double std::log(long double)
+log(long double __x)
+^
+external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/cmath:361:3: note:   no known conversion for argument 1 from 'const __vector(4) __builtin_neon_sf' to 'long double'
+external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/cmath:369:5: note: template constexpr typename __gnu_cxx::__enable_if<std::__is_integer<_Tp>::__value, double>::__type std::log(_Tp)
+log(_Tp __x)
+^
+external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/cmath:369:5: note:   template argument deduction/substitution failed:
+external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/cmath: In substitution of 'template constexpr typename __gnu_cxx::__enable_if<std::__is_integer<_Tp>::__value, double>::__type std::log(_Tp) [with _Tp = __vector(4) __builtin_neon_sf]':
+external/eigen_archive/Eigen/src/Core/GenericPacketMath.h:411:60:   required from 'Packet Eigen::internal::plog(const Packet&) [with Packet = __vector(4) __builtin_neon_sf]'
+tensorflow/compiler/xla/service/cpu/cpu_runtime_neon.cc:32:33:   required from here
+external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/cmath:369:5: error: no type named '__type' in 'struct __gnu_cxx::__enable_if<false, double>'
+In file included from external/eigen_archive/Eigen/Core:78:0,
+from ./third_party/eigen3/Eigen/Core:1,
+from tensorflow/compiler/xla/service/cpu/cpu_runtime_neon.cc:20:
+external/eigen_archive/Eigen/src/Core/GenericPacketMath.h: In instantiation of 'Packet Eigen::internal::plog(const Packet&) [with Packet = __vector(4) __builtin_neon_sf]':
+tensorflow/compiler/xla/service/cpu/cpu_runtime_neon.cc:32:33:   required from here
+external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/complex:790:5: note: template std::complex<_Tp> std::log(const std::complex<_Tp>&)
+log(const complex<_Tp>& __z) { return __complex_log(__z); }
+^
+external/androidndk/ndk/sources/cxx-stl/gnu-libstdc++/4.9/include/complex:790:5: note:   template argument deduction/substitution failed:
+In file included from external/eigen_archive/Eigen/Core:372:0,
+from ./third_party/eigen3/Eigen/Core:1,
+from tensorflow/compiler/xla/service/cpu/cpu_runtime_neon.cc:20:
+external/eigen_archive/Eigen/src/Core/GenericPacketMath.h:411:60: note:   mismatched types 'const std::complex<_Tp>' and 'const __vector(4) __builtin_neon_sf'
+Packet plog(const Packet& a) { using std::log; return log(a); }
+^
+Target //tensorflow/compiler/xla/service/cpu:cpu_runtime_neon failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+INFO: Elapsed time: 15.227s, Critical Path: 0.76s
+FAILED: Build did NOT complete successfully

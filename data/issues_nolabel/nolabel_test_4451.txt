@@ -1,0 +1,62 @@
+TensorFlow demo app crashes with my own model
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+#1269
+Environment info
+Operating System: Linux ubuntu
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+ce3572a
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+
+Followin this tutorial: https://www.tensorflow.org/versions/r0.9/how_tos/image_retraining/index.html
+I built a model via transfer learning using custom images.
+I edited WORKSPACE and built demo.apk
+App crashed.
+Then i used inception5h.zip  as referenced in https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/android.
+The app run without any problem.
+
+What other attempted solutions have you tried?
+Then i looked at issue #1269 for guidance.
+
+---Edited tensorflowImagelistener.java---
+
+  private static final int NUM_CLASSES = 4; //1001;
+  private static final int INPUT_SIZE = 299; //224
+  private static final int IMAGE_MEAN = 128; //117
+  private static final float IMAGE_STD = 128; //1;
+  private static final String INPUT_NAME = "Mul:0"; //"input:0"; 
+  private static final String OUTPUT_NAME = "final_result:0"; //"output:0";
+
+---I even stripped the graph using strip_unused.py using ----
+
+  bazel build tensorflow/python/tools:strip_unused
+  bazel-bin/tensorflow/python/tools/strip_unused --input_graph=/tmp/inception.pb   --output_graph=/tmp/stripped_inception.pb --input_node_names="Mul:0" --output_node_names="final_result" --input_binary=true
+
+--In strip_unused_lib.py i added if else clause as referenced by @dmirk quick-n-dirty from #1269---
+
+      if "jpeg" in node.op.lower():
+        placeholder_node.attr["dtype"].CopyFrom(tf.AttrValue(
+            type=tf.uint8.as_datatype_enum))
+      else:
+        placeholder_node.attr["dtype"].CopyFrom(tf.AttrValue(
+            type=placeholder_type_enum))
+
+For some reason i still got this error. See attached
+oldlogcat.txt
+
+tensorflow_jni.cc:304 Error during inference: Invalid argument: No OpKernel was registered to support Op 'DecodeJpeg' with these attrs.  Registered kernels:
+
+As a last resort i did this modification to tensorflow_jni.cc as referenced in #1269. See attached logcat.txt
+
+      // Copy 3 values
+      input_tensor_mapped(0, i, j, 0) =
+          (static_cast<float>(src->red) - g_image_mean) / g_image_mean;//g_image_std;
+      input_tensor_mapped(0, i, j, 1) =
+          (static_cast<float>(src->green) - g_image_mean) / g_image_mean;//g_image_std;
+      input_tensor_mapped(0, i, j, 2) =
+          (static_cast<float>(src->blue) - g_image_mean) / g_image_mean;//g_image_std;
+but i think this dint help any much. however i dint find the opkernel error
+Logs or other output that would be helpful

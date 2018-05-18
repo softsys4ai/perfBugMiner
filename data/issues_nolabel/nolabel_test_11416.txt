@@ -1,0 +1,23 @@
+Distributed training with synchronized SGD using 'grpc+verbs' sometimes hangs indefinitely
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04.2 LTS
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): v1.2.0-1755-gee4259a 1.2.1
+Python version: Python 3.5.2
+Bazel version (if compiling from source): 0.5.1
+CUDA/cuDNN version: 8.0/5.1
+GPU model and memory: GeForce GTX 1080 Ti
+Exact command to reproduce: Sorry, the command is not available since this is custom code
+RDMA driver version: libibverbs-dev (1.2.1mlnx1-OFED.4.0.1.5.3.40200)
+
+Describe the problem
+I am training a seq2seq model with synchronized SGD (using tf.train.SyncReplicasOptimizer and tf.train.Supervisor), over RDMA (using grpc+verbs protocol), on 2 workers and 1 parameter server. Each worker has 8 GPUs, and the model on each GPU is the same.
+I can train this model fine with the default grpc protocol using the same setting. When I switched to grpc+verbs, the behavior becomes unpredictable. Most of the times both workers hang (for at least 12 hours, so not because I didn't wait long enough). Sometimes the chief worker (worker 0) starts training, but worker 1 hangs. (This should not happen since I am programming with synchronized SGD. Worker 0 should be blocked if worker 1 is not ready.) In rare case it can go through and start training. I believe the RDMA driver is correctly installed.
+When worker hangs, the CPU utilization stays low but not zero, and the GPU utilization is 0.
+Source code / logs
+I attached below the log from worker 1 worker1.txt. In this case, worker 1 hangs, and worker 0 starts training. (There are some custom logs printed.) In the log you can find that worker 1 sent a RDMA_MESSAGE_TENSOR_REQUEST to the parameter server, but never got an ACK, and I have checked the log from the parameter server, which showed that it never received a RDMA_MESSAGE_TENSOR_REQUEST from worker 1.
+I also attached the full trace gdb_worker1.txt collected on worker 1 in gdb with thread apply all bt, during worker 1 hanging.
+Thanks.

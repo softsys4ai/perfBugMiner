@@ -1,0 +1,41 @@
+Possible sparse gradients bug in 1.4
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Slackware 14.2
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version: 3.6
+
+Problem
+I get the following warning when I run my code:
+/usr/lib64/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py:96: UserWarning: Converting sparse IndexedSlices to a dense Tensor of unknown shape. This may consume a large amount of memory.
+  "Converting sparse IndexedSlices to a dense Tensor of unknown shape. "
+
+When I was using the exact same code with TF 1.3, I did not get the warning. I was wondering if this is a possible bug in 1.4 or simply the warning got added in the update?
+I located the problem to this part of my code:
+act_t_ph = tf.placeholder(tf.int32, [None])
+# ...
+with tf.variable_scope("action_value"):
+    x = tf.layers.dense(x, 512, activation=tf.nn.relu)
+    x = tf.layers.dense(x, 6, activation=None)
+z_net_locs = x
+action_mask = tf.one_hot(act_t_ph, 6, on_value=True, off_value=False, dtype=tf.bool)
+z_locations = tf.boolean_mask(z_net_locs, action_mask)
+# ...
+
+Later, gradients are computed with respect to the variables in the dense layers and these gradients are backpropagated through  z_locations.
+I also tried changing my code to:
+self.act_t_ph = tf.placeholder(tf.int32, [None])
+# ...
+with tf.variable_scope("action_value"):
+    x = tf.layers.dense(x, 512, activation=tf.nn.relu)
+    x = tf.layers.dense(x, 6, activation=None)
+z_net_locs = x
+bsize = tf.shape(self.act_t_ph)[0]
+b_ind = tf.range(0, bsize, 1, tf.int32)
+ind   = tf.concat([act_t_ph, b_ind], axis=-1)
+z_locations = tf.gather_nd(z_net_locs, ind)
+# ...
+
+and I no longer get the warning in TF 1.4. As far as I can tell, one of the operations in the original code cannot handle sparse gradients.

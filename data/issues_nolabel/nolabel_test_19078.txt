@@ -1,0 +1,39 @@
+Getting an error while converting frozen inference graph (*.pb) to tflite graph with toco
+
+I've trained the R-FCN model on my own training set. Now, I'd like to convert my frozen inference graph form the *.pb format to the *.tflite format to use it on an android mobile phone.
+After training, I exported the frozen inference graph with the following command:
+python3 export_inference_graph.py 
+--pipeline_config_path="training/ckpt/rfcn-69/pipeline.config" 
+--trained_checkpoint_prefix="training/ckpt/rfcn-69/model.ckpt-300000" 
+--output_directory="training/ckpt/rfcn-69/"
+
+Afterwards I run the transform_graph util to quantize the graph. I noticed that it doesn't matter wether I run the transform_graph or not. In the end I'm getting the same error with both of the graphs.
+bazel run tensorflow/tools/graph_transforms/transform_graph -- 
+--in_graph="/git/bda/frozen_graphs/rfcn-69/frozen_inference_graph.pb" 
+--out_graph="/git/bda/frozen_graphs/rfcn-69/quantized_graph_2.pb" 
+--inputs=image_tensor 
+--outputs="num_detections,detection_boxes,detection_scores,detection_classes" 
+--transforms='fold_old_batch_norms quantize_weights strip_unused_nodes sort_by_execution_order obfuscate_names merge_duplicate_nodes'
+
+Finally, I try to convert the quantized graph to an tflite graph with the toco util.
+bazel run --config=opt  tensorflow/contrib/lite/toco:toco -- 
+--input_file=/git/bda/frozen_graphs/rfcn-69/quantized_graph_2.pb 
+--output_file=/git/bda/frozen_graphs/out.tflite --inference_type=FLOAT 
+--input_shape=1,600,1024,3 
+--input_array=image_tensor 
+--output_arrays=num_detections,detection_boxes,detection_scores,detection_classes
+
+But, the operation fails with the following error.
+2018-04-11 13:19:58.364591: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1253] Converting unsupported operation: TensorArrayV3
+2018-04-11 13:19:58.364606: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1253] Converting unsupported operation: TensorArrayV3
+2018-04-11 13:19:58.364656: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1253] Converting unsupported operation: TensorArrayReadV3
+2018-04-11 13:19:58.364753: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1253] Converting unsupported operation: Where
+2018-04-11 13:19:58.364851: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1253] Converting unsupported operation: Where
+2018-04-11 13:19:58.364969: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1253] Converting unsupported operation: Dequantize
+2018-04-11 13:19:58.365001: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1253] Converting unsupported operation: TensorArraySizeV3
+2018-04-11 13:19:58.365022: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1253] Converting unsupported operation: Dequantize
+2018-04-11 13:19:58.366115: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1253] Converting unsupported operation: Where
+2018-04-11 13:20:00.620101: F tensorflow/contrib/lite/toco/tooling_util.cc:821] Check failed: d >= 1 (0 vs. 1)
+
+I've got no clue what could be the problem. Any help would be highly appreciated.
+Thanks in advance.

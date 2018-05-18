@@ -1,0 +1,77 @@
+Error while generating executable from obj file created with XLA aot for CPU
+
+Hi,
+I m trying to generate executable (currently x86 for testing) using xla aot. I built the test file and generated .o using bazel build. Now I am trying to generate executable using clang (gcc also gives the similar error). I get the following error as undefined reference to tensorflow::tfcompile::runtime::MallocContiguousBuffers and
+tensorflow::tfcompile::runtime::FreeContiguous
+**clang  ../aot_build/9fb1b9df97c5e4f9c88d55c740dbcaad/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/compiler/aot/tests/_objs/test_graph_binary/tensorflow/compiler/aot/tests/test_graph.o -lstdc++ -v**
+clang version 3.8.0 (tags/RELEASE_380/final)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /pkg/qct/software/llvm/build_tools/llvm38_160329/bin
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8.4
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9
+Found candidate GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.9.3
+Selected GCC installation: /usr/lib/gcc/x86_64-linux-gnu/4.8
+Candidate multilib: .;@m64
+Selected multilib: .;@m64
+ "/usr/bin/ld" -z relro --hash-style=gnu --build-id --eh-frame-hdr -m elf_x86_64 -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o a.out /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crt1.o /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/4.8/crtbegin.o -L/usr/lib/gcc/x86_64-linux-gnu/4.8 -L/usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu -L/lib/x86_64-linux-gnu -L/lib/../lib64 -L/usr/lib/x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/4.8/../../.. -L/afs/localcell/cm/gv2.6/sysname/pkg.@sys/qct/software/llvm/build_tools/llvm38_160329/bin/../lib -L/lib -L/usr/lib ../aot_build/9fb1b9df97c5e4f9c88d55c740dbcaad/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/compiler/aot/tests/_objs/test_graph_binary/tensorflow/compiler/aot/tests/test_graph.o -lstdc++ -lgcc --as-needed -lgcc_s --no-as-needed -lc -lgcc --as-needed -lgcc_s --no-as-needed /usr/lib/gcc/x86_64-linux-gnu/4.8/crtend.o /usr/lib/gcc/x86_64-linux-gnu/4.8/../../../x86_64-linux-gnu/crtn.o
+../aot_build/9fb1b9df97c5e4f9c88d55c740dbcaad/execroot/tensorflow/bazel-out/local-opt/bin/tensorflow/compiler/aot/tests/_objs/test_graph_binary/tensorflow/compiler/aot/tests/test_graph.o: In function `main':
+test_graph.cc:(.text.startup.main+0xb4): undefined reference to `tensorflow::tfcompile::runtime::MallocContiguousBuffers(long const*, unsigned long, void**, bool)'
+test_graph.cc:(.text.startup.main+0xda): undefined reference to `tensorflow::tfcompile::runtime::MallocContiguousBuffers(long const*, unsigned long, void**, bool)'
+test_graph.cc:(.text.startup.main+0xf8): undefined reference to `xla::ExecutableRunOptions::set_intra_op_thread_pool(Eigen::ThreadPoolDevice const*)'
+test_graph.cc:(.text.startup.main+0x1dc): undefined reference to `__tensorflow_compiler_aot_tests__test_graph_tfmatmul'
+test_graph.cc:(.text.startup.main+0x22e): undefined reference to `tensorflow::tfcompile::runtime::FreeContiguous(void*)'
+test_graph.cc:(.text.startup.main+0x23a): undefined reference to `tensorflow::tfcompile::runtime::FreeContiguous(void*)'
+test_graph.cc:(.text.startup.main+0x289): undefined reference to `tensorflow::tfcompile::runtime::FreeContiguous(void*)'
+test_graph.cc:(.text.startup.main+0x295): undefined reference to `tensorflow::tfcompile::runtime::FreeContiguous(void*)'
+clang-3.8: error: linker command failed with exit code 1 (use -v to see invocation)
+
+I am running it on  Ubuntu 14.04.5
+Tensorflow version: 1.2.1
+Installed tensorflow from source with XLA enabled and everything else disabled.
+bazel: release 0.5.1
+GPU: N/A
+Python: 2.7.6 (although I thik it's not applicable here)
+clang version 3.8.0
+
+I am following this: https://www.tensorflow.org/performance/xla/tfcompile
+Initially I was getting error in build
+
+ERROR: /local/mnt/workspace/ankitac/virtual/tensorflow/tensorflow/compiler/aot/tests/aot_project/BUILD:12:1: undeclared inclusion(s) in rule '//tensorflow/compiler/aot/tests/aot_project:test_graph_binary':
+this rule is missing dependency declarations for the following files included by 'tensorflow/compiler/aot/tests/aot_project/test_graph.cc':
+  '/local/mnt/workspace/ankitac/virtual/tensorflow/tensorflow/compiler/aot/tests/aot_project/test_graph_tfmatmul.h'.
+Target //tensorflow/compiler/aot/tests/aot_project:test_graph_binary failed to build
+Use --verbose_failures to see the command lines of failed build steps.
+INFO: Elapsed time: 5.092s, Critical Path: 1.34s
+
+I have BUILD file as:
+load("//tensorflow/compiler/aot:tfcompile.bzl", "tf_library")
+
+tf_library(
+    name = "test_graph_tfmatmul",
+    cpp_class = "foo::MatMulComp",
+    graph = "test_graph_tfmatmul.pb",
+    config = "test_graph_tfmatmul.config.pbtxt",
+)
+
+cc_binary(
+    name = "test_graph_binary",
+    srcs = [
+        "test_graph.cc",  # include test_graph_tfmatmul.h to access the generated header
+    ],
+    deps = [
+        ":test_graph_tfmatmul",  # link in the generated object file
+        "//third_party/eigen3",
+    ],
+    linkopts = [
+          "-lpthread",
+    ]
+)
+
+Building that using
+bazel --output_user_root=/local/mnt/workspace/ankitac/virtual/aot_build/ build  //tensorflow/compiler/aot/tests/aot_project:test_graph_binary
+
+For now I resolved this issue by adding my cc_binary to aot/test BUILD and building it from there works. But crating executable is still the issue.
+Any help is highly appreciated!
+Thanks & regards

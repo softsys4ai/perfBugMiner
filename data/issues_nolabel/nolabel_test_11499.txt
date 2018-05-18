@@ -1,0 +1,77 @@
+Tensorflow runs matmul, bincount and other "heavy" funcions only on cpu
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux virgo-wn100.roma1.infn.it 3.10.0-514.el7.x86_64 #1 SMP Thu Nov 3 15:10:49 CDT 2016 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="7.3 (Nitrogen)"
+VERSION_ID="7.3"
+REDHAT_BUGZILLA_PRODUCT_VERSION=7.3
+REDHAT_SUPPORT_PRODUCT_VERSION="7.3"
+TensorFlow installed from (source or binary): from pip3
+TensorFlow version (use command below): v1.2.0-5-g435cdfc 1.2.1
+Python version: Python 3.5.2
+CUDA/cuDNN version: CUDA: 8.0, cuDNN : 5
+GPU model and memory: Tesla K20m, memory 4742MiB
+
+Describe the problem
+Everytime i run a code with simple operations and heavy computation functions, the simple ones, like add or reshape, run on the gpu, while the heavy ones, like matmul, bincount, tensordot run always on cpu. This is very strange, because tensorflow sees the gpu but uses it only for simple functions, while i expect the inverse behavior.
+I noticed it when i used Timeline to profile my codes.
+Source code / logs
+A simple example of the code i use:
+import numpy
+import tensorflow as tf
+from tensorflow.python.client import timeline
+
+matrix1 = tf.zeros([5000,5000], dtype = tf.int32)
+matrix2 = tf.ones([5000,5000], dtype = tf.int32)
+matrix1 = tf.add(matrix1,2)
+product = tf.matmul(matrix1,matrix2)
+    
+session = tf.Session(config=tf.ConfigProto(log_device_placement=True))
+
+run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+run_metadata = tf.RunMetadata()
+
+image = session.run(product, options=run_options, run_metadata=run_metadata)
+
+
+    # Create the Timeline object, and write it to a json
+tl = timeline.Timeline(run_metadata.step_stats)
+ctf = tl.generate_chrome_trace_format()
+with open('timelineDB.json', 'w') as f:
+	f.write(ctf)
+
+and here the logs:
+2017-07-14 12:33:41.431036: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-14 12:33:41.431080: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-14 12:33:41.431089: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-14 12:33:41.431096: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-14 12:33:41.431104: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+2017-07-14 12:33:42.860681: I tensorflow/core/common_runtime/gpu/gpu_device.cc:940] Found device 0 with properties: 
+name: Tesla K20m
+major: 3 minor: 5 memoryClockRate (GHz) 0.7055
+pciBusID 0000:02:00.0
+Total memory: 4.63GiB
+Free memory: 4.57GiB
+2017-07-14 12:33:42.860741: I tensorflow/core/common_runtime/gpu/gpu_device.cc:961] DMA: 0 
+2017-07-14 12:33:42.860778: I tensorflow/core/common_runtime/gpu/gpu_device.cc:971] 0:   Y 
+2017-07-14 12:33:42.860791: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla K20m, pci bus id: 0000:02:00.0)
+Device mapping:
+/job:localhost/replica:0/task:0/gpu:0 -> device: 0, name: Tesla K20m, pci bus id: 0000:02:00.0
+2017-07-14 12:33:42.901828: I tensorflow/core/common_runtime/direct_session.cc:265] Device mapping:
+/job:localhost/replica:0/task:0/gpu:0 -> device: 0, name: Tesla K20m, pci bus id: 0000:02:00.0
+
+Add: (Add): /job:localhost/replica:0/task:0/gpu:0
+2017-07-14 12:33:42.902645: I tensorflow/core/common_runtime/simple_placer.cc:847] Add: (Add)/job:localhost/replica:0/task:0/gpu:0
+MatMul: (MatMul): /job:localhost/replica:0/task:0/cpu:0
+2017-07-14 12:33:42.902669: I tensorflow/core/common_runtime/simple_placer.cc:847] MatMul: (MatMul)/job:localhost/replica:0/task:0/cpu:0
+Add/y: (Const): /job:localhost/replica:0/task:0/gpu:0
+2017-07-14 12:33:42.902714: I tensorflow/core/common_runtime/simple_placer.cc:847] Add/y: (Const)/job:localhost/replica:0/task:0/gpu:0
+ones: (Const): /job:localhost/replica:0/task:0/cpu:0
+2017-07-14 12:33:42.902736: I tensorflow/core/common_runtime/simple_placer.cc:847] ones: (Const)/job:localhost/replica:0/task:0/cpu:0
+zeros: (Const): /job:localhost/replica:0/task:0/gpu:0
+2017-07-14 12:33:42.902756: I tensorflow/core/common_runtime/simple_placer.cc:847] zeros: (Const)/job:localhost/replica:0/task:0/gpu:0
+2017-07-14 12:33:43.110880: I tensorflow/stream_executor/dso_loader.cc:139] successfully opened CUDA library libcupti.so.8.0 locally
+
+I attach the .json generated (change .txt to .json and open it with chrome://tracing/)
+timeline.txt

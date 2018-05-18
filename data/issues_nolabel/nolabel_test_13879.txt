@@ -1,0 +1,198 @@
+Variable rnn/multi_rnn_cell/cell_0/gru_cell/gates/kernel already exists, disallowed.
+
+Hello,
+I wrote this code:
+def rnn_inputs(FLAGS, input_data):
+with tf.variable_scope('rnn_inputs', reuse=True):
+    W_input = tf.get_variable("W_input",
+        [FLAGS.en_vocab_size, FLAGS.num_hidden_units])
+
+# <num_examples, seq_len, num_hidden_units>
+embeddings = tf.nn.embedding_lookup(W_input, input_data)
+
+return embeddings
+
+def rnn_softmax(FLAGS, outputs):
+with tf.variable_scope('rnn_softmax', reuse=True):
+W_softmax = tf.get_variable("W_softmax",
+[FLAGS.num_hidden_units, FLAGS.num_classes])
+b_softmax = tf.get_variable("b_softmax", [FLAGS.num_classes])
+logits = tf.matmul(outputs, W_softmax) + b_softmax
+
+return logits
+
+class model(object):
+def __init__(self, FLAGS):
+
+    # Placeholders
+    self.inputs_X = tf.placeholder(tf.int32,
+        shape=[None, None], name='inputs_X')
+    self.targets_y = tf.placeholder(tf.float32,
+        shape=[None, None], name='targets_y')
+    self.seq_lens = tf.placeholder(tf.int32,
+        shape=[None, ], name='seq_lens')
+    self.dropout = tf.placeholder(tf.float32)
+
+    # RNN cell
+    stacked_cell = rnn_cell(FLAGS, self.dropout)
+
+    # Inputs to RNN
+    with tf.variable_scope('rnn_inputs',reuse=True):
+        W_input = tf.get_variable("W_input",
+            [FLAGS.en_vocab_size, FLAGS.num_hidden_units])
+
+    inputs = rnn_inputs(FLAGS, self.inputs_X)
+    #initial_state = stacked_cell.zero_state(FLAGS.batch_size, tf.float32)
+
+    # Outputs from RNN
+    all_outputs, state = tf.nn.dynamic_rnn(cell=stacked_cell, inputs=inputs,
+        sequence_length=self.seq_lens, dtype=tf.float32)
+
+    # state has the last RELEVANT output automatically since we fed in seq_len
+    # [0] because state is a tuple with a tensor inside it
+    outputs = state[0]
+
+    # Process RNN outputs
+    with tf.variable_scope('rnn_softmax',reuse=True):
+        W_softmax = tf.get_variable("W_softmax",
+            [FLAGS.num_hidden_units, FLAGS.num_classes])
+        b_softmax = tf.get_variable("b_softmax", [FLAGS.num_classes])
+
+    # Logits
+    logits = rnn_softmax(FLAGS, outputs)
+    probabilities = tf.nn.softmax(logits)
+    self.accuracy = tf.equal(tf.argmax(
+        self.targets_y,1), tf.argmax(logits,1))
+
+    # Loss
+    self.loss = tf.reduce_mean(
+        tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self.targets_y))
+
+    # Optimization
+    self.lr = tf.Variable(0.0, trainable=False)
+    trainable_vars = tf.trainable_variables()
+    # clip the gradient to avoid vanishing or blowing up gradients
+    grads, _ = tf.clip_by_global_norm(
+        tf.gradients(self.loss, trainable_vars), FLAGS.max_gradient_norm)
+    optimizer = tf.train.AdamOptimizer(self.lr)
+    self.train_optimizer = optimizer.apply_gradients(
+        zip(grads, trainable_vars))
+
+    # Below are values we will use for sampling (generating the sentiment
+    # after each word.)
+
+    # this is taking all the ouputs for the first input sequence
+    # (only 1 input sequence since we are sampling)
+    sampling_outputs = all_outputs[0]
+
+    # Logits
+    sampling_logits = rnn_softmax(FLAGS, sampling_outputs)
+    self.sampling_probabilities = tf.nn.softmax(sampling_logits)
+
+    # Components for model saving
+    self.global_step = tf.Variable(0, trainable=False)
+    self.saver = tf.train.Saver(tf.all_variables())
+
+def step(self, sess, batch_X, batch_seq_lens, batch_y=None, dropout=0.0,
+    forward_only=True, sampling=False):
+
+    input_feed = {self.inputs_X: batch_X,
+                  self.targets_y: batch_y,
+                  self.seq_lens: batch_seq_lens,
+                  self.dropout: dropout}
+
+    if forward_only:
+        if not sampling:
+            output_feed = [self.loss,
+                           self.accuracy]
+        elif sampling:
+            input_feed = {self.inputs_X: batch_X,
+                          self.seq_lens: batch_seq_lens,
+                          self.dropout: dropout}
+            output_feed = [self.sampling_probabilities]
+    else: # training
+        output_feed = [self.train_optimizer,
+                       self.loss,
+                       self.accuracy]
+
+
+    outputs = sess.run(output_feed, input_feed)
+
+    if forward_only:
+        if not sampling:
+            return outputs[0], outputs[1]
+        elif sampling:
+            return outputs[0]
+    else: # training
+        return outputs[0], outputs[1], outputs[2]
+
+But I faced this error while training:
+ValueError                                Traceback (most recent call last)
+ in ()
+----> 1 train()
+ in train()
+9
+10         # Load old model or create new one
+---> 11         model = create_model(sess, FLAGS)
+12
+13         # Train results
+ in create_model(sess, FLAGS)
+1 def create_model(sess, FLAGS):
+2
+----> 3     text_model = model(FLAGS)
+4
+5     ckpt = tf.train.get_checkpoint_state(FLAGS.ckpt_dir)
+ in init(self, FLAGS)
+18         with tf.variable_scope('rnn_inputs',reuse=True):
+19             W_input = tf.get_variable("W_input",
+---> 20                 [FLAGS.en_vocab_size, FLAGS.num_hidden_units])
+21
+22         inputs = rnn_inputs(FLAGS, self.inputs_X)
+C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\ops\variable_scope.py in get_variable(name, shape, dtype, initializer, regularizer, trainable, collections, caching_device, partitioner, validate_shape, use_resource, custom_getter)
+1063       collections=collections, caching_device=caching_device,
+1064       partitioner=partitioner, validate_shape=validate_shape,
+-> 1065       use_resource=use_resource, custom_getter=custom_getter)
+1066 get_variable_or_local_docstring = (
+1067     """%s
+C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\ops\variable_scope.py in get_variable(self, var_store, name, shape, dtype, initializer, regularizer, reuse, trainable, collections, caching_device, partitioner, validate_shape, use_resource, custom_getter)
+960           collections=collections, caching_device=caching_device,
+961           partitioner=partitioner, validate_shape=validate_shape,
+--> 962           use_resource=use_resource, custom_getter=custom_getter)
+963
+964   def _get_partitioned_variable(self,
+C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\ops\variable_scope.py in get_variable(self, name, shape, dtype, initializer, regularizer, reuse, trainable, collections, caching_device, partitioner, validate_shape, use_resource, custom_getter)
+365           reuse=reuse, trainable=trainable, collections=collections,
+366           caching_device=caching_device, partitioner=partitioner,
+--> 367           validate_shape=validate_shape, use_resource=use_resource)
+368
+369   def _get_partitioned_variable(
+C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\ops\variable_scope.py in _true_getter(name, shape, dtype, initializer, regularizer, reuse, trainable, collections, caching_device, partitioner, validate_shape, use_resource)
+350           trainable=trainable, collections=collections,
+351           caching_device=caching_device, validate_shape=validate_shape,
+--> 352           use_resource=use_resource)
+353
+354     if custom_getter is not None:
+C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\ops\variable_scope.py in _get_single_variable(self, name, shape, dtype, initializer, regularizer, partition_info, reuse, trainable, collections, caching_device, validate_shape, use_resource)
+680       raise ValueError("Variable %s does not exist, or was not created with "
+681                        "tf.get_variable(). Did you mean to set reuse=None in "
+--> 682                        "VarScope?" % name)
+683     if not shape.is_fully_defined() and not initializing_from_value:
+684       raise ValueError("Shape of a new variable (%s) must be fully defined, "
+ValueError: Variable rnn_inputs/W_input does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+So,I set reuse=None, but it showed another error:
+ValueError: Variable rnn_inputs/W_input already exists, disallowed. Did you mean to set reuse=True in VarScope? Originally defined at:
+File "C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\framework\ops.py", line 1269, in init
+self._traceback = _extract_stack()
+File "C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\framework\ops.py", line 2506, in create_op
+original_op=self._default_original_op, op_def=op_def)
+File "C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 767, in apply_op
+op_def=op_def)
+I again set back reuse = True, which should be the case,but this is error this time:
+Variable rnn/multi_rnn_cell/cell_0/gru_cell/gates/kernel already exists, disallowed. Did you mean to set reuse=True in VarScope? Originally defined at:
+File "C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\framework\ops.py", line 1269, in init
+self._traceback = _extract_stack()
+File "C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\framework\ops.py", line 2506, in create_op
+original_op=self._default_original_op, op_def=op_def)
+File "C:\Users\Prof subhasis\Anaconda31\lib\site-packages\tensorflow\python\framework\op_def_library.py", line 767, in apply_op
+op_def=op_def)
+Can anybody help me with this?

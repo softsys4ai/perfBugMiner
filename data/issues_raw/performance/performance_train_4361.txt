@@ -1,0 +1,61 @@
+Update tf.contrib.layers.batch_norm() docs
+
+Tensorflow version that I use : 0.10 (pip package)
+
+I took heavy use of tf.contrib.layers.batch_norm() the last weeks.
+After facing some problems on how to use it correctly, I figured out that there are many devs out there who are confused as well, such as here:
+
+#1122
+http://stackoverflow.com/questions/33949786/how-could-i-use-batch-normalization-in-tensorflow
+
+I would suggest to do following improvements to make it more clear:
+1) Update example in doc-string:
+The example tells in case we use update_collections on its defaults, we have to include this:
+update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+if update_ops:
+    updates = tf.group(update_ops)
+    total_loss = control_flow_ops.with_dependencies([updates], total_loss)
+
+But this is actually not working or deprecated, as it throws errors. Instead, we have to do some tiny changes. I would suggest to update the docs as follows:
+from tensorflow.python import control_flow_ops
+
+update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+if update_ops:
+    updates = tf.tuple(update_ops)
+    total_loss = control_flow_ops.with_dependencies(updates, total_loss)
+
+As a side question, why do we apply it to the total_loss, and not to the train_op directly, as described in the doc-string text. Added a dependency to total_loss works, but grouping it with the train_op would make the example more clear in my opinion, because we do batch-statistic updates only during training.
+2) UPDATE_OPS in combination with reuse varscope:
+This is related to the question above. Let's say we have a model with which reuses an convolutional encoder (and also its batch-norm-layers) several times. Even when we reuse these layers, the update operation for the batch-statistics is added to UPDATE_OPS nevertheless. Personally, I'm not sure if this is a bug, or if this is really what should be done?
+Or is it required to filter the update-ops after collecting them with update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS), so that each one is executed just once?
+To sum this up: Am I wrong that lines 213-215 should not be executed when reuse=True? So changing it to:
+if not reuse:
+    # Collect the updates to be computed later.
+    ops.add_to_collections(updates_collections, update_moving_mean)
+    ops.add_to_collections(updates_collections, update_moving_variance)
+
+In my case, I'm using a Conv-LSTM-Conv_tp architecture, where I reuse the Conv/Conv_tp for each timestep. When I increase the number of timesteps in the LSTM, the number of update-ops increases in proportionally, while the number of model-parameters stays constant because they get reused. Currently, I'm getting 420 update-ops when calling tf.get_collection(tf.GraphKeys.UPDATE_OPS). As the performance feels super slow when I use batch-norm, I guess this high number of update-ops cannot be right.
+3) Handling of is_training parameter:
+I have seen a lot of examples people doing something like this in their code to handle the is_training parameter:
+def batch_norm_layer(x,train_phase,scope_bn):
+    bn_train = batch_norm(x, decay=0.999, center=True, scale=True,
+    updates_collections=None,
+    is_training=True)
+    bn_inference = batch_norm(x, decay=0.999, center=True, scale=True,
+    updates_collections=None,
+    is_training=False)
+    bn = tf.cond(train_phase, lambda: bn_train, lambda: bn_inference)
+    return bn
+
+As far as I know, this was really required in the past, because is_training was just a Boolean. But since the param can be a Bool-Tensor as well, this is not required anymore. Since many devs are still ding this workaound, added a comment to the doc-string that this is not required anymore could be helpful.
+4) Usage on Multi-GPU configuration
+a) When I optimize my code for multi-GPU systems (as in the CIFAR10 example) the number of update-ops increases with the factor of num_gpus (might be related to 2) ).
+b) When I use tf.contrib.batch_norm() within a multi-GPU system, I get an error like this:
+InvalidArgumentError: Cannot assign a device to node 'tower_1/inference/ConvStack/x_bn_9/moments/sufficient_statistics/SparseToDense': 
+Could not satisfy explicit device specification '/device:GPU:1' because no supported kernel 
+for GPU devices is available.
+...
+
+Hence, to we have to wrap evey batch_norm() call with tf.device("/cpu:0")? I guess this might have bad impacts on performance, right?
+Thanks!
+PS: Sorry in case this question would fits better to StackOverflow. As it is a combination of suggested improvements and questions. Just let me know...

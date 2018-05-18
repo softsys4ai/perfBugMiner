@@ -1,0 +1,60 @@
+Odd error message for empty session run with queues
+
+I have encountered a counter intuative error when working with queues and accidental sess.run([]).
+This is a stretch, but possibly related to #1277 where batch norm updates are being run but there is no batch norm in the graph.
+Environment info
+Operating System: Ubuntu 14.04, tf version (63409bd) with cuda.
+Steps to reproduce
+import tensorflow as tf
+
+BREAK_ME = False
+
+def get_iter():
+    img_list = [(tf.zeros((12,)), ), (tf.zeros((12, )), )]
+    xx = tf.train.shuffle_batch_join(
+        img_list, batch_size=5,
+        capacity=1000 + 3 * 5,
+        min_after_dequeue=1000)
+    return xx
+
+if BREAK_ME:
+    w = get_iter()
+
+sess = tf.Session()
+coord = tf.train.Coordinator()
+threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+sess.run([])
+As expected, when BREAK_ME is false I get:
+RuntimeError: The Session graph is empty. Add operations to the graph before calling run().
+When BREAK_ME is true, enabling the creation of a queue I get the following:
+Traceback (most recent call last):
+  File "test.py", line 20, in <module>
+    sess.run([])
+  File "/home/indico/Apps/tensorflow/_python_build/tensorflow/python/client/session.py", line 332, in run
+    result = self._run(None, fetches, feed_dict, options_ptr, run_outputs_ptr)
+  File "/home/indico/Apps/tensorflow/_python_build/tensorflow/python/client/session.py", line 537, in _run
+    feed_dict_string, options, run_outputs)
+  File "/home/indico/Apps/tensorflow/_python_build/tensorflow/python/client/session.py", line 599, in _do_run
+    target_list, options, run_outputs)
+  File "/home/indico/Apps/tensorflow/_python_build/tensorflow/python/client/session.py", line 621, in _do_call
+    e.code)
+tensorflow.python.framework.errors.OutOfRangeError: RandomShuffleQueue '_0_shuffle_batch_join/random_shuffle_queue' is closed and has insufficient elements (requested 5, current size 0)
+     [[Node: shuffle_batch_join = QueueDequeueMany[component_types=[DT_FLOAT], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](shuffle_batch_join/random_shuffle_queue, shuffle_batch_join/n/_8)]]
+Caused by op u'shuffle_batch_join', defined at:
+  File "test.py", line 14, in <module>
+    w = get_iter()
+  File "test.py", line 10, in get_iter
+    min_after_dequeue=1000)
+  File "/home/indico/Apps/tensorflow/_python_build/tensorflow/python/training/input.py", line 770, in shuffle_batch_join
+    dequeued = queue.dequeue_many(batch_size, name=name)
+  File "/home/indico/Apps/tensorflow/_python_build/tensorflow/python/ops/data_flow_ops.py", line 301, in dequeue_many
+    self._queue_ref, n, self._dtypes, name=name)
+  File "/home/indico/Apps/tensorflow/_python_build/tensorflow/python/ops/gen_data_flow_ops.py", line 359, in _queue_dequeue_many
+    timeout_ms=timeout_ms, name=name)
+  File "/home/indico/Apps/tensorflow/_python_build/tensorflow/python/ops/op_def_library.py", line 655, in apply_op
+    op_def=op_def)
+  File "/home/indico/Apps/tensorflow/_python_build/tensorflow/python/framework/ops.py", line 2104, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/indico/Apps/tensorflow/_python_build/tensorflow/python/framework/ops.py", line 1129, in __init__
+    self._traceback = _extract_stack()

@@ -1,0 +1,84 @@
+Getting an error for tensors with partial shape information with tf.contrib.staging.StagingArea
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+If you open a GitHub issue, here is our policy:
+
+It must be a bug, a feature request, or a significant problem with documentation (for small docs fixes please send a PR instead).
+The form below must be filled out.
+It shouldn't be a TensorBoard issue. Those go here.
+
+Here's why we have that policy: TensorFlow developers respond to issues. We want to focus on work that benefits the whole community, e.g., fixing bugs and adding features. Support only helps individuals. GitHub also notifies thousands of people when issues are filed. We want them to see you communicating an interesting problem, rather than being redirected to Stack Overflow.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.7.0
+Python version: 3.5.2
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 9.0/7.0.5
+GPU model and memory: TitanX 12Gb
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+Describe the problem clearly here. Be sure to convey here why it's a bug in TensorFlow or a feature request.
+When using tf.contrib.staging.StagingArea to prefetch data to the GPU from a tf.data pipeline. I get the following output:
+Traceback (most recent call last):
+  File "trainer.py", line 387, in <module>
+    main(ARGS)
+  File "trainer.py", line 49, in main
+    thread_count=args.thread_count, use_nccl=args.use_nccl
+  File "trainer.py", line 161, in train
+    features = stage([features])
+  File "trainer.py", line 112, in stage
+    get_tensors = [tf.reshape(gt, t.get_shape()) for (gt,t) in zip(get_tensors, tensors)]
+  File "trainer.py", line 112, in <listcomp>
+    get_tensors = [tf.reshape(gt, t.get_shape()) for (gt,t) in zip(get_tensors, tensors)]
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/gen_array_ops.py", line 6113, in reshape
+    "Reshape", tensor=tensor, shape=shape, name=name)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/op_def_library.py", line 528, in _apply_op_helper
+    (input_name, err))
+ValueError: Tried to convert 'shape' to a tensor and failed. Error: Cannot convert a partially known TensorShape to a Tensor: (1, ?)
+
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+def stage(tensors):
+    
+    staging_area = tf.contrib.staging.StagingArea(
+        dtypes=[tensor.dtype for tensor in tensors],
+        shapes=[tensor.get_shape() for tensor in tensors]
+    )
+    put_op = staging_area.put(tensors)
+    get_tensors = staging_area.get()
+
+    get_tensors = [tf.reshape(gt, t.get_shape()) for (gt,t) in zip(get_tensors, tensors)]
+
+    return put_op, get_tensors
+
+dataset = tf.data.TFRecordDataset([source])
+dataset = dataset.map(parse, num_parallel_calls=thread_count)
+dataset = dataset.apply(tf.contrib.data.padded_batch_and_drop_remainder(
+    batch_size, ([None], [], [None])
+))
+if shuffle:
+    dataset = dataset.apply(tf.contrib.data.shuffle_and_repeat(shuffle_buffer_size, 1))
+dataset.prefetch(2 * gpu_count)
+iterator = dataset.make_initializable_iterator()
+
+for gpu in range(gpu_count):
+    with tf.device('/device:CPU:0'):
+        features, timesteps, labels = iterator.get_next()
+        labels = tf.deserialize_many_sparse(labels, dtype=tf.int32)
+
+        device = '/device:GPU:{}'.format(gpu)
+        with tf.device(device):
+            scope_name = 'clone_{}'.format(gpu)
+            with tf.variable_scope(scope_name) as scope, tf.name_scope(scope_name):
+                features = stage([features])

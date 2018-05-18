@@ -1,0 +1,40 @@
+AdamOptimizer's slots "beta1_power" and "beta2_power" are not available via "get_slot()" and "get_slot_names()"
+
+Preamble.
+I want to explicitly pass list of variables to tf.variables_initializer(). I do something like this:
+model_variables = my_model.get_variables_list()
+optimizer_slots = [
+    optimizer.get_slot(var, name)
+    for name in optimizer.get_slot_names()
+    for var in model_variables
+]
+all_variables = [
+    *model_variables,
+    *optimizer_slots,
+    global_step,
+]
+init_op = tf.variables_initializer(all_variables)
+When I used the AdamOptimizer, I got such exception:
+FailedPreconditionError (see above for traceback): Attempting to use uninitialized value beta2_power
+
+The problem.
+After digging into the TensorFlow sources, I found that AdamOptimizer overrides its _create_slots() in that way:
+  def _create_slots(self, var_list):
+    # Create the beta1 and beta2 accumulators on the same device as the first
+    # variable.
+    if (self._beta1_power is None or
+        self._beta1_power.graph is not var_list[0].graph):
+      with ops.colocate_with(var_list[0]):
+        self._beta1_power = variables.Variable(self._beta1,
+                                               name="beta1_power",
+                                               trainable=False)
+        self._beta2_power = variables.Variable(self._beta2,
+                                               name="beta2_power",
+                                               trainable=False)
+    # Create slots for the first and second moments.
+    for v in var_list:
+      self._zeros_slot(v, "m", self._name)
+      self._zeros_slot(v, "v", self._name)
+It creates two Variables and does not store them into self._slots, therefore I can not access them using public interface.
+This problem refers to library's API design.
+I see that beta1_power and beta2_power slots are not subject to any variable while self._slots implies that each slot have both name and related variable, so there is no obvious solution... It may be reasonable to extend public API to cover such cases.

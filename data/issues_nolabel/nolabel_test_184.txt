@@ -1,0 +1,31 @@
+Dropout Loses Shape Inference Information
+
+I was working on a simple conv net architecture (stack of convs followed by fully connected) and I came across the following issue. If you apply dropout to the output of a convolution and use a placeholder for p_keep on the dropout, you lose all of the shape information except for the last axis'. Below is a code snippet demonstrating this behavior
+def conv(input_, h, w, nfilt_in, nfilt_out, layer_number):
+    with tf.name_scope('conv_%d' % layer_number) as scope:
+        kernel = tf.Variable(tf.truncated_normal([h, w, nfilt_in, nfilt_out],
+                                                 dtype=tf.float32,
+                                                 stddev=1e-1), name='conv_kernel')
+        conv = tf.nn.conv2d(input_, kernel, [1, 1, 1, 1], padding='SAME')
+    return conv
+
+
+def model(X, p_keep):
+
+    c = conv(X, 5, 5, 1, 8, 0)
+    print "c_shape before dropout:", c.get_shape()  # prints TensorShape([Dimension(None), Dimension(28), Dimension(28), Dimension(8)]) as expected
+    c = tf.nn.dropout(c, p_keep)
+    print "c_shape after dropout:", c.get_shape()  # prints TensorShape(None) which is strange
+    c2 = conv(c, 5, 5, 8, 16, 1)
+    print "c2_shape:", c2.get_shape()  # prints TensorShape([Dimension(None), Dimension(None), Dimension(None), Dimension(16)]) which is strange
+    return c2
+
+X = tf.placeholder("float", [None, 28, 28, 1])
+p_keep = tf.placeholder("float")
+y_model = model(X, p_keep)
+sess = tf.Session()
+init = tf.initialize_all_variables()
+sess.run(init)
+
+
+As an aside, if you explicitly pass in a value instead of using a placeholder (e.g. replace p_keep=tf.placeholder('float') with p_keep=0.5) this issue does not occur.

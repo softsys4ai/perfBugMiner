@@ -1,0 +1,23 @@
+SummaryWriter writes constants with the graph definition
+
+It looks like SummaryWriter includes the values of constants when writing the graph definition. I'm currently loading word embeddings using python and using the numpy array to initialize a variable. This results in the ~300M of embeddings to be dumped to disk during summarization.  I understand why a constant would be part of the model graph if the goal was to save and restore the graph, but I don't believe this is the goal of the SummaryWriter. Is it possible to strip these out to save disk space?
+Here's a trivial example. If the declaration of random_b is removed, the resulting summary is ~4.6K, but with it, it's about 7.6M.
+import numpy as np
+import os
+import tensorflow as tf
+
+session = tf.Session()
+
+logdir = "/tmp/tflogs"
+
+random_a = tf.Variable(tf.random_normal([1000000]))
+random_b = tf.Variable(np.random.rand(1000000))
+tf.histogram_summary("random_var", random_a)
+os.makedirs(logdir)
+writer = tf.train.SummaryWriter(logdir, session.graph_def)
+init = tf.initialize_all_variables()
+merged_summary_op = tf.merge_all_summaries()
+session.run(init)
+
+summary = session.run(merged_summary_op)
+writer.add_summary(summary, 0)

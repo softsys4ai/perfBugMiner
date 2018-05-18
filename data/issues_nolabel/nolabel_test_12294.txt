@@ -1,0 +1,51 @@
+Computation of Mean IoU
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+No.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 7
+TensorFlow installed from (source or binary):
+Source.
+TensorFlow version (use command below):
+r1.2
+Python version:
+3.5
+
+Describe the problem
+I believe that the calculation of the IoU metric in tf.metrics.mean_iou is incorrect. Consider an image which can have 3 classes (sky, road, building). In one image there is no building and everything has been perfectly classified as either sky or road so the tp + fn + fp for buildings is zero. To avoid divisions by zero in the IoU calculation (tp / (tp + fn + fp)) the current implementation sets the denominator to 1. This causes a result of 0 because tp=0 and we are computing 0=0/1.
+Both the sky and road class get a score of 1 so the overall image gets a mean_iou score of 2/3 even though every single pixel was correctly classified. I propose to change the metric so that when the denominator is 0 the result is 1. I can send a pull request if this is needed.
+Source code / logs
+Complete example as a unit test:
+class TestMetrics(tf.test.TestCase):
+
+    def get_data(self):
+        label_int64 = tf.constant([
+            [[0, 1, 2, 2, 1, 0],
+             [2, 1, 0, 0, 1, 2]],
+            [[2, 2, 2, 2, 2, 2],
+             [1, 1, 1, 1, 1, 1]]], dtype=tf.int64)
+
+        predicted_perfect_int64 = tf.constant([
+            [[1, 1, 2, 2, 1, 2],
+             [2, 1, 9, 3, 1, 2]],
+            [[2, 2, 2, 2, 2, 2],
+             [1, 1, 1, 1, 1, 1]]], dtype=tf.int64)
+        return label_int64, predicted_perfect_int64
+
+
+    def test_iou_metric(self):
+        with self.test_session():
+            l, p = self.get_data()
+            num_classes = 9
+            weights = tf.cast(tf.not_equal(l, 0), tf.int32)
+
+            iou, update_op = tf.metrics.mean_iou(
+                l - 1, p - 1, num_classes, weights=weights)
+            tf.global_variables_initializer().run()
+            tf.local_variables_initializer().run()
+            update_op.eval()
+            self.assertAlmostEqual(iou.eval(), 1)
+
+Currently this test fails with: 0.222 is not equal to 1.

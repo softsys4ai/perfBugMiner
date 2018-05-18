@@ -1,0 +1,41 @@
+multi core cpu issue(server vs local)
+
+My local computer is mac : i7 quad core 2.2GHz .  (2015 model)
+My server computer is centos7 : 120-core (8 sockets × 15cores) Intel Xeon E7-8870
+My tensorflow version : v1.0.1
+I build tensorflow source with this option :
+bazel build -c opt --copt=-msse4.2 --copt=-msse4.1 --copt=-mavx --copt=-mavx2 --copt=-mfma --config=opt //tensorflow/tools/pip_package:build_pip_package
+With under simple code, my local computer time is 8 seconds and my server computer time is 22 second.
+`
+import tensorflow as tf
+from tensorflow.examples.tutorials.mnist import input_data
+import time
+mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
+x = tf.placeholder(tf.float32, [None, 784]);
+y_ = tf.placeholder(tf.float32, [None, 10]);
+W1 = tf.Variable(tf.random_normal([784,240], stddev=0.35));
+W2 = tf.Variable(tf.random_normal([240,120], stddev=0.35));
+W3 = tf.Variable(tf.random_normal([120,10], stddev=0.35));
+b1 = tf.Variable(tf.zeros([240]));
+b2 = tf.Variable(tf.zeros([120]));
+b3 = tf.Variable(tf.zeros([10]));
+y1 = tf.nn.sigmoid(tf.matmul(x,W1)+b1);
+y2 = tf.nn.sigmoid(tf.matmul(y1,W2)+b2);
+y = tf.nn.softmax(tf.matmul(y2,W3)+b3);
+cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_*tf.log(y), reduction_indices=[1]))
+train = tf.train.GradientDescentOptimizer(0.5).minimize(cross_entropy)
+NUM_THREADS = 100
+sess = tf.InteractiveSession(config=tf.ConfigProto(intra_op_parallelism_threads=NUM_THREADS))
+tf.global_variables_initializer().run()
+start_time = time.time()
+for _ in range(3000):
+batch_xs, batch_ys = mnist.train.next_batch(100)
+sess.run(train, feed_dict={x: batch_xs, y_: batch_ys})
+end_time = time.time()
+print (end_time - start_time)
+correct_prediction = tf.equal(tf.argmax(y, 1), tf.argmax(y_, 1))
+accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+print(sess.run(accuracy, feed_dict={x: mnist.test.images, y_: mnist.test.labels}))
+`
+I think it is impossible because my server computer have so many cores.
+Isn't it multi-core issue?

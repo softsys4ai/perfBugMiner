@@ -1,0 +1,82 @@
+Bug when trying to restore training from Inception-3 checkpoint with different trainable variables
+
+I have the pretty common use case of freezing the bottom layers of Inception and training only the first two layers, after which I lower the learning rate and fine tune the entire Inception model.
+Here is my code for running the first part
+train_dir='/home/ubuntu/pynb/TF play/log-inceptionv3flowers'
+with tf.Graph().as_default():
+    tf.logging.set_verbosity(tf.logging.INFO)
+    
+    dataset = get_dataset()
+    images, _, labels = load_batch(dataset, batch_size=32)
+    
+    # Create the model, use the default arg scope to configure the batch norm parameters.
+    with slim.arg_scope(inception.inception_v3_arg_scope()):
+        logits, _ = inception.inception_v3(images, num_classes=5, is_training=True)
+        
+    # Specify the loss function:
+    one_hot_labels = slim.one_hot_encoding(labels, 5)
+    tf.losses.softmax_cross_entropy(one_hot_labels, logits)
+    total_loss = tf.losses.get_total_loss()
+
+    # Create some summaries to visualize the training process:
+    tf.summary.scalar('losses/Total Loss', total_loss)
+  
+    # Specify the optimizer and create the train op:
+    optimizer = tf.train.RMSPropOptimizer(0.001, 0.9,
+                                    momentum=0.9, epsilon=1.0)
+    train_op = slim.learning.create_train_op(total_loss, optimizer, variables_to_train=get_variables_to_train())
+    
+    # Run the training:
+    final_loss = slim.learning.train(
+        train_op,
+        logdir=train_dir,
+        init_fn=get_init_fn(),
+        number_of_steps=4500,
+        save_summaries_secs=30,
+        save_interval_secs=30,
+        session_config=tf.ConfigProto(gpu_options=gpu_options))
+        
+print('Finished training. Last batch loss %f' % final_loss)
+which runs properly, then my code for running the second part
+train_dir='/home/ubuntu/pynb/TF play/log-inceptionv3flowers'
+with tf.Graph().as_default():
+    tf.logging.set_verbosity(tf.logging.INFO)
+    
+    dataset = get_dataset()
+    images, _, labels = load_batch(dataset, batch_size=32)
+    
+    # Create the model, use the default arg scope to configure the batch norm parameters.
+    with slim.arg_scope(inception.inception_v3_arg_scope()):
+        logits, _ = inception.inception_v3(images, num_classes=5, is_training=True)
+        
+    # Specify the loss function:
+    one_hot_labels = slim.one_hot_encoding(labels, 5)
+    tf.losses.softmax_cross_entropy(one_hot_labels, logits)
+    total_loss = tf.losses.get_total_loss()
+
+    # Create some summaries to visualize the training process:
+    tf.summary.scalar('losses/Total Loss', total_loss)
+  
+    # Specify the optimizer and create the train op:
+    optimizer = tf.train.RMSPropOptimizer(0.0001, 0.9,
+                                    momentum=0.9, epsilon=1.0)
+    train_op = slim.learning.create_train_op(total_loss, optimizer)
+    
+    # Run the training:
+    final_loss = slim.learning.train(
+        train_op,
+        logdir=train_dir,
+        init_fn=get_init_fn(),
+        number_of_steps=10000,
+        save_summaries_secs=30,
+        save_interval_secs=30,
+        session_config=tf.ConfigProto(gpu_options=gpu_options))
+        
+print('Finished training. Last batch loss %f' % final_loss)
+Notice that in the second part, I do not pass anything into create_train_op's variables_to_train parameter. This error is then shown
+NotFoundError (see above for traceback): Key InceptionV3/Conv2d_4a_3x3/BatchNorm/beta/RMSProp not found in checkpoint
+	 [[Node: save_1/RestoreV2_49 = RestoreV2[dtypes=[DT_FLOAT], _device="/job:localhost/replica:0/task:0/cpu:0"](_recv_save_1/Const_0, save_1/RestoreV2_49/tensor_names, save_1/RestoreV2_49/shape_and_slices)]]
+	 [[Node: save_1/Assign_774/_1550 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_2911_save_1/Assign_774", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"]()]]
+
+
+I suspect that it's looking for the RMSProp variables for the InceptionV3/Conv2d_4a_3x3 layer, which is non-existent, because I didn't train that layer in the previous checkpoint. I'm not sure how to achieve what I want, as I can see no examples in the documentation about how to do this.

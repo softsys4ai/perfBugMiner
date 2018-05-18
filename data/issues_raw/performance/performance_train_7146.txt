@@ -1,0 +1,74 @@
+Nested `tf.while_loop`s hang when they are placed on CPU
+
+When I place all ops within nested tf.while_loop on CPU, evaluating the output of nested tf.while_loop makes the program hang.
+I also posted a question on StackOverflow.
+Environment info
+Operating System: Ubuntu 16.04
+Installed version of CUDA and cuDNN:
+/usr/local/cuda/lib64/libcudadevrt.a
+/usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+/usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+/usr/local/cuda/lib64/libcudart.so.8.0.44
+/usr/local/cuda/lib64/libcudart_static.a
+/usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+/usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+/usr/local/cuda/lib64/libcudnn.so.5.1.5
+/usr/local/cuda/lib64/libcudnn_static.a
+
+If installed from source, provide
+
+
+The commit hash (git rev-parse HEAD)
+28f5099d532ce59787ee58012b8ef04c498947ae
+
+
+The output of bazel version
+
+
+Build label: 0.4.3
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Dec 22 12:31:25 2016 (1482409885)
+Build timestamp: 1482409885
+Build timestamp as int: 1482409885
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+The following code is run on python 3.5:
+import tensorflow as tf
+
+config = tf.ConfigProto(allow_soft_placement=False)
+with tf.Session(config=config) as sess, tf.device('/cpu:0'):
+    num_outer_iters = tf.constant(3)
+    num_inner_iters = tf.constant(5)
+
+    def outer_body(loop_outer_index, loop_outer_ta):
+
+        def inner_body(loop_inner_index, loop_inner_ta):
+            loop_inner_ta = loop_inner_ta.write(loop_inner_index,
+                                                tf.constant(0))
+            return (loop_inner_index + 1, loop_inner_ta)
+
+        inner_index = tf.constant(0)
+        inner_ta = tf.TensorArray(tf.int32, num_inner_iters)
+        (_, inner_ta) = tf.while_loop(
+            lambda index, *_: index < num_inner_iters,
+            inner_body,
+            (inner_index, inner_ta))
+
+        loop_outer_ta = loop_outer_ta.write(loop_outer_index,
+                                            inner_ta.stack())
+        return loop_outer_index + 1, loop_outer_ta
+
+    outer_index = tf.constant(0)
+    outer_ta = tf.TensorArray(tf.int32, num_outer_iters)
+    (_, outer_ta) = tf.while_loop(
+        lambda index, *_: index < num_outer_iters,
+        outer_body,
+        (outer_index, outer_ta),
+        parallel_iterations=1, back_prop=False)
+
+    print(sess.run(outer_ta.concat()))
+
+What other attempted solutions have you tried?
+If I replace num_inner_iters = tf.constant(5) with num_inner_iters = 5, the program will exit normally.
+Logs or other output that would be helpful
+The program hangs without any error message.

@@ -1,0 +1,29 @@
+Calling variable.assign() too many times crashes on memory allocation.
+
+Background: I'm working on a set of networks that only share some layers, so I have a parameter server that sends new weights for the different clients to use.  These clients accept the new weights and bias for the layers they are using and assign the values to the TF.Variables via sess.run(self.w1.assign(new_weights)).  However, when I start it up and let it run, it crashes saying
+W tensorflow/core/common_runtime/bfc_allocator.cc:271] Ran out of memory trying to allocate 16B.  See logs for memory state.
+
+(Sometimes it's allocating 16B, other times its 3.9KiB)
+To give you an idea of the size of the weights, I have three layers of:
+Layer 1(W,b): (2, 1000), (1000, )
+Layer 2(W,b): (1000, 1000), (1000, )
+Layer 3(W,b): (1000, 4), (4, )
+I'm running on a Titan X with 12G memory.
+With per_process_gpu_memory_fraction = 0.01, the program dies at ~190 assign commands.
+With per_process_gpu_memory_fraction = 0.02, the program dies at ~384 assign commands.
+With per_process_gpu_memory_fraction = 0.03, the program dies at ~780 assign commands.
+With per_process_gpu_memory_fraction = 0.04, the program dies at ~784 assign commands.
+With per_process_gpu_memory_fraction = 0.05, the program dies at ~1582 assign commands.
+With per_process_gpu_memory_fraction = 0.06, the program dies at ~1586 assign commands.
+I've tried to set allow_growth=True, and deferred_deletion_bytes=1 in the session's GPUOptions after reading issue #1578, but that didn't get me much further.  (I have no idea what deferred_deletion_bytes does...)  Looking at the numbers just above (GPU%vsAssignmentCommands), it seems to be fairly linear, so it seems to me that the assign operation takes some of the GPU ram and it's never freed up.  Is there any sense of GC on the GPU memory allocated durring the var.assign() op?
+It seems that I could delete and create a new session, but that sounds expensive to me, and I'd have to maintain the weights outside of session to be able to restore them correctly.  The second idea I had would to use placeholders and ship the weights in every time with the feed_dict, but again, that seems less that ideal and I think it would struggle in the optimizer on knowing what to optimize if they are just placeholders.
+Let me know if you would like any other logs or reports from me.  I figure this is the first time someone has tried to use assign operations like this, so I want to be helpful in fixing it if it's a bug.
+Thanks
+Environment info
+Operating System: Ubuntu 16.04
+Installed version of CUDA and cuDNN:
+/usr/local/cuda/lib/libcudart.so -> libcudart.so.7.0
+/usr/local/cuda/lib/libcudart.so.7.0 -> libcudart.so.7.0.28
+/usr/local/cuda/lib/libcudart.so.7.0.28
+/usr/local/cuda/lib/libcudart_static.a
+Built from source.  Commit hash:  35cd6a3

@@ -1,0 +1,45 @@
+Allocating C++ types instead of Tensors in a new Op - Feature Request
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS
+TensorFlow installed from (source or binary): No
+TensorFlow version: 1.5
+Python version: 2.7
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: N/A
+
+Feature Request
+Feature requested: the ability to allocate memory in a new op as C++ types and not only as tensors;
+I have been implementing a new op on Tensorflow following the guide and have noticed what could be a useful feature for people implementing new ops in C++/CUDA.
+Currently using OpKernelConstruction* context it is only possible to allocate memory (CPU or GPU) in the form of tensors. For basic  C++ types you can obtain  a pointer for that type easily, for example:
+Tensor tensor;
+OP_REQUIRES_OK(context, context->allocate_temp(DT_FLOAT,  TensorShape({5}), &tensor));
+float * ptr = tensor.flat<float>.data();
+
+However, for more complex types like structs this is not possible (or at least not direct). Why not have something like:
+struct A {
+    int a;
+    int b;
+};
+A * a = nullptr;
+OP_REQUIRES_OK(context, context->allocate_bytes(n_bytes=sizeof(A), address = a));
+
+I think this could be useful when porting C++ code from elsewhere and simplifies memory allocation of non-tensor types in C++.
+Could this be a useful feature or is there a good reason it's not implemented?
+Note:
+One possible work-around with the current system is to allocate a tensor of type UINT_8with the number of bytes required and then used reinterpret_cast:
+struct A {
+    int a;
+    int b;
+};
+A * a = nullptr;
+Tensor tensor;
+OP_REQUIRES_OK(context, context->allocate_temp(DT_UINT8, TensorShape({sizeof(A)}), &tensor));
+a = reinterpret_cast<A*>(tensor.flat<unsigned char>().data());
+
+This kind of feels like cheating and over complex just for allocating memory.

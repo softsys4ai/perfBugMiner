@@ -1,0 +1,95 @@
+tensorflow/core/framework/op_kernel.cc:968 Invalid argument: Could not parse example input
+
+I'm trying to convert images (PNG) to tf-records files. When I read tf-records files. I saw lots of unreadable code on the screen. Please help to find the problem. I list my problems and code below:
+I need to convert a sequence of images (10 PNGs) into a single tf-records file. I have several sequences of images and each sequence (10 PNGs) is in a folder. Here is the code I used to convert images to tf-records:
+import os, sys
+import tensorflow as tf
+import numpy as np
+from PIL import Image
+
+def _int64_feature(value):
+    return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+
+def _bytes_feature(value):
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
+def read():
+    # parent folder contains all sequence, each sequence (10 png) is in a sub-folder 
+    parent_foler = sys.argv[1]
+    for folder in os.listdir(parent_foler):
+        images = read_images_from(parent_foler + '/' + folder)
+        num_examples = len(images)
+
+        print 'Number of images: ' + str(num_examples)
+        outputFile = os.path.join(parent_foler, folder + '.tfrecords')
+        writer = tf.python_io.TFRecordWriter(outputFile)
+        fs = {}
+        for index in range(num_examples):
+            image_raw = images[index].tostring()
+            image_name = 'move/' + str(index) + '/image/encoded'
+            fs[image_name] = _bytes_feature(image_raw)
+            print folder + ':' + image_name
+        print 'Size of Features:' + str(len(fs))
+        example = tf.train.Example(features=tf.train.Features(feature=fs))
+        writer.write(example.SerializeToString())
+        writer.close()
+
+def read_images_from(folder_name):
+    images = []
+    files_to_read = [folder_name + '/' + folder_name.split('/')[-1] + '_' + str(i + 1) + '.png' for i in range(10)]
+    for filename in files_to_read:
+        im = Image.open(filename)
+        im = np.asarray(im, np.uint8)
+        images.append(im)
+    images = np.array(images)
+    print'shape of images: ' + str(images.shape)
+    return images
+
+if __name__ == "__main__":
+    read()
+
+Here is the code to read these tf-records files: (adapted from this code)
+ORIGINAL_WIDTH = 2048
+ORIGINAL_HEIGHT = 1536
+COLOR_CHAN = 4
+
+def build_tfrecord_input(tf_folder):
+    filenames = [foldername + '/' + tf_file for tf_file in os.listdir(tf_folder)]
+    filename_queue = tf.train.string_input_producer(filenames, shuffle=True)
+    reader = tf.TFRecordReader()
+    _, serialized_example = reader.read(filename_queue)
+    image_seq = []
+
+    # FLAGS.sequence_length = 10
+    for i in range(FLAGS.sequence_length): 
+        image_name = 'move/' + str(i) + '/image/encoded'
+        features = {image_name: tf.FixedLenFeature([1], tf.string)}
+        features = tf.parse_single_example(serialized_example, features=features)
+        image = tf.decode_raw(features[image_name], tf.uint8)
+        image = tf.reshape(image, shape=[ORIGINAL_HEIGHT,ORIGINAL_WIDTH,COLOR_CHAN])
+        image.set_shape([ORIGINAL_HEIGHT, ORIGINAL_WIDTH, COLOR_CHAN])
+
+        crop_size = min(ORIGINAL_HEIGHT, ORIGINAL_WIDTH)
+        image = tf.image.resize_image_with_crop_or_pad(image, crop_size, crop_size)
+        image = tf.reshape(image, [1, crop_size, crop_size, COLOR_CHAN])
+        image = tf.image.resize_bicubic(image, [IMG_HEIGHT, IMG_WIDTH])
+        image = tf.cast(image, tf.float32) / 255.0
+        image_seq.append(image)
+
+        image_seq = tf.concat(0, image_seq)
+
+    return image_seq
+
+When the training code runs to
+tf.train.start_queue_runners(sess)
+sess.run(tf.initialize_all_variables())
+
+I saw unreadable code:
+��������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������������|���|�������������������������������������������������������������������������������������������������������������������������������������������������������������}����������������������������������������������������������������������������������������������������������������������������������������������������������}���}�������������������������������������������������}��|�~}{�~}{�~}{�~}{�~}{��~|���}���}���}���������|���|���|���|���}������}���{�}y�}|x�|{w�|{w�}|x�|{w�{zv�zyu�xws�wvr�vuq�utp�tso�tso�tso�utp�tso�utp�utp�utp�tso�tso�utp�utp�tso�utp�utp�vuq�wvr�xws�yxt�zyu�{zv�|{w�}|x�}|x�}|x�}|x�}|x�}|x�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}y�~}x��y��w��w��w��w��w��w��w��w��w��~W tensorflow/core/framework/op_kernel.cc:968] Invalid argument: Could not parse example input, value: '
+���<
+����
+�move/7/image/encoded�����
+����
+Can anyone tell me which part of the code is wrong?
+Thanks very much in advance,
+Andy.

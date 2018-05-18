@@ -1,0 +1,47 @@
+tf.control_dependencies() not work in a custom_gradient function
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Y
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): r1.8
+Python version: 2.7.14
+GCC/Compiler version (if compiling from source): 5.4
+CUDA/cuDNN version: 8.0/7.0
+GPU model and memory: GTX1080, 8G
+Bazel version: N/A
+Exact command to reproduce: python test_script.py
+
+Describe the problem
+The output for the code below, is not correct. The first value of variable "assign_var" is not assigned with 2. The expected output for the 2nd line is: [2 0]. Thus, the approach [here][1] cannot work with "@tf.custom_gradient". I don't know if this is a bug or there is a solution for this. Thanks in advance!
+Source code / logs
+@tf.custom_gradient
+def test_func(x):
+i = tf.constant(0)
+id_refs = tf.Variable(tf.zeros((1), tf.int32))
+assign_var = tf.Variable(tf.zeros((2), tf.int32))
+cond = lambda i, id_refs: tf.less(i, 8)
+def _body(i, id_refs):
+  a = tf.assign(assign_var[0], 2)
+  id_refs = tf.concat([id_refs, [i]], 0)
+  with tf.control_dependencies([a]):
+    return i+1, id_refs
+
+_, gradRefs = tf.while_loop(cond, _body, [i, id_refs], shape_invariants= \
+  [i.get_shape(), tf.TensorShape([None])])
+def grad(dy):
+    return tf.constant(0)
+return assign_var, grad
+
+x = tf.constant(100.)
+y = test_func(x)
+dy = tf.gradients(y, x)
+init_op = tf.global_variables_initializer()
+with tf.Session() as sess:
+sess.run(init_op)
+print(sess.run(dy))
+print(sess.run(y))
+Output:
+[0]
+[0 0]

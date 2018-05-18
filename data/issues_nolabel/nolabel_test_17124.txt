@@ -1,0 +1,53 @@
+tf serving - dependency_optimizer - Non-existent input  for node dynamic_seq2seq/decoder/decoder/GatherTree
+
+I am trying to serve a tensorflow/nmt model with tf serving. I copied my SavedModel into the docker image and I'm serving it using:
+bazel-bin/tensorflow_serving/model_servers/tensorflow_model_server --port=9000 --model_name=model_test --model_base_path=/serving/SavedModel &> model_test.log &
+Here the logs:
+root@8de7a26d2e65:/serving# cat model_test.log
+2018-02-19 10:07:01.227129: I tensorflow_serving/model_servers/main.cc:153] Building single TensorFlow model file config:  model_name: rxn_test model_base_path: /serving/SavedModel
+2018-02-19 10:07:01.228912: I tensorflow_serving/model_servers/server_core.cc:444] Adding/updating models.
+2018-02-19 10:07:01.228996: I tensorflow_serving/model_servers/server_core.cc:499]  (Re-)adding model: rxn_test
+2018-02-19 10:07:01.330004: I tensorflow_serving/core/basic_manager.cc:716] Successfully reserved resources to load servable {name: rxn_test version: 1}
+2018-02-19 10:07:01.330050: I tensorflow_serving/core/loader_harness.cc:66] Approving load for servable version {name: rxn_test version: 1}
+2018-02-19 10:07:01.330072: I tensorflow_serving/core/loader_harness.cc:74] Loading servable version {name: rxn_test version: 1}
+2018-02-19 10:07:01.330097: I external/org_tensorflow/tensorflow/contrib/session_bundle/bundle_shim.cc:360] Attempting to load native SavedModelBundle in bundle-shim from: /serving/SavedModel/1
+2018-02-19 10:07:01.330124: I external/org_tensorflow/tensorflow/cc/saved_model/loader.cc:240] Loading SavedModel with tags: { serve }; from: /serving/SavedModel/1
+2018-02-19 10:07:01.338657: I external/org_tensorflow/tensorflow/core/platform/cpu_feature_guard.cc:140] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2018-02-19 10:07:01.371196: I external/org_tensorflow/tensorflow/cc/saved_model/loader.cc:159] Restoring SavedModel bundle.
+2018-02-19 10:07:01.641102: I external/org_tensorflow/tensorflow/cc/saved_model/loader.cc:194] Running LegacyInitOp on SavedModel bundle.
+2018-02-19 10:07:01.659991: I external/org_tensorflow/tensorflow/cc/saved_model/loader.cc:289] SavedModel load for tags { serve }; Status: success. Took 329854 microseconds.
+2018-02-19 10:07:01.660289: I tensorflow_serving/core/loader_harness.cc:86] Successfully loaded servable version {name: rxn_test version: 1}
+2018-02-19 10:07:01.664151: I tensorflow_serving/model_servers/main.cc:315] **Running ModelServer at 0.0.0.0:9000 ...** <--- it runs 
+
+When I try to predict something, using predict.py:
+python predict.py --server=localhost:9000 --inputs='input string'
+it fails with following error:
+Traceback (most recent call last):
+  File "/envs/tf35/lib/python3.5/site-packages/grpc/beta/_client_adaptations.py", line 193, in _blocking_unary_unary
+    credentials=_credentials(protocol_options))
+  File "/envs/tf35/lib/python3.5/site-packages/grpc/_channel.py", line 487, in __call__
+    return _end_unary_response_blocking(state, call, False, deadline)
+  File "/envs/tf35/lib/python3.5/site-packages/grpc/_channel.py", line 437, in _end_unary_response_blocking
+    raise _Rendezvous(state, None, None, deadline)
+grpc._channel._Rendezvous: <_Rendezvous of RPC that terminated with (StatusCode.INVALID_ARGUMENT, Incomplete graph, missing 1 inputs for dynamic_seq2seq/decoder/decoder/GatherTree)>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "predict.py", line 50, in <module>
+    tf.app.run()
+  File "/envs/tf35/lib/python3.5/site-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "predict.py", line 45, in main
+    result = stub.Predict(request, 60.0)  # 60 secs timeout
+  File "/envs/tf35/lib/python3.5/site-packages/grpc/beta/_client_adaptations.py", line 309, in __call__
+    self._request_serializer, self._response_deserializer)
+  File "/envs/tf35/lib/python3.5/site-packages/grpc/beta/_client_adaptations.py", line 195, in _blocking_unary_unary
+    raise _abortion_error(rpc_error_call)
+grpc.framework.interfaces.face.face.AbortionError: AbortionError(code=StatusCode.INVALID_ARGUMENT, details="Incomplete graph, missing 1 inputs for dynamic_seq2seq/decoder/decoder/GatherTree")
+
+And in the model_test.log
+2018-02-19 10:07:16.628894: E external/org_tensorflow/tensorflow/core/grappler/optimizers/dependency_optimizer.cc:584] Non-existent input  for node dynamic_seq2seq/decoder/decoder/GatherTree
+2018-02-19 10:07:16.638890: E external/org_tensorflow/tensorflow/core/grappler/optimizers/dependency_optimizer.cc:584] Non-existent input  for node dynamic_seq2seq/decoder/decoder/GatherTree
+
+Did anyone experience this?

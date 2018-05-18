@@ -1,0 +1,33 @@
+PosixFileSystem::CreateDir should create directory respecting umask
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.8.0
+Python version: 3.6.5
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: See below
+
+The Problem
+When using the EventFileWriter to write event files to a non-existent directory, the directory will be created but will not have group or other permissions, even if the parent directory has the sticky bit set and umask is set to 0777.
+The problem originates from posix_file_system.cc:244. Here the mask is set to 0755, which may not be desired. Instead setting this to 0777 will respect the umask, thus work as expected.
+Source code / logs
+The following code will create the directory "nonexistent-directory" with permissions 0755 even when umask is set to 0775 or 0755:
+from tensorflow.python.training.summary_io import SummaryWriterCache
+SummaryWriterCache.get("nonexistent-directory")
+
+Workaround
+As a workaround, the directory can be created before the SummaryWriterCache is used:
+from tensorflow.python.training.summary_io import SummaryWriterCache
+import os
+os.makedirs("nonexistent-directory", exist_ok=True)
+SummaryWriterCache.get("nonexistent-directory")
+
+In this case the umask is respected correctly.
+Fix
+Replacing posix_file_system.cc:244 by if (mkdir(TranslateName(name).c_str(), 0777) != 0) { should fix the problem.

@@ -1,0 +1,38 @@
+Estimators can't restore from their saved configuration
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): N/A: no verbatim example from TensorFlow on restoring from and export_savedmodel().
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Window 10x64; Ubuntu 16.04
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): 1.7
+Python version: 3.6.4
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+# Create and train some classifier ....
+c = tf.estimator.DNNClassifier(hidden_units = [10,10], feature_columns=my_feature_columns)
+# ... do some training
+# We'll assume here that I'm using Pandas, and just have floats
+specDict = {}
+for col in list(train_x.columns):
+    specDict[col] = tf.FixedLenFeature([], tf.float32)
+psirf = tf.estimator.export.build_parsing_serving_input_receiver_fn(specDict, 100)
+pathOut = c.export_savedmodel("./trainedModels/", psirf)
+# I'll write pathOut to a file ...
+In a new instance:
+# We recreate my cols, and pull pathOut from the file it was written to
+c = tf.estimator.DNNClassifier(hidden_units = [10,10], feature_columns=my_feature_columns, model_dir = pathOut)
+# Using the canned `eval_input_fn` from the iris_data.py example
+# dataDict is the source data
+predictions = c.predict(input_fn=eval_input_fn(dataDict, None))
+for predDict in predictions:
+    # raises "ValueError: Could not find trained model in model_dir: pathOut"
+    print(predDict)
+
+Describe the problem
+The estimator only looks for the latest checkpoint, and ignores any exports that might have been created from its own export_savedmodel function
+Because of https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/estimator/estimator.py#L644-L652 , seems like tf.saved_model.loader.load should also be checked

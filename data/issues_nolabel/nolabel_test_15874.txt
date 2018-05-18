@@ -1,0 +1,110 @@
+Weird behaviour of tf.control_dependencies
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.4.0-19-ga52c8d9 1.4.1
+Python version: 3.5
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:  CUDA V8.0.61 CUDNN 6.0.20
+GPU model and memory: K40M
+Exact command to reproduce:
+
+Describe the problem
+The source code is a minimal one to use dynamic rnn to predict token tag.
+I tried to use tf.control_dependencies to ensure loss will be evaluated before train_op. However,  I mistakenly evaluated loss in session.run([train, loss]).
+Then I found that if the input length (EXAMPLE_LENGTH in the example code) is larger than or equal to 32, the program will hang without any notification. If I set CUDA_VISIBLE_DEVICES='' to use CPU only, the program will output an error code. However, if the input length is smaller than 32, it will run without any problem.
+I am not sure if it is a bug or an intentional behavior.
+Source code / logs
+import tensorflow as tf
+
+from tensorflow.contrib.rnn import stack_bidirectional_dynamic_rnn
+from tensorflow.python.ops import rnn_cell
+
+EXAMPLE_LENGTH = 31
+with tf.Graph().as_default():
+    x = tf.random_uniform(maxval=2000, minval=1, 
+                          shape=[1, EXAMPLE_LENGTH, 300], dtype=tf.float32)
+    lengths = tf.constant([EXAMPLE_LENGTH])
+    y = tf.random_uniform(maxval=5, minval=0, 
+                          shape=[1, EXAMPLE_LENGTH], dtype=tf.int32)
+
+    cell = rnn_cell.BasicRNNCell(50)
+    output, _ = tf.nn.dynamic_rnn(cell, x, dtype="float32")
+    
+    logits = tf.layers.dense(output ,units=5)
+    loss = tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=y))
+    with tf.control_dependencies([loss]):
+        opt = tf.train.AdamOptimizer()
+        train_op = opt.minimize(loss)
+        
+
+
+    sess = tf.InteractiveSession()
+    sess.run(tf.global_variables_initializer())
+
+    for i in range(10):
+        _, l = sess.run([train_op, loss])
+        print(i, l)
+Traceback
+Only output error with CPU
+---------------------------------------------------------------------------
+InvalidArgumentError                      Traceback (most recent call last)
+/usr/local/var/pyenv/versions/anaconda3-4.1.1/lib/python3.6/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+   1322     try:
+-> 1323       return fn(*args)
+   1324     except errors.OpError as e:
+
+/usr/local/var/pyenv/versions/anaconda3-4.1.1/lib/python3.6/site-packages/tensorflow/python/client/session.py in _run_fn(session, feed_dict, fetch_list, target_list, options, run_metadata)
+   1301                                    feed_dict, fetch_list, target_list,
+-> 1302                                    status, run_metadata)
+   1303 
+
+/usr/local/var/pyenv/versions/anaconda3-4.1.1/lib/python3.6/site-packages/tensorflow/python/framework/errors_impl.py in __exit__(self, type_arg, value_arg, traceback_arg)
+    472             compat.as_text(c_api.TF_Message(self.status.status)),
+--> 473             c_api.TF_GetCode(self.status.status))
+    474     # Delete the underlying status object from memory otherwise it stays alive
+
+InvalidArgumentError: Retval[0] does not have value
+
+During handling of the above exception, another exception occurred:
+
+InvalidArgumentError                      Traceback (most recent call last)
+<ipython-input-43-926b17edef2c> in <module>()
+     26 
+     27     for i in range(10):
+---> 28         _, l = sess.run([train_op, loss])
+     29         print(i, l)
+
+/usr/local/var/pyenv/versions/anaconda3-4.1.1/lib/python3.6/site-packages/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+    887     try:
+    888       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 889                          run_metadata_ptr)
+    890       if run_metadata:
+    891         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+/usr/local/var/pyenv/versions/anaconda3-4.1.1/lib/python3.6/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+   1118     if final_fetches or final_targets or (handle and feed_dict_tensor):
+   1119       results = self._do_run(handle, final_targets, final_fetches,
+-> 1120                              feed_dict_tensor, options, run_metadata)
+   1121     else:
+   1122       results = []
+
+/usr/local/var/pyenv/versions/anaconda3-4.1.1/lib/python3.6/site-packages/tensorflow/python/client/session.py in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+   1315     if handle is None:
+   1316       return self._do_call(_run_fn, self._session, feeds, fetches, targets,
+-> 1317                            options, run_metadata)
+   1318     else:
+   1319       return self._do_call(_prun_fn, self._session, handle, feeds, fetches)
+
+/usr/local/var/pyenv/versions/anaconda3-4.1.1/lib/python3.6/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+   1334         except KeyError:
+   1335           pass
+-> 1336       raise type(e)(node_def, op, message)
+   1337 
+   1338   def _extend_graph(self):
+
+InvalidArgumentError: Retval[0] does not have value

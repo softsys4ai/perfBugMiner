@@ -1,0 +1,83 @@
+tf.contrib.slim Out of Date API
+
+I am using tf.contrib.slim API to build nets, it's simple and convenient, however, I think it's some kind of confusion me, I occurs a lot of out-of-date api which I think should be update or fix (except I got wrong idea to using it).
+Basiclly, I got images and labels from tfrecord file, run this:
+def run_training():
+
+    train_log_dir = './train_log'
+    if not tf.gfile.Exists(train_log_dir):
+        tf.gfile.MakeDirs(train_log_dir)
+
+    images, labels = inputs(train=True, batch_size=FLAGS.batch_size,
+                            num_epochs=FLAGS.num_epochs, one_hot_labels=True)
+    predictions = vgg.vgg_16(images, is_training=True)
+
+    slim.losses.softmax_cross_entropy(predictions, labels)
+    total_loss = slim.losses.get_total_loss()
+    tf.summary.scalar('loss', total_loss)
+
+    optimizer = tf.train.RMSPropOptimizer(0.001, 0.9)
+    train_op = slim.learning.create_train_op(total_loss, optimizer, summarize_gradients=True)
+
+    slim.learning.train(train_op, train_log_dir, save_summaries_secs=20)
+
+all imports from tf.contirb.slim.
+And I got these error.
+File "train_slim_vgg16.py", line 157, in run_training2
+    slim.losses.softmax_cross_entropy(predictions, labels)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/python/util/deprecation.py", line 117, in new_func
+    return func(*args, **kwargs)
+  File "/usr/local/lib/python3.6/site-packages/tensorflow/contrib/losses/python/losses/loss_ops.py", line 380, in softmax_cross_entropy
+    logits.get_shape().assert_is_compatible_with(onehot_labels.get_shape())
+AttributeError: 'tuple' object has no attribute 'get_shape'
+
+I read and load images labels like this:
+def read_and_decode(filename_queue):
+    reader = tf.TFRecordReader()
+    _, serialized_example = reader.read(filename_queue)
+    features = tf.parse_single_example(
+        serialized=serialized_example,
+        features={
+            'image/height': tf.FixedLenFeature([], tf.int64),
+            'image/width': tf.FixedLenFeature([], tf.int64),
+            'image/channels': tf.FixedLenFeature([], tf.int64),
+            'image/encoded': tf.FixedLenFeature([], tf.string),
+            'image/class/label': tf.FixedLenFeature([], tf.int64),
+        })
+    height = tf.cast(features['image/height'], dtype=tf.int32)
+    width = tf.cast(features['image/width'], dtype=tf.int32)
+    channels = tf.cast(features['image/channels'], dtype=tf.int32)
+    label = tf.cast(features['image/class/label'], dtype=tf.int32)
+
+    image = tf.image.decode_jpeg(features['image/encoded'], channels=3)
+    image = tf.image.resize_image_with_crop_or_pad(
+        image=image,
+        target_height=FLAGS.target_image_height,
+        target_width=FLAGS.target_image_width,
+    )
+    image = tf.cast(image, tf.float32) * (1. / 255) - 0.5
+    return image, label
+
+
+def inputs(train, batch_size, num_epochs, one_hot_labels):
+    if not num_epochs:
+        num_epochs = None
+    with tf.name_scope('input'):
+        filename_queue = tf.train.string_input_producer(
+            tf_records_walker(tf_records_dir=FLAGS.tf_record_dir),
+            num_epochs=num_epochs,
+            shuffle=True)
+        image, label = read_and_decode(filename_queue)
+
+        if one_hot_labels:
+            label = tf.one_hot(indices=label, depth=FLAGS.num_classes+1, dtype=tf.int32)
+        images, sparse_labels = tf.train.shuffle_batch(
+            [image, label],
+            batch_size=batch_size,
+            num_threads=2,
+            capacity=10 + 3 * batch_size,
+            min_after_dequeue=10)
+
+        return images, sparse_labels
+
+Obviously, the way used to write slim nets and train graph not effect anymore, I suggest develope team  update this contrib docs or update some APIs. (If I did something wrong, sincerely help you guys help me out, I just can't get my network run.)

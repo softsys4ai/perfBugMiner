@@ -1,0 +1,104 @@
+Gradient computation across multi-GPU
+
+System information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4
+Python version: 2.7.6
+CUDA/cuDNN version: 8.0/6.0
+
+I am trying to compute global mean and global variance for batch normalization layer across GPUs, both forward and backward should be considered. With \sigma^2 = mean(x^2) - mean(x)^2, the gradient w.r.t. each x can be computed independently in the GPU that x is attached to.
+However, when computing the gradients, I met a problem: without specifying GPU device, tf.gradient will use the \gpu:0. I cannot specify each operation of gradient computation because the gradients are computed automatically by the optimizer and only gradients of parameters are computed.
+My question is that if a node is explicitly attached to a GPU device, why the gradient can not be attached to the same GPU device?
+I tried this code and get two timeline files timelines.zip and two snapshots bellow.
+import tensorflow as tf
+import numpy as np
+from tensorflow.python.client import timeline
+
+N_SAMPLES = 100000000
+
+
+def all_reduce(gpu_num):
+    means = []
+    x2s = []
+    axs = []
+    for i in range(gpu_num):
+        with tf.device('/cpu:0'):
+            x = tf.placeholder(dtype=tf.float32, shape=[N_SAMPLES], name='local_input_%d' % i)
+        with tf.device('/gpu:%d'%i):
+            ax = tf.multiply(10.0, x, name='local_multiply_%d'%i)
+            mean = tf.reduce_mean(ax, name='local_mean_%d'%i)
+            x2 = tf.square(ax, name='local_square_%d'%i)
+            axs.append(ax)
+            means.append(mean)
+            x2s.append(x2)
+
+    with tf.device('/gpu:0'):
+        global_mean = tf.reduce_mean(means, name='global_mean')
+        global_var = tf.subtract(tf.reduce_mean(x2s, name='global_x2'),
+                                 tf.square(global_mean, name='global_mean_square'),
+                                 name='global_sub')
+        print global_var.get_shape()
+
+    gs = []
+    # manually
+    # for i in range(gpu_num):
+    #     with tf.device('/gpu:%d'%i):
+    #         gradient_wrt_mean = tf.gradients(global_mean, axs[i])
+    #         gradient_wrt_var = tf.gradients(global_var, axs[i])
+    #         gs.append(gradient_wrt_mean)
+    #         gs.append(gradient_wrt_var)
+
+    # auto by tf
+    gradient_wrt_mean = tf.gradients(global_mean, axs)
+    gradient_wrt_var = tf.gradients(global_var, axs)
+    gs.append(gradient_wrt_var)
+    gs.append(gradient_wrt_mean)
+
+    for n in tf.get_default_graph().as_graph_def().node:
+        print [n.name, n.device]
+
+    return global_mean, global_var, axs, gs
+
+
+def main(_):
+    gpu_num = 2
+    mean_op, var_op, xs, gs = all_reduce(gpu_num)
+    x = np.random.randn(N_SAMPLES*gpu_num)
+    print np.mean(x), np.var(x)
+    feed_dict = dict()
+    for i in range(gpu_num):
+        feed_dict[xs[i]] = x[i*N_SAMPLES:(i+1)*N_SAMPLES]
+
+    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+    gpu_options = tf.GPUOptions(allow_growth=False)
+    config = tf.ConfigProto(log_device_placement=False, gpu_options=gpu_options)
+    sess = tf.Session(config=config)
+
+    # mean, var, g = sess.run([
+    #     mean_op, var_op, gs
+    # ], feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+    # print mean, var
+
+    g = sess.run([
+        gs
+    ], feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+
+    # Create the Timeline object, and write it to a json
+    tl = timeline.Timeline(run_metadata.step_stats)
+    ctf = tl.generate_chrome_trace_format()
+    with open('timeline.json', 'w') as f:
+        f.write(ctf)
+
+
+if __name__ == '__main__':
+    tf.app.run()
+
+Two figures:
+auto, without specifying GPU device.
+
+manually specifying GPU device.
+
+If using tf.gradient without specifying GPU devices, only a tf.reduce_mean operation is done in /gpu:1. So is there some easy way that the operations of gradient computation can be assigned automatically to the corresponded GPU device?

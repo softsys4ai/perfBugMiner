@@ -1,0 +1,46 @@
+TensorFlow 1.2.0rc0 strange behavior with Benchmark scripts
+
+I'm running https://github.com/tensorflow/benchmarks/ scripts by @tfboyd and I'm observing strange behavior and crashes.
+
+There's a LOT of messages like these (below).  These messages happen in both standalone and distributed runs.
+
+2017-05-22 17:21:00.589871: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:3) -> (device: 3, name: Tesla P40, pci bus id: 0000:85:00.0)
+2017-05-22 17:21:00.600723: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla P40, pci bus id: 0000:04:00.0)
+2017-05-22 17:21:00.600741: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:1) -> (device: 1, name: Tesla P40, pci bus id: 0000:05:00.0)
+2017-05-22 17:21:00.600746: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:2) -> (device: 2, name: Tesla P40, pci bus id: 0000:84:00.0)
+2017-05-22 17:21:00.600750: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:3) -> (device: 3, name: Tesla P40, pci bus id: 0000:85:00.0)
+2017-05-22 17:21:00.619525: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla P40, pci bus id: 0000:04:00.0)
+2017-05-22 17:21:00.619543: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:1) -> (device: 1, name: Tesla P40, pci bus id: 0000:05:00.0)
+2017-05-22 17:21:00.619548: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:2) -> (device: 2, name: Tesla P40, pci bus id: 0000:84:00.0)
+2017-05-22 17:21:00.619552: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:3) -> (device: 3, name: Tesla P40, pci bus id: 0000:85:00.0)
+2017-05-22 17:21:00.629770: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla P40, pci bus id: 0000:04:00.0)
+2017-05-22 17:21:00.629786: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:1) -> (device: 1, name: Tesla P40, pci bus id: 0000:05:00.0)
+2017-05-22 17:21:00.629807: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:2) -> (device: 2, name: Tesla P40, pci bus id: 0000:84:00.0)
+2017-05-22 17:21:00.629811: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:3) -> (device: 3, name: Tesla P40, pci bus id: 0000:85:00.0)
+2017-05-22 17:21:00.649854: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla P40, pci bus id: 0000:04:00.0)
+2017-05-22 17:21:00.649871: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:1) -> (device: 1, name: Tesla P40, pci bus id: 0000:05:00.0)
+2017-05-22 17:21:00.649892: I tensorflow/core/common_runtime/gpu/gpu_device.cc:996] Creating TensorFlow device (/gpu:2) -> (device: 2, name: Tesla P40, pci bus id: 0000:84:00.0)
+
+
+In distributed mode, TF 1.2.0 rc0 is not able to handle batch size 64 for Inception V3: - This was figured out.
+
+Slave worker crashes with:
+2017-05-22 17:22:25.411569: W tensorflow/core/framework/op_kernel.cc:1158] Resource exhausted: OOM when allocating tensor with shape[64,32,149,149]
+
+Chief worker crashes with:
+Exception in thread Thread-1:
+Traceback (most recent call last):
+  File "/usr/lib/python2.7/threading.py", line 810, in __bootstrap_inner
+    self.run()
+  File "tf_cnn_benchmarks.py", line 226, in run
+    global_step_val, = self.sess.run([self.global_step_op])
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 789, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 925, in _run
+    raise RuntimeError('Attempted to use a closed Session.')
+RuntimeError: Attempted to use a closed Session.
+
+My command:
+python -u tf_cnn_benchmarks.py --model inception3 --batch_size 64 --num_gpus 4 --worker_hosts {worker_hosts} --ps_hosts {ps_hosts} --task_index {task_index} --job_name {job_name} --local_parameter_device cpu
+
+This worked perfectly fine on hash cae8ed1 (just a little bit past TF 1.1 release).

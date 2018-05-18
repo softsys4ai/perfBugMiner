@@ -1,0 +1,60 @@
+Lite label_image with Quantized MobileNet reporting varying, incorrect labels for test image
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): OSX
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): v1.6.0-0-gd2e24b6039 1.6.0
+Python version: 3.6.4
+Bazel version (if compiling from source): [bazel release 0.8.1-homebrew]
+GCC/Compiler version (if compiling from source): Apple LLVM version 9.0.0 (clang-900.0.39.2)
+CUDA/cuDNN version: n/a
+GPU model and memory: n/a
+Exact command to reproduce: See below, running Lite's label_image example
+
+I've set the Android SDK/NDK paths in my WORKSPACE file and I'm cross compiling the Lite label_image binary for my armv7a device as described in the README, without errors:
+bazel build --config android_arm --config monolithic --cxxopt=-std=c++11   //tensorflow/contrib/lite/examples/label_image:label_image
+
+When I run the resulting binary on my device with the stock mobilenet_quant_v1_224.tflite model and Grace Hopper image, I do not get the expected results, with "military uniform" at the top of the list. Instead I get:
+ # ./label_image
+nnapi error: unable to open library libneuralnetworks.so
+Loaded model ./mobilenet_quant_v1_224.tflite
+resolved reporter
+invoked 
+average time: 2153.24 ms 
+0.862745: 188 Yorkshire terrier
+0.0862745: 194 Australian terrier
+0.0313726: 187 Norwich terrier
+0.0117647: 202 silky terrier
+0.00784314: 152 Chihuahua
+
+I see the nnapi error about the lack of the libneuralnetworks.so, so is that the culprit here? I had hoped that if the library was missing, it would still run correctly, albeit more slowly, but perhaps that is not the case and the library is 100% required for Lite to work. (If it is truly required, it does seem odd/confusing that the error isn't "more fatal" instead of continuing to do forward inference and producing garbage output!)
+Furthermore, when I run with more iterations (via the -c flag), I continue to get the wrong labels, but a different set of incorrect labels depending on the number of iterations. For example, with two iterations:
+# ./label_image2 -c 2
+nnapi error: unable to open library libneuralnetworks.so
+Loaded model ./mobilenet_quant_v1_224.tflite
+resolved reporter
+invoked 
+average time: 2214.83 ms 
+0.345098: 795 shower curtain
+0.109804: 906 window shade
+0.0470588: 563 fountain
+0.0470588: 534 dishrag
+0.0392157: 912 wool
+
+And with three iterations:
+# ./label_image2 -c 3
+nnapi error: unable to open library libneuralnetworks.so
+Loaded model ./mobilenet_quant_v1_224.tflite
+resolved reporter
+invoked 
+average time: 2407.64 ms 
+0.0705882: 906 window shade
+0.0509804: 829 strainer
+0.0509804: 734 pole
+0.0431373: 795 shower curtain
+0.0431373: 620 lampshade
+
+And so on.
+Why does the number of iterations performed affect the output? (Perhaps this is just the same issue as above, due to missing nnapi lib?)

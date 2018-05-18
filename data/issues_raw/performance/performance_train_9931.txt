@@ -1,0 +1,177 @@
+Go: SIGSEGV when using int32 instead of int64 and missing error in Resize functions
+
+Problem
+In Go, some operation causes a SIGSEGV when using an int32 instead of an int64 (and I have reasons to believe that the same will happen when using float instead of double and vice-versa).
+The Resize* operations don't define the output shape correctly when the input is not a "batch": they just let the dimensions undefined instead of raising some errors.
+The tests below are commented so I hope that's enough to let you understand what the problems are.
+Source code / logs
+package poc_test
+
+import (
+        "fmt"
+        //tf "github.com/tensorflow/tensorflow/tensorflow/go"
+        "github.com/tensorflow/tensorflow/tensorflow/go/op"
+        "testing"
+)
+
+func TestResizeWithoutBatchIsNoSense(t *testing.T) {
+        // Create root scope
+        root := op.NewScope()
+
+        // Define graph
+
+        // 1: read image content
+        imagePath := "test.jpg"
+        contents := op.ReadFile(root.SubScope("ReadFile"), op.Const(root.SubScope("filename"), imagePath))
+
+        // 2: decode Jpeg
+        value := op.DecodeJpeg(root.SubScope("DecodeJpeg"), contents, op.DecodeJpegChannels(3))
+
+        // I'd like to add noise to the image, so I'd like to define a nose tensor with the same shape of the image
+        // Just to be sure that the image shape is fully defined, I resize it
+        resize1 := op.ResizeNearestNeighbor(root.SubScope("ResizeArea"), value, op.Const(root.SubScope("size"), []int32{int32(80), int32(80)}))
+
+        // If the size parameter is an int32, no error is raised but the operation is no sense
+        // Because it returns ? instead of [80, 80, 3]
+        // The reason is taht Resize* methods requires a batch of images: should raise an error?
+        fmt.Println("Shape with int32: ", resize1.Shape().String())
+        if dims64, err := resize1.Shape().ToSlice(); err != nil {                                                                                                                                                                                                              
+                fmt.Println(dims64)                                                                                                                                                                                                                                            
+        } else {                                                                                                                                                                                                                                                               
+                t.Error("Error: ", err.Error())                                                                                                                                                                                                                                
+        }                                                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                                               
+        // I expect a fully defined shape                                                                                                                                                                                                                                      
+        if !resize1.Shape().IsFullySpecified() {                                                                                                                                                                                                                               
+                t.Error("Not defined shape")                                                                                                                                                                                                                                   
+        }                                                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                                               
+        // create the batch and see how things changes                                                                                                                                                                                                                         
+        batch := op.ExpandDims(root.SubScope("expand"), value, op.Const(root.SubScope("axis"), []int32{0}))                                                                                                                                                                    
+        resize1 = op.ResizeNearestNeighbor(root.SubScope("ResizeArea"), batch, op.Const(root.SubScope("size"), []int32{int32(80), int32(80)}))                                                                                                                                 
+        fmt.Println("Shape with int32 and input as a batch: ", resize1.Shape().String())                                                                                                                                                                                       
+        if dims64, err := resize1.Shape().ToSlice(); err == nil {                                                                                                                                                                                                              
+                fmt.Println(dims64)                                                                                                                                                                                                                                            
+        } else {                                                                                                                                                                                                                                                               
+                fmt.Println("Error: ", err.Error())                                                                                                                                                                                                                            
+        }                                                                                                                                                                                                                                                                      
+        // Now the things have sense and the shape is defined and equals to [ 1, 80, 80, 3]                                                                                                                                                                                    
+}                                                                                                                                                                                                                                                                              
+                                                                                                                                                                                                                                                                               
+func TestResizeWithIn64ShapeSigSegvs(t *testing.T) {                                                                                                                                                                                                                           
+        defer func() {                                                                                                                                                                                                                                                         
+                if r := recover(); r != nil {                                                                                                                                                                                                                                  
+                        t.Error("Panic!")                                                                                                                                                                                                                                      
+                }                                                                                                                                                                                                                                                              
+        }()
+        // Create root scope
+        root := op.NewScope()
+
+        // Define graph
+
+        // 1: read image content
+        imagePath := "test.jpg"
+        contents := op.ReadFile(root.SubScope("ReadFile"), op.Const(root.SubScope("filename"), imagePath))
+
+        // 2: decode Jpeg
+        value := op.DecodeJpeg(root.SubScope("DecodeJpeg"), contents, op.DecodeJpegChannels(3))
+
+        // However, changing int32 with int64 breaks everyting (no matter if I use `batch` or `value`)
+        resize2 := op.ResizeArea(root.SubScope("ResizeArea2"), value, op.Const(root.SubScope("size2"), []int64{int64(80), int64(80)}))
+        // This operation causes a SIGSEGV
+        fmt.Println("Shape value: ", resize2.Shape())
+        fmt.Println("Shape with int64: ", resize2.Shape().String())
+
+        // In short, chaning int32 with int64 causes SIGSEGV. It looks like kernels are not registered to handle both types
+
+        // This can bring the code to be a mess to debug, because If I'd like to, for example, add noise to an image
+        // I have to generate a set of values with the same shape of the input images.
+        // Using the one with the defined shape (the batch) I'd like to use the output of Shape().ToSlice()
+        // But I can't.
+}
+
+func TestGenerateNoiseWithInt32Shape(t *testing.T) {
+        defer func() {
+                if r := recover(); r != nil {
+                        t.Error("Panic!")
+                }
+        }()
+        // Create root scope
+        root := op.NewScope()
+
+        // Define graph
+
+        // 1: read image content
+        imagePath := "test.jpg"
+        contents := op.ReadFile(root.SubScope("ReadFile"), op.Const(root.SubScope("filename"), imagePath))
+        // 2: decode Jpeg
+        value := op.DecodeJpeg(root.SubScope("DecodeJpeg"), contents, op.DecodeJpegChannels(3))
+        batch := op.ExpandDims(root.SubScope("expand"), value, op.Const(root.SubScope("axis"), []int32{0}))
+        resize1 := op.ResizeNearestNeighbor(root.SubScope("ResizeArea"), batch, op.Const(root.SubScope("size"), []int32{int32(80), int32(80)}))
+        fmt.Println("Shape with int32 and input as a batch: ", resize1.Shape().String())
+        if dims64, err := resize1.Shape().ToSlice(); err != nil {
+                fmt.Println(dims64)
+        } else {
+                fmt.Println("Error: ", err.Error())
+        }
+
+        dims64, _ := resize1.Shape().ToSlice()
+        noise := op.ParameterizedTruncatedNormal(root.SubScope("ParameterizedTruncatedNormal"),
+                op.Const(root.SubScope("shape"), dims64),
+                op.Const(root.SubScope("means"), 0.),
+                op.Const(root.SubScope("stddev"), 1.),
+                op.Const(root.SubScope("minvals"), 0.),
+                op.Const(root.SubScope("maxvals"), 1.))
+        fmt.Println(noise)
+
+        // ^ This operation causes SIGSEGV
+        // I have to convert dims64 to a slice of int32 and then the operation works
+
+}
+
+func TestGenerateNoiseWithInt64Shape(t *testing.T) {
+        // Create root scope
+        root := op.NewScope()
+
+        // Define graph
+
+        // 1: read image content
+        imagePath := "test.jpg"
+        contents := op.ReadFile(root.SubScope("ReadFile"), op.Const(root.SubScope("filename"), imagePath))
+        // 2: decode Jpeg
+        value := op.DecodeJpeg(root.SubScope("DecodeJpeg"), contents, op.DecodeJpegChannels(3))
+        batch := op.ExpandDims(root.SubScope("expand"), value, op.Const(root.SubScope("axis"), []int32{0}))
+        resize1 := op.ResizeNearestNeighbor(root.SubScope("ResizeArea"), batch, op.Const(root.SubScope("size"), []int32{int32(80), int32(80)}))
+        fmt.Println("Shape with int32 and input as a batch: ", resize1.Shape().String())
+        if dims64, err := resize1.Shape().ToSlice(); err != nil {
+                fmt.Println(dims64)
+        } else {
+                fmt.Println("Error: ", err.Error())
+        }
+
+        dims64, _ := resize1.Shape().ToSlice()
+
+        var dims []int32 = make([]int32, len(dims64))
+        for i, dim := range dims64 {
+                dims[i] = int32(dim)
+        }
+
+        noise := op.ParameterizedTruncatedNormal(root.SubScope("ParameterizedTruncatedNormal"),
+                op.Const(root.SubScope("shape"), dims64),
+                op.Const(root.SubScope("means"), 0.),
+                op.Const(root.SubScope("stddev"), 1.),
+                op.Const(root.SubScope("minvals"), 0.),
+                op.Const(root.SubScope("maxvals"), 1.))
+        fmt.Println(noise.Shape().String())
+}
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Archlinux
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.1.0-rc2
+Bazel version (if compiling from source): 0.4.5
+CUDA/cuDNN version: cuda 8, cudnn 5.1
+GPU model and memory:  GeForce GTX 1080
+Exact command to reproduce: go test

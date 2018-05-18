@@ -1,0 +1,233 @@
+Set training=True in BatchNormalization layer causes evaluation error in custom Estimator model
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu16.04
+TensorFlow installed from (source or binary): pip install
+TensorFlow version (use command below): 1.4.1
+Python version:  3.5.2
+CUDA/cuDNN version: 8.0/6
+GPU model and memory: GeForce 1080ti, 11G
+
+Describe the problem
+I define a custom estimator model for classification following this document. Cifar10 dataset is used for test and network framework is xception rewritten in tensorflow. But when using estimator.train_and_evaluate() to train and evaluate the model repeatedly, I find evaluation accuracy dones't improve while training accuracy is normally increasing with training. Inspired by tensorflow official resnet estimator example: 
+  with tf.variable_scope('conv_layer1'):
+    net = tf.layers.conv2d(
+        x,
+        filters=64,
+        kernel_size=7,
+        activation=tf.nn.relu)
+    net = tf.layers.batch_normalization(net)   # no training status, default is False
+I turn off training=is_training in tf.layers.batch_normalization(), both training and evaluation do work normally. For estimator model_fn is used multiple times (see issue 13895),  so is this issue related to graph reuse in BN layer and if training status option could be set to enable BN layer to act differently during training and evaluation/predict?
+BTW, same issue occurs when using keras or slim instead of tf.layers to construct network architecture.
+Source code / logs
+Network architecture: 
+def tf_xception(features, input_shape, pooling=None, classes=2, is_training=True):
+    # is_training = False  # manually set False to disable training option
+    x = tf.layers.conv2d(features, 32, (3, 3), strides=(2, 2), use_bias=False, name='block1_conv1')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block1_conv1_bn')
+    x = tf.nn.relu(x, name='block1_conv1_act')
+    x = tf.layers.conv2d(x, 64, (3, 3), use_bias=False, name='block1_conv2')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block1_conv2_bn')
+    x = tf.nn.relu(x, name='block1_conv2_act')
+
+    residual = tf.layers.conv2d(x, 128, (1, 1), strides=(2, 2),
+                      padding='same', use_bias=False)
+    residual = tf.layers.batch_normalization(residual, training=is_training)
+
+    x = tf.layers.separable_conv2d(x, 128, (3, 3), padding='same', use_bias=False, name='block2_sepconv1')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block2_sepconv1_bn')
+    x = tf.nn.relu(x, name='block2_sepconv2_act')
+    x = tf.layers.separable_conv2d(x, 128, (3, 3), padding='same', use_bias=False, name='block2_sepconv2')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block2_sepconv2_bn')
+
+    x = tf.layers.max_pooling2d(x, (3, 3), strides=(2, 2), padding='same', name='block2_pool')
+    x = tf.add(x, residual, name='block2_add')
+
+    residual = tf.layers.conv2d(x, 256, (1, 1), strides=(2, 2),
+                      padding='same', use_bias=False)
+    residual = tf.layers.batch_normalization(residual, training=is_training)
+
+    x = tf.nn.relu(x, name='block3_sepconv1_act')
+    x = tf.layers.separable_conv2d(x, 256, (3, 3), padding='same', use_bias=False, name='block3_sepconv1')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block3_sepconv1_bn')
+    x = tf.nn.relu(x, name='block3_sepconv2_act')
+    x = tf.layers.separable_conv2d(x, 256, (3, 3), padding='same', use_bias=False, name='block3_sepconv2')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block3_sepconv2_bn')
+
+    x = tf.layers.max_pooling2d(x, (3, 3), strides=(2, 2), padding='same', name='block3_pool')
+    x = tf.add(x, residual, name="block3_add")
+
+    residual = tf.layers.conv2d(x, 728, (1, 1), strides=(2, 2),
+                      padding='same', use_bias=False)
+    residual = tf.layers.batch_normalization(residual, training=is_training)
+
+    x = tf.nn.relu(x, name='block4_sepconv1_act')
+    x = tf.layers.separable_conv2d(x, 728, (3, 3), padding='same', use_bias=False, name='block4_sepconv1')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block4_sepconv1_bn')
+    x = tf.nn.relu(x, name='block4_sepconv2_act')
+    x = tf.layers.separable_conv2d(x, 728, (3, 3), padding='same', use_bias=False, name='block4_sepconv2')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block4_sepconv2_bn')
+
+    x = tf.layers.max_pooling2d(x, (3, 3), strides=(2, 2), padding='same', name='block4_pool')
+    x = tf.add(x, residual, name="block4_add")
+
+    for i in range(8):
+        residual = x
+        prefix = 'block' + str(i + 5)
+
+        x = tf.nn.relu(x, name=prefix + '_sepconv1_act')
+        x = tf.layers.separable_conv2d(x, 728, (3, 3), padding='same', use_bias=False, name=prefix + '_sepconv1')
+        x = tf.layers.batch_normalization(x, training=is_training, name=prefix + '_sepconv1_bn')
+        x = tf.nn.relu(x, name=prefix + '_sepconv2_act')
+        x = tf.layers.separable_conv2d(x, 728, (3, 3), padding='same', use_bias=False, name=prefix + '_sepconv2')
+        x = tf.layers.batch_normalization(x, training=is_training, name=prefix + '_sepconv2_bn')
+        x = tf.nn.relu(x, name=prefix + '_sepconv3_act')
+        x = tf.layers.separable_conv2d(x, 728, (3, 3), padding='same', use_bias=False, name=prefix + '_sepconv3')
+        x = tf.layers.batch_normalization(x, training=is_training, name=prefix + '_sepconv3_bn')
+
+        x = tf.add(x, residual, name=prefix+"_add")
+
+    residual = tf.layers.conv2d(x, 1024, (1, 1), strides=(2, 2),
+                      padding='same', use_bias=False)
+    residual = tf.layers.batch_normalization(residual, training=is_training)
+
+    x = tf.nn.relu(x, name='block13_sepconv1_act')
+    x = tf.layers.separable_conv2d(x, 728, (3, 3), padding='same', use_bias=False, name='block13_sepconv1')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block13_sepconv1_bn')
+    x = tf.nn.relu(x, name='block13_sepconv2_act')
+    x = tf.layers.separable_conv2d(x, 1024, (3, 3), padding='same', use_bias=False, name='block13_sepconv2')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block13_sepconv2_bn')
+
+    x = tf.layers.max_pooling2d(x, (3, 3), strides=(2, 2), padding='same', name='block13_pool')
+    x = tf.add(x, residual, name="block13_add")
+
+    x = tf.layers.separable_conv2d(x, 1536, (3, 3), padding='same', use_bias=False, name='block14_sepconv1')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block14_sepconv1_bn')
+    x = tf.nn.relu(x, name='block14_sepconv1_act')
+
+    x = tf.layers.separable_conv2d(x, 2048, (3, 3), padding='same', use_bias=False, name='block14_sepconv2')
+    x = tf.layers.batch_normalization(x, training=is_training, name='block14_sepconv2_bn')
+    x = tf.nn.relu(x, name='block14_sepconv2_act')
+    # replace conv layer with fc
+    x = tf.layers.average_pooling2d(x, (3, 3), (2, 2), name="global_average_pooling")
+    x = tf.layers.conv2d(x, 2048, [1, 1], activation=None, name="block15_conv1")
+    x = tf.layers.conv2d(x, classes, [1, 1], activation=None, name="block15_conv2")
+    x = tf.squeeze(x, axis=[1, 2], name="logits")
+    return x
+model_fn: 
+def model_fn(features, labels, mode, params):
+    # check if training stage
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        is_training = True
+    else:
+        is_training = False
+    input_tensor = features["input"]
+    logits = tf_xception(input_tensor, input_shape=(96, 96, 3), classes=10, is_training=is_training)
+    probs = tf.nn.softmax(logits, name="output_score")
+    predictions = tf.argmax(probs, axis=-1, name="output_label")
+    onehot_labels = tf.one_hot(tf.cast(labels, tf.int32), 10)
+    predictions_dict = {"score": probs,
+                        "label": predictions}
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        predictions_output = tf.estimator.export.PredictOutput(predictions_dict)
+        return tf.estimator.EstimatorSpec(mode=mode,
+                                          predictions=predictions_dict,
+                                          export_outputs={
+                                              tf.saved_model.signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY: predictions_output
+                                          })
+    # calculate loss
+    loss = tf.losses.softmax_cross_entropy(onehot_labels, logits)
+    accuracy = tf.metrics.accuracy(labels=labels,
+                                   predictions=predictions)
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        lr = params.learning_rate
+        # train optimizer
+        optimizer = tf.train.RMSPropOptimizer(learning_rate=lr, decay=0.9)
+        train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step())
+        tensors_to_log = {'batch_accuracy': accuracy[1]}
+        logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=1000)
+        return tf.estimator.EstimatorSpec(mode=mode,
+                                          loss=loss,
+                                          train_op=train_op,
+                                          training_hooks=[logging_hook])
+    else:
+        eval_metric_ops = {"accuracy": accuracy}
+        return tf.estimator.EstimatorSpec(mode=mode,
+                                          loss=loss,
+                                          eval_metric_ops=eval_metric_ops)
+If the training status set True in training and False in evaluation
+train logs:
+INFO:tensorflow:Saving checkpoints for 1 into train_episode5/model.ckpt.
+INFO:tensorflow:loss = 2.3025837, step = 1
+INFO:tensorflow:batch_accuracy = 0.109375
+INFO:tensorflow:global_step/sec: 3.50983
+INFO:tensorflow:loss = 2.3048878, step = 101 (28.492 sec)
+INFO:tensorflow:Saving checkpoints for 185 into train_episode5/model.ckpt.
+INFO:tensorflow:Loss for final step: 2.3093615.
+...
+INFO:tensorflow:Restoring parameters from train_episode5/model.ckpt-185
+INFO:tensorflow:Saving checkpoints for 186 into train_episode5/model.ckpt.
+INFO:tensorflow:loss = 2.2975698, step = 186
+INFO:tensorflow:batch_accuracy = 0.09375
+INFO:tensorflow:global_step/sec: 3.47248
+INFO:tensorflow:loss = 2.3078504, step = 286 (28.798 sec)
+INFO:tensorflow:Saving checkpoints for 374 into train_episode5/model.ckpt.
+INFO:tensorflow:Loss for final step: 2.290754.
+...
+INFO:tensorflow:Restoring parameters from train_episode5/model.ckpt-374
+INFO:tensorflow:Saving checkpoints for 375 into train_episode5/model.ckpt.
+INFO:tensorflow:loss = 2.2987142, step = 375
+INFO:tensorflow:batch_accuracy = 0.140625
+INFO:tensorflow:global_step/sec: 3.50966
+INFO:tensorflow:loss = 2.0407405, step = 475 (28.493 sec)
+INFO:tensorflow:Saving checkpoints for 560 into train_episode5/model.ckpt.
+INFO:tensorflow:Loss for final step: 2.1280906.
+...
+INFO:tensorflow:Restoring parameters from train_episode5/model.ckpt-560
+INFO:tensorflow:Saving checkpoints for 561 into train_episode5/model.ckpt.
+INFO:tensorflow:loss = 2.0747793, step = 561
+INFO:tensorflow:batch_accuracy = 0.203125
+INFO:tensorflow:global_step/sec: 3.31447
+INFO:tensorflow:loss = 2.1767468, step = 661 (30.171 sec)
+INFO:tensorflow:Saving checkpoints for 740 into train_episode5/model.ckpt.
+INFO:tensorflow:Loss for final step: 1.9530052.
+...
+INFO:tensorflow:Restoring parameters from train_episode5/model.ckpt-740
+INFO:tensorflow:Saving checkpoints for 741 into train_episode5/model.ckpt.
+INFO:tensorflow:loss = 1.9676144, step = 741
+INFO:tensorflow:batch_accuracy = 0.296875
+INFO:tensorflow:global_step/sec: 3.50441
+INFO:tensorflow:loss = 1.8766258, step = 841 (28.536 sec)
+INFO:tensorflow:Saving checkpoints for 930 into train_episode5/model.ckpt.
+INFO:tensorflow:Loss for final step: 1.884157.
+...
+INFO:tensorflow:Restoring parameters from train_episode5/model.ckpt-930
+INFO:tensorflow:Saving checkpoints for 931 into train_episode5/model.ckpt.
+INFO:tensorflow:loss = 1.8624167, step = 931
+INFO:tensorflow:batch_accuracy = 0.296875
+INFO:tensorflow:global_step/sec: 3.30778
+INFO:tensorflow:loss = 1.7580669, step = 1031 (30.232 sec)
+INFO:tensorflow:Saving checkpoints for 1112 into train_episode5/model.ckpt.
+INFO:tensorflow:Loss for final step: 1.9509349.
+...
+
+eval log:
+INFO:tensorflow:Saving dict for global step 170: accuracy = 0.099306434, global_step = 170, loss = 2.3029344
+INFO:tensorflow:Saving dict for global step 348: accuracy = 0.11751261, global_step = 348, loss = 2.2920265
+INFO:tensorflow:Saving dict for global step 528: accuracy = 0.13106872, global_step = 528, loss = 2.5031097
+INFO:tensorflow:Saving dict for global step 697: accuracy = 0.085986756, global_step = 697, loss = 30.668789
+INFO:tensorflow:Saving dict for global step 871: accuracy = 0.10009458, global_step = 871, loss = 47931.96
+...
+
+accuracy round initial 0.1 and loss increase ridiculously !!!!
+If training status set False in both stage:
+train log: similar to above train log
+eval log: 
+INFO:tensorflow:Saving dict for global step 185: accuracy = 0.1012768, global_step = 185, loss = 2.3037012
+INFO:tensorflow:Saving dict for global step 374: accuracy = 0.10001576, global_step = 374, loss = 2.3124988
+INFO:tensorflow:Saving dict for global step 560: accuracy = 0.20081967, global_step = 560, loss = 2.0881999
+INFO:tensorflow:Saving dict for global step 740: accuracy = 0.26134932, global_step = 740, loss = 2.0297167
+INFO:tensorflow:Saving dict for global step 930: accuracy = 0.26379257, global_step = 930, loss = 1.9529407
+INFO:tensorflow:Saving dict for global step 1112: accuracy = 0.3454445, global_step = 1112, loss = 1.832811

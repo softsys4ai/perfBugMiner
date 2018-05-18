@@ -1,0 +1,69 @@
+Suggestion for efficient upsample+conv2d and conv2d+pool
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.7.0-3-g024aecf414 1.7.0
+Python version: 3.5.2
+Bazel version (if compiling from source): N/A
+GCC/Compiler version (if compiling from source): /A
+CUDA/cuDNN version: CUDA 9.0/cuDNN 7.0
+GPU model and memory: Titan Xp 12GB
+Exact command to reproduce: CUDA_VISIBLE_DEVICES=0 python test_conv_upsample_pool_ops.py
+
+Describe the problem
+TLDR: upsampling+conv2d (which is very expensive) could be implemented such that it has the same time and memory complexity as strided conv2d_transposed. Similarly for conv2d+average_pooling and strided conv2d. An efficient implementation could be S^2 faster, where S is the stride (typically S=2).
+Strided conv2d_transposed have been traditionally used in decoders for dense prediction problems (e.g. image generation, video prediction, semantic segmentation). However, this op often produces outputs with checkerboard artifacts, e.g. see [1] and papers citing it. An alternative is to use bilinear upsampling followed by a standard convolution (with no strides). This is widely used in several recent works and it mitigates the checkerboard artifacts but at a cost: it's computationally and memory expensive (e.g. see [2]). upsampling+conv2d does S^2 more computation than the strided counterpart, where S is the stride factor. Furthermore, the intermediate tensor after upsampling could be very large if the input has a large number of channels.
+Under certain conditions (which happens to be the most common use case), upsampling+conv2d could be rewritten as convolving the upsampling kernel with the given kernel, followed by conv2d_transposed of the given input and the combined kernels. This follows from commutative and associative properties of linearity in convolutions (taking proper care of flipping the filters so that the ops are actual convolutions).
+A similar reasoning applies for an efficient implementation of conv2d+average_pooling.
+Implementations of the mentioned ops are here (see upsample_conv2d and conv_pool2d): https://github.com/alexlee-gk/video_prediction/blob/master/video_prediction/ops.py
+A script that tests for equivalence and timings is here: https://gist.github.com/alexlee-gk/1ae88125ec38efc48b542a4c0356078f
+I report some timings below of hundreds of evaluations. The naive op should be about 4x slower than the strided counterpart since S^2 = 4. In theory, the optimized op should be as fast as the strided counterpart, but my implementation is about 2x slower (but still much faster than the naive version), and I think there is room for improvement.
+
+
+
+
+upsample + conv2d (optimized)
+upsample + conv2d (naive)
+strided conv2d_transpose
+
+
+
+
+forward pass
+11.0s
+16.3s
+4.7s
+
+
+forward and backward pass
+6.5s
+17.5s
+2.6s
+
+
+
+
+
+conv2d + pool (optimized)
+conv2d + pool (naive)
+strided conv2d
+
+
+
+
+forward pass
+4.1s
+8.2s
+2.6s
+
+
+forward and backward pass
+4.1s
+8.4s
+2.6s
+
+[1] https://distill.pub/2016/deconv-checkerboard
+[2] https://arxiv.org/abs/1707.05847

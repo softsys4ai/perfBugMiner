@@ -1,0 +1,20 @@
+Is there a way to turn off variable reuse a number of scopes down?
+
+I'm having trouble with an under-sharing error for scope reuse. A specific example that I can point to using TF repo code is if we were to build an architecture with parallel attention modules.
+Say we did something in the attention_decoder in rnn/seq2seq.py like this:
+        # module can be any of ['a', 'b', 'c'...]
+        with tf.variable_scope(module, reuse=None):
+          k = tf.get_variable('AttnW', [1, 1, attn_size, attention_vec_size])
+          hidden_features.append(tf.nn.conv2d(hidden, k, [1, 1, 1, 1], "SAME"))
+          v.append(tf.get_variable('AttnV', [attention_vec_size]))
+
+I then build the model by running:
+for module in modules:
+  _outputs, _losses = seq2seq.model_with_buckets(..., 
+                  lambda x, y: seq2seq.embedding_attention_seq2seq(x, y, module, False), 
+                  ...)
+  ...
+
+This works just fine for one module, i.e. the first loop goes off without a hitch. When I get to the second module though, I get the following error:
+ValueError: Under-sharing: Variable embedding_attention_seq2seq/embedding_attention_decoder/attention_decoder/b/AttnW_0 does not exist, disallowed. Did you mean to set reuse=None in VarScope?
+I realize that I can build the variables up front and then push them through functions to where they're needed. However, that seems really bad because then there are floating variables built in the beginning that are way out of program scope. Is there a better way?

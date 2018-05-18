@@ -1,0 +1,20 @@
+grpc RecvTensor is slow
+
+I made benchmark tests for distributed setup with loopback network, profiling it and found there is excessive memory copying in the client side of RecvTensor call, which is actually one of the bottleneck.
+Here is the code, which mainly stolen from @yaroslavvb here,
+  with tf.device(device1):                                                      
+    params = tf.get_variable("params", shape=[params_size], dtype=dtype,        
+                             initializer=tf.zeros_initializer)                  
+  with tf.device(device2):                                                      
+    # constant node gets placed on device1 because of simple_placer             
+    #    update = tf.constant(1, shape=[params_size], dtype=dtype)              
+    update = tf.get_variable("update", shape=[params_size], dtype=dtype,        
+                             initializer=tf.ones_initializer())                 
+    add_op = params.assign(update)
+Here is the profiling result (google perftools) with tensor size 100MB (one fact is, the throughput will degrade with the increasing of tensor size):
+
+device1 worker profiling report
+device2 worker profiling report
+
+From the result, the sending side (device2) look fine, but the receiving side (device1, the grpc client) consumes too many CPU cycles for the data transfer.
+By the way, I made rough stats for this memmove call. For one round of 100MB tensor assignment, there are roughly 2GB data moved (actually, including the copy inside memmove, it should be 4GB copied with a naive memmove), which is 20+ times RAM bandwidth amplification (the result is an average of 100 round run, which may not precise but the scale should be ok).

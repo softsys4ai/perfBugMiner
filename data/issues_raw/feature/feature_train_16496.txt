@@ -1,0 +1,215 @@
+Feature Suggestion: "Float-bit-strings"
+
+System information (Not really relevant ...)
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4
+Python version: 3.6
+Bazel version (if compiling from source): NA
+GCC/Compiler version (if compiling from source): NA
+CUDA/cuDNN version: 8 (?)
+GPU model and memory: GTX 1070
+Exact command to reproduce: NA
+
+Summary
+This proposes the use of what I call "float-bit-strings" or "float-bits" instead of one-hot-encoded arrays so as to greatly reduce the memory and computational usage e.g. in language models.
+I don't think this preliminary discussion belongs on StackOverflow so I hope it is OK to post it here. It is a new feature that could be added to TensorFlow. There's quite likely somebody on the TensorFlow dev-team or in the community who has already thought of this. But I have searched the internet and cannot find any mentioning of a similar idea.
+Background
+I have started looking at language-models using e.g. LSTM and encoder-decoder architectures. There are some aspects that seem to be incredibly wasteful and limiting. Let me briefly describe this and please forgive me if I am ignorant, I have only spent a week or two on studying LSTM and language models so far :-)
+For example in Machine Translation we typically have the text-data for the source- and target-languages as lists of integer-tokens, where each integer maps to a word in the vocabulary. There may be e.g. 100k different words so these integer-tokens can take on values between zero and 100k. This data cannot be input directly to a Neural Network so we use an embedding layer to convert these integers to n-dimensional vectors with values between zero and one, according to a mapping-function that may either be loaded from disk or trained along with the rest of the Neural Network; if I understand correctly.
+For the decoder in a language model, we have a similar problem where we must somehow convert integer-tokens to data that the neural network can work on. A typical way of doing this seems to be a one-hot encoding; if I understand correctly. (This could also be done for the encoder-part, but it doesn't seem to be necessary).
+I can't figure out what the max-size of one-hot encodings are in TensorFlow and whether it can even handle 100k one-hot encoded tensors. But it is obviously an extremely wasteful data-mapping. For example, for a vocab of 100k words we only need 17-bits (log2(100k)) to represent each integer-token - but for a one-hot encoding using 32-bit floats we need 32 x 100k bits!
+I can't figure out what people normally do, but it seems like the common practice is to limit the vocab to a smaller number of words, e.g. 1k or 10k. It appears that Google Translate runs on multiple GPU's and maybe that's why they can handle extremely large vocabs with one-hot encoded tensors?
+Float-bit-strings
+I thought it might be possible to use a bit-string-like representation inside a TensorFlow model. I have searched the internet and cannot find anyone who has proposed a similar idea.
+The idea is to convert each integer-token to what I call a "float-bit-string" or "float-bits". For example, the number 123 has the bit-string 01111011. We can then make a corresponding tensor with floats [0., 1., 1., 1., 1., 0., 1., 1.] and input this to the TensorFlow model.
+In a language model we would then have to input and output these "float-bits" instead of one-hot encoded arrays. This would dramatically reduce the memory and computational requirements of the models.
+Test
+I have hacked together a little test using numpy and Keras / TensorFlow. The idea is to see if we can learn to map integers x with values between 0 and 10k to y = 123 * x using these "float-bit" encodings. And it works as you can see by running the code further below! That is perhaps not a surprise as neural networks are general function approximators, but it's not always that they work according to theory :-)
+However, the network cannot learn the arithmetic mapping of e.g. y = 123 * x when x and y are "float-bits". This means it cannot generalize to data it hasn't seen during training in the arithmetic manner we might expect. But I don't think that is necessary for use in e.g. language models where we merely want to be able to map some tensor from e.g. an LSTM to an integer-token from the vocabulary.
+Loss Functions
+I have tested this with both MSE and binary cross-entropy in Keras, which unfortunately isn't documented so I'm not completely sure what it does. But in both cases it works and the model trains to get the bit-wise mapping correct.
+There might be cases where you are more concerned about the MSE between the actual integer-values instead of their "float-bit-string" representations, in which case we would need a TensorFlow method to convert "float-bits" to integers and then take the MSE of the resulting integer and the true integer from the data-set. This is not relevant for language models, because the proximity of integer-keys do not correspond to words that are necessarily similar in meaning. But it could be useful in other applications.
+TensorFlow Implementation
+In order to make this work in TensorFlow it seems that we just need a couple of TensorFlow-methods for converting between integers and "float-bit-strings". I have hacked this together using numpy but I'm sure somebody on the dev-team can make a super-fast native TensorFlow implementation. Then we just need a wrapper in Keras and that might be enough to do e.g. language models with gigantic vocabs.
+Test-Code
+import numpy as np
+from tensorflow.python.keras.models import Sequential
+from tensorflow.python.keras.layers import InputLayer
+from tensorflow.python.keras.layers import Dense
+from tensorflow.python.keras.optimizers import RMSprop
+
+
+# Number of bits to use in our "float-bit-strings".
+num_bits = 32
+
+def int_to_floatbits(value):
+    """
+    Convert a single integer value to an array of 0.0 and 1.0 floats
+    corresponding to the bit-string.
+
+    Example: value==123 gives [0.  ... 0.  1.  1.  1.  1.  0.  1.  1.]
+    """
+
+    # Convert the integer value to a bit-string.
+    # NOTE: This has been fixed to 32-bit length.
+    bitstr = "{0:032b}".format(value)
+
+    # Convert the bit-string to an array of equivalent float-values.
+    floatbits = np.array([1.0 if bit == '1' else 0.0 for bit in bitstr])
+
+    return floatbits
+
+
+def floatbits_to_strbits(floatbits):
+    """
+    Convert an array of floats to a bit-string.
+    A float value greater than 0.5 results in 1.0
+    and a float value less or equal to 0.5 results in 0.0
+
+    Example: [0.1, 0.49, 0.51, 0.9, 1.1, -2.3] gives "001110"
+    """
+
+    # Convert the float-array to a list of bit-characters '0' or '1'.
+    charbits = ['1' if floatbit > 0.5 else '0' for floatbit in floatbits]
+
+    # Convert the bit-characters to a string.
+    strbits = "".join(charbits)
+
+    return strbits
+
+def floatbits_to_int(floatbits):
+    """
+    Convert a float-array to an integer, assuming each element
+    of the float-array corresponds to a bit.
+    
+    Example: [0.1, 0.49, 0.51, 0.9, 1.1, -2.3] corresponds to
+    the bit-string "001110" which is the integer 14.
+    """
+
+    # Convert the float-array to a bit-string.
+    strbits = floatbits_to_strbits(floatbits=floatbits)
+
+    # Convert the bit-string to an integer value.
+    value = int(strbits, base=2)
+
+    return value
+
+
+# Various tests of the above functions.
+if True:
+    foo = int_to_floatbits(123)
+    print(foo)
+    print(floatbits_to_strbits(foo))
+    print(floatbits_to_int(foo))
+
+    bar = [0.3,  0.9,  0.8,  0.51,  0.501,  0.4999,  0.999,  1.1]
+    print(floatbits_to_strbits(bar))
+    print(floatbits_to_int(bar))
+
+    baz = [0.1, 0.49, 0.51, 0.9, 1.1, -2.3]
+    print(floatbits_to_strbits(baz))
+    print(floatbits_to_int(baz))
+
+# quit()
+
+# We will now train a TensorFlow / Keras model
+# that maps integers between 0 and 10000 to
+# the same numbers multiplied by 123.
+# If we were to use one-hot encoding then we would
+# need 10000 inputs to the Neural Network and
+# 1230000 outputs if using the full output range.
+# Using "bit-strings" encoded as floats, we only need
+# 14 bits for the input and 21 bits for the output.
+# We round it up to 32-bits.
+
+# The dataset as integers,
+# we want the Neural Network to map from x to y.
+x_int = np.arange(10000, dtype=int)
+y_int = 123 * x_int
+
+# Convert the dataset to "float-bit-strings" (aka. float-bits).
+x = np.array(list(map(int_to_floatbits, x_int)))
+y_true = np.array(list(map(int_to_floatbits, y_int)))
+
+# Check the mapping is correct. E.g. if the number of required bits
+# exceeds num_bits then these may not create numpy matrices correctly.
+if False:
+    print(x.shape)
+    print(y_true.shape)
+    print(x[0:10])
+    print(y_true[0:10])
+
+# Start construction of the Keras Sequential model.
+model = Sequential()
+
+# Add an input layer to the model.
+model.add(InputLayer(input_shape=(num_bits,)))
+
+# Fully-connected / dense layers with ReLU-activation.
+model.add(Dense(512, activation='relu'))
+model.add(Dense(512, activation='relu'))
+
+# Last fully-connected / dense layer with sigmoid-activation
+# so the output is between 0.0 and 1.0
+model.add(Dense(num_bits, activation='sigmoid'))
+
+optimizer = RMSprop(lr=1e-3)
+
+if True:
+    # Loss is MSE.
+    model.compile(optimizer=optimizer,
+                  loss='mean_squared_error')
+else:
+    # Loss is Binary Crossentropy, but also report MSE.
+    model.compile(optimizer=optimizer,
+                  loss='binary_crossentropy',
+                  metrics=['mse'])
+
+epochs = 50
+
+if True:
+    # Fit the model using the entire data-set.
+    model.fit(x, y_true, epochs=epochs)
+else:
+    # Fit the model using the data-set split into training and validation.
+    # You will see that the validation-error is high so the model
+    # has not learned the arithmetic function of the data-set.
+    model.fit(x, y_true, epochs=epochs, validation_split=0.2)
+
+# Use the model to predict the output for a part of the data-set.
+y_pred = model.predict(x[0:10])
+
+# The true output for this part of the data-set.
+y_true_subset = y_true[0:10]
+
+# Map the "float-bit-strings" to integers.
+y_pred_int = list(map(floatbits_to_int, y_pred))
+y_true_int = list(map(floatbits_to_int, y_true_subset))
+
+# Print the predicted and true integers.
+print(*zip(y_pred_int, y_true_int))
+
+# Round the float-bit-strings to 2 decimals for pretty printing.
+def rounded(numbers):
+    return np.array([["{:.2f}".format(x) for x in row] for row in numbers])
+y_pred_rounded = rounded(y_pred)
+y_true_rounded = rounded(y_true_subset)
+
+# Print the predicted and true float-bit-strings.
+# (I know it is bad to reuse the same variable-names here ...)
+for y_pred_int, y_true_int, y_pred_rounded, y_true_rounded \
+    in zip(y_pred_int, y_true_int, y_pred_rounded, y_true_rounded):
+
+    print(y_true_int, "\t", y_true_rounded)
+    print(y_pred_int, "\t", y_pred_rounded)
+    print()
+
+Output
+True integer and true "float-bit-string" (note that the numbers are all exactly 0.00 or 1.00):
+738 	 ['0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '1.00' '0.00' '1.00' '1.00' '1.00' '0.00' '0.00' '0.00' '1.00' '0.00']
+
+Predicted integer and predicted "float-bit-string" (note that the numbers a not all exactly 0.00 or 1.00):
+738 	 ['0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.00' '0.03' '0.00' '0.00' '0.00' '0.01' '0.00' '0.00' '0.00' '0.00' '0.99' '0.00' '1.00' '1.00' '1.00' '0.00' '0.00' '0.00' '1.00' '0.00']

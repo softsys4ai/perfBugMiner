@@ -1,0 +1,109 @@
+Restoring RNN model from checkpoint fails when hidden layer width is not equal to input/output width
+
+Hi, I'm not sure whether this is actually a bug, or I'm doing something wrong, so please treat accordingly.
+I have an RNN model defined as following:
+import tensorflow as tf
+
+nn_layers = 3
+
+def RNN(x, weights, out_biases, input_size, n_steps, nn_hidden, keep_prob, forget_bias=0.0):
+    # Input data shape: (batch_size, n_steps, input_size)
+    # Output data shape: (batch_size, output_size)
+    # Permute, reshape and split to get n_steps tensors of shape (batch_size, input_size)
+    x = tf.transpose(x, [1, 0, 2])
+    x = tf.reshape(x, [-1, input_size])
+    x = tf.split(axis=0, num_or_size_splits=n_steps, value=x)
+    
+    # define RNN structure
+    
+    #layer_cell = tf.contrib.rnn.BasicLSTMCell(nn_hidden, forget_bias=forget_bias)
+    layer_cell = tf.contrib.rnn.GRUCell(nn_hidden)
+    
+    cell = tf.contrib.rnn.DropoutWrapper(layer_cell, output_keep_prob=keep_prob)
+    cell = tf.contrib.rnn.MultiRNNCell([cell] * nn_layers)
+    output, state = tf.contrib.rnn.static_rnn(cell, x, dtype=tf.float32)
+    
+    pred = tf.matmul(output[-1], weights["out"]) + out_biases["out"]
+    
+    
+    return pred
+
+def vs3_RNN(x, input_size, n_steps, nn_hidden, output_size, keep_prob, forget_bias=0.0):
+    
+    # Define weights -- output layer
+    weights = {
+        'out': tf.Variable(tf.random_normal([nn_hidden, output_size]), name="smax_w")
+    }
+    out_biases = {
+        'out': tf.Variable(tf.random_normal([output_size]), name="smax_b")
+    }
+    
+    pred = RNN(x, weights, out_biases, input_size, n_steps, nn_hidden, keep_prob, forget_bias=forget_bias)
+    
+    return pred
+
+
+I use the vs3_RNN method for both training and testing. The size of my input and output vectors (input_size, output_size) is 500. When I set the width of my hidden layer (nn_hidden) to 500, everything works great. However, when I set it to something else, I can train the model and save the checkpoint fine -- but when I try to restore the model from checkpoint, I get an error message.
+Here's a stack trace with nn_hidden equal to 600:
+Traceback (most recent call last):
+  File "thdvector/vs3_service.py", line 43, in <module>
+    saver.restore(sess, tf.train.latest_checkpoint(SAVEDIR))
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1439, in restore
+    {self.saver_def.filename_tensor_name: save_path})
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 1035, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Assign requires shapes of both tensors to match. lhs shape= [500] rhs shape= [600]
+	 [[Node: save/Assign = Assign[T=DT_FLOAT, _class=["loc:@rnn/multi_rnn_cell/cell_0/gru_cell/candidate/biases"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/cpu:0"](rnn/multi_rnn_cell/cell_0/gru_cell/candidate/biases, save/RestoreV2)]]
+
+Caused by op u'save/Assign', defined at:
+  File "thdvector/vs3_service.py", line 41, in <module>
+    saver = tf.train.Saver()
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1051, in __init__
+    self.build()
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 1081, in build
+    restore_sequentially=self._restore_sequentially)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 675, in build
+    restore_sequentially, reshape)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 414, in _AddRestoreOps
+    assign_ops.append(saveable.restore(tensors, shapes))
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/training/saver.py", line 155, in restore
+    self.op.get_shape().is_fully_defined())
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/ops/gen_state_ops.py", line 47, in assign
+    use_locking=use_locking, name=name)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 763, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2395, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1264, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Assign requires shapes of both tensors to match. lhs shape= [500] rhs shape= [600]
+	 [[Node: save/Assign = Assign[T=DT_FLOAT, _class=["loc:@rnn/multi_rnn_cell/cell_0/gru_cell/candidate/biases"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/cpu:0"](rnn/multi_rnn_cell/cell_0/gru_cell/candidate/biases, save/RestoreV2)]]
+
+
+
+I have tried this with either GRUCell or BasicLSTMCell, and I get the error message regardless.
+Here's the code that run that tries to restore the checkpoint and fails:
+x = tf.placeholder("float", [1, n_steps, input_size], name="x_in")
+    
+    pred = vs_model.vs3_RNN(x, input_size, n_steps, nn_hidden, output_size, keep_prob=testing_keep_prob, forget_bias=forget_bias)
+    
+    init = tf.global_variables_initializer()
+    
+    with tf.Session() as sess:
+        sess.run(init)
+        print("Variables initialized")
+        
+        saver = tf.train.Saver()
+        #saver = tf.train.import_meta_graph(META)
+        saver.restore(sess, tf.train.latest_checkpoint(SAVEDIR))
+        print("Model restored from " + str(SAVEDIR))
+        ...
+
+Thanks.

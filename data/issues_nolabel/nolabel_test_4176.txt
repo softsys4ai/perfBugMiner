@@ -1,0 +1,33 @@
+Why reuse default to True for loop_function() in seq2seq.rnn_decoder ?
+
+My question concerns the rnn_decoder() in seq2seq.
+I am batchnormalizing activation maps in the loop_function(). To this end, I call the tf.contrib.layers.batch_norm() function. Like many other optionalities, it calls variables using tf.get_variable().
+Ideally, you'd set reuse=None during the first call of loop_function(). That way, tf.get_variable() functions can construct variables. During second and subsequent calls of loop_function() you set reuse=True.
+However, in rnn_decoder() reuse is set to True also during the first call. This doesn't allow the tf.get_variable() functions to construct variables.
+My question is: why is this so? Am I doing something wrong? Or what is the logic here?
+More specifically, my loop_function is:
+    def loop_function(output, i):
+      ##some code##
+      some_variable = tf.contrib.layers.batch_norm(some_variable,is_training= self.is_training)
+      ##some code##
+      return some_variable
+I made a work-around, by defining my own rnn_decoder. I copy-paste the Tensorflow implementation and set reuse=None during the first call
+def rnn_decoder_rob(decoder_inputs, initial_state, cell, loop_function=None,
+                scope=None):
+  REUSE=None
+  with variable_scope.variable_scope(scope or "rnn_decoder"):
+    state = initial_state
+    outputs = []
+    prev = None
+    for i, inp in enumerate(decoder_inputs):
+      if loop_function is not None and prev is not None:
+        with variable_scope.variable_scope("loop_function", reuse=REUSE):
+          inp = loop_function(prev, i)
+      if i > 0:
+        variable_scope.get_variable_scope().reuse_variables()
+        REUSE = True
+      output, state = cell(inp, state)
+      outputs.append(output)
+      if loop_function is not None:
+        prev = output
+  return outputs, state

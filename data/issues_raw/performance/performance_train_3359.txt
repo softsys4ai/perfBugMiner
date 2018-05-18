@@ -1,0 +1,124 @@
+Gradient computation fails concatenation in while_loop() body
+
+Description
+When I was trying to implement RNN with while_loop(), I tried to concatenate output to a matrix.
+This worked in forward passes but not in applying gradients.
+Also, I saw that there are discussions (#2237) about supporting Recursive NN. There's a workaround by transforming tree structures to a matrix. For example, if we have a binary tree with its node values and structure be like
+10------20------40
+ |       |------50
+ | 
+ |------30------60
+         |------70
+
+Then we could transform it to a value vector V
+[70 60 50 40 30 20 10]
+
+and a (strictly bottom-up) structure matrix M
+[[0 1 4]  # V[0] and V[1] are V[4]'s children
+ [2 3 5]
+ [4 5 6]]
+
+Then we could build our graph with while_loop() by iteratively index into previous output. Note that this is without any specific inputs; only knowing they'll be a vector and a matrix instead.
+For more details, see
+https://github.com/jacobvsdanniel/tf_rnn
+inspired by
+https://github.com/ofirnachum/tree_rnn
+I also ran into problems of computing gradients for nested gather inside while_loop(), but managed to worked around before fixes come up to #418 and #206 .
+Tensorflow version
+0.9.0
+Reproduction steps
+def test_concat_loop():
+    x = tf.constant([[1.,2.]])
+    X = tf.get_variable("X", initializer=x)
+
+    i = tf.constant(0)
+    H = tf.zeros([0, 2])
+
+    def condition(i, H):
+        return i < 2
+
+    def body(i, H):
+        return i+1, tf.concat(0, [H, X])
+
+    _, H = tf.while_loop(condition, body, [i, H])
+    s = tf.reduce_sum(H)
+
+    sess = tf.Session()
+    sess.run(tf.initialize_all_variables())
+    print sess.run(X)
+    print sess.run(H)
+    print sess.run(s)
+
+    optimizer = tf.train.GradientDescentOptimizer(0.01)
+    op = optimizer.minimize(s) #Raise
+    print sess.run(op)
+    print sess.run(X)
+    return
+Workaround
+def test_concat_loop_workaround():
+    x = tf.constant([[1.,2.]])
+    X = tf.get_variable("X", initializer=x)
+
+    i = tf.constant(0)
+    H = tf.zeros([5, 2])
+
+    def condition(i, H):
+        return i < 5
+
+    def body(i, H):
+        past = tf.zeros([i, 2])
+        future = tf.zeros([4-i, 2])
+        return i+1, H + tf.concat(0, [past, X, future])
+
+    _, H = tf.while_loop(condition, body, [i, H])
+    s = tf.reduce_sum(H)
+
+    sess = tf.Session()
+    sess.run(tf.initialize_all_variables())
+    print sess.run(X)
+    print sess.run(H)
+    print sess.run(s)
+
+    optimizer = tf.train.GradientDescentOptimizer(0.01)
+    op = optimizer.minimize(s)
+    print sess.run(op)
+    print sess.run(X)
+    return
+Error Logs
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcuda.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:924] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties: 
+name: GeForce GTX 980
+major: 5 minor: 2 memoryClockRate (GHz) 1.329
+pciBusID 0000:01:00.0
+Total memory: 4.00GiB
+Free memory: 3.86GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:806] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 980, pci bus id: 0000:01:00.0)
+[[ 1.  2.]]
+[[ 1.  2.]
+ [ 1.  2.]]
+6.0
+Traceback (most recent call last):
+  File "issue-418.py", line 244, in <module>
+    main()
+  File "issue-418.py", line 233, in main
+    test_concat_loop()
+  File "issue-418.py", line 53, in test_concat_loop
+    op = optimizer.minimize(s)
+  File "/home/danniel/.local/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 193, in minimize
+    grad_loss=grad_loss)
+  File "/home/danniel/.local/lib/python2.7/site-packages/tensorflow/python/training/optimizer.py", line 250, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/home/danniel/.local/lib/python2.7/site-packages/tensorflow/python/ops/gradients.py", line 494, in gradients
+    in_grad.set_shape(t_in.get_shape())
+  File "/home/danniel/.local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 404, in set_shape
+    self._shape = self._shape.merge_with(shape)
+  File "/home/danniel/.local/lib/python2.7/site-packages/tensorflow/python/framework/tensor_shape.py", line 570, in merge_with
+    (self, other))
+ValueError: Shapes (0, 2) and (1, 2) are not compatible

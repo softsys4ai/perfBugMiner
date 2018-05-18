@@ -1,0 +1,46 @@
+FailedPreconditionError when restoring initializable_iterator with Scaffold in a MonitoredTrainingSession for the second time.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): +
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.3.0-rc2-20-g0787eee 1.3.0
+Python version: Python 3.5.1
+Bazel version (if compiling from source): -
+CUDA/cuDNN version: -
+GPU model and memory: -
+Exact command to reproduce: -
+
+Context:
+Using initializable_iterator with MonitoredTrainingSession because there are stateful lookup_ops.index_table_from_tensor() lookup tables that don't work with one_shot_iterator.
+initializable_iterator is initialized with a tf.train.Scaffold():
+Scaffold = tf.train.Scaffold(
+        init_op=control_flow_ops.group(variables.global_variables_initializer(),
+                                       resources.initialize_resources(resources.shared_resources()),
+                                       iter_init_op))
+
+with tf.train.MonitoredTrainingSession(
+    master=server.target,
+    is_chief=hps.is_chief,
+    scaffold=Scaffold,
+    config=config,
+    checkpoint_dir=hps.checkpoint_dir,
+    hooks=hooks
+) as mon_sess:
+                ...
+
+Where iter_init_op is equivalent to iterator.initializer.
+Problem
+Upper mentioned initialization works properly when the model is initialized and created for the first time and some initial training can be done without problems.
+If chief worker crashes or is shut down purposefully, after restarting MonitoredTrainingSession shows following error as if iterator is not initialized:
+FailedPreconditionError (see above for traceback): GetNext() failed because the iterator has not been initialized. Ensure that you have run the initializer operation for this iterator before getting the next element...
+
+Workaround
+Right now the only solution that works for is to run initialization internally using _coordinated_creator.tf_sess.run:
+mon_sess._coordinated_creator.tf_sess.run(iter_init_op)
+
+This doesn't look like an intended use.
+Statement:
+This doesn't seem as an intended behaviour.
+What is a better way to use initializable_iterator with MonitoredTrainingSession or lookup_ops.index_table_from_tensor with one_shot_iterator?

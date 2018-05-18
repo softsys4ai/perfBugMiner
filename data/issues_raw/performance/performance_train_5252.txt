@@ -1,0 +1,35 @@
+multigpu gradient averaging if grad_op is IndexedSlices; race condition in apply_gradients?
+
+If one follows the cifar10_multi_gpu_train.py example (build two towers that share weights, feed data independently, collect gradients, average them, apply then) and passes gradients to the average_gradients() function, but graph uses tf.gather consequently, the resulting gradient op will be IndexedSlices that has many -1 values in indices field (from my experience, not sure about why this happens), so when tensorflow will attempt to apply tensorflow.python.ops.gradients._IndexedSlicesToTensor to convert it to Tensor (to apply tf.expand_dims on it), it will fail on unsorted_segment_sum , because -1s are indeed not in the indexes range. I have explicitly printed w_grad_op.indices and they looked like:
+[0 1 2 3 6 4 5 6 7 8 9 13 12 11 15 16 ... 230 231 -1 -1 ... -1 280 -1 -1 265 -1 -1 ... -1]
+
+- so the average_gradients() indeed fails on these examples (people have been reporting similar problems [1], [2] .. 2-3 more around the web).
+One way of dealing with (solution 1) it is just applying gradients consequentially (with lower learning rate) instead of averaging them first:
+ train_op = tf.group(*[gd.apply_gradients(grad) for grad in tower_grads])
+
+-  this works great and scales nicely, but (in my case) led to some weird convergence issues (eventually leading to nans popping here and there), possibly because of some sort of race conditions (?), while applying gradients (gd.apply_gradients() is probably not very atomic). One possible workaround (solution 2) might be to use tf.control_dependencies:
+def rigid_op_sequence(op_lambdas):
+    ## equivalent to:
+    ## op = op1()
+    ## with.control_dependencies([op]):
+    ##    op = op2()
+    ##    with.control_dependencies([op]):
+    ##        op = op3()
+    ##        ...
+    ## return op
+
+    with ExitStack() as stack:
+        for op_func in op_lambdas:
+            op = op_func()
+            context = tf.control_dependencies([op])
+            stack.enter_context(context)
+    return op
+
+grad_update_lambdas = [(lambda: gd.apply_gradients(grad)) for grad in tower_grads]
+train_op = rigid_op_sequence(grad_update_lambdas)
+
+however this solution seems to somewhat significantly degenerate performance, because of that "blocking" (GPU load dropped from ~90% to ~60%).
+Several fundamental questions:
+
+What is officially recommended way of dealing with this "multigpu IndexedSlices" case? (could not find any; people keep asking)
+Does (solution 1) indeed might experience race condition or tensorflow handles it somehow and my convergences issues were not related to that? (and we all can just use solution 1)

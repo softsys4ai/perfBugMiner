@@ -1,0 +1,58 @@
+Output for tfrecords files is not reproducible
+
+Environment info
+Operating System:
+OS: Debian testing stretch
+Kernel: x86_64 Linux 4.5.0-1-amd64
+Tensorflow
+Version: 0.9.0
+Steps to reproduce
+Running this script gives a ~/test.tfrecords file.
+Running the script repeatedly gives different hashes for the file.
+import os
+import argparse
+
+import tensorflow as tf
+import numpy as np
+
+MAXIMUM_SEQUENCE_LENGTH = 1000
+
+def export(data, name, args):
+    num_examples = len(data)
+
+    fh_output = os.path.join(os.path.expandvars(args.output_directory), name + '.tfrecords')
+    print('Writing', fh_output)
+    writer = tf.python_io.TFRecordWriter(fh_output)
+    for index in range(num_examples):
+        ## prepare things to save
+        seq_x1 = data[index][0].tostring()
+        seq_x2 = data[index][1].tostring()
+
+        example = tf.train.Example(features=tf.train.Features(feature={
+            'x1': _bytes_feature(seq_x1),
+            'x2': _bytes_feature(seq_x2),
+            }))
+        writer.write(example.SerializeToString())
+    writer.close()
+
+def _int64_feature(value):
+    return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+
+def _bytes_feature(value):
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
+
+if __name__ == '__main__':
+    tf.set_random_seed(11)
+    np.random.seed(11)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--output_directory', type=str, default='$HOME/', help='Directory to write the converted result')
+    # parser.add_argument('--validation_size', type=int, default=3000, help='Number of examples to separate from the training data for the validation set.')
+    args = parser.parse_args()
+
+    train = [( np.zeros(1000), np.ones(1000), 500 )]
+
+    ## Write data to training file
+    export(train, 'test', args)
+I wonder why I cannot produce the same binary file again, if I rerun the script. Does this mean the content is different? I didn't find any option to set a seed either.

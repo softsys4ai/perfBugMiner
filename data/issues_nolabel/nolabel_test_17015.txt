@@ -1,0 +1,27 @@
+tfcompile tf.cond not dominated by switch nodes
+
+Using the following example:
+graph = tf.Graph()
+with graph.as_default():
+  x = tf.placeholder(name='x', shape=(2,), dtype=tf.float64)
+  y = tf.cond(x[0] > x[1], partial(lambda x: x[0], x), partial(lambda x: x[1], x))
+
+Compiling with:
+tfcompile --graph=test_graph.pb --config=test_config.pb --entry_point=test_func --cpp_class=test --out_object=test.o --out_header=test.hpp --gen_program_shape=true --target_cpu=haswell
+Gives the following error:
+2018-02-13 16:32:27.484808: F tensorflow/compiler/aot/tfcompile_main.cc:140] Non-OK-status: status status: Failed precondition: Value {name:'cond/strided_slice_1' id:20 op device:{/device:XLA_CPU_JIT} def:{cond/strided_slice_1 = StridedSlice[Index=DT_INT32, T=DT_DOUBLE, begin_mask=0, ellipsis_mask=0, end_mask=0, new_axis_mask=0, shrink_axis_mask=1](cond/strided_slice_1/Switch, cond/strided_slice_1/stack, cond/strided_slice_1/stack_1, cond/strided_slice_1/stack_2)}} not dominated by switch nodes.
+Would expect code to be generated similar to:
+double test_func( double* x )
+{
+  if (x[0] > x[1] )
+    return x[0];
+  else
+    return x[1];
+}
+
+tensorflow version 1.5.0
+RHEL 7.3 64bit
+tensorflow built from source
+python 2.7
+bazel 0.7
+gcc 4.8.5

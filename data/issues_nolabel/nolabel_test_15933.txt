@@ -1,0 +1,261 @@
+Tensorflow 1.4.1 on Linux (CentOS-7.4) and Tensorflow 1.4.1 on MacOSX producing *very* different results in image creation simulation.
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No.
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux CentOS-7.4 and MacOSx 10.10.5
+
+
+TensorFlow installed from (source or binary): Both; Installed from binary, then, built and installed from source. Same behaviour on each install.
+
+
+TensorFlow version (use command below):
+Tensorflow 1.4.0 and Tensorflow 1.4.1
+
+
+Python version:
+2.7.14 (installed from binary, and then built and installed from source
+
+
+Bazel version (if compiling from source):
+Bazel 0.9.0.  Source built and installed successfully, Python .whl file built & installed successfully.
+
+
+GCC/Compiler version (if compiling from source):
+Xcode7.2.1 and the Gnu gFortran, 5.2.  (needed gFortran for SciPy install.  All installs OK.)
+
+
+CUDA/cuDNN version:
+N/A - compiled and running CPU versions only for now.
+
+
+GPU model and memory:
+
+
+Exact command to reproduce:
+(See supplied test program - based on the Laplace PDE ("Raindrops on Pond") simulation example
+from Tensorflow Tutorial)
+
+
+Description of Problem:
+I've run into a curious situation.  I am getting very different behaviour in Tensorflow 1.4.1 on Linux and Tensorflow 1.4.1 on MacOSX, in straightforward image-generation simulation, based on the "Raindrops on a Pond" (Laplace PDE) example from the Tensorflow Tutorial.
+I must stress that both Tensorflow installations seem to be 100% correct, and operate other tests correctly, producing the same numeric results for simple models.
+I have also built Tensorflow 1.4.1 completely from source, and the Python 2.7.14 as well, on the MacOSX (MacBook) machine, in order to build the Python using "--enable-unicode=ucs4", since that was one difference I was able to find, between the two version.  But even with the Macbook now running exactly the same Python 2.7.14 as the Linux box, I am still getting wildly divergent evoluationary behaviour as when I iterate the simple simulation.   The numbers just zoom off in very different directions on each machine, and the generated images show this.
+On the MacOSX, the simulation evolves very quickly to a pure white canvas (all "255"s), but on the Linux platform, the image grows more complex, with the generated numbers bifurcating between large negative and large positive - and hence when np.clip-ed, to range 0-255, show a complex moire-style pattern.
+I have confirmed all related libraries and packages seem to be the same versions.  The difference seems to be in the operation of Tensorflow.
+This seems pretty serious, as each platform is Intel.  The Linux box (CentOS-7.4) is Core-i3, while the Macbook is Core-i5.  But both are 64-bit, and both Tensorflow installations seem to be correct.  I have tried both the binary version, and then built a complete local version of Tensorflow 1.4.1 for the Macbook from source.  Both seem to be Ok, and operate correctly.  The Linux version of Tensorflow 1.4.0 was installed from binary appears to be operating correctly, albeit differently, but just for this one program.
+When the sample program runs, it will display fourteen 400x400 images, as well as the numeric values of the row-20 of the "a" array (400 numbers).   The program can be started from an Xterm shell window, with "python LapTest.py".  It does not need Jupyter or IPython.  With SciPy loaded, the images are rendered as .PNG files on both platforms, using Preview on the MacOSX MacBook, and ImageMagick on the CentOS-7.4 Linux box.   Program runs fine to completion, and all looks ok on both machines.
+But the results - even with the simple initial pseudo-random conditions - evolve completely differently, and consistantly.  The Macbook version of Tensorflow 1.4.1 goes to a pure white screen, while the LInux Tensorflow 1.4.1 configuration evolves to a complex, chaotic, moire-pattern.
+Leaving aside the question of even which machine is "correct", the expected result is of course that both machines should at least show clear evidence of similar behaviour.
+No change was made to the test program, "LapTest.py", from one machine to the other.   The different behaviour is not related to how the images are displayed, which is working fine on both platforms.   A copy of this simple program is provided.   I have removed or commented out the IPython/Jupyter dependent code, so this program can be run on plain vanilla Python 2.7.14, as long the appropriate packages (tensorflow, numpy, scipy, PIL (Pillow version), matplotlib, imageio ...) are available
+Example of Source code to demostrate behaviour:     LapTest.py
+#-------------------------------------------------------------------------------
+# Prgm: LapTest.py
+#
+# --- the Tensorflow LaPlace Image example (Uses PIL(Pillow ver.), and numpy)
+# --- updated for TensorFlow 1.4.1 running on CentOS-7.4 & Python 2.7.14
+#     compiled (configured, actually) with the "--enable-unicode=ucs4" option
+#                                             (Python compile default is ucs2)
+#                                             (which caused TensorFlow 1.4 to)
+#                                             (fail to load. Building Python )
+#                                             (with ucs4, => pip can install )
+#                                             (TensorFlow 1.4.0 successfully.)
+#
+# --- This version of program tested on: MacOSX 10.10.5. (Yosemite)
+# --- LapTest.py on Linux (CentOS-7.4), and LapTest.py on MacOSX, with Tensorflow-1.4.1 and
+#     Python 2.7.14 (with ucs4 enabled on both Python versions), show *very*
+#     different behaviour, and produce very different results.
+#     Note: CentOS-7.4 is using Linux kernel: 4.14.9-1el7.elrepo.x86_64    
+#
+# --- Import various libraries for simulation
+import tensorflow as tf
+import numpy as np
+import scipy.misc
+import imageio
+import os
+import sys
+import subprocess
+import PIL
+import time    
+
+
+# --- Import for visualization and jpeg encoder  
+import matplotlib
+matplotlib.rcParams["backend"]= 'TkAgg'
+from matplotlib import pyplot as plt
+# from PIL import Image, ImageDraw
+from io import BytesIO
+#  from IPython.display import clear_output, Image, display
+
+#--- we need this to get a sane for-loop...
+def jump_range(start, end, step):
+    while start <= end:
+        yield start
+        start += step
+
+# --- function for displaying state of the pond's surface as an image
+def DisplayArray(a, fmt='jpeg', rng=[0,1]):
+  global proc
+  # proc.kill() 
+  # """Display an array as a picture. """
+  a = (a - float(rng[0]))/float(rng[1] - rng[0])*37
+  amod = np.clip(a, 0, 255)
+  a = np.uint8(amod)
+#  a = np.clip(a, 0, 255) 
+#  a = np.uint8(a) 
+#  np.clip(a, 0, 255, out=a )
+#  a = a.astype('uint8')
+  print " "
+  print " ----------- This is a: => row 20  ------------"
+  print a[20]
+  print " ----------------------------------------------"
+  f = BytesIO()
+  # --- this is the cool, realtime thing that runs in Jupyter-IPython Notebook
+  PIL.Image.fromarray(a).save(f,fmt)
+  # --- clear_output(wait = True)  --- only for IPython
+  # display(Image(data=f.getvalue()))
+  # --- write the image
+  # --- write the simulation images to .jpg files
+  scipy.misc.imsave("tensor.jpg", a)
+  pic = PIL.Image.open("tensor.jpg")
+  # --- new approach... use subprocess, wait for time(2) then kill it
+  # proc = subprocess.Popen(["display", "./tensor.jpg"])
+  # time.sleep(0.5)
+  pic.show()
+  # clear_output(wait=True)
+  # --- this line below doesn't work outside of the Jupyter environment...
+  # display(Image(data=f.getvalue()))
+  #
+  # pic.close()  <--- does not work to close image.  Just removes the pointer to image in memory
+    
+def DisplayArrayToFile(a, fmt='jpeg', rng=[0,1]):
+  # """Display an array as a picture to a file... """
+  a = (a - rng[0])/float(rng[1] - rng[0])*37
+  a = np.uint8(np.clip(a, 0, 255))
+  f = BytesIO()
+  # --- this is the cool, realtime thing that runs in Jupyter-IPython Notebook
+  PIL.Image.fromarray(a).save(f,fmt)
+  # clear_output(wait = True)
+  # display(Image(data=f.getvalue()))
+  # --- write the image
+  # --- this is my stuff to write the simulation images to .jpg files
+  #scipy.misc.imsave ("tensor_new.jpg", a)
+  imageio.imwrite("tensor_new.jpg", a)
+  # --- image = PIL.Image.open("tensor_new.jpg")
+  # --- image.show()
+  # clear_output(wait=True)
+  # display(Image(data=f.getvalue()))
+  #
+ 
+# --- make print stmt print the whole array... (not just part of it...)
+np.set_printoptions(threshold=np.nan)
+  
+# --- make interactive session for testing - can use regular session also
+sess = tf.InteractiveSession()
+# sess = tf.Session()
+
+# --- computational functions go here... once we get jpeg pic working
+def make_kernel(a):
+  """Transform a 2D array into a convolutional kernel """
+  a = np.asarray(a)
+  a = a.reshape(list(a.shape) + [1,1])
+  return tf.constant(a, dtype=1)
+
+
+def simple_conv(x, k):
+  """ A simplified 2D convolutional operation """
+  x = tf.expand_dims(tf.expand_dims(x, 0), -1)
+  y = tf.nn.depthwise_conv2d(x, k, [1, 1, 1, 1], padding='SAME')
+  return y[0, :, :, 0]
+
+
+def laplace(x):
+  """Compute the 2D laplacian of an array """
+  laplace_k = make_kernel([[0.5, 1.0, 0.5],
+                           [1.0, -6., 1.0],
+                           [0.5, 1.0, 0.5]])  
+  return simple_conv(x, laplace_k)
+
+
+
+# --- Define the PDE - the pond surface is a perfect 400x400 square
+N = 400
+
+# --- list of display points...
+dispval = jump_range(0, 12500, 1000)
+# --- dispval has to be a list...
+dispval = list(dispval)
+print "We will look at these values: ",dispval
+
+# --- now, we create some "raindrops"
+# --- Initial Conditions -- some rain drops hit the pond
+# --- set everything to zero
+u_init = np.zeros([N, N], dtype=np.float32)
+ut_init = np.zeros([N, N], dtype=np.float32)
+
+# Some material accretion occurs (raindrops hit pond) at random points
+for n in range(40):
+  a,b = np.random.randint(0, N, 2)
+  u_init[a,b] = np.random.uniform()
+
+# --- Create and Display the jpeg image...
+# proc = subprocess.Popen(["display", "./tensor.jpg"])
+# DisplayArray(u_init, rng=[-0.1, 0.1])
+
+# Parameters
+# eps -- time resolution
+# damping -- wave damping
+eps = tf.placeholder(tf.float32, shape=())
+damping = tf.placeholder(tf.float32, shape=())
+
+# --- Create vaiables for simulation state
+U  = tf.Variable(u_init)
+Ut = tf.Variable(u_init)
+
+# --- Discretized PDE update rules
+U_  = U + eps * Ut
+Ut_ = Ut + eps * (laplace(U) - damping * Ut)
+
+# --- Operation to update the state
+step = tf.group(
+  U.assign(U_),
+  Ut.assign(Ut_))
+
+# --- Run the simulation forward with a simple FOR loop.
+# --- Initialize state to initial conditions
+tf.global_variables_initializer().run(session=sess)
+
+# --- Run 12701 steps of PDE
+for i in range(12701):
+  # Step simulation  (damping was 0.04, I made it negative .14)
+   with sess.as_default(): step.run( {eps: 0.03, damping: -0.14})
+# --- to see everything...
+#   with sess.as_default(): print "U.eval()   .... ", U.eval()[20]  # --- ,"   ", Ut.eval()
+# ------
+
+   if (i in dispval) :
+       with sess.as_default(): DisplayArray(U.eval(), rng=[-0.1, 0.1])
+       print "                                ------ For iteration:  ",i
+       sys.stdout.flush()
+       print "U.eval()   ....... "
+       with sess.as_default(): print   U.eval()[20]      # --- ,"   ", Ut.eval()
+       print "                                --- End of iteration:  ",i
+       sys.stdout.flush()
+       continue
+#
+# --- to show each iteration...
+#  with sess.as_default(): DisplayArray(U.eval(), rng=[-0.1, 0.1])
+print "Done at: ",i
+
+# --- Ok, we are done...
+with sess.as_default(): DisplayArray(U.eval(), rng=[-0.1, 0.1])
+
+with sess.as_default(): DisplayArrayToFile(U.eval(), rng=[-0.1, 0.1])
+print "Last Image Written to file: tensor_new.jpg. Done."   
+#--------------- done ------------------
+
+If someone could try this program on a supported version of Linux (ie. the Ubuntu version that TensorFlow officially supports), that would be helpful.  I am running a recent version of the Linux kernel on the CentOS-7.4 box  (uname -a reports: kernel version 4.14.9-1.el7.elrepo.x86_64 ).  Really like to nail down what is happening.  I have attached images of results I am seeing on the two machines, first the Linux box, second is the Macbook.

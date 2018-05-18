@@ -1,0 +1,64 @@
+memory leak in tensorflow_gpu 0.12.1
+
+Hi, We use tensorflow for training our OCR system models. I simply train models in tensorflow 0.9 and former versions. after some upgrade in cuda and tensorflow, I see large memory leak in our server with 32GB RAM.
+I have tried all of suggestions in How to debug a memory leak in TensorFlow and some other github issues and stackoverflow posts. No of them worked.
+train code:
+#!/bin/env python
+import tensorflow as tf
+
+import Config
+import Utilities
+from Dataset import Dataset
+from Model import Model
+
+dataset = Dataset()
+
+sess_config = tf.ConfigProto()
+sess_config.gpu_options.allow_growth = True
+sess = tf.Session(config=sess_config)
+images, labels = dataset.train_images_labels()
+model = Model(images, labels, training=True)
+tf.train.start_queue_runners(sess=sess)
+
+
+def main(global_step=0):
+    if global_step == 0:
+        init_op = tf.global_variables_initializer()
+        sess.run(init_op)
+    else:
+        checkpoint_path = Utilities.get_checkpoint_path(global_step)
+        model.saver.restore(sess, checkpoint_path)
+        Utilities.log_checkpoint_load(checkpoint_path)
+
+    loss = 0
+    train_iterations = global_step
+    while train_iterations < Config.train_max_iterations:
+        # train
+        l = model.train(sess)
+        loss += l
+        train_iterations += 1
+
+        # show train loss
+        if train_iterations % Config.display_intervals == 0:
+            loss /= float(Config.display_intervals)
+            Utilities.log_train_loss(train_iterations, loss)
+            loss = 0
+
+        # save checkpoint
+        if train_iterations % Config.checkpoint_intervals == 0:
+            checkpoint_path = model.saver.save(sess, Utilities.get_checkpoint_path(train_iterations))
+            Utilities.log_checkpoint_save(checkpoint_path)
+
+
+if __name__ == '__main__':
+    main()
+
+images, labels are queues from tf.train.shuffle_batch function. I used Graph.finalize() and I am sure no new operation added to graph in training because the size of stored models' files are equal. I guess the reason of leak is tensorflow queues.
+Environment info
+Ubuntu Server 14.04.5 LTS
+Installed version of CUDA and cuDNN:
+CUDA V8.0.44, cuDNN V5.1.5.
+installed tensorflow from PyPI.
+
+sudo pip install --upgrade tensorflow_gpu.
+tensorflow 0.12.1.

@@ -1,0 +1,40 @@
+gpu_memory_fraction for tf.contrib.lean Estimators stopped working in tensorflow 1.1.0
+
+I was updating to Tensorflow 1.1.0 to use the tf.estimator API and I found, that I couldn't get it to use less than the full GPU RAM for one process.
+I was trying to find out where the issue is and found, that also the tf.contrib.lean.Estimators had the same problem.
+Here a code snippet to reproduce the issue:
+import tensorflow as tf
+import numpy as np
+from tensorflow.contrib.learn import DNNClassifier
+import os
+
+tf.logging.set_verbosity(tf.logging.INFO)
+
+from tensorflow.examples.tutorials.mnist import input_data
+mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
+
+feature_columns = [tf.contrib.layers.real_valued_column("x", dimension=mnist.train.images.shape[1])]
+model = DNNClassifier(hidden_units=[10,10],
+                      feature_columns=feature_columns,
+                      n_classes=10,
+                      config=tf.contrib.learn.RunConfig(gpu_memory_fraction=0.1))
+
+input_fn_train = tf.contrib.learn.io.numpy_input_fn(
+                                x={"x":mnist.train.images.reshape([-1,28,28,1]).astype(np.float32)[:1000]},
+                                y=np.argmax(mnist.train.labels[:1000],1).astype(np.int32),
+                                batch_size=50,
+                                num_epochs=50,
+                                )
+
+
+model.fit(input_fn=input_fn_train)
+
+
+With tensorflow 1.0.1 it works as expected and only allocated 1/10 of the GPU RAM, but in tensorflow 1.1.0 it ignores this parameter.
+I also check with the code from the MNIST for ML beginners code  and used the GPUOptions when initializing the session:
+gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.1)
+sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+
+It works as expected in both verions.
+Somehow this GPU options is not set correctly when using the tf.contib.learn.Estimator framework OR The gpu_memory is allocated before this call.
+I asked this before on the tensorflow discuss group and I was told that is is a bug.

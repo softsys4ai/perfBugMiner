@@ -1,0 +1,246 @@
+saver will cause crash,error message:"InvalidArgumentError: Shape [xx] has negative dimensions"
+
+It should be a bug of tensorflow
+add the saver will cause the procedure crash. error message is strange, as following:
+### InvalidArgumentError (see above for traceback): Shape [-1,32,32,3] has negative dimensions
+[[Node: x = Placeholderdtype=DT_FLOAT, shape=[?,32,32,3], _device="/job:localhost/replica:0/task:0/cpu:0"]]
+the added part is:
+if (i % 1000 == 0) or (i == num_iterations - 1):
+# Save all variables of the TensorFlow graph to a
+# checkpoint. Append the global_step counter
+# to the filename so we save the last several checkpoints.
+saver.save(sess,
+save_path=save_dir,
+global_step=train_step)
+System information
+== cat /etc/issue ===============================================
+Darwin zhangdeMacBook-Pro.local 16.6.0 Darwin Kernel Version 16.6.0: Fri Apr 14 16:21:16 PDT 2017; root:xnu-3789.60.24~6/RELEASE_X86_64 x86_64
+Mac OS X 10.12.5
+== are we in docker =============================================
+No
+== compiler =====================================================
+Apple LLVM version 8.1.0 (clang-802.0.42)
+Target: x86_64-apple-darwin16.6.0
+Thread model: posix
+InstalledDir: /Library/Developer/CommandLineTools/usr/bin
+== uname -a =====================================================
+Darwin zhangdeMacBook-Pro.local 16.6.0 Darwin Kernel Version 16.6.0: Fri Apr 14 16:21:16 PDT 2017; root:xnu-3789.60.24~6/RELEASE_X86_64 x86_64
+== check pips ===================================================
+numpy (1.13.0)
+protobuf (3.3.0)
+tensorflow (1.2.1)
+== check for virtualenv =========================================
+False
+== tensorflow import ============================================
+tf.VERSION = 1.2.1
+tf.GIT_VERSION = v1.2.0-5-g435cdfc
+tf.COMPILER_VERSION = v1.2.0-5-g435cdfc
+Sanity check: array([1], dtype=int32)
+== env ==========================================================
+LD_LIBRARY_PATH is unset
+DYLD_LIBRARY_PATH is unset
+== nvidia-smi ===================================================
+== cuda libs  ===================================================
+Tensorflow version:
+v1.2.0-5-g435cdfc 1.2.1
+Source code / logs
+source code:
+#coding=utf-8
+import tensorflow as tf
+import numpy as np
+import cifar10
+import preprocess
+from six.moves import xrange
+import os
+
+img_size = 32
+img_height = img_size
+img_width = img_size
+img_channel = 3
+
+first_conv_feamap = 16
+filter_size = 5
+pool_size = 4
+
+second_conv_feamap = 32
+
+fcn1_size = 1024
+
+epoch = 60
+batch_size = 50
+
+
+def weight_variable(shape):
+    """weight_variable generates a weight variable of a given shape."""
+    initial = tf.truncated_normal(shape, stddev=0.1)
+    return tf.Variable(initial)
+
+def bias_variable(shape):
+    initial = tf.constant(0.1,shape=shape)
+    return tf.Variable(initial)
+
+def conv2d(x, W):
+  """conv2d returns a 2d convolution layer with full stride."""
+  return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+
+def max_pool_2x2(x):
+  """max_pool_2x2 downsamples a feature map by 2X."""
+  #ksize是窗口大小，stride是步长，4->1步长正好是2
+  return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
+                        strides=[1, 2, 2, 1], padding='SAME')
+
+
+def sequence_batch(images, labels, idx,_batch_size):
+
+    # Use the random index to select random images and labels.
+    x_batch = images[idx:idx+_batch_size, :, :, :]
+    y_batch = labels[idx:idx+_batch_size, :]
+
+    return x_batch, y_batch
+
+#Procedure start now!
+
+images,training_class,labels = cifar10.load_training_data()
+
+test_images,test_class,test_labels = cifar10.load_test_data()
+
+
+log_dir = os.getcwd() + '/log'
+print('log_dir is ' + log_dir)
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+
+save_dir = os.getcwd() + '/checkpoints'
+print('save_dir is ' + save_dir)
+if not os.path.exists(save_dir):
+    os.makedirs(save_dir)
+
+
+x = tf.placeholder(tf.float32, shape=[None,img_height,img_width,img_channel], name='x')
+y_ = tf.placeholder(tf.float32, shape=[None, 10], name='y_')
+y_cls = tf.argmax(y_, dimension=1)
+
+x = tf.reshape(x, shape=[-1, img_height, img_width, img_channel])
+
+with tf.name_scope('conv1'):
+    w_conv1 = weight_variable([filter_size, filter_size, img_channel, first_conv_feamap])
+    b_conv1 = bias_variable([first_conv_feamap])
+
+    h_conv1 = tf.nn.relu(conv2d(x, w_conv1) + b_conv1)
+    h_pool1 = max_pool_2x2(h_conv1)
+
+with tf.name_scope('conv2'):
+    w_conv2 = weight_variable([filter_size, filter_size, first_conv_feamap, second_conv_feamap])
+    b_conv2 = bias_variable([second_conv_feamap])
+
+    h_conv2 = tf.nn.relu(conv2d(h_pool1, w_conv2) + b_conv2)
+    h_pool2 = max_pool_2x2(h_conv2)
+
+conv2_size = 8
+
+with tf.name_scope('fcn1'):
+    w_fcn1 = weight_variable([conv2_size * conv2_size * second_conv_feamap, fcn1_size])
+    b_fcn1 = bias_variable([fcn1_size])
+
+    # change with the image size and convlo
+    h_pool2_flat = tf.reshape(h_pool2, [-1, conv2_size * conv2_size * second_conv_feamap])
+    h_fcn1 = tf.nn.relu(tf.matmul(h_pool2_flat, w_fcn1) + b_fcn1)
+
+    keep_prob = tf.placeholder(tf.float32)
+    h_fcn1_drop = tf.nn.dropout(h_fcn1, keep_prob)
+
+with tf.name_scope('fcn2'):
+    w_fcn2 = weight_variable([fcn1_size, 10])
+    b_fcn2 = bias_variable([10])
+
+    y_cnn = tf.matmul(h_fcn1_drop, w_fcn2) + b_fcn2
+
+
+
+cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y_,logits=y_cnn))
+
+train_step = tf.train.AdamOptimizer(learning_rate=1e-4).minimize(cross_entropy)
+
+correct_prediction = tf.equal(tf.arg_max(y_cnn,1),tf.arg_max(y_,1))
+
+accuracy = tf.reduce_mean(tf.cast(correct_prediction,tf.float32))
+
+
+
+saver = tf.train.Saver()
+
+
+
+with tf.Session() as sess:
+    init = tf.global_variables_initializer()
+    sess.run(init)
+
+
+    num_iterations = int(len(images)/batch_size)
+
+    idx = 0
+
+    for j in xrange(60):
+        for i in xrange(num_iterations):
+
+
+            x_batch,y_batch = sequence_batch(images,labels,idx,batch_size)
+
+            print("x_batch shape: " + str(x_batch.shape))
+            print("y_batch shape: " + str(y_batch.shape))
+
+            train_step.run(
+                feed_dict={
+                    x: x_batch,
+                    y_: y_batch,
+                    keep_prob: 0.5
+                }
+            )
+
+            idx = idx + batch_size
+
+            if i%100 == 0:
+                training_feed_dict = {
+                    x: images,
+                    y_: labels,
+                    keep_prob: 1.0
+                }
+
+                test_feed_dict = {
+                    x: test_images,
+                    y_: test_labels,
+                    keep_prob: 1.0
+                }
+
+
+
+                train_accuracy = accuracy.eval(
+                    feed_dict=training_feed_dict
+                )
+                print('step %d, training accuracy %g' % (i, train_accuracy))
+
+                test_accuracy = accuracy.eval(
+                    feed_dict=test_feed_dict
+                )
+                print('step %d, test accuracy %g' % (i, test_accuracy))
+
+            if (i % 1000 == 0) or (i == num_iterations - 1):
+                # Save all variables of the TensorFlow graph to a
+                # checkpoint. Append the global_step counter
+                # to the filename so we save the last several checkpoints.
+                saver.save(sess,
+                           save_path=save_dir,
+                           global_step=train_step)
+
+                print("Saved checkpoint.")
+
+
+    print('test accuracy in every epoch %g' % accuracy.eval(
+        feed_dict={
+            x: test_images,
+            y_: test_labels,
+            keep_prob: 1.0
+        }
+        )
+    )

@@ -1,0 +1,19 @@
+Making a composite assignment + optimization op
+
+I want to make an op that, when run, changes a Variable's value and then updates it by optimizing some dependent scalar Tensor.
+I came up with this, which runs successfully:
+v = tf.Variable(tf.zeros([3]), name='v')
+v_input = tf.placeholder(tf.float32, [3], name='v_input')
+loss = tf.reduce_sum(tf.square(v))
+
+with tf.control_dependencies([v.assign(v_input)]):
+  op = tf.train.GradientDescentOptimizer(learning_rate=0.01).minimize(loss)
+
+session = tf.Session()
+session.run(tf.initialize_all_variables())
+session.run(op, feed_dict={v_input: [1., 2., 3.]})
+However, if I change GradientDescentOptimizer to AdagradOptimizer (or RMSProp, Adam, ...), it fails in the variable-initialization (second-to-last) line, complaining that v_input must be fed:
+W tensorflow/core/common_runtime/executor.cc:1076] 0x15cb160 Compute status: Invalid argument: You must feed a value for placeholder tensor 'v_input' with dtype float and shape dim { size: 3 }
+
+Obviously to actually execute the training op I need to feed in a value for v_input due to the control dependency. But just to initialize variables? I don't understand why I would need to feed anything in...
+I guess since AdagradOptimizer creates its own Variables (accumulated gradient) when you call minimize? I really only want the optimizer's update step to be dependent on the assignment op I create, but I'm not sure how to do that. Any help would be appreciated!

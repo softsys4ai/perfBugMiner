@@ -1,0 +1,52 @@
+NoOp replacement in DependencyOptimizer misses some control dependency conversions
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Debian testing (buster)
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+('v1.7.0-3-g024aecf414', '1.7.0')
+Python version:
+2.7.14
+Bazel version (if compiling from source):
+N/A
+GCC/Compiler version (if compiling from source):
+N/A
+CUDA/cuDNN version:
+N/A
+GPU model and memory:
+N/A
+Exact command to reproduce:
+Run Python code below with environment variable TF_CPP_MIN_VLOG_LEVEL=1
+
+Describe the problem
+When DependencyOptimizer::OptimizeNode() converts a node to a NoOp, it only converts the first input from each input node to a control dependencies. Multiple inputs from the same node can cause a NoOp to be created with non-control inputs. In the VLOG output below, the IdentityN node has inputs "^Placeholder" and "Placeholder". I haven't tried it but perhaps when this condition is false, the input should be deleted (like in the control input case). Note that the bad NoOp gets deleted in the small example here (because that was the easiest way to display the problem) but the real code I was running, the NoOp remains in the graph to cause trouble later.
+This bug is pretty sneaky: a NoOp with non-control inputs can cause GraphConstructor methods to fail, which in turn (silently!) prevents graph optimization (see here). The fallback original graph runs fine. I only went investigating because I saw output like this:
+2018-04-12 13:09:26.465603: E tensorflow/core/framework/types.cc:102] Unrecognized DataType enum value 425390044
+
+The cause was an error message from GraphConstructor::MakeEdge(), called here. It appears node and node_def did not agree on how many inputs there were to the node! node thought zero, which is where that strange DataType enum value came from: reading uninitialized memory here. I wasn't able to reproduce that exact failure in a tiny example; I believe the example here causes optimization to fail here.
+It would also be nice to see a warning when graph optimization fails.
+Source code / logs
+Code to reproduce the problem
+import tensorflow as tf
+
+with tf.device('/cpu:0'):
+    x = tf.placeholder(dtype=tf.int32, shape=[])
+    id2 = tf.identity_n([x, x])
+    with tf.control_dependencies(id2):
+        y = x + 1
+
+with tf.Session() as sess:
+    print sess.run(y, feed_dict={x: 5})
+Relevant log output
+2018-04-13 15:58:27.870639: I tensorflow/core/grappler/optimizers/dependency_optimizer.cc:194] ***** Replacing  IdentityN (IdentityN) with NoOp.
+2018-04-13 15:58:27.870678: I tensorflow/core/grappler/optimizers/dependency_optimizer.cc:332] ***** Rerouting input around
+name: "IdentityN"
+op: "NoOp"
+input: "^Placeholder"
+input: "Placeholder"
+device: "/job:localhost/replica:0/task:0/device:CPU:0"

@@ -1,0 +1,213 @@
+Does orthogonal initialization have GPU implementation (fails when explicitly assigned on a gpu)?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):  Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 14.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below):  1.2.1
+Python version:  3.4.3
+Bazel version (if compiling from source): 0.5.2
+CUDA/cuDNN version:  8.0/6.0
+GPU model and memory: Tesla P100 (16 gb)
+
+Describe the problem
+I get an error when trying to use orthogonal initialization which is explicitly assigned to be run on GPU. Looking at the log it looks like some parts of it (e.g. QR decomposition) are available on CPU only. Is this the case or is there some bug that is blocking it from being run on GPU only?
+Source code / logs
+The following code could be used to reproduce the issue:
+import tensorflow as tf
+with tf.device('/gpu:0'):
+    a = tf.get_variable('a', (10, 3, 3, 20), tf.float32, tf.orthogonal_initializer())
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+The error log:
+---------------------------------------------------------------------------
+InvalidArgumentError                      Traceback (most recent call last)
+~/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+   1284     try:
+-> 1285       return fn(*args)
+   1286     except errors.OpError as e:
+
+~/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/client/session.py in _run_fn(session, feed_dict, fetch_list, target_list, options, run_metadata)
+   1254       # Ensure any changes to the graph are reflected in the runtime.
+-> 1255       self._extend_graph()
+   1256       with errors.raise_exception_on_not_ok_status() as status:
+
+~/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/client/session.py in _extend_graph(self)
+   1315           tf_session.TF_ExtendGraph(
+-> 1316               self._session, graph_def.SerializeToString(), status)
+   1317         self._opened = True
+
+/usr/lib/python3.4/contextlib.py in __exit__(self, type, value, traceback)
+     65             try:
+---> 66                 next(self.gen)
+     67             except StopIteration:
+
+~/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/framework/errors_impl.py in raise_exception_on_not_ok_status()
+    465           compat.as_text(pywrap_tensorflow.TF_Message(status)),
+--> 466           pywrap_tensorflow.TF_GetCode(status))
+    467   finally:
+
+InvalidArgumentError: Cannot assign a device for operation 'a': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+Colocation Debug Info:
+Colocation group had the following types and devices: 
+Assign: GPU CPU 
+Reshape: GPU CPU 
+RealDiv: GPU CPU 
+Abs: GPU CPU 
+DiagPart: CPU 
+StridedSlice: GPU CPU 
+Qr: CPU 
+Add: GPU CPU 
+Mul: GPU CPU 
+Identity: CPU 
+VariableV2: GPU CPU 
+RandomStandardNormal: GPU CPU 
+Minimum: GPU CPU 
+Const: GPU CPU 
+Pack: GPU CPU 
+	 [[Node: a = VariableV2[_class=["loc:@a"], container="", dtype=DT_FLOAT, shape=[10,3,3,20], shared_name="", _device="/device:GPU:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+InvalidArgumentError                      Traceback (most recent call last)
+<ipython-input-1-f5bccc7031ec> in <module>()
+      5 
+      6 sess = tf.Session()
+----> 7 sess.run(tf.global_variables_initializer())
+
+~/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+    894     try:
+    895       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 896                          run_metadata_ptr)
+    897       if run_metadata:
+    898         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+~/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+   1122     if final_fetches or final_targets or (handle and feed_dict_tensor):
+   1123       results = self._do_run(handle, final_targets, final_fetches,
+-> 1124                              feed_dict_tensor, options, run_metadata)
+   1125     else:
+   1126       results = []
+
+~/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/client/session.py in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+   1277     if handle is None:
+   1278       return self._do_call(_run_fn, self._session, feeds, fetches, targets,
+-> 1279                            options, run_metadata)
+   1280     else:
+   1281       return self._do_call(_prun_fn, self._session, handle, feeds, fetches)
+
+~/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+   1296         except KeyError:
+   1297           pass
+-> 1298       raise type(e)(node_def, op, message)
+   1299 
+   1300   def _extend_graph(self):
+
+InvalidArgumentError: Cannot assign a device for operation 'a': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+Colocation Debug Info:
+Colocation group had the following types and devices: 
+Assign: GPU CPU 
+Reshape: GPU CPU 
+RealDiv: GPU CPU 
+Abs: GPU CPU 
+DiagPart: CPU 
+StridedSlice: GPU CPU 
+Qr: CPU 
+Add: GPU CPU 
+Mul: GPU CPU 
+Identity: CPU 
+VariableV2: GPU CPU 
+RandomStandardNormal: GPU CPU 
+Minimum: GPU CPU 
+Const: GPU CPU 
+Pack: GPU CPU 
+	 [[Node: a = VariableV2[_class=["loc:@a"], container="", dtype=DT_FLOAT, shape=[10,3,3,20], shared_name="", _device="/device:GPU:0"]()]]
+
+Caused by op 'a', defined at:
+  File "/usr/lib/python3.4/runpy.py", line 170, in _run_module_as_main
+    "__main__", mod_spec)
+  File "/usr/lib/python3.4/runpy.py", line 85, in _run_code
+    exec(code, run_globals)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/ipykernel_launcher.py", line 16, in <module>
+    app.launch_new_instance()
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/traitlets/config/application.py", line 658, in launch_instance
+    app.start()
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/ipykernel/kernelapp.py", line 477, in start
+    ioloop.IOLoop.instance().start()
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/zmq/eventloop/ioloop.py", line 177, in start
+    super(ZMQIOLoop, self).start()
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tornado/ioloop.py", line 888, in start
+    handler_func(fd_obj, events)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tornado/stack_context.py", line 277, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/zmq/eventloop/zmqstream.py", line 440, in _handle_events
+    self._handle_recv()
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/zmq/eventloop/zmqstream.py", line 472, in _handle_recv
+    self._run_callback(callback, msg)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/zmq/eventloop/zmqstream.py", line 414, in _run_callback
+    callback(*args, **kwargs)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tornado/stack_context.py", line 277, in null_wrapper
+    return fn(*args, **kwargs)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/ipykernel/kernelbase.py", line 283, in dispatcher
+    return self.dispatch_shell(stream, msg)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/ipykernel/kernelbase.py", line 235, in dispatch_shell
+    handler(stream, idents, msg)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/ipykernel/kernelbase.py", line 399, in execute_request
+    user_expressions, allow_stdin)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/ipykernel/ipkernel.py", line 196, in do_execute
+    res = shell.run_cell(code, store_history=store_history, silent=silent)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/ipykernel/zmqshell.py", line 533, in run_cell
+    return super(ZMQInteractiveShell, self).run_cell(*args, **kwargs)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/IPython/core/interactiveshell.py", line 2698, in run_cell
+    interactivity=interactivity, compiler=compiler, result=result)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/IPython/core/interactiveshell.py", line 2802, in run_ast_nodes
+    if self.run_code(code, result):
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/IPython/core/interactiveshell.py", line 2862, in run_code
+    exec(code_obj, self.user_global_ns, self.user_ns)
+  File "<ipython-input-1-f5bccc7031ec>", line 4, in <module>
+    a = tf.get_variable('a', (10, 3, 3, 20), tf.float32, tf.orthogonal_initializer())
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/ops/variable_scope.py", line 1065, in get_variable
+    use_resource=use_resource, custom_getter=custom_getter)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/ops/variable_scope.py", line 962, in get_variable
+    use_resource=use_resource, custom_getter=custom_getter)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/ops/variable_scope.py", line 367, in get_variable
+    validate_shape=validate_shape, use_resource=use_resource)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/ops/variable_scope.py", line 352, in _true_getter
+    use_resource=use_resource)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/ops/variable_scope.py", line 725, in _get_single_variable
+    validate_shape=validate_shape)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/ops/variables.py", line 199, in __init__
+    expected_shape=expected_shape)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/ops/variables.py", line 283, in _init_from_args
+    name=name)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/ops/state_ops.py", line 131, in variable_op_v2
+    shared_name=shared_name)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/ops/gen_state_ops.py", line 684, in _variable_v2
+    name=name)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 2576, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/igitman/Documents/weight-normalization-exps/venv/lib/python3.4/site-packages/tensorflow/python/framework/ops.py", line 1204, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): Cannot assign a device for operation 'a': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+Colocation Debug Info:
+Colocation group had the following types and devices: 
+Assign: GPU CPU 
+Reshape: GPU CPU 
+RealDiv: GPU CPU 
+Abs: GPU CPU 
+DiagPart: CPU 
+StridedSlice: GPU CPU 
+Qr: CPU 
+Add: GPU CPU 
+Mul: GPU CPU 
+Identity: CPU 
+VariableV2: GPU CPU 
+RandomStandardNormal: GPU CPU 
+Minimum: GPU CPU 
+Const: GPU CPU 
+Pack: GPU CPU 
+	 [[Node: a = VariableV2[_class=["loc:@a"], container="", dtype=DT_FLOAT, shape=[10,3,3,20], shared_name="", _device="/device:GPU:0"]()]]

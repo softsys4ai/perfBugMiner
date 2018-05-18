@@ -1,0 +1,58 @@
+tf.Fill has no gradient.  (Was: "ValueError: No inputs provided" when creating optimizer, seems like a bug)
+
+I am in the process of implementing a version of BinaryConnect in tensorflow, and ran into this weird crash.  I pasted a simple example to demonstrate the crash.  Seems that line w = tf.select(draws,mx_fill,-mx_fill) is causing the problem when the optimization graph is being constructed.
+# Simplified example to demonstrate the crash.  Seems that line w = tf.select(draws,mx_fill,-mx_fill) is causing the problem when the optimization graph is being constructed.
+
+import tensorflow as tf
+
+# Parameters
+learning_rate = 0.001
+batch_size = 100
+SEED = None  # Set to None for random seed.
+
+# Network Parameters
+n_image_size = 28
+n_channels = 1
+n_classes = 10 # MNIST total classes (0-9 digits)
+
+# tf Graph input
+x = tf.placeholder(tf.types.float32, [batch_size, n_image_size, n_image_size, n_channels])
+y = tf.placeholder(tf.types.float32, [batch_size, n_classes])
+
+#BinaryConnect like projections
+def project(W):
+    weights = tf.clip_by_value(W,0.1,-0.1)
+    shape = weights.get_shape()
+    rnd = tf.random_uniform(shape, minval=0, maxval=1.0, dtype=tf.float32, seed=None)
+    mx = tf.reduce_max(tf.abs(weights))
+    mx_fill = tf.fill(shape,mx)        
+    w_norm = tf.div(weights,mx_fill)
+    #[-1,1] -> [0,1]
+    w_prob = tf.div(tf.add(w_norm,tf.fill(shape,1.0)),tf.fill(shape,2.0))
+    prob = tf.clip_by_value(w_prob, 0.0, 1.0) 
+    draws = tf.greater(rnd,tf.fill(shape,1.0) - prob)
+    w = tf.select(draws,mx_fill,-mx_fill) #This line seems to be the issue
+    #Note that uncommenting below seems work, suggesting the graph is constructed correctly
+    #w = tf.select(draws,mx_fill,weights)
+    return w
+
+def net_conv(_x, _weights): 
+    wconv_proj = project(_weights['layer1'])
+    out1 = tf.nn.relu(tf.nn.conv2d(x, wconv_proj, strides=[1, 1, 1, 1], padding='SAME'))
+    out1p = tf.nn.max_pool(out1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
+
+    wfc_proj = project(_weights['layer2'])
+    shape = out1p.get_shape().as_list()
+    reshape = tf.reshape(out1p, [shape[0], shape[1] * shape[2] * shape[3]])
+    out2 = tf.nn.relu(tf.matmul(reshape, wfc_proj))
+
+    return out2
+
+weights_conv = {
+    'layer1': tf.Variable(tf.truncated_normal([5, 5, n_channels, 32], stddev=0.1, seed=SEED)),
+    'layer2': tf.Variable(tf.truncated_normal([14 * 14 * 32, n_classes], stddev=0.1, seed=SEED))
+}
+
+pred1  = net_conv(x, weights_conv)
+cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(pred1, y))
+optimizer1 = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost)

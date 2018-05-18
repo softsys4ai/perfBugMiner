@@ -1,0 +1,128 @@
+Unable to use two gmms in one classifier in tf gpu 1.1
+
+I've tried to use tf.contrib.factorization.python.ops' gmm model
+I've watched the gmm_test.py as the doc about this model is not clear to use
+My code is as below
+class DTW_GMM:
+    def __init__(self, cluster_num=3):
+        self.genuine_graph = tf.Graph()
+        self.forgery_graph = tf.Graph()
+        with self.genuine_graph.as_default():
+            self.genuine_gmm = gmm.GMM(cluster_num)
+        with self.forgery_graph.as_default():
+            self.forgery_gmm = gmm.GMM(cluster_num)
+
+    def compare(self, reference, target):
+        channel_dtw = []
+        for channel_index in range(len(reference)):
+            dis, _, _, _ = dtw(reference[channel_index], target[channel_index], dist=my_custom_norm)
+            channel_dtw.append(dis)
+        return channel_dtw
+
+    def input_fn(self, data):
+        def fn():
+            return data, None
+        return fn
+
+    def train_genuine(self, data, steps=10):
+        with self.genuine_graph.as_default():
+            self.genuine_gmm.fit(input_fn=self.input_fn(data), steps=steps)
+
+    def train_forgery(self, data, steps=10):
+        with self.forgery_graph.as_default():
+            self.forgery_gmm.fit(input_fn=self.input_fn(data), steps=steps)
+
+    def infer(self, data):
+        genuine_score = self.genuine_gmm.score(input_fn=self.input_fn(data), steps=1)
+        forgery_score = self.forgery_gmm.score(input_fn=self.input_fn(data), steps=1)
+        return genuine_score >= forgery_score
+
+batch_size = 64
+loop = 100
+
+
+def train():
+    model = DTW_GMM()
+    data = Data()
+
+    sess = tf.Session()
+    with sess.as_default():
+        sess.run(tf.global_variables_initializer())
+        for step in range(loop):
+            print('step: {}'.format(step))
+            genuine_data = []
+            forgery_data = []
+            for i in range(batch_size):
+                reference, target = data.get_genuine_pair()
+                genuine_data.append(model.compare(reference, target))
+                reference, target = data.get_fake_pair()
+                forgery_data.append(model.compare(reference, target))
+            genuine_data = tf.constant(genuine_data, dtype=np.float32)
+            forgery_data = tf.constant(forgery_data, dtype=np.float32)
+            model.train_genuine(genuine_data)
+            model.train_forgery(forgery_data)
+
+Even I try to define graph for each of the two gmm, it still connot work with the error log:
+  File "DTW_GMM.py", line 39, in train_genuine
+    self.genuine_gmm.fit(input_fn=self.input_fn(data), steps=steps)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/util/deprecation.py", line 281, in new_func
+    return func(*args, **kwargs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 430, in fit
+    loss = self._train_model(input_fn=input_fn, hooks=hooks)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 927, in _train_model
+    model_fn_ops = self._get_train_ops(features, labels)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1132, in _get_train_ops
+    return self._call_model_fn(features, labels, model_fn_lib.ModeKeys.TRAIN)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1103, in _call_model_fn
+    model_fn_results = self._model_fn(features, labels, **kwargs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/factorization/python/ops/gmm.py", line 137, in _model_fn
+    self._params)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/factorization/python/ops/gmm_ops.py", line 498, in gmm
+    covariance_type, random_seed)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/factorization/python/ops/gmm_ops.py", line 147, in __init__
+    self._create_variables(data, initial_means)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/factorization/python/ops/gmm_ops.py", line 173, in _create_variables
+    _init_clusters_random(data, self._num_classes, self._random_seed),
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/factorization/python/ops/gmm_ops.py", line 81, in _init_clusters_random
+    [check_ops.assert_less_equal(num_clusters, num_data)]):
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 3595, in control_dependencies
+    return get_default_graph().control_dependencies(control_inputs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 3324, in control_dependencies
+    c = self.as_graph_element(c)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2414, in as_graph_element
+    return self._as_graph_element_locked(obj, allow_tensor, allow_operation)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2498, in _as_graph_element_locked
+    raise ValueError("Operation %s is not an element of this graph." % obj)
+ValueError: Operation name: "assert_less_equal/Assert/Assert"
+op: "Assert"
+input: "assert_less_equal/All"
+input: "assert_less_equal/Assert/Assert/data_0"
+input: "assert_less_equal/Assert/Assert/data_1"
+input: "assert_less_equal/Assert/Assert/data_2"
+input: "assert_less_equal/x"
+input: "assert_less_equal/Assert/Assert/data_4"
+input: "assert_less_equal/Assert/Assert/data_5"
+input: "strided_slice_1"
+attr {
+  key: "T"
+  value {
+    list {
+      type: DT_STRING
+      type: DT_STRING
+      type: DT_STRING
+      type: DT_INT32
+      type: DT_STRING
+      type: DT_STRING
+      type: DT_INT32
+    }
+  }
+}
+attr {
+  key: "summarize"
+  value {
+    i: 3
+  }
+}
+ is not an element of this graph.
+
+The input is a constant tensor with shape of [batch_size, 4]

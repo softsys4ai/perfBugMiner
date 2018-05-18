@@ -1,0 +1,46 @@
+tf.data.Dataset.padded_batch() doesn't work with dataset.map using tf.py_func
+
+System information
+
+Have I written custom code: yes
+OS Platform and Distribution: CentOS Linux release 7.2.1511
+TensorFlow installed from: pip
+TensorFlow version (use command below): 1.4.1
+Python version: 2.7.5
+
+Describe the problem
+It's quite common for NLP tasks to read variable-length sentences from text files, to map them and to padd them. But Dataset.padded_batch() doesn't work with tf.dataset which uses map (tf.py_func)
+Source code
+import tensorflow as tf                                                                           
+import numpy as np                                                                                
+                                                                                                  
+def convert(line):                                                                                
+    tokens = line.split()                                                                 
+    return np.array(tokens, dtype=np.int32)
+
+# Simulating reading variable-length sentences from a file. Using TextLineDataset will have the same problem
+dataset = tf.data.Dataset.from_tensor_slices(["1 2 3", "4 5"])         
+                           
+# Tokenize each sentence and convert it to list of int
+dataset = dataset.map(lambda line: tf.py_func(convert, [line], [tf.int32]))     
+                  
+dataset = dataset.padded_batch(1, [None]) # This line doesn't work whatever the batch_size is
+# dataset = dataset.batch(1) # This line works well                                              
+ 
+iterator = dataset.make_one_shot_iterator()                                                       
+batch_data = iterator.get_next()                                                                  
+                                                                                                  
+with tf.Session() as sess:                                                                        
+    print sess.run(batch_data)                                                                                                 
+
+Log
+    dataset = dataset.padded_batch(1, [None])
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/data/ops/dataset_ops.py", line 695, in padded_batch
+    return PaddedBatchDataset(self, batch_size, padded_shapes, padding_values)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/data/ops/dataset_ops.py", line 1292, in __init__
+    input_dataset.output_shapes, _partial_shape_to_tensor, padded_shapes)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/data/util/nest.py", line 512, in map_structure_up_to
+    assert_shallow_structure(shallow_tree, input_tree)
+  File "/usr/lib/python2.7/site-packages/tensorflow/python/data/util/nest.py", line 356, in assert_shallow_structure
+    "Input has type: %s." % type(input_tree))
+TypeError: If shallow structure is a sequence, input must also be a sequence. Input has type: <type 'list'>.

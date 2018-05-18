@@ -1,0 +1,51 @@
+Incorrect gradients for scatter_add
+
+Hi Tensorflow Development Team,
+Thank you so much for being so patient with me. I am currently working with scatter_add, and have encountered a None gradient where I believe there should be gradients.
+Environment info
+Operating System: CentOS
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+CUDA version 7.5
+cuDNN version 7.0 (64 bit)
+tensorflow/0.8.0-gpu version
+Steps to reproduce
+N_rows = 10
+N_cols = 3
+X_ph = tf.placeholder(tf.float32, shape=(None, N_cols))
+ind_ph = tf.placeholder(tf.int32, shape=(None))
+Z = tf.Variable(tf.zeros([N_rows, N_cols]))
+Z = Z.assign(tf.zeros([N_rows, N_cols]))
+Z_add = tf.scatter_add(Z, ind_ph, X_ph)
+Z_sum = tf.reduce_sum(Z_add)
+grad_op = tf.gradients(Z_sum, X_ph)
+X = np.array([[1,0,1],[2,2,1]])
+ind = [0, 1]
+What have you tried?
+If you try to differentiate Z_sum with respect to Z_add, you get a nonzero gradient, as expected. However, It seems that if you differentiate Z_sum with respect to Z or X_ph, you get a None, indicating no connection between Z_sum and X_ph or Z. I would definitely expect there to be a connection between Z_add and X_ph/Z. Do you think you could take a look at this and tell me how I might be able to circumvent this issue? Thank you so much for your help!
+Best,
+Han
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment).
+The output given by tensorflow when evaluating grad_op is
+File "scatter_update_grad_test.py", line 34, in 
+out = sess.run(grad_op, feed_dict={X_ph : X, ind_ph : ind})
+File "/share/sw/free/tensorflow/0.8.0/tensorflow/python/client/session.py", line 340, in run
+run_metadata_ptr)
+File "/share/sw/free/tensorflow/0.8.0/tensorflow/python/client/session.py", line 523, in _run
+processed_fetches = self._process_fetches(fetches)
+File "/share/sw/free/tensorflow/0.8.0/tensorflow/python/client/session.py", line 493, in _process_fetches
+% (subfetch, fetch, type(subfetch), str(e)))
+TypeError: Fetch argument None of None has invalid type <type 'NoneType'>, must be a string or Tensor. (Can not convert a NoneType into a Tensor or Operation.)
+If I take grad_op = tf.gradients(Z_sum, Z_add), I obtain
+array([[ 1.,  1.,  1.],
+[ 1.,  1.,  1.],
+[ 1.,  1.,  1.],
+[ 1.,  1.,  1.],
+[ 1.,  1.,  1.],
+[ 1.,  1.,  1.],
+[ 1.,  1.,  1.],
+[ 1.,  1.,  1.],
+[ 1.,  1.,  1.],
+[ 1.,  1.,  1.]], dtype=float32)]
+as expected since we are using reduce sum.

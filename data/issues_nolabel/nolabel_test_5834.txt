@@ -1,0 +1,59 @@
+TensorForestEstimator with input_fn results in infinite loop for evaluate and predict.
+
+When using TensorForestEstimator, using the previous implementation with x= and y= works. However, when trying to convert to the soon-to-be standard of input_fn, I get strange behaviors. Given
+params = tf.contrib.tensor_forest.python.tensor_forest.ForestHParams(
+num_trees=10,
+max_nodes=100,
+num_classes=2,
+num_features=features_count)
+classifier = TensorForestEstimator(params)
+
+calling
+classifier.fit(input_fn=(lambda: training_input_fn(trainset)))
+
+works and completes correctly. The input_fn used is the following :
+features_name = [] # ordered list of all features in the dataset
+def training_input_fn(dataset):
+        data, target = dataset
+        # 'data' is a numpy array where data[:,i] returns all observations for a given feature
+        # It is reshaped because otherwise I had a concat error
+        features = {features_name[i]: tf.constant(data[:, i], shape=(data.shape[0], 1))
+                    for i in range(len(features_name)) if features_name[i] in DEFAULT_FEATURES}
+        labels = tf.constant(target)
+        return features, labels
+
+However, calling
+classifier.evaluate(input_fn=(lambda: training_input_fn(validset)))
+
+afterwards results in an apparently neverending loop in tf.contrib.learn.python.learn.graph_actions in function run_feeds_iter in the following snippet :
+      try:
+        threads = queue_runner.start_queue_runners(session, coord=coord)
+        for f in feed_dicts:
+          yield session.run(output_dict, f)
+      finally:
+        coord.request_stop()
+        if threads:
+          coord.join(threads, stop_grace_period_secs=120)
+
+The loop seems like never stopping. Also, memory starts increasing slowly but steadily from there (had to stop at 10 GB for this fairly small dataset). The same goes if I try predict on it.
+My Training dataset is composed of 3633 entries with 183 features and my validation dataset is composed of 2180 entries.
+Environment info
+Operating System:
+Ubuntu 16.04, running on Python3.5
+Installed version of CUDA and cuDNN:
+-rw-r--r-- 1 root root   558720 Nov 22 10:52 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Nov 22 10:52 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root       19 Nov 22 10:52 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rwxr-xr-x 1 root root   415432 Nov 22 10:52 /usr/local/cuda/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root   775162 Nov 22 10:52 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 root root       13 Nov 22 12:47 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 root root       17 Nov 22 12:47 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+-rwxr-xr-x 1 root root 79337624 Nov 22 12:47 /usr/local/cuda/lib64/libcudnn.so.5.1.5
+-rw-r--r-- 1 root root 69756172 Nov 22 12:47 /usr/local/cuda/lib64/libcudnn_static.a
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD) : a26a5925b0500d0e9cd259989fc0e113fa29e27f
+The output of bazel version :
+
+Build label: 0.4.0 Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar Build time: Wed Nov 2 17:54:14 2016 (1478109254) Build timestamp: 1478109254 Build timestamp as int: 1478109254

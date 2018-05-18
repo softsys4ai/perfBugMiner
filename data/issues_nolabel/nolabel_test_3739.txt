@@ -1,0 +1,143 @@
+Cross entropy should give targets out of range error as given by tf.nn.in_top_k
+
+I ran the tensorflow code(given below) and it gave me error(error stack is below code) targets out of range.
+I have figured out what was causing this error, it was due to mismatch between labels and outputs, like I'm doing 8 class sentiment classification and my labels are (1,2,3,4,7,8,9,10) so it was unable to match predictions(1,2,3,4,5,6,7,8) with my labels, so that's why it was giving out of range error. My question is, why it didn't gave me error in this line c_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits,Y) , how it's matching labels with predictions in this case as opposed to in in_top_k? I think c_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits,Y) should give me error because predictions and labels are not same. Why I'm not getting targets out of range error in cross entropy function?
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import tensorflow as tf
+import numpy as np
+import math
+import os
+from nltk.tokenize import TweetTokenizer
+batch = 500
+start = 0
+end = batch - 1
+learning_rate = 0.2
+num_classes = 8
+path = "/home/indy/Downloads/aclImdb/train/pos"
+time_steps = 250
+embedding = 50
+
+def get_embedding():
+    gfile_path = os.path.join("/home/indy/Downloads/glove.6B", "glove.6B.50d.txt")
+    f = open(gfile_path,'r')
+    embeddings = {}
+    for line in f:
+        sp_value = line.split()
+        word = sp_value[0]
+        embedding = [float(value) for value in sp_value[1:]]
+        embeddings[word] = embedding
+    return embeddings
+
+ebd = get_embedding()
+
+def get_y(file_name):
+    y_value = file_name.split('_')
+    y_value = y_value[1].split('.')
+    return y_value[0] 
+
+def get_x(path,file_name):
+    file_path = os.path.join(path,file_name)
+    x_value = open(file_path,'r')
+    for line in x_value:
+        x_value = line.replace("<br /><br />","") 
+        x_value = x_value.lower()
+    tokeniz = TweetTokenizer()
+    x_value = tokeniz.tokenize(x_value)
+    padding = 250 - len(x_value)
+    if padding > 0:
+       p_value = ['pad' for i in range(padding)]
+       x_value = np.concatenate((x_value,p_value))
+    x_value = [ebd['value'] for value in x_value]
+
+    return x_value
+
+def  batch_f(path):
+     directory = os.listdir(path)
+     y = [get_y(directory[i]) for i in range(len(directory))]
+     x = [get_x(path,directory[i]) for i in range(len(directory))]    
+     return x,y
+
+
+X = tf.placeholder(tf.float32, [batch,time_steps,embedding])
+Y = tf.placeholder(tf.int32, [batch])
+
+def build_nlp_model(x, _units, lstm_layers,num_classes):
+
+     x = tf.transpose(x, [1, 0, 2])
+     x = tf.reshape(x, [-1, embedding])
+     x = tf.split(0, time_steps, x)
+
+
+     lstm = tf.nn.rnn_cell.LSTMCell(num_units = _units, state_is_tuple = True)
+
+     multi_lstm = tf.nn.rnn_cell.MultiRNNCell([lstm] * lstm_layers, state_is_tuple = True)
+
+     outputs , state = tf.nn.rnn(multi_lstm,x, dtype = tf.float32)     
+
+     weights = tf.Variable(tf.random_normal([_units,num_classes]))
+     biases  = tf.Variable(tf.random_normal([num_classes]))
+
+     logits = tf.matmul(outputs[-1], weights) + biases
+     return logits
+
+logits = build_nlp_model(X,400,4,num_classes)
+c_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits,Y)
+loss = tf.reduce_mean(c_loss)
+
+
+
+decayed_learning_rate = tf.train.exponential_decay(learning_rate,0,10000,0.9)
+optimizer= tf.train.AdamOptimizer(decayed_learning_rate)
+minimize_loss = optimizer.minimize(loss)
+
+
+
+correct_predict = tf.nn.in_top_k(logits, Y, 1)
+accuracy = tf.reduce_mean(tf.cast(correct_predict, tf.float32))
+
+
+init = tf.initialize_all_variables()
+
+with tf.Session() as sess:
+     sess.run(init)
+     for i in range(25):
+         x, y = batch_f(path)
+         sess.run(minimize_loss,feed_dict={X : x, Y : y})
+         accu = sess.run(accuracy,feed_dict = {X: x, Y: y})
+         cost = sess.run(loss,feed_dict = {X: x,Y: y})
+         start = end 
+         end = (start + batch)
+         print ("Minibatch Loss = " + "{:.6f}".format(cost) + ", Training Accuracy= " + "{:.5f}".format(accu))
+
+This is the error stack that is caused by tf.nn.in_top_k.
+(500, 250, 50)
+(500,)
+Traceback (most recent call last):
+  File "nlp.py", line 115, in <module>
+    accu = sess.run(accuracy,feed_dict = {X: x, Y: y})
+  File "/home/indy/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 372, in run
+    run_metadata_ptr)
+  File "/home/indy/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 636, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/indy/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 708, in _do_run
+    target_list, options, run_metadata)
+  File "/home/indy/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 728, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: targets[0] is out of range
+     [[Node: InTopK = InTopK[T=DT_INT32, k=1, _device="/job:localhost/replica:0/task:0/cpu:0"](add, _recv_Placeholder_1_0)]]
+Caused by op u'InTopK', defined at:
+  File "nlp.py", line 102, in <module>
+    correct_predict = tf.nn.in_top_k(logits, Y, 1)
+  File "/home/indy/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/ops/gen_nn_ops.py", line 890, in in_top_k
+    targets=targets, k=k, name=name)
+  File "/home/indy/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/ops/op_def_library.py", line 704, in apply_op
+    op_def=op_def)
+  File "/home/indy/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2260, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/home/indy/tensorflow/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1230, in __init__
+    self._traceback = _extract_stack()
+
+And I think this type of error(targets out of range) should be given by cross entropy also, when labels don't match with predictions.

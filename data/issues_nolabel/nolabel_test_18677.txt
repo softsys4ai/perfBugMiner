@@ -1,0 +1,67 @@
+Tensorflow not respecting device placement for custom ops
+
+Please go to Stack Overflow for help and support:
+https://stackoverflow.com/questions/tagged/tensorflow
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.7.0-3-g024aecf414 1.7.0
+Python version:  3.5.2
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source): gcc (Ubuntu 5.4.0-6ubuntu1~16.04.9) 5.4.0 20160609, for the custom op
+CUDA/cuDNN version: nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2017 NVIDIA Corporation
+Built on Fri_Sep__1_21:08:03_CDT_2017
+Cuda compilation tools, release 9.0, V9.0.176
+GPU model and memory: GTX 1080 Ti
+
+Exact command to reproduce
+Folder for reproducing the issue:
+https://github.com/proteneer/khan/tree/tf_bug_repro/gpu_featurizer/debug.py
+
+
+Compile with instructions in README.build
+
+
+Run debug.py
+
+
+log device placement shows that the op is placed on a gpu:
+2018-04-18 17:24:01.008389: I tensorflow/core/common_runtime/placer.cc:884] Featurize: (Featurize)/job:localhost/replica:0/task:0/device:GPU:0
+however, it actually runs on the CPU:
+stdout: RUNNING ON CPU!! (this is emitted by the actual CPU kernel in C++)
+
+Removing the reshape line (line 55) in debug.py:
+
+f0, f1, f2, f3 = tf.reshape(f0, (-1, 384)), tf.reshape(f1, (-1, 384)), tf.reshape(f2, (-1, 384)), tf.reshape(f3, (-1, 384))
+Successfully triggers the custom op to be run on the GPU:
+stdout: RUNNING ON GPU.. (this is emitted by the actual GPU kernel in C++)
+
+Removing the registration line in ani_op.cpp:
+
+REGISTER_KERNEL_BUILDER(Name("Featurize").HostMemory("acs").Device(DEVICE_CPU), AniCombined<CPUDevice>);
+Restores the intended behavior as in runs properly on the GPU with or without the reshape. But cripples the op in that it only works on GPUs.
+Describe the problem
+This should be a bug since we should be enforcing placement of the op onto the GPU. See steps to reproduce the bug. Oddly enough the custom Featurize op in addition to the Reshape op is shown being placed on the GPU:
+2018-04-18 17:24:01.008389: I tensorflow/core/common_runtime/placer.cc:884] Featurize: (Featurize)/job:localhost/replica:0/task:0/device:GPU:0
+Reshape_3: (Reshape): /job:localhost/replica:0/task:0/device:GPU:0
+2018-04-18 17:24:01.008404: I tensorflow/core/common_runtime/placer.cc:884] Reshape_3: (Reshape)/job:localhost/replica:0/task:0/device:GPU:0
+Reshape_2: (Reshape): /job:localhost/replica:0/task:0/device:GPU:0
+2018-04-18 17:24:01.008418: I tensorflow/core/common_runtime/placer.cc:884] Reshape_2: (Reshape)/job:localhost/replica:0/task:0/device:GPU:0
+Reshape_1: (Reshape): /job:localhost/replica:0/task:0/device:GPU:0
+2018-04-18 17:24:01.008432: I tensorflow/core/common_runtime/placer.cc:884] Reshape_1: (Reshape)/job:localhost/replica:0/task:0/device:GPU:0
+Reshape: (Reshape): /job:localhost/replica:0/task:0/device:GPU:0
+2018-04-18 17:24:01.008446: I tensorflow/core/common_runtime/placer.cc:884] Reshape: (Reshape)/job:localhost/replica:0/task:0/device:GPU:0
+Reshape_3/shape: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+2018-04-18 17:24:01.008462: I tensorflow/core/common_runtime/placer.cc:884] Reshape_3/shape: (Const)/job:localhost/replica:0/task:0/device:GPU:0
+Reshape_2/shape: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+2018-04-18 17:24:01.008476: I tensorflow/core/common_runtime/placer.cc:884] Reshape_2/shape: (Const)/job:localhost/replica:0/task:0/device:GPU:0
+Reshape_1/shape: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+2018-04-18 17:24:01.008490: I tensorflow/core/common_runtime/placer.cc:884] Reshape_1/shape: (Const)/job:localhost/replica:0/task:0/device:GPU:0
+Reshape/shape: (Const): /job:localhost/replica:0/task:0/device:GPU:0
+2018-04-18 17:24:01.008505: I tensorflow/core/common_runtime/placer.cc:884] Reshape/shape: (Const)/job:localhost/replica:0/task:0/device:GPU:0
+Source code / logs
+All the code required is inside here:
+https://github.com/proteneer/khan/tree/tf_bug_repro/gpu_featurizer

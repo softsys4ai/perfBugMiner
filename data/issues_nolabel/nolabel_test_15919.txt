@@ -1,0 +1,21 @@
+A bug of tf.layers.batch_normalization when training is not a constant
+
+I encountered a bug of tf.layers.batch_normalization when the training argument is not a constant. Usually, when the training argument evaluates to False, the moving mean and variance should not be updated. However, in certain cases, the moving mean and variance may become NaN.
+The bug occurs in the following code in python/layers/normalization.py:
+    training_value = utils.constant_value(training)
+    if training_value is None:
+      one_minus_decay = utils.smart_cond(training,
+                                         lambda: self._one_minus_decay,
+                                         lambda: 0.)
+    else:
+      one_minus_decay = ops.convert_to_tensor(self._one_minus_decay)
+    if training_value or training_value is None:
+      mean_update = self._assign_moving_average(self.moving_mean, mean,
+                                                one_minus_decay)
+      variance_update = self._assign_moving_average(self.moving_variance,
+                                                    variance, one_minus_decay)
+
+When training is not a constant but evaluates to False, one_minus_decay is set to 0, and it is expected that _assign_moving_average does not actually change the moving average. However, mean and variance are outputs of FusedBatchNormOp, which are not actually computed when training is False. So, the content of mean and variance are random, and it can contain NaN values in certain cases. The NaN values in mean and variance then lead to NaN values in the moving mean and moving variance, even if the one_minus_decay is 0 (NaN times 0 is still NaN). Once moving mean and variance contain NaN values, the network produces NaN outputs forever.
+I think a way to fix this issue is to modify _assign_moving_average. Just add following one line:
+update_delta = tf.cond(tf.equal(one_minus_decay, 0), 0, update_delta)
+Another way to fix is to let mean and variance output be zero if training is False. This way also helps preventing triggering the inf_or_nan_filter of tfdbg.

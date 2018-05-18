@@ -1,0 +1,216 @@
+NAN returning for cost and optimizer for tensorflow.train.GradientDescentOptimizer (updated code)
+
+Been working on this all day now and totally at a loss...  I keep getting Nan values for my cost function right away and i cannot tell why.  Any help much appreciated at this point....
+I am running the following code with tensorflow GradientDescentOptmizer...
+#!/usr/bin/env python
+
+import tensorflow as tf
+import numpy as np
+import os
+from   os.path import isfile, join
+import argparse
+import sys
+import glob
+import pandas as pd
+import csv
+import re
+import tempfile
+import urllib
+import matplotlib.pyplot as plt
+
+# Start basic regression
+tf.reset_default_graph()
+
+rng = np.random
+
+# Parameters
+learning_rate = 0.0001
+training_epochs = 1000
+display_step = 50
+
+logs_path = '/tmp/tensorflow_logs/example'
+
+# Bad Training Data
+train_Y = np.asarray([  59.8000,   60.5000,   60.9000,   61.0000,   61.5000,   64.0000,   64.5000,
+                        64.8000,   67.8000,   71.2000,   72.0000,   78.9000,   79.2000,   81.0000,
+                        82.6000,   84.0000,   84.0000])
+train_X = np.asarray([600., 760., 802., 568., 679., 865., 1103., 865., 896., 1068.,
+                        769., 1062., 1123., 1081., 1137., 1137., 1137.])
+# Good Training Data
+#train_X = np.asarray([3.3,4.4,5.5,6.71,6.93,4.168,9.779,6.182,7.59,2.167,
+#                     7.042,10.791,5.313,7.997,5.654,9.27,3.1])
+#train_Y = np.asarray([1.7,2.76,2.09,3.19,1.694,1.573,3.366,2.596,2.53,1.221,
+#                     2.827,3.465,1.65,2.904,2.42,2.94,1.3])
+
+print(train_X.dtype)
+print(train_Y.dtype)
+print(str(train_X))
+print(str(train_Y))
+
+n_samples = train_X.shape[0]
+
+print("Samples = %d" % n_samples)
+
+# tf Graph Input
+X = tf.placeholder("float")
+Y = tf.placeholder("float")
+
+# Set model weights
+W = tf.Variable(1.0, name="weight")
+b = tf.Variable(1.0, name="bias")
+
+# Construct a linear model
+with tf.name_scope('Model'):
+    pred = tf.add(tf.multiply(X, W), b)
+
+# Mean squared error
+with tf.name_scope('Loss'):
+    cost = tf.reduce_sum(tf.pow(pred-Y, 2))/(2*n_samples)
+# Gradient descent
+with tf.name_scope('SGD'):
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost)
+
+# Initializing the variables
+init = tf.global_variables_initializer()
+
+# summaries
+tf.summary.scalar("loss",cost)
+merged_summary_op = tf.summary.merge_all()
+
+# Launch the graph
+with tf.Session() as sess:
+    sess.run(init)
+    # op to write logs to Tensorboard
+    summary_writer = tf.summary.FileWriter(logs_path, graph=tf.get_default_graph())
+
+    # Fit all training data
+    for epoch in range(training_epochs):
+        for (x, y) in zip(train_X, train_Y):
+            #print("x=%f y=%f" % (x,y))
+            op, c, summary = sess.run([optimizer, cost, merged_summary_op], feed_dict={X: x, Y: y})
+
+            summary_writer.add_summary(summary, epoch)
+
+            # Display logs per epoch step
+        if (epoch+1) % display_step == 0:
+            c, summmary = sess.run([cost, merged_summary_op], feed_dict={X: train_X, Y:train_Y})
+            summary_writer.add_summary(summary, epoch)                
+              
+            print("Epoch:", '%04d' % (epoch+1), "cost=", "{:.9f}".format(c), \
+            "W=", sess.run(W), "b=", sess.run(b))
+
+    print("Optimization Finished!")
+    training_cost = sess.run(cost, feed_dict={X: train_X, Y: train_Y})
+    print("Training cost=", training_cost, "W=", sess.run(W), "b=", sess.run(b), '\n')
+
+    # Graphic display
+    plt.plot(train_X, train_Y, 'ro', label='Original data')
+    plt.plot(train_X, sess.run(W) * train_X + sess.run(b), label='Fitted line')
+    plt.legend()
+    plt.show()
+
+    # Bad Test Data
+    test_Y = np.asarray([ 48.2000,  56.5000,  57.0000,  59.5000,  15.0000,  17.8000,  43.5000,  50.2000])
+    test_X = np.asarray([ 549.,  710.,  568.,  825., 414.,  439.,  460.,  614. ])
+
+    # Good Test Data
+    #test_X = np.asarray([6.83, 4.668, 8.9, 7.91, 5.7, 8.7, 3.1, 2.1])
+    #test_Y = np.asarray([1.84, 2.273, 3.2, 2.831, 2.92, 3.24, 1.35, 1.03])
+
+
+    print("Testing... (Mean square loss Comparison)")
+    testing_cost = sess.run(
+        tf.reduce_sum(tf.pow(pred - Y, 2)) / (2 * test_X.shape[0]),
+        feed_dict={X: test_X, Y: test_Y})  # same function as cost above
+    print("Testing cost=", testing_cost)
+    print("Absolute mean square loss difference:", abs(
+        training_cost - testing_cost))
+
+    plt.plot(test_X, test_Y, 'bo', label='Testing data')
+    plt.plot(train_X, sess.run(W) * train_X + sess.run(b), label='Fitted line')
+    plt.legend()
+    plt.show()`
+
+And get the following result...
+
+float64
+float64
+[  600.   760.   802.   568.   679.   865.  1103.   865.   896.  1068.
+769.  1062.  1123.  1081.  1137.  1137.  1137.]
+[ 59.8  60.5  60.9  61.   61.5  64.   64.5  64.8  67.8  71.2  72.   78.9
+79.2  81.   82.6  84.   84. ]
+Samples = 17
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+Epoch: 0050 cost= nan W= nan b= nan
+Epoch: 0100 cost= nan W= nan b= nan
+Epoch: 0150 cost= nan W= nan b= nan
+Epoch: 0200 cost= nan W= nan b= nan
+Epoch: 0250 cost= nan W= nan b= nan
+Epoch: 0300 cost= nan W= nan b= nan
+Epoch: 0350 cost= nan W= nan b= nan
+Epoch: 0400 cost= nan W= nan b= nan
+Epoch: 0450 cost= nan W= nan b= nan
+Epoch: 0500 cost= nan W= nan b= nan
+Epoch: 0550 cost= nan W= nan b= nan
+Epoch: 0600 cost= nan W= nan b= nan
+Epoch: 0650 cost= nan W= nan b= nan
+Epoch: 0700 cost= nan W= nan b= nan
+Epoch: 0750 cost= nan W= nan b= nan
+Epoch: 0800 cost= nan W= nan b= nan
+Epoch: 0850 cost= nan W= nan b= nan
+Epoch: 0900 cost= nan W= nan b= nan
+Epoch: 0950 cost= nan W= nan b= nan
+Epoch: 1000 cost= nan W= nan b= nan
+Optimization Finished!
+Training cost= nan W= nan b= nan
+Testing... (Mean square loss Comparison)
+Testing cost= nan
+Absolute mean square loss difference: nan
+And get the following output...
+
+if I uncomment out the alternate array values for X amd Y everything works fine...
+
+float64
+float64
+[  3.3     4.4     5.5     6.71    6.93    4.168   9.779   6.182   7.59
+2.167   7.042  10.791   5.313   7.997   5.654   9.27    3.1  ]
+[ 1.7    2.76   2.09   3.19   1.694  1.573  3.366  2.596  2.53   1.221
+2.827  3.465  1.65   2.904  2.42   2.94   1.3  ]
+Samples = 17
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+Epoch: 0050 cost= 8.580235481 W= 0.846042 b= 0.978224
+Epoch: 0100 cost= 5.489832401 W= 0.72321 b= 0.960839
+Epoch: 0150 cost= 3.522622824 W= 0.625209 b= 0.946956
+Epoch: 0200 cost= 2.270416975 W= 0.547022 b= 0.935869
+Epoch: 0250 cost= 1.473346949 W= 0.484644 b= 0.927012
+Epoch: 0300 cost= 0.965984821 W= 0.434878 b= 0.919934
+Epoch: 0350 cost= 0.643029690 W= 0.395175 b= 0.914275
+Epoch: 0400 cost= 0.437456042 W= 0.363499 b= 0.909749
+Epoch: 0450 cost= 0.306603283 W= 0.338229 b= 0.906127
+Epoch: 0500 cost= 0.223311335 W= 0.318069 b= 0.903225
+Epoch: 0550 cost= 0.170292616 W= 0.301985 b= 0.900899
+Epoch: 0600 cost= 0.136546493 W= 0.289155 b= 0.899031
+Epoch: 0650 cost= 0.115067258 W= 0.278921 b= 0.89753
+Epoch: 0700 cost= 0.101395160 W= 0.270757 b= 0.89632
+Epoch: 0750 cost= 0.092692636 W= 0.264245 b= 0.895344
+Epoch: 0800 cost= 0.087154001 W= 0.259051 b= 0.894554
+Epoch: 0850 cost= 0.083628759 W= 0.254909 b= 0.893912
+Epoch: 0900 cost= 0.081385054 W= 0.251606 b= 0.893389
+Epoch: 0950 cost= 0.079956941 W= 0.248972 b= 0.892961
+Epoch: 1000 cost= 0.079047829 W= 0.246872 b= 0.892606
+Optimization Finished!
+Training cost= 0.0790478 W= 0.246872 b= 0.892606
+Testing... (Mean square loss Comparison)
+Testing cost= 0.0796623
+Absolute mean square loss difference: 0.000614464
+
+I am using tensorflow 1.01 libraries, and running on a mac OS Sierra...
+Banging my head against the wall trying to figure this out. As you can see I tried to setup tensorboad to help, but seems I have limited success, get a graph but so far has not been any help debugging this...

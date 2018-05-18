@@ -1,0 +1,24 @@
+[WIP] Multi-bus support with NUMA-aware allocator
+
+As the title suggests, this is a WIP to partially address issues brought by @poxvoculi in #5986.
+In our testbed, we have a multi-bus topology where 4 K40m GPUs are connected by different PCI-e root, as shown with the following command:
+$ nvidia-smi topo -m
+	GPU0	GPU1	GPU2	GPU3	mlx4_0	CPU Affinity
+GPU0	 X 	PHB	SOC	SOC	SOC	0-5
+GPU1	PHB	 X 	SOC	SOC	SOC	0-5
+GPU2	SOC	SOC	 X 	PHB	PHB	6-11
+GPU3	SOC	SOC	PHB	 X 	PHB	6-11
+mlx4_0	SOC	SOC	PHB	PHB	 X
+
+Legend:
+
+  X   = Self
+  SOC  = Connection traversing PCIe as well as the SMP link between CPU sockets(e.g. QPI)
+  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+  PXB  = Connection traversing multiple PCIe switches (without traversing the PCIe Host Bridge)
+  PIX  = Connection traversing a single PCIe switch
+  NV#  = Connection traversing a bonded set of # NVLinks
+
+Current TF always allocates the host memory used to transfer from/to GPU on NUMA node 0, which is sub-optimal for GPUs with other CPU affinity. This could be further validated by adjusting CUDA_VISIBLE_DEVICES and numactl -m <numa_node> -N <numa_node> prepended to TF process.
+The basic idea is simple: use numa_alloc_onnode and other related functions available in libnuma to allocate memory for CUDA host allocator. There are some pieces of code, e.g. here, there, and there to identify bus id and numa node for each device, and I plan to reuse those as much as possible.
+I am wondering if anyone in the TF team could give me some advice so I can start to implement it.

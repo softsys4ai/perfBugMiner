@@ -1,0 +1,46 @@
+Failed to build from source due to missing libcudart.so.7.5:
+
+Hi! I tried to compile the tutorials_example_trainer file, and I have quite a journey behind me. I recompiled GCC several times, I recompiled bazel dozens of times and did a fair share of CROSSTOOLS editing.
+At this point, I am stuck. The compliation fails with the message:
+bazel-out/host/bin/tensorflow/cc/ops/random_ops_gen_cc: error while loading shared libraries: libcudart.so.7.5: cannot open shared object file: No such file or directory Target //tensorflow/cc:tutorials_example_trainer failed to build
+I am using Tensorflow HEAD (currently 7b536cd), I have CUDA 7.5 installed in /usr/local/cuda-7.5 .
+My LD_LIBRARY_PATH is set to :/usr/local/cuda/lib64:/usr/local/cuda/lib64 , and the files exist there.
+I tried to point bazel to the library directory by adding
++ linker_flag: "-L/usr/local/cuda/lib64"
+.
+Environment info
+Operating System: Fedora 23
+Installed version of CUDA and cuDNN: 7.5 and 4.0.7
+$ ls /usr/local/cuda-7.5/lib64/libcud*
+/usr/local/cuda-7.5/lib64/libcudadevrt.a    /usr/local/cuda-7.5/lib64/libcudart.so.7.5.18  /usr/local/cuda-7.5/lib64/libcudnn.so.4
+/usr/local/cuda-7.5/lib64/libcudart.so      /usr/local/cuda-7.5/lib64/libcudart_static.a   /usr/local/cuda-7.5/lib64/libcudnn.so.4.0.7
+/usr/local/cuda-7.5/lib64/libcudart.so.7.5  /usr/local/cuda-7.5/lib64/libcudnn.so          /usr/local/cuda-7.5/lib64/libcudnn_static.a
+
+If installed from sources, provide the commit hash: 7b536cd
+Steps to reproduce
+
+Recompiled Bazel, version 0.2.1 with the following patch: https://gist.github.com/akors/5db13e874c144b3b111f0e0326d7b771#file-bazel-custom-gcc-patch
+Applied the following patch to TensorFlow: https://gist.github.com/akors/5db13e874c144b3b111f0e0326d7b771#file-tensorflow-custom-gcc-patch
+Ran ./configure with /opt/gcc-4.9/bin/gcc as compiler, but default otherwise.
+Ran bazel build -c opt --config=cuda --local_resources 4096,3.0,1.0 -j 4 //tensorflow/cc:tutorials_example_trainer --verbose_failures
+
+What have you tried?
+
+I cried a lot.
+Add linker_flag: "-L/usr/local/cuda/lib64" to third_party/gpus/crosstool/CROSSTOOL
+Add linker_flag: "-Wl,-R/usr/local/cuda/lib64"  to third_party/gpus/crosstool/CROSSTOOL
+Recompile bazel, with added linker_flag: "-Wl,-R/usr/local/cuda/lib64" in tools/cpp/CROSSTOOL
+Create a file /etc/ld.so.conf.d/LOCAL_cuda-lib64.conf with the contents /usr/local/cuda/lib64 and ran ldconfig
+
+Logs or other output that would be helpful
+Here's the full output of the last operation:
+ERROR: /home/alexander/.local/src/tensorflow/tensorflow/cc/BUILD:28:1: Executing genrule //tensorflow/cc:random_ops_genrule failed: namespace-sandbox failed: error executing command 
+  (cd /home/alexander/.cache/bazel/_bazel_alexander/3fc3a90944d6c7fe99106d6e515412c7/tensorflow && \
+  exec env - \
+    PATH=/usr/lib/ccache:/usr/lib/ccache:/usr/lib64/qt-3.3/bin:/usr/lib64/ccache:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/home/alexander/.local/bin:/home/alexander/bin:/home/alexander/.local/bin:/home/alexander/bin \
+  /home/alexander/.cache/bazel/_bazel_alexander/3fc3a90944d6c7fe99106d6e515412c7/tensorflow/_bin/namespace-sandbox @/home/alexander/.cache/bazel/_bazel_alexander/3fc3a90944d6c7fe99106d6e515412c7/tensorflow/bazel-sandbox/7d27406c-6595-46a2-a8dc-b7faf7c28c88-0.params -- /bin/bash -c 'source external/bazel_tools/tools/genrule/genrule-setup.sh; bazel-out/host/bin/tensorflow/cc/ops/random_ops_gen_cc bazel-out/local_linux-opt/genfiles/tensorflow/cc/ops/random_ops.h bazel-out/local_linux-opt/genfiles/tensorflow/cc/ops/random_ops.cc 0').
+bazel-out/host/bin/tensorflow/cc/ops/random_ops_gen_cc: error while loading shared libraries: libcudart.so.7.5: cannot open shared object file: No such file or directory
+Target //tensorflow/cc:tutorials_example_trainer failed to build
+INFO: Elapsed time: 630.365s, Critical Path: 137.07s
+
+ps.: Out of curiosity, what are you TensorFlow devs using for a development machine? Has any of you actually tried using a modern Linux distribution that comes with GCC newer than 4.9 for compilation? You really should. It's quite the experience.

@@ -1,0 +1,137 @@
+The precision difference between tensorflow and numpy when using tf.reduce_mean and np.mean
+
+### System information
+- **Have I written custom code (as opposed to using a stock example script provided in TensorFlow)**: Yes
+- **TensorFlow installed from (source or binary)**:binary
+- **OS Platform and Distribution (e.g., Linux Ubuntu 16.04)**:
+== cat /etc/issue ===============================================
+Linux quad6 4.4.0-83-generic #106-Ubuntu SMP Mon Jun 26 17:54:43 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="16.04.1 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+
+== are we in docker =============================================
+No
+
+== compiler =====================================================
+c++ (Ubuntu 5.4.1-2ubuntu1~16.04) 5.4.1 20160904
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+== uname -a =====================================================
+Linux quad6 4.4.0-83-generic #106-Ubuntu SMP Mon Jun 26 17:54:43 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+
+== check pips ===================================================
+numpy (1.13.1)
+protobuf (3.3.0)
+tensorflow (1.2.1)
+tensorflow-fold (0.0.1)
+tensorflow-gpu (1.2.1)
+tensorflow-tensorboard (0.1.4)
+
+== check for virtualenv =========================================
+True
+
+== tensorflow import ============================================
+tf.VERSION = 1.2.1
+tf.GIT_VERSION = v1.2.0-5-g435cdfc
+tf.COMPILER_VERSION = v1.2.0-5-g435cdfc
+Sanity check: array([1], dtype=int32)
+
+== env ==========================================================
+LD_LIBRARY_PATH /usr/local/cuda-8.0/lib64:
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+Fri Aug 18 16:14:35 2017
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 375.66                 Driver Version: 375.66                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  TITAN Xp            Off  | 0000:05:00.0     Off |                  N/A |
+| 28%   51C    P0    67W / 250W |      0MiB / 12188MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   1  TITAN Xp            Off  | 0000:06:00.0     Off |                  N/A |
+| 31%   55C    P0    66W / 250W |      0MiB / 12189MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   2  TITAN Xp            Off  | 0000:09:00.0     Off |                  N/A |
+| 54%   84C    P2   130W / 250W |  11655MiB / 12189MiB |     52%      Default |
++-------------------------------+----------------------+----------------------+
+|   3  TITAN Xp            Off  | 0000:0A:00.0     Off |                  N/A |
+| 23%   33C    P0    61W / 250W |      0MiB / 12189MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    2      5854    C   python3                                      11651MiB |
++-----------------------------------------------------------------------------+
+
+== cuda libs  ===================================================
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0.27
+/usr/local/cuda-8.0/lib64/libcudart_static.a
+
+
+
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+v1.2.0-5-g435cdfc 1.2.1
+
+Describe the problem
+When using tf.reduce_mean, i found the behaviour between tensorflow and numpy was different when dtype was float32. The experiment shows that this maybe caused by the precision problem in tensorflow. When I changed the dtype to tf.float64, the problem fixed.
+Or if I calculate the mean axis by axis, the problem also disappear.
+However, if I use numpy array, the result was right no matter the dtype is  float32 or float64.
+Is this a normal behaviour or will be fixed later?
+The test code I used as following:
+Source code / logs
+In [61]: x = tf.constant(0.6931, shape=[32, 100, 79804], dtype=tf.float32)
+
+In [62]: y = tf.reduce_mean(x)
+
+In [63]: sess.run(y)
+Out[63]: 0.26278782
+
+In [64]: y = tf.reduce_mean(tf.reduce_mean(tf.reduce_mean(x, axis=2), axis=-1))
+
+In [65]: sess.run(y)
+Out[65]: 0.693142
+
+In [66]: x = tf.constant(0.6931, shape=[32, 100, 79804], dtype=tf.float32)
+
+In [67]: y = tf.reduce_mean(x)
+
+In [68]: sess.run(y)
+Out[68]: 0.26278782
+
+In [69]: x = tf.constant(0.6931, shape=[32, 100, 79804], dtype=tf.float64)
+
+In [70]: y = tf.reduce_mean(x)
+
+In [71]: sess.run(y)
+Out[71]: 0.6931000008030902
+
+In [72]: y = tf.reduce_mean(tf.reduce_mean(tf.reduce_mean(x, axis=2), axis=-1))
+
+In [73]: sess.run(y)
+Out[73]: 0.69310000000034644
+
+In [74]: xn = np.full((32, 100, 79084), 0.6931, dtype=np.float64)
+
+In [75]: yn = np.mean(xn)
+
+In [76]: yn
+Out[76]: 0.69310000000032723
+
+In [77]: xn = np.full((32, 100, 79084), 0.6931, dtype=np.float32)
+
+In [78]: yn = np.mean(xn)
+
+In [79]: yn = np.mean(xn)
+
+In [80]: yn
+Out[80]: 0.69321907

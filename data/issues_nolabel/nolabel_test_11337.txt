@@ -1,0 +1,274 @@
+get error in tensorflow 1.2 but the code works on tensorflow 1.0
+
+Hi,
+I have the following code. I can run it successfully in tf v1.0 but it failed in tf v1.2. The error is from the (inputs, state) in the GRUCell. Can you help me understand why the errors come from?
+Thank you.
+import tensorflow as tf
+from  tensorflow.contrib.learn.python.learn.estimators.dnn  import DNNClassifier
+from tensorflow.contrib.layers import real_valued_column
+from tensorflow.contrib.layers.python.layers.initializers import xavier_initializer
+
+dropout=0.2
+hidden_1_size = 1000
+hidden_2_size = 250
+NUM_EPOCHS=100
+BATCH_SIZE=50
+lr=0.0001
+
+num_features = 2328
+RNN_HIDDEN_SIZE=100
+FIRST_LAYER_SIZE=1000
+SECOND_LAYER_SIZE=250
+NUM_LAYERS=2
+BATCH_SIZE=50
+NUM_EPOCHS=200
+lr=0.0003
+ATTN_LENGTH=30
+beta=0
+
+
+class RNNModel():
+    def __init__(self):
+        global_step = tf.contrib.framework.get_or_create_global_step()
+        self.input_data = tf.placeholder(dtype=tf.float32,shape=[BATCH_SIZE,num_features])
+        self.target_data = tf.placeholder(dtype=tf.int32,shape=[BATCH_SIZE])
+        self.dropout_prob = tf.placeholder(dtype=tf.float32,shape=[])
+        
+        def makeGRUCells():
+            base_cell = tf.contrib.rnn.GRUCell(num_units=RNN_HIDDEN_SIZE,) 
+            layered_cell = tf.contrib.rnn.MultiRNNCell([base_cell] * NUM_LAYERS,state_is_tuple=False) 
+            attn_cell =tf.contrib.rnn.AttentionCellWrapper(cell=layered_cell,attn_length=ATTN_LENGTH,state_is_tuple=False)
+            return attn_cell
+        
+        self.gru_cell = makeGRUCells()
+        self.zero_state = self.gru_cell.zero_state(1, tf.float32)
+        
+        self.start_state = tf.placeholder(dtype=tf.float32,shape=[1,self.gru_cell.state_size])
+        print((self.start_state))
+        
+        
+
+        with tf.variable_scope("fff",initializer=xavier_initializer(uniform=False), reuse = None):
+            droped_input = tf.nn.dropout(self.input_data,keep_prob=self.dropout_prob)
+            
+            layer_1 = tf.contrib.layers.fully_connected(
+                num_outputs=FIRST_LAYER_SIZE,
+                inputs=droped_input,
+            )
+            layer_2 = tf.contrib.layers.fully_connected(
+                num_outputs=RNN_HIDDEN_SIZE,
+                inputs=layer_1,
+            )
+            
+        
+        split_inputs = tf.reshape(droped_input,shape=[1,BATCH_SIZE,num_features],name="reshape_l1") # Each item in the batch is a time step, iterate through them
+        #print(split_inputs.shape)
+        split_inputs = tf.unstack(split_inputs,axis=1,name="unpack_l1")
+        #print("lentgh is " + str(len(split_inputs)))
+        states =[]
+        outputs =[]
+        with tf.variable_scope("rnn",initializer=xavier_initializer(uniform=False), reuse = None) as scope:
+            state = self.start_state
+            for i, inp in enumerate(split_inputs):
+                if i >0:
+                    scope.reuse_variables()
+                print((state))
+                print((inp))
+                print("this is for " + str(i))
+                output, state = self.gru_cell(inputs = inp, state = state)
+                states.append(state)
+                outputs.append(output)
+        self.end_state = states[-1]
+        outputs = tf.stack(outputs,axis=1) # Pack them back into a single tensor
+        outputs = tf.reshape(outputs,shape=[BATCH_SIZE,RNN_HIDDEN_SIZE])
+        self.logits = tf.contrib.layers.fully_connected(
+            num_outputs=num_classes,
+            inputs=outputs,
+            activation_fn=None
+        )
+
+            
+        with tf.variable_scope("loss", reuse = None):
+            self.penalties =    tf.reduce_sum([beta*tf.nn.l2_loss(var) for var in tf.trainable_variables()])
+
+            
+            self.losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits = self.logits,labels = self.target_data)
+            self.loss = tf.reduce_sum(self.losses + beta*self.penalties)
+        
+        with tf.name_scope("train_step"):
+            opt = tf.train.AdamOptimizer(lr)
+            gvs = opt.compute_gradients(self.loss)
+            self.train_op = opt.apply_gradients(gvs, global_step=global_step)
+        
+        with tf.name_scope("predictions"):
+            probs = tf.nn.softmax(self.logits)
+            self.predictions = tf.argmax(probs, 1)
+            correct_pred = tf.cast(tf.equal(self.predictions, tf.cast(self.target_data,tf.int64)),tf.float64)
+            self.accuracy = tf.reduce_mean(correct_pred)
+
+         
+with tf.Graph().as_default():
+    model = RNNModel()
+WARNING:tensorflow:<tensorflow.contrib.rnn.python.ops.rnn_cell.AttentionCellWrapper object at 0x0000000038EB4CC0>: Using a concatenated state is slower and will soon be deprecated.  Use state_is_tuple=True.
+Tensor("Placeholder_3:0", shape=(1, 3300), dtype=float32)
+Tensor("Placeholder_3:0", shape=(1, 3300), dtype=float32)
+Tensor("unpack_l1:0", shape=(1, 2328), dtype=float32)
+this is for 0
+
+
+
+
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-20-2249079aecbe> in <module>()
+      1 with tf.Graph().as_default():
+----> 2     model = RNNModel()
+
+<ipython-input-19-58646adfd4d3> in __init__(self)
+     48                 print((inp))
+     49                 print("this is for " + str(i))
+---> 50                 output, state = self.gru_cell(inputs = inp, state = state)
+     51                 states.append(state)
+     52                 outputs.append(output)
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py in __call__(self, inputs, state, scope)
+    178       with vs.variable_scope(vs.get_variable_scope(),
+    179                              custom_getter=self._rnn_get_variable):
+--> 180         return super(RNNCell, self).__call__(inputs, state)
+    181 
+    182   def _rnn_get_variable(self, getter, *args, **kwargs):
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\layers\base.py in __call__(self, inputs, *args, **kwargs)
+    439         # Check input assumptions set after layer building, e.g. input shape.
+    440         self._assert_input_compatibility(inputs)
+--> 441         outputs = self.call(inputs, *args, **kwargs)
+    442 
+    443         # Apply activity regularization.
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\contrib\rnn\python\ops\rnn_cell.py in call(self, inputs, state)
+   1111       input_size = inputs.get_shape().as_list()[1]
+   1112     inputs = _linear([inputs, attns], input_size, True)
+-> 1113     lstm_output, new_state = self._cell(inputs, state)
+   1114     if self._state_is_tuple:
+   1115       new_state_cat = array_ops.concat(nest.flatten(new_state), 1)
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py in __call__(self, inputs, state, scope)
+    178       with vs.variable_scope(vs.get_variable_scope(),
+    179                              custom_getter=self._rnn_get_variable):
+--> 180         return super(RNNCell, self).__call__(inputs, state)
+    181 
+    182   def _rnn_get_variable(self, getter, *args, **kwargs):
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\layers\base.py in __call__(self, inputs, *args, **kwargs)
+    439         # Check input assumptions set after layer building, e.g. input shape.
+    440         self._assert_input_compatibility(inputs)
+--> 441         outputs = self.call(inputs, *args, **kwargs)
+    442 
+    443         # Apply activity regularization.
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py in call(self, inputs, state)
+    914                                       [-1, cell.state_size])
+    915           cur_state_pos += cell.state_size
+--> 916         cur_inp, new_state = cell(cur_inp, cur_state)
+    917         new_states.append(new_state)
+    918 
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py in __call__(self, inputs, state, scope)
+    178       with vs.variable_scope(vs.get_variable_scope(),
+    179                              custom_getter=self._rnn_get_variable):
+--> 180         return super(RNNCell, self).__call__(inputs, state)
+    181 
+    182   def _rnn_get_variable(self, getter, *args, **kwargs):
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\layers\base.py in __call__(self, inputs, *args, **kwargs)
+    439         # Check input assumptions set after layer building, e.g. input shape.
+    440         self._assert_input_compatibility(inputs)
+--> 441         outputs = self.call(inputs, *args, **kwargs)
+    442 
+    443         # Apply activity regularization.
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py in call(self, inputs, state)
+    293       value = math_ops.sigmoid(
+    294           _linear([inputs, state], 2 * self._num_units, True, bias_ones,
+--> 295                   self._kernel_initializer))
+    296       r, u = array_ops.split(value=value, num_or_size_splits=2, axis=1)
+    297     with vs.variable_scope("candidate"):
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py in _linear(args, output_size, bias, bias_initializer, kernel_initializer)
+   1015         _WEIGHTS_VARIABLE_NAME, [total_arg_size, output_size],
+   1016         dtype=dtype,
+-> 1017         initializer=kernel_initializer)
+   1018     if len(args) == 1:
+   1019       res = math_ops.matmul(args[0], weights)
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\variable_scope.py in get_variable(name, shape, dtype, initializer, regularizer, trainable, collections, caching_device, partitioner, validate_shape, use_resource, custom_getter)
+   1063       collections=collections, caching_device=caching_device,
+   1064       partitioner=partitioner, validate_shape=validate_shape,
+-> 1065       use_resource=use_resource, custom_getter=custom_getter)
+   1066 get_variable_or_local_docstring = (
+   1067     """%s
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\variable_scope.py in get_variable(self, var_store, name, shape, dtype, initializer, regularizer, reuse, trainable, collections, caching_device, partitioner, validate_shape, use_resource, custom_getter)
+    960           collections=collections, caching_device=caching_device,
+    961           partitioner=partitioner, validate_shape=validate_shape,
+--> 962           use_resource=use_resource, custom_getter=custom_getter)
+    963 
+    964   def _get_partitioned_variable(self,
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\variable_scope.py in get_variable(self, name, shape, dtype, initializer, regularizer, reuse, trainable, collections, caching_device, partitioner, validate_shape, use_resource, custom_getter)
+    358           reuse=reuse, trainable=trainable, collections=collections,
+    359           caching_device=caching_device, partitioner=partitioner,
+--> 360           validate_shape=validate_shape, use_resource=use_resource)
+    361     else:
+    362       return _true_getter(
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\variable_scope.py in wrapped_custom_getter(getter, *args, **kwargs)
+   1403     return custom_getter(
+   1404         functools.partial(old_getter, getter),
+-> 1405         *args, **kwargs)
+   1406   return wrapped_custom_getter
+   1407 
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py in _rnn_get_variable(self, getter, *args, **kwargs)
+    181 
+    182   def _rnn_get_variable(self, getter, *args, **kwargs):
+--> 183     variable = getter(*args, **kwargs)
+    184     trainable = (variable in tf_variables.trainable_variables() or
+    185                  (isinstance(variable, tf_variables.PartitionedVariable) and
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\variable_scope.py in wrapped_custom_getter(getter, *args, **kwargs)
+   1403     return custom_getter(
+   1404         functools.partial(old_getter, getter),
+-> 1405         *args, **kwargs)
+   1406   return wrapped_custom_getter
+   1407 
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py in _rnn_get_variable(self, getter, *args, **kwargs)
+    181 
+    182   def _rnn_get_variable(self, getter, *args, **kwargs):
+--> 183     variable = getter(*args, **kwargs)
+    184     trainable = (variable in tf_variables.trainable_variables() or
+    185                  (isinstance(variable, tf_variables.PartitionedVariable) and
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\rnn_cell_impl.py in _rnn_get_variable(self, getter, *args, **kwargs)
+    181 
+    182   def _rnn_get_variable(self, getter, *args, **kwargs):
+--> 183     variable = getter(*args, **kwargs)
+    184     trainable = (variable in tf_variables.trainable_variables() or
+    185                  (isinstance(variable, tf_variables.PartitionedVariable) and
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\variable_scope.py in _true_getter(name, shape, dtype, initializer, regularizer, reuse, trainable, collections, caching_device, partitioner, validate_shape, use_resource)
+    350           trainable=trainable, collections=collections,
+    351           caching_device=caching_device, validate_shape=validate_shape,
+--> 352           use_resource=use_resource)
+    353 
+    354     if custom_getter is not None:
+
+C:\Users\hsong01\AppData\Local\Continuum\Anaconda\lib\site-packages\tensorflow\python\ops\variable_scope.py in _get_single_variable(self, name, shape, dtype, initializer, regularizer, partition_info, reuse, trainable, collections, caching_device, validate_shape, use_resource)
+    667         raise ValueError("Trying to share variable %s, but specified shape %s"
+    668                          " and found shape %s." % (name, shape,
+--> 669                                                    found_var.get_shape()))
+    670       if not dtype.is_compatible_with(found_var.dtype):
+    671         dtype_str = dtype.name
+
+ValueError: Trying to share variable rnn/attention_cell_wrapper/multi_rnn_cell/cell_0/gru_cell/gates/kernel, but specified shape (200, 200) and found shape (2428, 200).

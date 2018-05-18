@@ -1,0 +1,119 @@
+Graph with tf.cond can not be serialized correctly after calling remove_training_nodes.
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+#3667 may be the same problem? But that thread is closed without a clear answer.
+Environment info
+Operating System:
+
+Tensorflow 1.0.0
+Python 2.7
+Ubuntu 14.04
+
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+CUDA 8.0
+cuDNN 5.1.10
+*This problem occurs in both GPU and CPU environment.
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+The following code is to produce a .pb file that can be used for tf.import_graph_def.
+import tensorflow as tf
+from tensorflow.python.framework import graph_util
+
+input_jpeg = tf.placeholder(tf.string, name='DecodeJpeg/contents')
+image = tf.image.decode_jpeg(input_jpeg, channels=3)
+image = tf.image.convert_image_dtype(image, dtype=tf.float32)
+
+height = tf.constant(224)
+width = tf.constant(224)
+input_h = tf.shape(image)[0]
+input_w = tf.shape(image)[1]
+
+def resize_t(image_t, h=height, w=width):
+  image2 = tf.expand_dims(image_t, axis=0)
+  return image2
+
+image_checked = tf.cond(
+    (tf.less(input_h, height)), 
+    lambda:resize_t(image), lambda:image)
+
+shape_t = tf.shape(image_checked, name='shape_t')
+
+with tf.Session() as sess:
+  # freeze the graph and export
+  output_graph_def = sess.graph_def
+  output_graph_def = graph_util.convert_variables_to_constants(
+        sess, sess.graph_def, ['shape_t'])
+  output_graph_def = graph_util.remove_training_nodes(output_graph_def)
+  with open('out.pb', 'wb') as f:
+    f.write(output_graph_def.SerializeToString())
+
+The out.pb file can be generated as expected, but when I import it using the code below:
+import tensorflow as tf
+with open('out.pb', 'rb') as f:
+  graph_content = f.read()
+graph_def = tf.GraphDef()
+graph_def.ParseFromString(graph_content)
+_ = tf.import_graph_def(graph_def, name='')
+
+It failed with Message:
+Traceback (most recent call last):
+  File "im.py", line 6, in <module>
+    _ = tf.import_graph_def(graph_def, name='')
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/importer.py", line 342, in import_graph_def
+    % (input_name,)))
+ValueError: graph_def is invalid at node u'cond/ExpandDims/dim': More inputs specified ('cond/Switch:1') than the op expects..
+
+What other attempted solutions have you tried?
+when I removed the graph_util.remove_training_nodes call, everything works well.
+So it seems that something goes wrong while removing the Identity nodes from the graph.
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+Exploring the .pbtxt generated with and without graph_util.remove_training_nodes,some Identity nodes are removed and the input of ExpandDims/dim is modified to connect to the output of Switch.(maybe?)
+Part of .pbtxt file content without graph_util.remove_training_nodes:
+^Kcond/Switch^R^FSwitch^Z^DLess^Z^DLess*^G
+^AT^R^B0
+
+1
+^Mcond/switch_t^R^HIdentity^Z^Mcond/Switch:1*^G
+^AT^R^B0
+
+'
+^Lcond/pred_id^R^HIdentity^Z^DLess*^G
+^AT^R^B0
+
+M
+^Scond/ExpandDims/dim^R^EConst^Z^N^cond/switch_t*^K
+^Edtype^R^B0^C*^R
+^Evalue^R       B^G^H^C^R^@:^A^@
+h
+^Vcond/ExpandDims/Switch^R^FSwitch^Z^Mconvert_image^Z^Lcond/pred_id*^G
+^AT^R^B0^A*
+^F_class^R^V
+^T^R^Rloc:@convert_image
+a
+^Ocond/ExpandDims^R
+ExpandDims^Z^Xcond/ExpandDims/Switch:1^Z^Scond/ExpandDims/dim*
+
+^DTdim^R^B0^C*^G
+^AT^R^B0^A
+
+
+Part of .pbtxt file content with graph_util.remove_training_nodes:
+^Kcond/Switch^R^FSwitch^Z^DLess^Z^DLess*^G
+^AT^R^B0
+
+L
+^Scond/ExpandDims/dim^R^EConst^Z^Mcond/Switch:1*^R
+^Evalue^R       B^G^H^C^R^@:^A^@*^K
+^Edtype^R^B0^C
+`
+^Vcond/ExpandDims/Switch^R^FSwitch^Z^Mconvert_image^Z^DLess*^G
+^AT^R^B0^A*
+^F_class^R^V
+^T^R^Rloc:@convert_image
+a
+^Ocond/ExpandDims^R
+ExpandDims^Z^Xcond/ExpandDims/Switch:1^Z^Scond/ExpandDims/dim*
+
+^DTdim^R^B0^C*^G
+^AT^R^B0^A

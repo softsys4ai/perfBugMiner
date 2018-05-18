@@ -1,0 +1,22 @@
+Dequeueing immediately after starting threads fails
+
+From a question on Stack Overflow, the following code fails:
+import tensorflow as tf
+import time
+with tf.Graph().as_default():
+    filename_list = ['data_batch_{}.mat'.format(i+1) for i in range(5)]
+    filename_queue = tf.train.string_input_producer(filename_list)
+
+    with tf.Session() as sess:
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+        #time.sleep(1) # If I uncomment this it works
+        for i in range(5):
+            print(sess.run(filename_queue.dequeue()))
+
+        coord.request_stop()
+        coord.join(threads)
+...with the following error:
+NotFoundError: FetchOutputs node input_producer_Dequeue:0: not found
+It turns out that my fix for #2425 was incomplete, and there is still a race between concurrent graph modification and Session.run() calls. I'm preparing a fix.

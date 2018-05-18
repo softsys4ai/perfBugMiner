@@ -1,0 +1,40 @@
+Error in CMake generated build script
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10 1709
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.4.0-rc1
+Python version: 3.5
+Bazel version (if compiling from source): - (I use cmake)
+CUDA/cuDNN version: 9.0/7
+GPU model and memory: Notebook 1070 8G
+Exact command to reproduce:
+Use cmake to generate build script for Visual Studio 2017 Win64
+CMAKE_C_COMPILER, CMAKE_CXX_COMPILER and CUDA_HOST_COMPILER should be set manually, otherwise, it will failed the compilation phase calling to NVCC
+
+Describe the problem
+This problem happens when building with Visual Studio 2017.4 + CUDA 9.0 + cuDNN 7 + CMake + GPU build.
+Sorry for lack of information. I build it yesterday (and failed) and it take so long the compile through and I didn't keep the log. This problem is LINK ERRORs. What I can identify is they are in the generated build script. The problems happens exactly  in
+_beam_search_ops.vcxproj
+_gru_ops.vcxproj
+_lstm_ops.vcxproj
+_nearest_neighbor_ops.vcxproj
+
+e.g. in  _beam_search_ops.vcxproj around line 103
+    <Link>
+      <AdditionalDependencies>\pywrap_tensorflow_internal.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\lib\x64\cudart_static.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\lib\x64\cuda.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\lib\x64\cublas.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\lib\x64\cublas_device.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\lib\x64\cufft.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\lib\x64\curand.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\extras\CUPTI\libx64\cupti.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\lib\x64\cusolver.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\lib\x64\cudnn.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64 /ignore:4049 /ignore:4197 /ignore:4217 /ignore:4221</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>D:/workspaces/tensorflow/tensorflow/contrib/cmake/build/Release/_beam_search_ops.lib</ImportLibrary>
+      <ProgramDataBaseFile>D:/workspaces/tensorflow/tensorflow/contrib/cmake/build/Release/_beam_search_ops.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+
+You can see a \pywrap_tensorflow_internal.lib in <AdditionalDependencies> cause the LINK ERROR, since the linker can't find file pywrap_tensorflow_internal.lib.
+The prefix backslash seems to be the cause. I suspect it should be some ${BLAH_env_VARIBALE}pywrap_tensorflow_internal.lib and this ${BLAH_env_VARIBALE} happens to be empty string and results to a \pywrap_tensorflow_internal.lib.
+All four .vcxproj files comes from function call AddUserOps in tf_python.cmake , where the AddUserOps is defined in tf_cc_ops.cmake file. Due to my poor eye sight, I can't decide where is the problem from here...
+Notice, I CAN see the file pywrap_tensorflow_internal.lib in some directory so it should be problem related with the path .

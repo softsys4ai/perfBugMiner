@@ -1,0 +1,97 @@
+Restoring a model trained with tf.estimator and feeding input through feed_dict
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 10
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+1.5
+Python version:
+3.6.2
+CUDA/cuDNN version:
+9.0/7.0
+GPU model and memory:
+NVIDIA 1050 4 GB
+
+I trained a resnet with tf.estimator, the model was saved during the training process. The saved files consist of .data, .index and .meta. I'd like to load this model back and get predictions for new images. The data was fed to the model during training using tf.data.Dataset.  I have closely followed the resnet implementation given here.
+I would like to restore the model and feed inputs to the nodes using a feed_dict.
+My attempt
+#rebuild input pipeline
+images, labels = input_fn(data_dir, batch_size=32, num_epochs=1)
+  #rebuild graph
+  prediction= imagenet_model_fn(images,labels,{'batch_size':32,'data_format':'channels_first','resnet_size':18},mode = tf.estimator.ModeKeys.EVAL).predictions 
+
+  saver  = tf.train.Saver()
+  with tf.Session() as sess:
+    ckpt = tf.train.get_checkpoint_state(r'./model')
+    saver.restore(sess, ckpt.model_checkpoint_path)
+    while True:
+    try:
+        pred,im= sess.run([prediction,images])
+        print(pred)
+    except tf.errors.OutOfRangeError:
+      break
+
+I fed a dataset which was evaluated on the same model using classifier.evaluate, but the above method gives wrong predictions. The model gives same class and probability, 1.0, for all images.
+The code I used for training and building the model is as below:
+Specification for parsing the dataset:
+def parse_record(raw_record, is_training):
+  keys_to_features = {
+      'image/encoded':
+          tf.FixedLenFeature((), tf.string, default_value=''),
+      'image/class/label':
+          tf.FixedLenFeature([], dtype=tf.int64, default_value=-1),
+  }
+  parsed = tf.parse_single_example(raw_record, keys_to_features)
+  image = tf.image.decode_image(
+      tf.reshape(parsed['image/encoded'], shape=[]),3)
+  image = tf.image.convert_image_dtype(image, dtype=tf.float32)
+  label = tf.cast(
+      tf.reshape(parsed['image/class/label'], shape=[]),
+      dtype=tf.int32)
+  return image, tf.one_hot(label,2)
+
+The following function parses the data and creates batches for training
+def input_fn(is_training, data_dir, batch_size, num_epochs=1):
+  dataset = tf.data.Dataset.from_tensor_slices(
+      filenames(is_training, data_dir))
+  if is_training:
+     dataset = dataset.shuffle(buffer_size=_FILE_SHUFFLE_BUFFER)
+  dataset = dataset.flat_map(tf.data.TFRecordDataset)
+  dataset = dataset.map(lambda value: parse_record(value, is_training),
+                        num_parallel_calls=5)
+  dataset = dataset.prefetch(batch_size)
+  if is_training:
+      dataset = dataset.shuffle(buffer_size=_SHUFFLE_BUFFER)
+  dataset = dataset.repeat(num_epochs)
+  dataset = dataset.batch(batch_size)
+
+  iterator = dataset.make_one_shot_iterator()
+  images, labels = iterator.get_next()
+  return images, labels
+
+A classifier is created as below for training on train set and evaluation on validation set
+classifier = tf.estimator.Estimator(
+      model_fn=model_function, model_dir=flags.model_dir, config=run_config,
+      params={
+          'resnet_size': flags.resnet_size,
+          'data_format': flags.data_format,
+          'batch_size': flags.batch_size,
+      })
+
+    #Training cycle
+     classifier.train(
+         input_fn=lambda: input_function(
+             training_phase=True, flags.data_dir, flags.batch_size, flags.epochs_per_eval),
+         hooks=[logging_hook])
+    # Evaluate the model 
+    eval_results = classifier.evaluate(input_fn=lambda: input_function(
+        training_phase=False, flags.data_dir, flags.batch_size))
+
+This is how I tried to load and get predictions from the model.
+I'd like to feed images through a feed_dict so that I can see the model's performance on individual images.
+What is the right way to restore a saved model and perform inference on it. I want to feed images directly without using tf.data.Dataset.  I had opened a question on stackoverflow, but didn't get any response. I'm wondering if there really is a feature that can help with restoring a model trained with tf.estimator and feeding images through a feed_dict.

@@ -1,0 +1,37 @@
+functional add_n: compose a new (differentiable) op from a list of ops without memory footprint
+
+Describe the problem
+It is a feature request, and should be very related to the current high memory cost of tensorflow.
+In my case, I am building a graph which I should be able to compute gradients. In this graph, I heavily use the add_n op which returns a tensor from a list of tensors. I want to remark that this is very inefficient for two reasons:
+
+
+Memory wise, it requires to cache all input tensors in the list before it actually aggregates. Technically, such process can be replaced by accumulate_n if one does not care computing its gradient. In facts, I have been tried with add_n with input list size goes to tens or a hundred, it quickly fills up the memory of GPUs.
+
+
+Besides high memory footprint, it also prohibits the use of multi-thread framework of tensorflow, ultimately affecting the efficiency. This is because the idea of add_n actually introduces an extra layer of tensors whose controlled dependency prevents deallocating any of these tensors computed in time. Consider the following example:
+
+
+a=tf.Variable(0.2)
+b=tf.Variable(0.1)
+
+c=[tf.sin(a), tf.cos(a), tf.sin(b)]
+d=[tf.sin(a), tf.cos(b)]
+
+e=add_n(c)
+f=add_n(d)
+# ... initialization 
+sess.run([e, f])
+In the above example, suppose given variables a and b what we really need is tensors e and f, but the introduction of tensor list c and d occupies what I consider as redundant memory. Note that the computation of tensors in c and d can be made multi-threaded / parallel if we have infinite memory. But the real situation is if the caching tensors in c already eat up all memory, no tenors in d will be executed simultaneously until e is complete (at which time c is released).
+In fact, one can calculate e and its gradients de/da, de/db without explicitly storing any tensors in c. This trick is by introducing a functional which takes a set of ops and their inputs, and return a global summed-up tensor, which may look like:
+a=tf.Variable(0.2)
+b=tf.Variable(0.1)
+
+e_func=add_n_functional([tf.sin, tf.cos, tf.sin])
+e=e_func([a, a, b])
+f_func=add_n_functional([tf.sin, tf.cos])
+f=f_fun([a, b])
+
+# ... initialization 
+sess.run([e, f])
+Note add_n_functional returns a new op from a list of given ops. With this new functional, we can avoid buffering a lot intermediate tensors. At the same time, e_func and f_func are still differentiable.
+I was thinking how to implement this idea at python level, but it seems to only be feasible via rewriting some C++ parts. I will appreciate if this feature is added to tensorflow in the near future.

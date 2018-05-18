@@ -1,0 +1,60 @@
+tf.contrib.data.Dataset behaves strangely when re-defined.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04 on GCP
+TensorFlow installed from (source or binary): pip (implies binary install I think).
+TensorFlow version (use command below): GIT Version: v1.2.0-5-g435cdfc, Version: 1.2.1
+Python version: 2.7 and 3.5 (I checked with both)
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: Run the attached script.
+tf_repro.txt
+
+Describe the problem
+It seems like once we start initializing and using datasets, redefining them even in minor ways leads to errors? I think? This is rather unlike any other error in python. Normally I wouldn't expect redefinitions of python variables to cause problems.
+I've noticed the following:
+
+Using separate variables for the datasets does not help (regardless of whether the old dataset is kept around or not).
+Creating the datasets first and using them after does work (again regardless of whether separate variables.
+
+If this is intended behavior, it might be worth documenting it. It's easy enough to work around I suppose. I don't know enough about TensorFlow internals to know what might be causing it.
+Source code / logs
+Here's the output I get when I run the attached script:
+2017-08-17 21:56:55.536140: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-17 21:56:55.536187: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-17 21:56:55.536194: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-17 21:56:55.536199: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+2017-08-17 21:56:55.536203: W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+First run works.
+2017-08-17 21:57:00.353667: W tensorflow/core/framework/op_kernel.cc:1158] Not found: Function tf_map_func_065aa1a3 is not defined.
+Second run failed...
+Function tf_map_func_065aa1a3 is not defined.
+         [[Node: MapDataset_1 = MapDataset[Targuments=[], f=tf_map_func_065aa1a3[], output_shapes=[[]], output_types=[DT_INT32], _device="/job:localhost/replica:0/task:0/cpu:0"](RepeatDataset_1)]]
+
+Caused by op 'MapDataset_1', defined at:
+  File "/home/prakhar/scratch/tf_repro.py", line 22, in <module>
+    iterator = ds.make_initializable_iterator()
+  File "/mnt/eph/user-pg-r0033ed652607/mypyenv/lib/python3.5/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.py", line 396, in make_initializable_iterator
+    return Iterator.from_dataset(self, shared_name)
+  File "/mnt/eph/user-pg-r0033ed652607/mypyenv/lib/python3.5/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.py", line 98, in from_dataset
+    initializer = gen_dataset_ops.make_iterator(dataset.make_dataset_resource(),
+  File "/mnt/eph/user-pg-r0033ed652607/mypyenv/lib/python3.5/site-packages/tensorflow/contrib/data/python/ops/dataset_ops.py", line 1457, in make_dataset_resource
+    output_shapes=nest.flatten(self.output_shapes))
+  File "/mnt/eph/user-pg-r0033ed652607/mypyenv/lib/python3.5/site-packages/tensorflow/python/ops/gen_dataset_ops.py", line 297, in map_dataset
+    output_shapes=output_shapes, name=name)
+  File "/mnt/eph/user-pg-r0033ed652607/mypyenv/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "/mnt/eph/user-pg-r0033ed652607/mypyenv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2506, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/mnt/eph/user-pg-r0033ed652607/mypyenv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1269, in __init__
+    self._traceback = _extract_stack()
+
+NotFoundError (see above for traceback): Function tf_map_func_065aa1a3 is not defined.
+         [[Node: MapDataset_1 = MapDataset[Targuments=[], f=tf_map_func_065aa1a3[], output_shapes=[[]], output_types=[DT_INT32], _device="/job:localhost/replica:0/task:0/cpu:0"](RepeatDataset_1)]]
+
+Third run works.
+
+-- PG

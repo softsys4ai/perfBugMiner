@@ -1,0 +1,67 @@
+AttentionWrapper is not compatible with dynamic_rnn
+
+System information
+
+TensorFlow version (v1.2.0-rc2-21-g12f033d 1.2.0):
+Python 3
+
+Describe the problem
+The return of zero_state function of  tensorflow.contrib.seq2seq.AttentionWrapper is not compatible with tensorflow.nn.dynamic_rnn function.  It seems that if output.shape.ndims == 0: in _copy_one_through function does not work. Once those scalar elements in return tuple are modified to have the shape like [batch_size, ...] the error disappears.
+Code to reproduce the bug
+import tensorflow as tf
+
+batch_size=2
+hidden_units = 3
+attention_size = 4
+max_len = 5
+
+inputs = tf.constant(1.,shape=(batch_size,max_len,hidden_units))
+context = tf.constant(1.,shape=(batch_size,max_len,hidden_units))
+input_lens = (2,4)
+
+cell = tf.contrib.rnn.LSTMCell(hidden_units)
+am = tf.contrib.seq2seq.BahdanauAttention(attention_size, context)
+wrapper = tf.contrib.seq2seq.AttentionWrapper(cell,am)
+tf.nn.dynamic_rnn(wrapper,inputs,input_lens,dtype=tf.float32)
+
+Log
+Traceback (most recent call last):
+  File "test.py", line 15, in <module>
+    tf.nn.dynamic_rnn(wrapper,inputs,input_lens,dtype=tf.float32)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/rnn.py", line 574, in dynamic_rnn
+    dtype=dtype)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/rnn.py", line 737, in _dynamic_rnn_loop
+    swap_memory=swap_memory)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 2770, in while_loop
+    result = context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 2599, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 2549, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/rnn.py", line 720, in _time_step
+    skip_conditionals=True)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/rnn.py", line 210, in _rnn_step
+    final_output_and_state = _copy_some_through(new_output, new_state)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/rnn.py", line 182, in _copy_some_through
+    for state, new_state in zip(flat_state, flat_new_state)]
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/rnn.py", line 182, in <listcomp>
+    for state, new_state in zip(flat_state, flat_new_state)]
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/rnn.py", line 171, in _copy_one_through
+    return array_ops.where(copy_cond, output, new_output)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/array_ops.py", line 2328, in where
+    return gen_math_ops._select(condition=condition, t=x, e=y, name=name)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/gen_math_ops.py", line 2145, in _select
+    name=name)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/op_def_library.py", line 767, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 2508, in create_op
+    set_shapes_for_outputs(ret)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 1873, in set_shapes_for_outputs
+    shapes = shape_func(op)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 1823, in call_with_requiring
+    return call_cpp_shape_fn(op, require_shape_fn=True)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/common_shapes.py", line 610, in call_cpp_shape_fn
+    debug_python_shape_fn, require_shape_fn)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/common_shapes.py", line 676, in _call_cpp_shape_fn_impl
+    raise ValueError(err.message)
+ValueError: Shapes must be equal rank, but are 0 and 1 for 'rnn/while/Select_4' (op: 'Select') with input shapes: [2], [], [].

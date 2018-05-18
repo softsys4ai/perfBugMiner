@@ -1,0 +1,162 @@
+Inconsistent functionality from tf.Graph with simple linear regression (not caused from random-seed-state)
+
+I am getting very inconsistent behavior with my tf.Graph objects and I can't explain why it's happening.  I'm running this in a Jupyter notebook.  Could this affect it at all?
+My versions:
+tf.__version__
+'1.0.1'
+sys.version
+'3.6.1 |Anaconda custom (x86_64)| (default, Mar 22 2017, 19:25:17) \n[GCC 4.2.1 Compatible Apple LLVM 6.0 (clang-600.0.57)]'
+
+from sklearn.datasets import *
+import multiprocessing
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+tf_max_threads = tf.ConfigProto(intra_op_parallelism_threads=multiprocessing.cpu_count())
+def iris_data():
+    # Iris dataset
+    X = pd.DataFrame(load_iris().data,
+                           index = ["iris_%d" % i for i in range(load_iris().data.shape[0])],
+                           columns = [x.split(" (cm)")[0].replace(" ","_") for x in load_iris().feature_names])
+
+    y = pd.Series(load_iris().target,
+                           index = ["iris_%d" % i for i in range(load_iris().data.shape[0])],
+                           name = "Species")
+    color_list = [{0:"red",1:"green",2:"blue"}[x] for x in y]
+    cmap = {k:v for k,v in zip(X.index, color_list)}
+    return (X, y, cmap)
+
+# Data
+X,y,c = iris_data()
+x = X["petal_width"].as_matrix()
+y = X["sepal_length"].as_matrix()
+n = 50
+
+# Containers
+lasso_data = list()
+A_data = list()
+b_data = list()
+
+# Graph
+G_3_78 = tf.Graph()
+
+# Iterations
+n_iter = 1500
+
+# Functions
+def lasso_penalty(coef, alpha=0.9):
+    lasso_param = tf.constant(alpha)
+    heavyside_step = tf.truediv(1.0, tf.add(1.0, tf.exp(tf.multiply(-100.0, tf.subtract(coef, lasso_param)))))
+    regularization_param = tf.multiply(heavyside_step, 99.0)
+    return regularization_param
+def l2(y, y_model):
+    return tf.square(y - y_model)
+
+# Build Graph
+with G_3_78.as_default():
+    # Placeholders
+    pH_x_petal_width = tf.placeholder(tf.float32, shape=[None,1], name="pH_x_petal_width")
+    pH_y_hat = tf.placeholder(tf.float32, shape=[None,1])
+    
+    # Model
+    A = tf.Variable(tf.random_normal(mean=0, stddev=1, shape=[1,1]), name="A")
+    b = tf.Variable(tf.random_normal(mean=0, stddev=1, shape=[1,1]), name="b")
+    model = tf.add(tf.matmul(pH_x_petal_width, A), b)
+    
+    # Loss
+    loss_lasso = tf.add(tf.reduce_mean(l2(pH_y_hat, model)), lasso_penalty(A, 0.9))
+    
+    with tf.Session(graph=G_3_78, config=tf_max_threads) as sess:
+        sess.run(tf.global_variables_initializer())
+        # Optimizer
+        op = tf.train.GradientDescentOptimizer(0.001)
+        train_step = op.minimize(loss_lasso)
+        # Train linear model 
+        for i in range(n_iter):
+            idx_random = np.random.RandomState(i).choice(y.shape[0], size=n)
+            tr_x = x[idx_random].reshape(-1,1)
+            tr_y = y[idx_random].reshape(-1,1)
+            sess.run(train_step, feed_dict={ pH_x_petal_width:tr_x, pH_y_hat:tr_y})
+            # Iterations
+            A_iter = sess.run(A)[0][0]
+            b_iter = sess.run(b)[0][0]
+            
+            lasso_iter = sess.run(loss_lasso, feed_dict={ pH_x_petal_width:tr_x, pH_y_hat:tr_y})[0][0]
+            lasso_data.append(lasso_iter)
+            A_data.append(A_iter)
+            b_data.append(b_iter)
+            # Log
+            if (i + 1) % 500 == 0:
+                print(f"Step #{i + 1}\n\tA = {A_iter}")
+                print(f"\tb = {b_iter}")
+                print(f"\tLoss = {lasso_iter}")
+                print()        
+# Plot path
+with plt.style.context("seaborn-white"):
+    fig, ax = plt.subplots(nrows=3, figsize=(6,6))
+    pd.Series(lasso_data,).plot(ax=ax[0], label="loss(lasso)", legend=True)
+    pd.Series(A_data,).plot(ax=ax[1], color="red", label="A", legend=True)
+    pd.Series(b_data,).plot(ax=ax[2], color="black", label="b", legend=True)
+    fig.suptitle("training-process", fontsize=15, y=0.95)
+
+    # Plot linear separation
+with plt.style.context("seaborn-white"):
+    fig, ax = plt.subplots(figsize=(5,5))
+    ax.scatter(x, y, c=X.index.map(lambda x:c[x]))
+    x_lims = ax.get_xlim()
+#     y_lims = ax.get_ylim()
+    for i in range(n_iter):
+        ax.plot(x, x*A_data[i] + b_data[i], alpha=i/(n_iter*100), color="black")
+    ax.set_xlim(x_lims)
+#     ax.set_ylim(y_lims)
+
+I will run this code block and get the desired results:
+Step #500
+	A = 0.8209055066108704
+	b = 3.338909149169922
+	Loss = 2.8257622718811035
+
+Step #1000
+	A = 0.812068521976471
+	b = 4.303615570068359
+	Loss = 0.5661464929580688
+
+Step #1500
+	A = 0.8036581873893738
+	b = 4.6621904373168945
+	Loss = 0.23930419981479645
+
+
+and then I will run the exact same code block again:
+Step #500
+	A = nan
+	b = nan
+	Loss = nan
+
+Step #1000
+	A = nan
+	b = nan
+	Loss = nan
+
+Step #1500
+	A = nan
+	b = nan
+	Loss = nan
+
+
+and then one more time:
+Step #500
+	A = 2.6116130352020264
+	b = 1.91126549243927
+	Loss = 101.70783233642578
+
+Step #1000
+	A = 2.3814141750335693
+	b = 2.4998815059661865
+	Loss = 100.85863494873047
+
+Step #1500
+	A = 2.11511492729187
+	b = 2.9327337741851807
+	Loss = 99.995849609375

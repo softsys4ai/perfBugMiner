@@ -1,0 +1,24 @@
+Using tf.train.SyncReplicasOptimizer with multiple optimizers
+
+I am trying to run the DeepLab Resnet (https://github.com/DrSleep/tensorflow-deeplab-resnet) in a distributed setup. I opted Synchronous Data parallel training approach similar to the one demonstrated in the Inception distributed training example.(https://github.com/tensorflow/models/tree/master/research/inception).
+In the Inception example, a single RMS optimizer is used to reduce the loss. The tf.train.SyncReplicasOptimizer function wraps the optimizer and becomes responsible for synchronization, aggregation and application of gradients to various workers. Also, it takes care of updating the global_step variable. In my case, the DeepLab Resnet makes use of three optimizers each handling specific portions of the network. Following snippet explains the case:
+`#Three optimizers declared with different learning rates
+ opt_conv = tf.train.MomentumOptimizer(learning_rate, args.momentum)
+ opt_fc_w = tf.train.MomentumOptimizer(learning_rate * 10.0, args.momentum)
+ opt_fc_b = tf.train.MomentumOptimizer(learning_rate * 20.0, args.momentum)`
+
+#Scope for every optimizer 
+grads = tf.gradients(reduced_loss, conv_trainable + fc_w_trainable + fc_b_trainable)
+grads_conv = grads[:len(conv_trainable)]
+grads_fc_w = grads[len(conv_trainable) : (len(conv_trainable) + len(fc_w_trainable))]
+grads_fc_b = grads[(len(conv_trainable) + len(fc_w_trainable)):]
+
+#Gradients applied to various portions of the network
+train_op_conv = opt_conv.apply_gradients(zip(grads_conv, conv_trainable))
+train_op_fc_w = opt_fc_w.apply_gradients(zip(grads_fc_w, fc_w_trainable))
+train_op_fc_b = opt_fc_b.apply_gradients(zip(grads_fc_b, fc_b_trainable))
+
+`#tf.group to combine all three operations
+train_op = tf.group(train_op_conv, train_op_fc_w, train_op_fc_b)`
+
+I don't have any clue about using the tf.train.SyncReplicasOptimizer for multiple optimizers to achieve synchronous data parallel training. Also, I don't have an idea about updating the global_step variable and using the chief_queue_runner for this case. Please help me on this.

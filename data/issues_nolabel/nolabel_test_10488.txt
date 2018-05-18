@@ -1,0 +1,84 @@
+Changing the cache_size in Gemmlowp/meta/single_thread_gemm.h cause random error in Requantize nodes
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+No
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux ubuntu 16.04
+
+
+TensorFlow installed from (source or binary):
+
+
+source, NDK built Android ARM64 binary
+
+TensorFlow version (use command below):
+
+commit id: f48673b
+Author: Luke Iwanski luke@codeplay.com
+
+
+Bazel version (if compiling from source):
+0.4.5
+
+
+CUDA/cuDNN version:
+no
+
+
+GPU model and memory:
+no
+
+
+Exact command to reproduce:
+
+
+
+
+bazel --output_base=../out/armv8_benchmark_model/ build -s -c opt --jobs=1 --crosstool_top=//external:android/crosstool --cpu=arm64-v8a --host_crosstool_top=@bazel_tools//tools/cpp:toolchain  tensorflow/tools/benchmark:benchmark_model 2>&1 |tee log.txt
+2.adb push benchmark_model /data/local/tmp/
+
+
+run_vgg1 on Nexus5X6P phone:
+script:
+time ./$1 --graph=$2   --input_layer="images:0"   --input_layer_shape="1,224,224,3"   --input_layer_type="float"   --output_layer="prob:0" --num_runs=1
+
+
+The final command line that I use:
+./run_vgg1.sh benchmark_model vgg16.8bit.weightsnodes.model
+My problem
+When I change the cache_size from 2561024 to 1281024 in the Gemmlowp/meta/single_thread_gemm.h, the benchmark_model randomly failed on the 8 bit quantized both node and weights vgg16 model.
+Source code / logs
+My Tensorflow commit-id:
+commit f48673b
+My modify for the Gemmlowp:
+in file  gemmlowp/meta/single_thread_gemm.h:
+change all the "int cache_size = 256 * 1024" to "int cache_size = 128 * 1024".
+The error log is :
+native : benchmark_model.cc:381 Graph: [vgg16.8bit.weightsnodes.model]
+native : benchmark_model.cc:382 Input layers: [images:0]
+native : benchmark_model.cc:383 Input shapes: [1,224,224,3]
+native : benchmark_model.cc:384 Input types: [float]
+native : benchmark_model.cc:385 Output layers: [prob:0]
+native : benchmark_model.cc:386 Num runs: [1]
+native : benchmark_model.cc:387 Inter-run delay (seconds): [-1.0]
+native : benchmark_model.cc:388 Num threads: [-1]
+native : benchmark_model.cc:389 Benchmark name: []
+native : benchmark_model.cc:390 Output prefix: []
+native : benchmark_model.cc:391 Show sizes: [0]
+native : benchmark_model.cc:392 Warmup runs: [2]
+native : benchmark_model.cc:52 Loading TensorFlow.
+native : benchmark_model.cc:59 Got config, 0 devices
+can't determine number of CPU cores: assuming 4
+can't determine number of CPU cores: assuming 4
+native : benchmark_model.cc:257 Running benchmark for 2 iterations without detailed stat logging:
+native : benchmark_model.cc:233 Error during inference: Invalid argument: requested_output_max must be >= requested_output_min, but got nan and 0
+[[Node: fc8/BiasAdd/eightbit/requantize = Requantize[Tinput=DT_QINT32, out_type=DT_QUINT8, _device="/job:localhost/replica:0/task:0/cpu:0"](fc8/BiasAdd/eightbit, fc8/BiasAdd/eightbit:1, fc8/BiasAdd/eightbit:2, fc8/BiasAdd/eightbit/requant_range, fc8/BiasAdd/eightbit/requant_range:1)]]
+native : benchmark_model.cc:268 Failed on run 0
+native : benchmark_model.cc:451 Timing failed with Invalid argument: requested_output_max must be >= requested_output_min, but got nan and 0
+[[Node: fc8/BiasAdd/eightbit/requantize = Requantize[Tinput=DT_QINT32, out_type=DT_QUINT8, _device="/job:localhost/replica:0/task:0/cpu:0"](fc8/BiasAdd/eightbit, fc8/BiasAdd/eightbit:1, fc8/BiasAdd/eightbit:2, fc8/BiasAdd/eightbit/requant_range, fc8/BiasAdd/eightbit/requant_range:1)]]
+0m11.12s real     0m27.55s user     0m01.87s system

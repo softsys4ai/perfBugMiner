@@ -1,0 +1,77 @@
+Input producer freezes if queue runner not started
+
+Hi,
+my entire program freezes when I pop an image from an input queue before starting the queue runner. The terminal window becomes unresponsive (including CTRL+C or CTRL+D signals) and the only way to kill the process is to close the terminal window. In rare cases zombie processes remain even after closing the terminal.
+I understand that I am not supposed to do that, but I think that Tensorflow absolutely HAS to check whether the queue runner is already initialized and throw an exception otherwise. Several reported issues might be related to that: 7503, 7573 etc.
+For reproducibility I provide a minimum (non-)working example. It requires a subfolder images with a handful of .jpg images:
+import tensorflow as tf
+
+# Read images from queue
+filename_queue = tf.train.string_input_producer(tf.train.match_filenames_once("./images/train/*.jpg"), shuffle=False)
+image_reader = tf.WholeFileReader()
+_, image_file = image_reader.read(filename_queue)
+image_query = tf.image.decode_jpeg(image_file)
+
+# Decode the image as a JPEG file, resize and assign to a variable
+image_query = tf.image.resize_images(image_query, (256, 256))
+image_batch = tf.Variable(tf.zeros((256, 256, 3)), trainable=False, name="image_batch")
+next_image = tf.assign(image_batch, image_query)
+loss = tf.reduce_mean(image_batch)
+
+# Start a new session to show example output.
+with tf.Session() as sess:
+    # Fix randomness, init variables and run threads
+    tf.set_random_seed(42)
+    tf.global_variables_initializer().run()
+
+    # Go to the next image
+    sess.run([next_image])
+
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
+
+    for i in xrange(0, 5):
+
+        # Get an image tensor and print its value.
+        image_tensor = sess.run([image_batch])
+        print(image_tensor[0][0, 0, 0])
+
+    # Finish off the filename queue coordinator.
+    coord.request_stop()
+    coord.join(threads)
+
+and here is the working code (the line sess.run([next_image]) was moved):
+import tensorflow as tf
+
+# Read images from queue
+filename_queue = tf.train.string_input_producer(tf.train.match_filenames_once("./images/train/*.jpg"), shuffle=False)
+image_reader = tf.WholeFileReader()
+_, image_file = image_reader.read(filename_queue)
+image_query = tf.image.decode_jpeg(image_file)
+
+# Decode the image as a JPEG file, resize and assign to a variable
+image_query = tf.image.resize_images(image_query, (256, 256))
+image_batch = tf.Variable(tf.zeros((256, 256, 3)), trainable=False, name="image_batch")
+next_image = tf.assign(image_batch, image_query)
+loss = tf.reduce_mean(image_batch)
+
+# Start a new session to show example output.
+with tf.Session() as sess:
+    # Fix randomness, init variables and run threads
+    tf.set_random_seed(42)
+    tf.global_variables_initializer().run()
+
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
+
+    for i in xrange(0, 5):
+        # Go to the next image
+        sess.run([next_image])
+
+        # Get an image tensor and print its value.
+        image_tensor = sess.run([image_batch])
+        print(image_tensor[0][0, 0, 0])
+
+    # Finish off the filename queue coordinator.
+    coord.request_stop()
+    coord.join(threads)

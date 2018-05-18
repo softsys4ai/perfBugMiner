@@ -1,0 +1,23 @@
+Fix issue of `name` used in `build_default_serving_input_fn`
+
+This fix tries to address the issue raised in #12755 where the name used in build_default_serving_input_fn is not a valid variable scope:
+$ python -c "import tensorflow as tf
+f = {'feature': tf.placeholder(name='feature', shape=[32], dtype=tf.float32) }
+serving_input = tf.contrib.learn.utils.input_fn_utils.build_default_serving_input_fn(f)
+serving_input()"
+...
+ValueError: 'feature:0' is not a valid scope name
+
+In build_default_serving_input_fn, the name of the tensor is used directly which consists of the op name and the value index:
+class Tensor(_TensorLike):
+....
+  @property
+  def name(self):
+    """The string name of this tensor."""
+    if not self._op.name:
+      raise ValueError("Operation was not named: %s" % self._op)
+    return "%s:%d" % (self._op.name, self._value_index)
+
+This fix fixes this issue by using the name of the tensor's op (not tensor): t.op.name instead, to avoid the ":0" (value index) at the end.
+This fix fixes #12755.
+Signed-off-by: Yong Tang yong.tang.github@outlook.com

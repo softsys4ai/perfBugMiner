@@ -1,0 +1,47 @@
+"In-Graph Replication" Multi-GPU training in local/single machine not working.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Wrote a minimal version custom code using TensorFlow API's (see attachment)
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Installed through pip
+TensorFlow version (use command below): ('v1.3.0-rc2-20-g0787eee', '1.3.0')
+Python version: Python 2.7.12
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: Cuda Version 8.0, cuDNN version 1.6
+GPU model and memory: GeForce GTX Titan X GPU 12 GB memory
+Exact command to reproduce: sh run_dist_tf_exp.sh (attached as zip file)
+distributed_tf_issue.zip
+
+Describe the problem
+We are trying to get single machine multi-gpu training with Distributed Tensor Flow for increasing model throughput. Our set-up is as follows, We have a single compute machine running Ubuntu 16.04 with 8 GPU's and we would like to enable "Data Parallelism" by training model on multiple(4 GPU's) device present in the local machine to increase throughput.
+I will explain three scenarios below which uses minimal code that just runs a LinearClassifier (see attached code),
+Scenario 1:
+tf_config set to run single worker and single parameter server config below,
+tf_config = {
+    "cluster": {
+        'ps': ['127.0.0.1:9000'],
+        'worker': ['127.0.0.1:9001']
+    }
+  }
+
+Does not run, execution just freezes. Also tried the suggestion that came in logs to use cloud as environment in tf_config, still didn't work. Read similar issue written here commented out the line in Experiment.py that checks if Environment is not LOCAL. By doing so it was successfully running training and worker exited after finished with training_steps. Should that line be commented for local distributed training runs?
+Scenario 2:
+tf_config set to run two worker and single parameter server config below,
+tf_config = {
+    "cluster": {
+        'ps': ['127.0.0.1:9000'],
+        'worker': ['127.0.0.1:9001', '127.0.0.1:9002']
+    }
+  }
+
+Had commented out [Experiment.py] (https://github.com/tensorflow/tensorflow/blob/master/tensorflow/contrib/learn/python/learn/experiment.py#L336) line as explained in Scenario 1, Did not work, the script was just hanging forever.
+Scenario 3:
+tf_config set to run one worker and a single parameter server config similar to Scenario 1.
+Change done here was learn_runner.run(..., schedule='continuous_train_and_eval), In continuous_train_and_eval mode the training just froze. Is continuous_train_and_eval not supported with distributed training? Seems to have some problem. Only change here compared to the working Scenario 1 setup with Experiment.py line commented out was changing the schedule to continuous_train_and eval.
+Source code / logs
+Following modification was done to Experiment.py in run function, Had to comment out LOCAL environment check.
+    if (#config.environment != run_config.Environment.LOCAL and
+        config.environment != run_config.Environment.GOOGLE and
+        config.cluster_spec and config.master):
+      self._start_server()

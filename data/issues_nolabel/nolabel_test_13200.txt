@@ -1,0 +1,89 @@
+speech_commands using python speech_recognition as input [working example]
+
+using your sample code /tensorflow/examples/speech_commands/label_wav.py I tweeked to use speech_recognition  as input that dumps wave data to trained network...
+feel free to add to examples for others to use..
+many thanks
+calvin
+(ubuntu 16.04, python 2.7)
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import argparse
+import sys
+
+import tensorflow as tf
+import speech_recognition as sr
+from tensorflow.contrib.framework.python.ops import audio_ops as contrib_audio
+
+FLAGS = None
+
+
+def load_graph(filename):
+  with tf.gfile.FastGFile(filename, 'rb') as f:
+    graph_def = tf.GraphDef()
+    graph_def.ParseFromString(f.read())
+    tf.import_graph_def(graph_def, name='')
+
+
+def load_labels(filename):
+  return [line.rstrip() for line in tf.gfile.GFile(filename)]
+
+
+def run_graph(wav_data, labels, input_layer_name, output_layer_name,
+              num_top_predictions):
+  with tf.Session() as sess:
+    softmax_tensor = sess.graph.get_tensor_by_name(output_layer_name)
+    predictions, = sess.run(softmax_tensor, {input_layer_name: wav_data})
+    top_k = predictions.argsort()[-num_top_predictions:][::-1]
+    for node_id in top_k:
+      human_string = labels[node_id]
+      score = predictions[node_id]
+      print('%s (score = %.5f)' % (human_string, score))
+
+    return 0
+
+def listen(r,source,labels_list):
+    audio = r.listen(source)
+	
+    run_graph(audio.get_wav_data(convert_rate = 16000, convert_width = 2), labels_list, FLAGS.input_name,
+            FLAGS.output_name, FLAGS.how_many_labels)
+
+def main(_):
+  print('start')
+  labels_list = load_labels(FLAGS.labels)
+  load_graph(FLAGS.graph)
+  
+  r = sr.Recognizer()
+  with sr.Microphone() as source:
+    print("Say something!")
+    while 1:
+        listen(r,source,labels_list)
+        print("------------------")
+  print('emd')
+ 
+
+if __name__ == '__main__':
+  parser = argparse.ArgumentParser()
+  parser.add_argument(
+      '--graph', type=str, default='', help='Model to use for identification.')
+  parser.add_argument(
+      '--labels', type=str, default='', help='Path to file containing labels.')
+  parser.add_argument(
+      '--input_name',
+      type=str,
+      default='wav_data:0',
+      help='Name of WAVE data input node in model.')
+  parser.add_argument(
+      '--output_name',
+      type=str,
+      default='labels_softmax:0',
+      help='Name of node outputting a prediction in the model.')
+  parser.add_argument(
+      '--how_many_labels',
+      type=int,
+      default=3,
+      help='Number of results to show.')
+
+  FLAGS, unparsed = parser.parse_known_args()
+  tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)

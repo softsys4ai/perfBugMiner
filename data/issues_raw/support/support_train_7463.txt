@@ -1,0 +1,78 @@
+Initialize error in 0.12.1
+
+I run my code well under Tensorflow 0.10, but after I update the version to 0.12.1, all the variables throws a FailedPreconditionError (see above for traceback): Attempting to use uninitialized value W error. And my code is  unchanged except I usetf.global_variables_initializer() instead of tf.initialize_all_variables(). I tried to add tf.GraphKeys.VARIABLES = tf.GraphKeys.GLOBAL_VARIABLES under import tensorflow as tf but it didn't work. So I opened this issue because I don't know where the bug is.
+My code is as below. Omitted some details to be more readable.
+And the error is different every time. All tf.Variable defined variables are mentioned wrong.
+class model(object):
+    def __init__(self, paras):
+        self.D = tf.constant(D, dtype = tf.float32)
+        self.Q = tf.constant(Q, dtype = tf.float32)
+
+        if self.USE_FEATURE:
+            self.CF = tf.Variable((np.random.rand(self.rank, d_F) - 0.5) / self.rank, \
+                                  dtype = tf.float32, name = 'CF')  #error here
+        self.W = tf.Variable((np.random.rand(self.rank, sample_num) - 0.5) / self.rank / 200, \
+                                  dtype = tf.float32, name = 'W')   #error here
+        self.C = tf.Variable((np.random.rand(context_num, self.rank) - 0.5) / self.rank, \
+                                   dtype = tf.float32, name = 'C')  #error here
+        
+        ED = tf.transpose(self.Q) * (1.0 / (1.0 + tf.exp(- tf.matmul(self.C, self.W))))
+        recons = self.D - ED
+        W_grad = tf.matmul(tf.transpose(self.C), recons)
+        self.W_grad = tf.Variable(W_grad, dtype = tf.float32)  #error here
+        
+        self._build_update_W_grad()
+        if not self.USE_FEATURE:
+            self._build_alter_W()
+        else:
+            self._build_W_with_F()
+        self._build_alter_C()
+
+    def _run(self, sess):
+        tf.initialize_all_variables().run()  #where the error throws
+
+        for i in xrange(self.max_iter):
+            if (i + 1) % self.prun_step == 0:
+                self.mu = self.mu * self.prun_rate
+            if (i + 1) % 2 == 1:
+                for j in xrange(self.inner_maxiter):
+                    if not self.USE_FEATURE:
+                        self.up_W_grad.run()
+                        self.up_W.run()
+                    else:
+                        self.up_W_grad.run()
+                        for k in xrange(self.sgd_batch):
+                            self.up_W_CF.run()
+                            #raise NotImplementedError
+            else:
+                for j in xrange(self.inner_maxiter):
+                    self.up_C.run()
+        
+        W = self.W.eval()
+        C = self.C.eval()
+        print 'end training. save W and C'
+        return W, C
+
+    def _build_alter_W(self):
+        #codes
+        self.up_W = tf.group(updata_W)
+        
+    def _build_W_with_F(self):    
+        #codes
+        self.up_W_CF = tf.group(updata_W, updata_CF)
+        #raise NotImplementedError
+   
+    def _build_alter_C(self):
+        #codes
+        self.up_C = tf.group(updata_C)
+   
+    def _build_update_W_grad(self):
+        #codes
+        self.up_W_grad = tf.group(update_W_grad)
+
+#main program
+train_epoch = model(paras)
+with tf.Session(config = config) as sess:
+    W, C = train_epoch._run(sess)
+
+Can anybody help? The program worked well in 0.10 but crashed after I updated to 0.12.1. I changed nothing but tf.initialize_all_variables().run() to tf.global_variables_initializer().run().

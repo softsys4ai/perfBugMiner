@@ -1,0 +1,175 @@
+Tensorflow in Android: You must feed a value for placeholder tensor 'Placeholder' with dtype float issue
+
+have a problem with importing Tensorflow model into Android Studio application. I have built a model, froze the model and optimized that frozen model in Python, and now I'm trying to use it in the Android app, but it constantly returns me that same error that I must feed a value for a placeholder. This is happening in the Android app when I run inferenceInterface.run(OUTPUT_NODES); function.
+I don't know if the error is it in the model itself, but I'm assuming that python would throw me an error and won't build the model, what he did.
+This is the example of rows of data I'm sending to Tensorflow (in csv file):
+1,26,2091,5,2,0,0,0,0,0,85,105,6,4,0,1
+1,26,47,9,4,0,0,0,0,0,85,0,7,4,1,0
+This is the creating model in Python:
+
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+from math import floor, ceil
+from pylab import rcParams
+
+
+columns = ["Gender", "Age", "StepsNum", "Still", "ContinuousStill",
+           "Running", "Driving", "Cycling", "Weather", "TargetWeight",
+           "Calories", "DayOfTheWeek", "PartOfTheDay",
+           "NotificationType", "UserInput"]
+
+userinput = ['0','1']
+
+
+activites_df = pd.read_csv("E:\\MASTER\\PythonPrograms\\useractivityInt.csv", header = None, names=columns)
+
+
+#encode all strings
+def encode(series): 
+    #print(pd.get_dummies(series.astype(str)))
+    return pd.get_dummies(series.astype(str))
+
+
+train_x = pd.DataFrame(activites_df, columns = columns, dtype=float)
+# train_x = activites_df
+train_y = encode(activites_df.UserInput)
+print(train_y)
+# train_y = activites_df.iloc[:,-1]
+# print(train_y)
+# train_y = pd.DataFrame(userinput, dtype=float)
+
+
+train_size = 0.9
+
+train_cnt = floor(train_x.shape[0] * train_size)
+#iloc[0] - first row, iloc[:0] - first column of data frame, iloc[0:n] - first n rows
+x_train = train_x.iloc[0:train_cnt].values
+y_train = train_y.iloc[0:train_cnt].values
+
+x_test = train_x.iloc[train_cnt:].values
+y_test = train_y.iloc[train_cnt:].values
+
+
+def multilayer_perceptron(x, weights, biases, keep_prob):
+    layer_1 = tf.add(tf.matmul(x, weights['h1']), biases['b1'])
+    layer_1 = tf.nn.relu(layer_1)
+    layer_1 = tf.nn.dropout(layer_1, keep_prob)
+    out_layer = tf.matmul(layer_1, weights['out']) + biases['out']
+    return out_layer
+
+
+#shape[0] - Gives the number of rows in matrix.. shape[1] - numbers of columns 
+n_hidden_1 = 38
+n_input = train_x.shape[1]
+n_classes = train_y.shape[1]
+# n_classes = 2
+
+weights = {
+    'h1': tf.Variable(tf.random_normal([n_input, n_hidden_1]),tf.float32),
+    'out': tf.Variable(tf.random_normal([n_hidden_1, n_classes]),tf.float32)
+}
+
+biases = {
+    'b1': tf.Variable(tf.random_normal([n_hidden_1]),tf.float32),
+    'out': tf.Variable(tf.random_normal([n_classes]),tf.float32)
+}
+
+#keep_prob: A scalar Tensor with the same type as x. The probability that each element is kept.
+# keep_prob = tf.placeholder("float")
+keep_prob = tf.placeholder(tf.float32)
+
+training_epochs = 5000
+display_step = 1000
+batch_size = 32
+
+x = tf.placeholder(tf.float32, [None, n_input], name='input')
+y = tf.placeholder(tf.float32, [None, n_classes])
+
+predictions = multilayer_perceptron(x, weights, biases, keep_prob)
+
+#_y is name for output node
+#If we take an input of [1, 2, 3, 4, 1, 2, 3], the softmax of that is [0.024, 0.064, 0.175, 0.475, 0.024, 0.064, 0.175]. 
+# The output has most of its weight where the '4' was in the original input. 
+# This is what the function is normally used for: to highlight the largest values and suppress values which are significantly below the maximum value.
+
+pred_softmax = tf.nn.softmax(predictions, name="y_")
+
+cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=predictions, labels=y))
+
+LEARNING_RATE = 0.0025
+
+optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(cost)
+
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+
+    for epoch in range(training_epochs):
+        avg_cost = 0.0
+        total_batch = int(len(x_train) / batch_size)
+        x_batches = np.array_split(x_train, total_batch)
+        y_batches = np.array_split(y_train, total_batch)
+        for i in range(total_batch):
+            batch_x, batch_y = x_batches[i], y_batches[i]
+            _, c = sess.run([optimizer, cost], 
+                            feed_dict={
+                                x: batch_x, 
+                                y: batch_y, 
+                                keep_prob: 0.8
+                            })
+            avg_cost += c / total_batch
+        if epoch % display_step == 0:
+            print("Epoch:", '%04d' % (epoch+1), "loss=", \
+                "{:.9f}".format(avg_cost))
+    print("Optimization Finished!")
+    correct_prediction = tf.equal(tf.argmax(predictions, 1), tf.argmax(y, 1))
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+    print("Accuracy:", accuracy.eval({x: x_test, y: y_test, keep_prob: 1.0}))
+
+    saver = tf.train.Saver()
+    tf.train.write_graph(sess.graph_def, '.', 'E:\\MASTER\\PythonPrograms\\har.pbtxt')  
+    saver.save(sess, save_path = "E:\\MASTER\\PythonPrograms\\har.ckpt")
+
+
+The main parts of the code in Android Studio are those:
+Definition of variables:
+
+private static final String MODEL_FILE = "file:///android_asset/optimized_frozen_har.pb";
+
+    String INPUT_NODE = "input";
+    String[] OUTPUT_NODES = {"y_"};
+    String OUTPUT_NODE = "y_";
+    //I don't know what is input size
+    long[] INPUT_SIZE = {1, 15};
+    int OUTPUT_SIZE = 2;
+
+    private TensorFlowInferenceInterface inferenceInterface;
+
+
+Initialization and calling function in OnCreate:
+
+inferenceInterface = new TensorFlowInferenceInterface(appContext.getAssets(), MODEL_FILE);
+
+
+ float[] data = {(float)1.0, (float)26.0, (float)1000.0, (float)3.0, (float)1.0,(float)0.0, (float) 0.0, (float)0.0, (float)0.0, (float)0.0, (float)85.0, (float)48.0, (float)7.0, (float)4.0, (float)2.0};
+        float[] out = predictProbabilitiesFloat(data);
+
+
+Function for returning result from TensorFlow:
+
+public float[] predictProbabilitiesFloat(float[] data) {
+        float[] result = new float[OUTPUT_SIZE];
+        inferenceInterface.feed(INPUT_NODE, data, INPUT_SIZE);
+        inferenceInterface.run(OUTPUT_NODES);
+        inferenceInterface.fetch(OUTPUT_NODE, result);
+
+        //for us it should be 0 or 1
+        return result;
+    }
+
+
+If somebody knows how to fix this problem, please help me, I have few more days to finish this as one part of my master thesis.
+Thank you in advance!``

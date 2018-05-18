@@ -1,0 +1,47 @@
+Matrix Inverse in TensorFlow
+
+I have a problem related to calculating matrix inverse in TensorFlow python interface version 1.1.0 on Linux. What I'm now trying to do is that, I have an input vector as tensorflow.float64, say S and a value V. I augment the vector S to be polynomial fashion in the form  and want to do a regression on V. I choose to compute the linear regression myself instead of using the infrastructure from tensorflow, where the regression is conducted as . The problem occurs at the  step, where the inverse multiply the original matrix does not give an identity. However, if I feed the  as a constant matrix containing the same value as the preprocessed input, the result is really the inverse of itself.
+The code below is a runnable version with parameter control=True turns on the constant input matrix version where the inverse behaves correctly. Three matrices are output by running the program, the original matrix, the "inverse" by tf.matrix_inverse, and the multiplication of the "inverse" with the original matrix aiming to recover an identify. control=False gives the same original matrix as control=True run, however, the recovered "identity" is not correct with control=False. I suspect something wrong with the data flow during preprocessing. However, limited by my experience with TensorFlow, I cannot spot it. Would you mind a help why the tf.matrix_inverse does not work as expected?
+import tensorflow as tf
+import pprint
+
+def matrixInverse( control=False ):
+    '''Compute inverse of a matrix.
+
+Parameters
+----------
+control : bool
+    whether to use control group or not.
+    '''
+    X = tf.constant( [ [100. , 100., 100., 100.],
+         [ 101.75497118 ,  92.84824314 ,  95.09528336 , 103.24955959],
+         [ 92.33287485 ,  95.86868862 ,  84.70664178 , 107.9505686 ],
+         [ 85.86109085 ,  99.05621029 ,  94.24396596 , 119.60257907] ], dtype=tf.float64 )
+
+    # extract input X
+    s = tf.slice( X, [ 2, 0 ], [ 1, 4 ])
+    s = tf.squeeze(s)
+    s1 = tf.multiply( tf.ones( 4, dtype=tf.float64 ), s )
+    s2 = tf.multiply( s, s )
+    s3 = tf.multiply( tf.multiply( s, s ), s )
+
+    A = tf.concat( [ tf.ones( 4, dtype=tf.float64 ), s1, s2, s3 ], 0 )
+    A = tf.reshape( A, [ 4, 4 ] )
+
+    # filter only the first element in the selected row
+    itm = tf.constant( [ True, False, False, False ], dtype=tf.bool )
+
+    A = tf.boolean_mask( tf.transpose(A), itm )
+
+    if control:
+        ATA = tf.constant([[  1.00000000e+00,   9.23328748e+01,   8.52535978e+03,   7.87170977e+05],
+                     [  9.23328748e+01,   8.52535978e+03,   7.87170977e+05,   7.26817593e+07],
+                     [  8.52535978e+03,   7.87170977e+05,   7.26817593e+07,   6.71091579e+09],
+                     [  7.87170977e+05,   7.26817593e+07,   6.71091579e+09,   6.19638148e+11]], dtype = tf.float64)
+    else:
+        ATA = tf.matmul( tf.transpose( A ), A )
+
+    inverseATA = tf.matrix_inverse( ATA )
+
+    sess = tf.Session()
+    pprint.pprint( sess.run( [ ATA, inverseATA, tf.matmul( ATA, inverseATA ) ] ) )

@@ -1,0 +1,63 @@
+Does it makes sense to use AdamOptimizer with Dropout?
+
+I was experimenting with Dropout and I tried to check the number of weights updated in every iteration.
+My network has an input layer of size 100 and output layer of size 1, and I use dropout with keep_prob of 0.8.  With this configuration, I am expecting to update every time around 80 neurons. I tried to check this, and I got weird results. I asked in stackexchange and someone got the right answer: the optimizer was updating all the weights.
+I was using Adam, and when I changed to GradientDescent, Adagrad and Adadelta it worked well. I haven't tried more optimizers thought.
+Here is the code
+import numpy as np
+import tensorflow as tf
+
+# As input, 100 random numbers.
+input_size = 100
+output_size = 1
+
+x = tf.placeholder(tf.float32,[None, input_size],name="input")
+y = tf.placeholder(tf.float32,[None, output_size],name="labels")
+
+with tf.variable_scope("dense1") as scope:
+    W = tf.get_variable("W",shape=[input_size,output_size],initializer=tf.keras.initializers.he_uniform())
+    b = tf.get_variable("b",initializer=tf.zeros([output_size]))
+    dropped = tf.nn.dropout(x,0.8)
+    dense = tf.matmul(dropped,W)+b
+
+eval_pred = tf.nn.sigmoid(dense,name="prediction")
+
+cost = tf.reduce_mean(tf.losses.absolute_difference(eval_pred,y))
+#train_step = tf.train.AdamOptimizer(learning_rate=0.01).minimize(cost)
+train_step = tf.train.GradientDescentOptimizer(learning_rate=0.01).minimize(cost)
+train_step = tf.train.AdadeltaOptimizer(learning_rate=0.01).minimize(cost)
+
+
+# 20 epochs, batch size of 1
+epochs = 20
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+
+    allWeights = []
+    for i in range(epochs):
+
+        x_raw = np.random.random((1,input_size))
+        y_raw = np.random.random((1,output_size))
+        [_,c,d,w]=sess.run([train_step,cost,dropped,W], feed_dict={x: x_raw, y: y_raw})
+        #print("Epoch {0}/{1}. Loss: {2}".format(i+1,epochs,c))
+
+        # Numbers will be around 20% of input_size (17-22)
+        print(np.sum(d==0))
+        allWeights.append(w)
+
+print("Calculate the difference between W_i and W_{i-1}")
+for wi in range(1,len(allWeights)):
+    difference = allWeights[wi]-allWeights[wi-1]
+    # I expect that there will be around 20 weights that won't be updated
+    # so the difference between the current weight and the previous one
+    # should be zero.
+    print(np.sum(difference==0))
+
+Just in case is not clear enough in the code, I'm printing two sets of numbers:
+The first set is the number of zeros in the masked dropout layer, and since I'm using 0.8 keep_prob, I should have around 20% of zeros (so, I should get a number around 20). This part works well.
+The second set counts how many weights were NOT updated (difference between the previous weight and the current weight). Therefore, I am expecting these two sets to display the same numbers.
+Again, with Adam doesn't work because it updates more weights whereas GradientDescend, Adadelta and Adagrad it works well.
+Question:
+Is this a bug or is it supposed to be like this?
+In the latter case, does it make sense to use Adam with Dropout?

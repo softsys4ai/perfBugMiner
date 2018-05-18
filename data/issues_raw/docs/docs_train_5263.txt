@@ -1,0 +1,42 @@
+OOM Error Message Should Show Which GPU is Out of Memory
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+I've created a few overflow threads in regards to balancing seq2seq memory loads over multiple gpus here:
+http://stackoverflow.com/questions/39773645/split-rnn-memory-consumption-evenly-between-gpus-in-tensorflow
+Environment info
+Operating System:
+Ubuntu 14.04 CUDA 7.5 -- tensorflow 0.11
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Simply load two matrices. One incredibly larger one on a gpu0 and a smaller one on gpu1. It would be great if the OOM message could tell you which gpu ran out of memory. This way you can redistribute resources from one gpu to another.
+What other attempted solutions have you tried?
+Currently I look at all tensors assigned per device and how large each tensor it is. I then sum the size of these tensors using the following code:
+def calculate_variable_sizes_per_device(batch_size = 64):
+  dev_list = get_available_gpus()
+  dev_size_list = [[dev_list[i], 0] for i in xrange(len(dev_list))]
+
+  tf.logging.info('calculating variable sizes on respective devices: %d' % len(dev_list))
+  print('dev_list', dev_list)
+  for eachvar in tf.all_variables():
+    device = eachvar.device
+    print('device', device)
+    var_shape = find_replace_list(eachvar.get_shape().as_list(), '?', batch_size)
+    print('varshape',var_shape)
+    var_size = np.prod(np.array(var_shape))
+    print('varsize', var_size)  
+
+    for i,dev in enumerate(dev_list):
+      if dev.replace('/','') in device.lower():
+        dev_size_list[i][1] += var_size
+
+  return dev_size_list
+
+def find_replace_list(list_, find, replace):
+  for n,i in enumerate(list_):
+    if i==find:
+      list_[n]=replace
+  return list_
+
+
+def get_available_gpus():
+  local_device_protos = device_lib.list_local_devices()
+  return [x.name for x in local_device_protos] #if x.device_type == 'GPU']

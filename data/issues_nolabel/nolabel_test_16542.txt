@@ -1,0 +1,95 @@
+Cannot merge devices with incompatible jobs
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04(kernel 4.10)
+TensorFlow installed from (source or binary): source code
+TensorFlow version (use command below): r1.4.0
+Python version: 2.7
+Bazel version (if compiling from source): 0.5.4
+GCC/Compiler version (if compiling from source): 5.4.0
+CUDA/cuDNN version: No CUDA
+GPU model and memory: No GPU
+Exact command to reproduce: var_rep = tf.Variable(var_concat, name=var_name, collections=[tf.GraphKeys.LOCAL_VARIABLES], trainable=False)
+
+Describe the problem
+I am running distributed tensorflow with 2 parameter servers and 2 workers. I created some partioned variables by using "tf.create_partitioned_variables()". So the different parts of a variable will be placed on different ps. Then I want to concatenate them by using "tf.concat()" and assign the result of tf.concat() to a untrainable variable which lies in worker. But the error occurs as follows:
+Traceback (most recent call last):
+  File "distributed_vgg19.py", line 230, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "distributed_vgg19.py", line 188, in main
+    sess = sv.prepare_or_wait_for_session(server.target, config=sess_config)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 726, in prepare_or_wait_for_session
+    max_wait_secs=max_wait_secs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/session_manager.py", line 400, in wait_for_session
+    sess)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/session_manager.py", line 483, in _try_run_local_init_op
+    sess.run(self._local_init_op)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 889, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1120, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1317, in _do_run
+    options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 1336, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Cannot colocate nodes 'fc8/fc8_biases_1/fc8/fc8_biases/part_1/read_fc8/fc8_biases_1_0' and 'fc8/fc8_biases/part_1: Cannot merge devices with incompatible jobs: '/job:ps/task:0' and '/job:worker/task:1'
+         [[Node: fc8/fc8_biases_1/fc8/fc8_biases/part_1/read_fc8/fc8_biases_1_0 = Identity[T=DT_FLOAT, _class=["loc:@fc8/fc8_biases/part_1"], _device="/job:worker/task:1"](fc8/fc8_biases_1/cond_1/Merge)]]
+
+Caused by op u'fc8/fc8_biases_1/fc8/fc8_biases/part_1/read_fc8/fc8_biases_1_0', defined at:
+  File "distributed_vgg19.py", line 230, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "distributed_vgg19.py", line 136, in main
+    vgg.build(x, train_mode)
+  File "/home/shuai/distributed_vgg19_part/vgg19.py", line 96, in build
+    self.fc8 = self.fc_layer(self.relu7, 4096, 1000, "fc8")
+  File "/home/shuai/distributed_vgg19_part/vgg19.py", line 120, in fc_layer
+    weights, biases = self.get_fc_var(in_size, out_size, name)
+  File "/home/shuai/distributed_vgg19_part/vgg19.py", line 143, in get_fc_var
+    biases = self.get_var(initial_value, name, 1, name + "_biases")
+  File "/home/shuai/distributed_vgg19_part/vgg19.py", line 171, in get_var
+    var_rep = tf.Variable(var_concat, name=var_name, collections=[tf.GraphKeys.LOCAL_VARIABLES], trainable=False)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 229, in __init__
+    constraint=constraint)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 378, in _init_from_args
+    self._build_initializer_expr(self._initial_value),
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 811, in _build_initializer_expr
+    new_op = self._build_initializer_expr(initial_value.op)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 830, in _build_initializer_expr
+    new_tensor = self._build_initializer_expr(tensor)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 811, in _build_initializer_expr
+    new_op = self._build_initializer_expr(initial_value.op)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/variables.py", line 847, in _build_initializer_expr
+    attrs=initial_value.node_def.attr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 3042, in create_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1521, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): Cannot colocate nodes 'fc8/fc8_biases_1/fc8/fc8_biases/part_1/read_fc8/fc8_biases_1_0' and 'fc8/fc8_biases/part_1: Cannot merge devices with incompatible jobs: '/job:ps/task:0' and '/job:worker/task:1'
+         [[Node: fc8/fc8_biases_1/fc8/fc8_biases/part_1/read_fc8/fc8_biases_1_0 = Identity[T=DT_FLOAT, _class=["loc:@fc8/fc8_biases/part_1"], _device="/job:worker/task:1"](fc8/fc8_biases_1/cond_1/Merge)]]
+
+there are some relevant code:
+            slice_list = []
+            for dim_index in range(value.get_shape().ndims):
+                if dim_index == 0:
+                    slice_list.append(self.num_of_ps)
+                else:
+                    slice_list.append(1)
+            var_list = tf.create_partitioned_variables(shape=value.get_shape(), 
+                                                       slicing=slice_list, 
+                                                       initializer=value,
+                                                       name=var_name)
+            var_concat = var_list[0]
+            for ps_index in range(self.num_of_ps - 1):
+                var_concat = tf.concat([var_concat, var_list[ps_index + 1]], 0)
+            with tf.device('/job:worker/task:%d' % self.task_index):
+                var = tf.Variable(var_concat, name=var_name, collections=[tf.GraphKeys.LOCAL_VARIABLES], trainable=False)
+
+Anybody knows why this error happened? Is it caused by an bug? If not, what i can do to assign the value of a variable lying in ps to another variable lying in worker?
+Thanks a lot!

@@ -1,0 +1,160 @@
+Getting AbortionError when running modified tensorflow serving client
+
+(I initially posted this on stackoverflow but have gotten no response.) I modified the mnist_export.py and mnist_client.py to run an LSTM on some excel data. No issue with the training and exporting, but I run into this error below when running the client code.
+grpc.framework.interfaces.face.face.AbortionError: 
+    AbortionError(code=StatusCode.INTERNAL, details="Output 0 of type 
+    double does not match declared output type float for node _recv_x_0 = 
+    _Recv[client_terminated=true, 
+    recv_device="/job:localhost/replica:0/task:0/cpu:0", 
+    send_device="/job:localhost/replica:0/task:0/cpu:0", 
+    send_device_incarnation=-9032417372349471954, tensor_name="x:0", 
+    tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"()")
+
+My input data is in the shape of [None, 1, 20] where 1 is the time_step and 20 is the features.
+Below are the relevant parts of my training and export code:
+def RNN(x, weights, biases):
+     # Prepare data shape to match `rnn` function requirements
+     # Current data input shape: (batch_size, n_steps, n_input)
+     # Required shape: 'n_steps' tensors list of shape (batch_size, n_input)
+     # Permuting batch_size and n_steps
+     x = tf.transpose(x, [1, 0, 2])
+     # Reshaping to (n_steps*batch_size, n_input)
+     x = tf.reshape(x, [-1, n_input])
+     # Split to get a list of 'n_steps' tensors of shape (batch_size, n_input)
+     x = tf.split(0, n_steps, x)
+     # Define a lstm cell with tensorflow
+     lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(n_hidden, forget_bias=1.0, state_is_tuple=True)
+     # Add dropout
+     #lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, input_keep_prob=keep_prob)
+     #lstm_cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell] * n_layers, state_is_tuple=True)
+     # Get lstm cell output
+     outputs, states = tf.nn.rnn(lstm_cell, x, dtype=tf.float32)
+     # Linear activation, using rnn inner loop last output
+     return tf.matmul(outputs[-1], weights['out']) + biases['out']
+ 
+ # get data
+ train_data_set, test_data_set = read_data_sets('AUDJPY Data.csv')
+ 
+ # tf Graph input
+ #x = tf.placeholder("float", [None, n_steps, n_input])
+ y_ = tf.placeholder("float", [None, n_classes])
+ keep_prob = tf.placeholder(tf.float32)
+ 
+ # Exporter signatures
+ serialized_tf_example = tf.placeholder(tf.string, name='tf_example')
+ feature_configs = {
+     'x': tf.FixedLenFeature(shape=[n_steps,n_input], dtype=tf.float32),
+ }
+ tf_example = tf.parse_example(serialized_tf_example, feature_configs)
+ x = tf.identity(tf_example['x'], name='x')  # use tf.identity() to assign name
+ 
+ # Define weights
+ weights = {
+     'out': tf.Variable(tf.random_normal([n_hidden, n_classes]))
+ }
+ biases = {
+     'out': tf.Variable(tf.random_normal([n_classes]))
+ }
+ 
+ pred = RNN(x, weights, biases)
+ 
+ # Define loss and optimizer
+ y = tf.nn.softmax(pred, name='y')
+ values, indices = tf.nn.top_k(y, k=4)
+ classes = tf.contrib.lookup.index_to_string(tf.to_int64(indices), mapping=tf.constant([str(i) for i in range(n_classes)]))
+ cost = -tf.reduce_sum(y_ * tf.log(y))
+ optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+ 
+ # Evaluate model
+ correct_pred = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
+ accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+ 
+ # Initializing the variables
+ init = tf.global_variables_initializer()
+ 
+ # Launch the graph
+ with tf.Session() as sess:
+     sess.run(init)
+     step = 1
+     # Keep training until reach max iterations
+     while step * batch_size < training_iters:
+         batch_x, batch_y = train_data_set.next_batch(batch_size)
+         # Reshape data to get 28 seq of 28 elements
+         batch_x = batch_x.reshape((batch_size, n_steps, n_input))
+         # Run optimization op (backprop)
+         sess.run(optimizer, feed_dict={x: batch_x, y_: batch_y})
+         if step % display_step == 0:
+             # Calculate batch accuracy
+             acc = sess.run(accuracy, feed_dict={x: batch_x, y_: batch_y})
+             # Calculate batch loss
+             loss = sess.run(cost, feed_dict={x: batch_x, y_: batch_y})
+             print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
+                   "{:.6f}".format(loss) + ", Training Accuracy= " + \
+                   "{:.5f}".format(acc))
+         step += 1
+     print("Optimization Finished!")
+     print("Testing Accuracy:", \
+             sess.run(accuracy, feed_dict={x: test_data_set.features, y_: test_data_set.labels}))
+     # Export inference model.
+     export_path = '/tmp/'
+     print('Exporting trained model to %s' % export_path)
+     init_op = tf.group(tf.initialize_all_tables(), name='init_op')
+     saver = tf.train.Saver(sharded=True)
+     classification_signature = exporter.classification_signature(
+         input_tensor=serialized_tf_example,
+         classes_tensor=classes,
+         scores_tensor=values)
+     named_graph_signature = {
+         'inputs': exporter.generic_signature({'images': x}),
+         'outputs': exporter.generic_signature({'scores': y})}
+     model_exporter = exporter.Exporter(saver)
+     model_exporter.init(
+         init_op=init_op,
+         default_graph_signature=classification_signature,
+         named_graph_signatures=named_graph_signature)
+     model_exporter.export(export_path, tf.constant(FLAGS.export_version), sess)
+     print('Done exporting!')
+
+And below are the relevant part of the client code:
+def do_inference(hostport, work_dir, concurrency, num_tests):
+      """Tests PredictionService with concurrent requests.
+      Args:
+        hostport: Host:port address of the PredictionService.
+        work_dir: The full path of working directory for test data set.
+        concurrency: Maximum number of concurrent requests.
+        num_tests: Number of test images to use.
+      Returns:
+        The classification error rate.
+      Raises:
+        IOError: An error occurred processing test data set.
+      """
+      train_data_set, test_data_set = read_data_sets(work_dir)
+      print('read test data')
+      host, port = hostport.split(':')
+      channel = implementations.insecure_channel(host, int(port))
+      stub = prediction_service_pb2.beta_create_PredictionService_stub(channel)
+      request = predict_pb2.PredictRequest()
+      request.model_spec.name = 'mnist'
+      image, label = test_data_set.next_batch(1)
+      print(image.shape)
+      request.inputs['images'].CopyFrom(
+          tf.contrib.util.make_tensor_proto(image[0], shape=[1,1,20]))
+      result = stub.Predict(request, 10.0)
+
+Also below is the traceback if that helps:
+Traceback (most recent call last):
+      File "/home/joel/Projects/serving/bazel-bin/tensorflow_serving/example/venatus_client.runfiles/tf_serving/tensorflow_serving/example/venatus_client.py", line 225, in <module>
+        tf.app.run()
+      File "/home/joel/Projects/serving/bazel-bin/tensorflow_serving/example/venatus_client.runfiles/org_tensorflow/tensorflow/python/platform/app.py", line 44, in run
+        _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+      File "/home/joel/Projects/serving/bazel-bin/tensorflow_serving/example/venatus_client.runfiles/tf_serving/tensorflow_serving/example/venatus_client.py", line 220, in main
+        FLAGS.concurrency, FLAGS.num_tests)
+      File "/home/joel/Projects/serving/bazel-bin/tensorflow_serving/example/venatus_client.runfiles/tf_serving/tensorflow_serving/example/venatus_client.py", line 208, in do_inference
+        result = stub.Predict(request, 10.0)
+      File "/usr/local/lib/python2.7/dist-packages/grpc/beta/_client_adaptations.py", line 305, in __call__
+        self._request_serializer, self._response_deserializer)
+      File "/usr/local/lib/python2.7/dist-packages/grpc/beta/_client_adaptations.py", line 203, in _blocking_unary_unary
+        raise _abortion_error(rpc_error_call)
+    grpc.framework.interfaces.face.face.AbortionError: AbortionError(code=StatusCode.INTERNAL, details="Output 0 of type double does not match declared output type float for node _recv_x_0 = _Recv[client_terminated=true, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=-9032417372349471954, tensor_name="x:0", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()")
+
+Appreciate any help on how to fix this!

@@ -1,0 +1,83 @@
+tf.data.apply does not return output shape
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS High Sierra
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): 1.8.0-dev20180328
+Python version:  3.6
+Bazel version (if compiling from source): NA
+GCC/Compiler version (if compiling from source): NA
+CUDA/cuDNN version: NA
+GPU model and memory: NA
+Exact command to reproduce:
+
+Describe the problem
+I am using tf.data API to transform my dataset. Following is the code Transform:
+Transformation Function
+win_len = 32
+look_back = 11
+pad = int(look_back/2)
+slen = 1344
+sh = int(slen + 2*pad)
+batch_size = 840
+
+def _parse_function(example_proto):
+    keys_to_features = {'mix':tf.FixedLenFeature((slen), tf.float32),
+                        'pure':tf.FixedLenFeature((slen), tf.float32)}
+    parsed_features = tf.parse_single_example(example_proto, keys_to_features)
+    return {"pure":parsed_features['pure'], "mix":parsed_features['mix']}
+def _dict_pad(sig):
+    return {'pure':tf.pad(sig['pure'],[[pad,pad]]),'mix':tf.pad(sig['mix'],[[pad,pad]])}
+def _dict_slide_reduce(sig,sh):
+    return sig.apply(sliding_window_batch(window_size=look_back,stride=1))
+def _pure_reduce(sig):
+    return {'pure': sig['pure'][:,pad],'mix':sig['mix'] }
+Data Reading:
+train_data = tf.data.TFRecordDataset(train_files)\
+            .map(_parse_function)\
+            .map(_dict_pad)\
+            .apply(unbatch())\
+            .apply((group_by_window(key_func= lambda sig : 1,reduce_func = lambda key,sig : _dict_slide_reduce(sig,sh),window_size=sh)))\
+            .batch(win_len)\
+            .map(_pure_reduce)\
+            .batch(batch_size) 
+train_data = train_data.prefetch(100)
+print(train_data.output_shapes)
+iterator_train = train_data.make_one_shot_iterator()
+tr_sig = iterator_train.get_next()
+output of print(train_data.output_shapes) is following:
+{'pure': TensorShape([Dimension(None), Dimension(None)]), 'mix': TensorShape([Dimension(None), Dimension(None), Dimension(None)])}
+output shape after each transformation:
+train_data = tf.data.TFRecordDataset(train_files)
+train_data = train_data.map(_parse_function)
+print(train_data.output_shapes)
+# {'pure': TensorShape([Dimension(1344)]), 'mix': TensorShape([Dimension(1344)])}
+train_data = train_data.map(_dict_pad)
+print(train_data.output_shapes)
+# {'pure': TensorShape([Dimension(1354)]), 'mix': TensorShape([Dimension(1354)])}
+train_data = train_data.apply(tf.contrib.data.unbatch())
+print(train_data.output_shapes)
+# {'pure': TensorShape([]), 'mix': TensorShape([])}
+train_data = train_data.apply((group_by_window(key_func= lambda sig : 1,reduce_func = lambda key,sig : _dict_slide_reduce(sig,sh),window_size=32)))
+print(train_data.output_shapes)
+# {'pure': TensorShape([Dimension(None)]), 'mix': TensorShape([Dimension(None)])}
+train_data = train_data.batch(win_len)
+print(train_data.output_shapes)
+# {'pure': TensorShape([Dimension(None), Dimension(None)]), 'mix': TensorShape([Dimension(None), Dimension(None)])}
+train_data = train_data.map(_pure_reduce)
+print(train_data.output_shapes)
+# {'pure': TensorShape([Dimension(None)]), 'mix': TensorShape([Dimension(None), Dimension(None)])}
+train_data = train_data.batch(batch_size)
+print(train_data.output_shapes)
+# {'pure': TensorShape([Dimension(None), Dimension(None)]), 'mix': TensorShape([Dimension(None), Dimension(None), Dimension(None)])}
+The expected output is {'mix': TensorShape([Dimension(None), Dimension(32), Dimension(11)]), 'pure': TensorShape([Dimension(None), Dimension(32)])}
+iterator_train = train_data.make_one_shot_iterator()
+tr_sig = iterator_train.get_next()
+with tf.Session() as sess:
+    data = sess.run(tr_sig)
+    print(data['mix'].shape,data['pure'].shape)
+# (840, 32, 11) (840, 32)
+Because of this issue I am getting following error in  dynamic_rnn:
+ValueError: Input size (depth of inputs) must be accessible via shape inference, but saw value None.

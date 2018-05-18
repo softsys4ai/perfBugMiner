@@ -1,0 +1,143 @@
+Multiprocessing for input pipeline
+
+I have asked this question on StackOverFlow but I also feel that it can also be seen as a feature request.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+: YES
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+: Linux version 3.10.0-229.11.1.el7.x86_64 (builder@kbuilder.dev.centos.org) (gcc version 4.8.3 20140911 (Red Hat 4.8.3-9) (GCC) )
+TensorFlow installed from (source or binary):
+:  Installed from sources
+TensorFlow version (use command below):
+:  v1.0.0-63-g5b4bb03-dirty' 1.0.1
+Bazel version (if compiling from source):
+:  0.4.4
+CUDA/cuDNN version:
+:  CUDA 8.0
+:  CuDNN 5.1
+GPU model and memory:
+: NVidia Titan X (Maxwell)
+Exact command to reproduce:
+: It is a feature request or clarification
+
+Describe the problem
+Basic Objective
+I have to train the OverFeat architecture for patch classification from scratch.
+Problem scope
+Input to the graph
+Problem description
+During the training of the OverFeat model, for each image 5 random crops and their mirrored versions (a total of 10 augmented images) are created and they are fed to the model.
+I previously used feed_dict to provide input to the model. However, it led to a very very slow  training and turned out to be impractical when handling 12 million input images (1.2 million of imagenet X 10).
+Hence, I want to use native Tensorflow queues to provide input to the graph.
+I have used multiprocessing module of Python to create sharded TFRecord files of Imagenet dataset.
+Now, I would like to use multiprocessing to enqueue augmented images to a tf.RandomShuffleQueue from which the graph takes it input.
+I could have used multithreading but it is still slow. Seeing the speedup in creation of TFRecord files through multiprocessing as opposed to multithreading, I am convinced that using multiprocessing would increase the speed of preprocessing.
+The problem is that, it is not clear to me that how do I use multiprocessing in TensorFlow. One code snippet is here  , but it ends up using a feed_dict at the end of the pipeline which leads to one extra copy operation.
+So, I want to launch like 20 processes using multiprocessing, each of which will process a range of shards and enqueue the augmented images and corresponding labels to a tf.RandomShuffleQueue
+It would be very helpful if there is a feature for using multiprocessing with TensorFlow for input pipeline and data augmentation. A good guideline in that direction would be very helpful.
+Source code / logs
+The source code which is used for creating the TFRecord files is here
+I also wrote a basic code to try out multiprocessing (to enqueue a queue from multiple processes) but it does not work.
+import os
+import tensorflow as tf
+from pathos.multiprocessing import Pool as mp
+
+def f(g,i):
+    #g = tf.Graph()                                                                                                  
+    with g.as_default():
+        q = tf.FIFOQueue(capacity=100, dtypes=[tf.string], shapes=[[]],
+                         shared_name="shared_q", name="q")
+        a = tf.constant("Hello")
+        b =	q.enqueue(a)
+        c = q.size()
+    with tf.Session(graph=g) as sess:
+        for n in range(i):
+            sess.run(b)
+            print(sess.run(c))
+    return
+
+if __name__ == "__main__":
+    os.environ["CUDA_VISIBLE_DEVICES"]=""
+    p = mp(5)
+    g = tf.Graph()
+    with g.as_default():
+        q = tf.FIFOQueue(capacity=100, dtypes=[tf.string], shapes=[[]],
+                         shared_name="shared_q", name="q")
+        qsz = q.size()
+	p.starmap(f,[(g,1),(g,2)])
+        with tf.Session(graph=g) as sess:
+            for	i in range(10):
+                print(sess.run(qsz))
+    	os.unsetenv("CUDA_VISIBLE_DEVICES")
+
+The output is
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+E tensorflow/stream_executor/cuda/cuda_driver.cc:509] failed call to cuInit: CUDA_ERROR_NO_DEVICE
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:158] retrieving CUDA diagnostic information for host: nefgpu11
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:165] hostname: nefgpu11
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:189] libcuda reported version is: 367.48.0
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:363] driver version file contents: """NVRM version: NVIDIA UNIX x86_64 Kernel Module  367.48  Sat Sep  3 18:21:08 PDT 2016
+GCC version:  gcc version 4.8.5 20150623 (Red Hat 4.8.5-4) (GCC) 
+"""
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:193] kernel reported version is: 367.48.0
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:300] kernel version seems to match DSO: 367.48.0
+W tensorflow/compiler/xla/service/platform_util.cc:61] platform CUDA present but no visible devices found
+I tensorflow/compiler/xla/service/platform_util.cc:58] platform Host present with 20 visible devices
+I tensorflow/compiler/xla/service/service.cc:180] XLA service executing computations on platform Host. Devices:
+I tensorflow/compiler/xla/service/service.cc:187]   StreamExecutor device (0): <undefined>, <undefined>
+1
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+E tensorflow/stream_executor/cuda/cuda_driver.cc:509] failed call to cuInit: CUDA_ERROR_NO_DEVICE
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:158] retrieving CUDA diagnostic information for host: nefgpu11
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:165] hostname: nefgpu11
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:189] libcuda reported version is: 367.48.0
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:363] driver version file contents: """NVRM version: NVIDIA UNIX x86_64 Kernel Module  367.48  Sat Sep  3 18:21:08 PDT 2016
+GCC version:  gcc version 4.8.5 20150623 (Red Hat 4.8.5-4) (GCC) 
+"""
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:193] kernel reported version is: 367.48.0
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:300] kernel version seems to match DSO: 367.48.0
+W tensorflow/compiler/xla/service/platform_util.cc:61] platform CUDA present but no visible devices found
+I tensorflow/compiler/xla/service/platform_util.cc:58] platform Host present with 20 visible devices
+I tensorflow/compiler/xla/service/service.cc:180] XLA service executing computations on platform Host. Devices:
+I tensorflow/compiler/xla/service/service.cc:187]   StreamExecutor device (0): <undefined>, <undefined>
+1
+2
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use FMA instructions, but these are available on your machine and could speed up CPU computations.
+E tensorflow/stream_executor/cuda/cuda_driver.cc:509] failed call to cuInit: CUDA_ERROR_NO_DEVICE
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:158] retrieving CUDA diagnostic information for host: nefgpu11
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:165] hostname: nefgpu11
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:189] libcuda reported version is: 367.48.0
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:363] driver version file contents: """NVRM version: NVIDIA UNIX x86_64 Kernel Module  367.48  Sat Sep  3 18:21:08 PDT 2016
+GCC version:  gcc version 4.8.5 20150623 (Red Hat 4.8.5-4) (GCC) 
+"""
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:193] kernel reported version is: 367.48.0
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:300] kernel version seems to match DSO: 367.48.0
+W tensorflow/compiler/xla/service/platform_util.cc:61] platform CUDA present but no visible devices found
+I tensorflow/compiler/xla/service/platform_util.cc:58] platform Host present with 20 visible devices
+I tensorflow/compiler/xla/service/service.cc:180] XLA service executing computations on platform Host. Devices:
+I tensorflow/compiler/xla/service/service.cc:187]   StreamExecutor device (0): <undefined>, <undefined>
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+As can be seen in the subprocesses, the queue is being enqueued, but the size as shown in the main module is continuously zero.

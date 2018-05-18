@@ -1,0 +1,134 @@
+OutOfRangeError
+
+My input data https://www.kaggle.com/c/titanic/download/train.csv
+I get OutOfRangeError while training. Can  someone tell me why out of range  error is thrown for below code.
+`
+import tensorflow as tf
+import csv
+import os
+initialize variables / model parameters
+W = tf.Variable(tf.zeros([5,1]),name="weights")
+W=tf.cast(W, tf.float32)
+b=tf.Variable(0.,)
+Linear Regression inference is now used for combining inputs
+def combine_inputs(X):
+return tf.matmul(X,W)+b
+New inferred value is the sigmoid applied the output of linear regression
+def inference(X):
+return tf.sigmoid(combine_inputs(X))
+def loss(X,Y):
+return tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(combine_inputs(X), Y))
+def read_csv(batch_size, file_name, record_defaults):
+filename_queue = tf.train.string_input_producer([os.path.dirname("file") + "/" + file_name])
+reader = tf.TextLineReader(skip_header_lines=1)
+key, value = reader.read(filename_queue)
+# decode_csv will convert a Tensor from type string (the text line) in
+# a tuple of tensor columns with the specified defaults, which also
+# sets the data type for each column
+decoded = tf.decode_csv(value, record_defaults=record_defaults)
+# batch actually reads the file and loads "batch_size" rows in a single tensor
+return tf.train.shuffle_batch(decoded,
+batch_size=batch_size,
+capacity=batch_size * 50,
+min_after_dequeue=batch_size)
+def inputs():
+passenger_id,survived, pclass, name, sex, age, sibsp, parch, ticket, fare, cabin, embarked = read_csv(100,"train.csv", [[0.0], [0.0], [0], [""], [""], [0.0], [0.0], [0.0], [""], [0.0], [""], [""]])
+print("Read Data Success")
+print(passenger_id)
+# convert categorical data
+is_first_class = tf.to_float(tf.equal(pclass, [1]))
+is_second_class = tf.to_float(tf.equal(pclass, [2]))
+is_third_class = tf.to_float(tf.equal(pclass, [3]))
+gender = tf.to_float(tf.equal(sex, ["female"]))
+# Finally we pack all the features in a single matrix;
+# We then transpose to have a matrix with one example per row and one feature per column.
+features = tf.transpose(tf.pack([is_first_class, is_second_class, is_third_class, gender, age]))
+survived = tf.reshape(survived, [100, 1])
+return features, survived
+def train(total_loss):
+learning_rate =0.01
+return tf.train.GradientDescentOptimizer(learning_rate).minimize(total_loss)
+Calculate Accuracy
+def evaluate(sess, X, Y):
+predicted = tf.cast(inference(X) > 0.5, tf.float32)
+print( sess.run(tf.reduce_mean(tf.cast(tf.equal(predicted, Y), tf.float32))))
+Create saver
+saver =tf.train.Saver()
+Launch the graph in a session, setup boilerplate
+with tf.Session() as sess:
+tf.initialize_all_variables().run()
+X,Y = inputs()
+total_loss=loss(X,Y)
+train_op=train(total_loss)
+coord=tf.train.Coordinator()
+threads=tf.train.start_queue_runners(sess=sess,coord=coord)
+
+# Actual Training Loop
+training_steps=1000
+for step in range(training_steps):
+    sess.run([train_op])
+    # for debugging and learning purposes, see how the loss gets decremented through training steps
+    #if step % 10 == 0 :
+    #    print "loss : ",sess.run([total_loss])
+
+evaluate(sess,X,Y)
+
+coord.request_stop()
+coord.join(threads)
+# Store the current values of each variable. By default keep most recent 5 files and delete rest
+saver.save(sess,'my-model-logistic',global_step=step)
+sess.close()
+
+`
+
+OutOfRangeError                           Traceback (most recent call last)
+/home/jenisha/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, _args)
+714     try:
+--> 715       return fn(_args)
+716     except errors.OpError as e:
+/home/jenisha/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py in _run_fn(session, feed_dict, fetch_list, target_list, options, run_metadata)
+696                                  feed_dict, fetch_list, target_list,
+--> 697                                  status, run_metadata)
+698
+/usr/lib/python3.5/contextlib.py in exit(self, type, value, traceback)
+65             try:
+---> 66                 next(self.gen)
+67             except StopIteration:
+/home/jenisha/.local/lib/python3.5/site-packages/tensorflow/python/framework/errors.py in raise_exception_on_not_ok_status()
+449           compat.as_text(pywrap_tensorflow.TF_Message(status)),
+--> 450           pywrap_tensorflow.TF_GetCode(status))
+451   finally:
+OutOfRangeError: RandomShuffleQueue '_398_shuffle_batch_16/random_shuffle_queue' is closed and has insufficient elements (requested 100, current size 0)
+[[Node: shuffle_batch_16 = QueueDequeueMany[_class=["loc:@shuffle_batch_16/random_shuffle_queue"], component_types=[DT_FLOAT, DT_FLOAT, DT_INT32, DT_STRING, DT_STRING, DT_FLOAT, DT_FLOAT, DT_FLOAT, DT_STRING, DT_FLOAT, DT_STRING, DT_STRING], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](shuffle_batch_16/random_shuffle_queue, shuffle_batch_16/n)]]
+During handling of the above exception, another exception occurred:
+OutOfRangeError                           Traceback (most recent call last)
+ in ()
+13     training_steps=1000
+14     for step in range(training_steps):
+---> 15         sess.run([train_op])
+16         # for debugging and learning purposes, see how the loss gets decremented through training steps
+17         #if step % 10 == 0 :
+/home/jenisha/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py in run(self, fetches, feed_dict, options, run_metadata)
+370     try:
+371       result = self._run(None, fetches, feed_dict, options_ptr,
+--> 372                          run_metadata_ptr)
+373       if run_metadata:
+374         proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+/home/jenisha/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py in _run(self, handle, fetches, feed_dict, options, run_metadata)
+634     try:
+635       results = self._do_run(handle, target_list, unique_fetches,
+--> 636                              feed_dict_string, options, run_metadata)
+637     finally:
+638       # The movers are no longer used. Delete them.
+/home/jenisha/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_run(self, handle, target_list, fetch_list, feed_dict, options, run_metadata)
+706     if handle is None:
+707       return self._do_call(_run_fn, self._session, feed_dict, fetch_list,
+--> 708                            target_list, options, run_metadata)
+709     else:
+710       return self._do_call(_prun_fn, self._session, handle, feed_dict,
+/home/jenisha/.local/lib/python3.5/site-packages/tensorflow/python/client/session.py in _do_call(self, fn, *args)
+726         except KeyError:
+727           pass
+--> 728       raise type(e)(node_def, op, message)
+729
+730   def _extend_graph(self):

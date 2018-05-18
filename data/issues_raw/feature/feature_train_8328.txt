@@ -1,0 +1,100 @@
+orthogonal_initializer() on GPU, horrible error message
+
+Works fine on CPU.
+Error message is horrible, without any hints towards orthogonal_initializer, or line it is used on, or GPU, or essence of the problem.
+Problems like this (not the first one for me) can only be handled as theory-by-theory manual search by user.
+Isolated example:
+import tensorflow as tf
+import numpy as np
+
+def strange_assign():
+	config = tf.ConfigProto()
+	config.allow_soft_placement = True
+	sess = tf.InteractiveSession(config=config)
+	with tf.device("gpu:0"):
+		g1 = tf.get_variable("g1", [2,2], tf.float32, tf.constant_initializer(1.0))
+		g2 = tf.get_variable("g2", [2,2], tf.float32, tf.zeros_initializer())
+		g3 = tf.get_variable("g3", [2,2], tf.float32, tf.ones_initializer())
+		g4 = tf.get_variable("g4", [2,2], tf.float32, tf.orthogonal_initializer(1.0))
+		g5 = tf.get_variable("g5", [2,2], tf.float32, tf.random_normal_initializer())
+		g6 = tf.get_variable("g6", [2,2], tf.float32, tf.random_uniform_initializer())
+
+	tf.global_variables_initializer().run()
+	for test in [g1,g2,g3,g4,g5,g6]:
+		t = sess.run(test)
+		print("ASSIGN TEST", test.name)
+		ph = tf.placeholder(tf.float32, t.shape)
+		try:
+			sess.run( [tf.assign(test, ph)] , feed_dict = { ph: t })
+			print("OK")
+		except:
+			print("FAIL")
+
+strange_assign()
+Output:
+ASSIGN TEST g1:0
+OK
+ASSIGN TEST g2:0
+OK
+ASSIGN TEST g3:0
+OK
+ASSIGN TEST g4:0
+E tensorflow/core/framework/op_segment.cc:53] Create kernel failed: Invalid argument: AttrValue must not have reference type value of float_ref
+	 for attr 'tensor_type'
+	; NodeDef: g1/_23 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_3_g1", tensor_type=DT_FLOAT_REF, _device="/job:localhost/replica:0/task:0/gpu:0"](^_recv_Placeholder_3_0/_25); Op<name=_Recv; signature= -> tensor:tensor_type; attr=tensor_type:type; attr=tensor_name:string; attr=send_device:string; attr=send_device_incarnation:int; attr=recv_device:string; attr=client_terminated:bool,default=false; is_stateful=true>
+E tensorflow/core/common_runtime/executor.cc:594] Executor failed to create kernel. Invalid argument: AttrValue must not have reference type value of float_ref
+	 for attr 'tensor_type'
+	; NodeDef: g1/_23 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_3_g1", tensor_type=DT_FLOAT_REF, _device="/job:localhost/replica:0/task:0/gpu:0"](^_recv_Placeholder_3_0/_25); Op<name=_Recv; signature= -> tensor:tensor_type; attr=tensor_type:type; attr=tensor_name:string; attr=send_device:string; attr=send_device_incarnation:int; attr=recv_device:string; attr=client_terminated:bool,default=false; is_stateful=true>
+	 [[Node: g1/_23 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_3_g1", tensor_type=DT_FLOAT_REF, _device="/job:localhost/replica:0/task:0/gpu:0"](^_recv_Placeholder_3_0/_25)]]
+FAIL
+ASSIGN TEST g5:0
+OK
+ASSIGN TEST g6:0
+OK
+
+Error message:
+E tensorflow/core/framework/op_segment.cc:53] Create kernel failed: Invalid argument: AttrValue must not have reference type value of float_ref
+	 for attr 'tensor_type'
+	; NodeDef: g1/_23 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_3_g1", tensor_type=DT_FLOAT_REF, _device="/job:localhost/replica:0/task:0/gpu:0"](^_recv_Placeholder_3_0/_25); Op<name=_Recv; signature= -> tensor:tensor_type; attr=tensor_type:type; attr=tensor_name:string; attr=send_device:string; attr=send_device_incarnation:int; attr=recv_device:string; attr=client_terminated:bool,default=false; is_stateful=true>
+E tensorflow/core/common_runtime/executor.cc:594] Executor failed to create kernel. Invalid argument: AttrValue must not have reference type value of float_ref
+	 for attr 'tensor_type'
+	; NodeDef: g1/_23 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_3_g1", tensor_type=DT_FLOAT_REF, _device="/job:localhost/replica:0/task:0/gpu:0"](^_recv_Placeholder_3_0/_25); Op<name=_Recv; signature= -> tensor:tensor_type; attr=tensor_type:type; attr=tensor_name:string; attr=send_device:string; attr=send_device_incarnation:int; attr=recv_device:string; attr=client_terminated:bool,default=false; is_stateful=true>
+	 [[Node: g1/_23 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_3_g1", tensor_type=DT_FLOAT_REF, _device="/job:localhost/replica:0/task:0/gpu:0"](^_recv_Placeholder_3_0/_25)]]
+Traceback (most recent call last):
+  File ".linuxbrew/Cellar/python3/3.5.2_3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1022, in _do_call
+    return fn(*args)
+  File ".linuxbrew/Cellar/python3/3.5.2_3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1004, in _run_fn
+    status, run_metadata)
+  File ".linuxbrew/Cellar/python3/3.5.2_3/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File ".linuxbrew/Cellar/python3/3.5.2_3/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py", line 466, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: AttrValue must not have reference type value of float_ref
+	 for attr 'tensor_type'
+	; NodeDef: g1/_23 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_3_g1", tensor_type=DT_FLOAT_REF, _device="/job:localhost/replica:0/task:0/gpu:0"](^_recv_Placeholder_3_0/_25); Op<name=_Recv; signature= -> tensor:tensor_type; attr=tensor_type:type; attr=tensor_name:string; attr=send_device:string; attr=send_device_incarnation:int; attr=recv_device:string; attr=client_terminated:bool,default=false; is_stateful=true>
+	 [[Node: g1/_23 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_3_g1", tensor_type=DT_FLOAT_REF, _device="/job:localhost/replica:0/task:0/gpu:0"](^_recv_Placeholder_3_0/_25)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "wtf.py", line 29, in <module>
+    strange_assign()
+  File "wtf.py", line 23, in strange_assign
+    sess.run( [tf.assign(test, ph)] , feed_dict = { ph: t })
+  File ".linuxbrew/Cellar/python3/3.5.2_3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 767, in run
+    run_metadata_ptr)
+  File ".linuxbrew/Cellar/python3/3.5.2_3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 965, in _run
+    feed_dict_string, options, run_metadata)
+  File ".linuxbrew/Cellar/python3/3.5.2_3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1015, in _do_run
+    target_list, options, run_metadata)
+  File ".linuxbrew/Cellar/python3/3.5.2_3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1035, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: AttrValue must not have reference type value of float_ref
+	 for attr 'tensor_type'
+	; NodeDef: g1/_23 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_3_g1", tensor_type=DT_FLOAT_REF, _device="/job:localhost/replica:0/task:0/gpu:0"](^_recv_Placeholder_3_0/_25); Op<name=_Recv; signature= -> tensor:tensor_type; attr=tensor_type:type; attr=tensor_name:string; attr=send_device:string; attr=send_device_incarnation:int; attr=recv_device:string; attr=client_terminated:bool,default=false; is_stateful=true>
+	 [[Node: g1/_23 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:localhost/replica:0/task:0/gpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=1, tensor_name="edge_3_g1", tensor_type=DT_FLOAT_REF, _device="/job:localhost/replica:0/task:0/gpu:0"](^_recv_Placeholder_3_0/_25)]]
+
+Versions:
+1.0.1
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0.44
+/usr/local/cuda-8.0/lib64/libcudnn.so.5.1.5

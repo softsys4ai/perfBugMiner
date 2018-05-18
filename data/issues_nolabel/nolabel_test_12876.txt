@@ -1,0 +1,64 @@
+Reading float value from tfrecord, return a not same value.
+
+System information
+
+OS Platform and Distribution: Linux Ubuntu 16.04)
+TensorFlow installed from: binary
+TensorFlow version: v1.3.0-rc2-20-g0787eee 1.3.0
+Python version: Python 3.6.2 :: Continuum Analytics, Inc.
+
+Describe the problem
+When i read feature label with float type from tfrecord, it return not same value. Example:
+
+3.3 -> 3.29999995
+3.7 -> 3.70000005
+4.9 -> 4.9000001
+
+Here, code make Example:
+def make_example(s0, s1, label):
+    ex = tf.train.SequenceExample()
+    ex.context.feature["len_s0"].int64_list.value.append(len(s0))
+    ex.context.feature["len_s1"].int64_list.value.append(len(s1))
+    ex.context.feature["label"].float_list.value.append(label)# HERE: the feature are `float` type
+
+    for w in s0:
+        ex.feature_lists.feature_list["s0"].feature.add().int64_list.value.append(w)
+    for w in s1:
+        ex.feature_lists.feature_list["s1"].feature.add().int64_list.value.append(w)
+
+    return ex
+
+Parsing function:
+def _parse_function(example_proto):
+    context_features = {
+        "len_s0": tf.FixedLenFeature((), dtype=tf.int64),
+        "len_s1": tf.FixedLenFeature((), dtype=tf.int64),
+        "label": tf.FixedLenFeature((), dtype=tf.float32) # HERE: the feature are `float` type
+    }
+    sequence_features = {
+        "s0": tf.FixedLenSequenceFeature((), dtype=tf.int64),
+        "s1": tf.FixedLenSequenceFeature((), dtype=tf.int64)
+    }
+
+    context_parsed, sequence_parsed = tf.parse_single_sequence_example(
+        serialized=example_proto,
+        context_features=context_features,
+        sequence_features=sequence_features
+    )
+
+    len_s0 = tf.cast(context_parsed['len_s0'], dtype=tf.int8)
+    len_s1 = tf.cast(context_parsed['len_s1'], dtype=tf.int8)
+    # label = tf.convert_to_tensor(context_parsed['label'], dtype=tf.float32)
+    # label = tf.round(context_parsed['label'])
+    label = context_parsed['label']
+    s0 = tf.cast(sequence_parsed['s0'], dtype=tf.int32)
+    s1 = tf.cast(sequence_parsed['s1'], dtype=tf.int32)
+
+    return {"len_s0": len_s0, "s0": s0, "len_s1": len_s1, "s1": s1}, label
+
+When i call result = tf.contrib.learn.run_n({"label": label}), it return:
+{'label': array([ 3.29999995], dtype=float32)} # right value: 3.3
+{'label': array([ 3.70000005], dtype=float32)} # right value: 3.7
+{'label': array([ 4.9000001], dtype=float32)} # right value: 4.9
+
+Some one can help me? Plzz told me some ways to fix it.

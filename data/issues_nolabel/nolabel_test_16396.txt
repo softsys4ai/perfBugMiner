@@ -1,0 +1,52 @@
+tf.image.resize_image_with_crop_or_pad() is taking too much time to process an image or batch of images
+
+ISSUE:
+I am stuck in fine tuning imagenet data rendering speed for the reason being tf.image.resize_image_with_crop_or_pad() is taking too much time to process an image or batch of images.
+Testing was done by preprocessing ONE image (no batching) and an observed latency was `~160msec`.
+NOTE: I did not observe memory pressure or any possible compute bottleneck during this time.
+Description:
+I have a tool to load ImageNet dataset which reads the dataset from processed TFRecords and returns an iterator object to iterate over the datasets with a shuffle and repeat.
+I have been observing slow rendering of data due to some overtime by certain steps in image (batch of images) pre-preprocessing. This is really impacting in data rendering speed and hence the slow training of models(Reference here is AlexNet).
+Here is the snip of time taken for each operation,
+
+Here is a snip  of data preprocess methods,
+def _parse_example_proto(dataset, height, width, depth, dtype, num_parallel_calls):
+    def _input_parser(record):
+        keys_to_features = {
+            "image/encoded": tf.FixedLenFeature((), tf.string, default_value=""),
+            "image/format": tf.FixedLenFeature((), tf.string, default_value="jpeg"),
+            "image/class/label": tf.FixedLenFeature([], dtype=tf.int64, default_value=-1),
+        }
+        parsed = tf.parse_single_example(record, keys_to_features)
+        image = tf.image.decode_jpeg(parsed["image/encoded"], channels=depth)
+        image = tf.image.convert_image_dtype(image, dtype=dtype)
+        label = tf.cast(parsed["image/class/label"], tf.int32)
+        return image, label
+    return dataset.map(_input_parser, num_parallel_calls=num_parallel_calls)
+
+def _dataset_preprocess_fn(dataset, height, width, num_parallel_calls):
+    def _preprocess_fn(image, label):
+        image = tf.image.resize_image_with_crop_or_pad(image, height + 8, width + 8 )
+        image = tf.random_crop(image, [height, width, 3])
+        image = tf.image.random_flip_left_right(image)
+        image = (ISTD * image) + MEAN  #dataset level MEAN
+        return image, label
+    return dataset.map(_preprocess_fn, num_parallel_calls=num_parallel_calls)
+
+System information
+
+**OS Platform and Distribution *:  Linux Centos 7.2
+TensorFlow installed from (source or binary): 1.4.0 rc1 ( commit hash badd356)
+TensorFlow version (use command below):  b'v1.3.0-rc1-4546-gef196f3' 1.4.0-rc1
+Python version:  3.4.5
+Bazel version (if compiling from source): Build label: 0.8.1
+CUDA/CUDAnn version: CUDA 9 and  CUDAnn 7.0
+GPU model and memory: Volta 100, 16GiB
+
+I am using Amazon Instance and here are the details,
+GPUs - Tesla V100
+GPU Memory (GB): 16
+vCPUs : 8
+Memory (GB):61
+Network Bandwidth: Upto 10Gbps
+EBS Bandwidth: 1.5 Gbps

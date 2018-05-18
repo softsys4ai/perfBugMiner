@@ -1,0 +1,32 @@
+Feeding to boolean placeholder -- works in TF 0.11 but not in 0.12.1
+
+@yaroslavvb The info is attached below. I've targeted the problem to the conflict of tf.cond on boolean placeholder with the ExponentialMovingAverage's apply function.
+The same code works just fine in TF 0.11
+Environment Info
+OS: Ubuntu 14.04
+CUDA: 8.0 with cuDNN 5.1
+TEnsorflow 0.12.1
+Minimal Example:
+import tensorflow as tf
+import numpy as np
+
+with tf.Graph().as_default():
+    with tf.device('/gpu:0'):
+        isTrain = tf.placeholder(tf.bool, shape=())
+        user_input = tf.placeholder(tf.float32, shape=(2,4))
+
+        with tf.variable_scope('batchnorm') as sc:
+           batch_mean, batch_var = tf.nn.moments(user_input, [0,])
+           ema = tf.train.ExponentialMovingAverage(decay=0.9)
+
+           ema_apply_op = tf.cond(isTrain,
+                           lambda: ema.apply([batch_mean, batch_var]),
+                           lambda: tf.no_op())
+
+    init = tf.initialize_all_variables()
+    sess = tf.Session()
+    sess.run(init)
+    sess.run([batch_mean], feed_dict={user_input:[[1,2,3,4],[2,3,4,5]], isTrain: True})
+Error Message:
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'Placeholder' with dtype bool
+	 [[Node: Placeholder = Placeholder[dtype=DT_BOOL, shape=[], _device="/job:localhost/replica:0/task:0/gpu:0"]()]]

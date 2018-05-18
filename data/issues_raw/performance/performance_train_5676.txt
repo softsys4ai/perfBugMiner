@@ -1,0 +1,108 @@
+UnicodeDecodeError when reading from tfrecords
+
+All I'm really trying to do is read a large array from a tfrecords file. I can do it so long that it's below a 8million ints but above that I get a unicode error, which doesn't seem to make much sense to me. Also, it worth noting that this script works using r0.9. I have about 64GB of ram on my computer so I doubt it's a memory issue.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+None
+Environment info
+Operating System:
+Linux Mint 18 Sarah (GNU/Linux 4.4.0-47-generic x86_64)
+Installed version of CUDA and cuDNN:
+not installed
+If installed from binary pip package, provide:
+
+
+A link to the pip package you installed:
+https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-0.11.0-cp27-none-linux_x86_64.whl
+
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+python -c "import tensorflow; print(tensorflow.version)"
+
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+import numpy as np
+
+dim_size = 9000000
+
+# Create the array
+array = np.zeros([dim_size], dtype=int)
+
+example = tf.train.Example(
+    features = tf.train.Features(
+        feature = {
+            'array': tf.train.Feature(
+                bytes_list= tf.train.BytesList(value=[array.tostring()])
+            )
+        }
+    )
+)
+
+# Write the example to disk
+writer = tf.python_io.TFRecordWriter('temp.tfrecords')
+writer.write(example.SerializeToString())
+writer.close()
+
+# Define input pipeline
+queue = tf.train.string_input_producer(['temp.tfrecords'], shuffle=False, num_epochs=1)
+reader = tf.TFRecordReader()
+_, se = reader.read(queue)
+
+#Define the parsed dict
+parsed = tf.parse_single_example(
+    serialized=se,
+    features={
+        "array":tf.FixedLenFeature([], tf.string),
+    }
+)
+
+# Decode the example
+tens = tf.decode_raw(parsed['array'], tf.int64)
+
+# Define the init op.
+init_op = tf.group(
+    tf.initialize_all_variables(),
+    tf.initialize_local_variables()
+)
+with tf.Session() as sess:
+    sess.run(init_op)
+    # Define coordinator and threads
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord, sess=sess)
+
+    # Run the reading operation
+    print sess.run([tens])
+    coord.request_stop()
+    coord.join(threads)
+
+What other attempted solutions have you tried?
+This works using r0.9 and it also works if you lower the dim_size below 800000. So it seems to be an issue with the size and r0.11. I also get the same results if I use a float array as opposed to an int.
+Logs or other output that would be helpful
+W tensorflow/core/framework/op_kernel.cc:968] Invalid argument: Could not parse example input, value: '
+?Ī"
+?Ī"
+array?Ī"
+?Ī"
+?Ī"
+Traceback (most recent call last):
+  File "temp.py", line 52, in <module>
+    print sess.run([tens])
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 717, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 915, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 965, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 972, in _do_call
+    return fn(*args)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 954, in _run_fn
+    status, run_metadata)
+  File "/usr/lib/python2.7/contextlib.py", line 24, in __exit__
+    self.gen.next()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/errors.py", line 462, in raise_exception_on_not_ok_status
+    compat.as_text(pywrap_tensorflow.TF_Message(status)),
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/util/compat.py", line 82, in as_text
+    return bytes_or_text.decode('utf-8')
+  File "/usr/lib/python2.7/encodings/utf_8.py", line 16, in decode
+    return codecs.utf_8_decode(input, errors, True)
+UnicodeDecodeError: 'utf8' codec can't decode byte 0x9b in position 40: invalid start byte

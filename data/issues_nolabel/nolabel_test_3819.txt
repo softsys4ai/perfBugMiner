@@ -1,0 +1,104 @@
+Chains of queues not working in 0.10.0 rc0
+
+Environment info
+Operating System: Ubuntu 14.04, Mac OS X
+Installed version of CUDA and cuDNN: None
+If installed from binary pip package, provide:
+CPU only, Python 2.7 packages for 0.9.0 and 0.10.0 rc0
+I am working with a scheme in which I feed several batch queues into a batch_join to multiplex them.
+The following code works in 0.9.0 (prints several batches before encountering OutOfRange, but fails in 0.10.0 rc0 (first run of sess.run(c) produces OutOfRange).
+import tensorflow as tf
+import numpy as np
+import string
+
+sess = tf.Session()
+
+a = tf.train.batch([tf.train.input_producer(list(string.ascii_lowercase), shuffle=False, num_epochs=1).dequeue()], 10)
+b = tf.train.batch([tf.train.input_producer(list(string.ascii_uppercase), shuffle=False, num_epochs=1).dequeue()], 10)
+
+c = tf.squeeze(tf.train.batch_join([(a,), (b,)], 1, enqueue_many=False), [0])
+
+sess.run(tf.initialize_all_variables())
+coord = tf.train.Coordinator()
+threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+for _ in range(20):
+    print sess.run(c)
+Steps to reproduce
+
+Run in 0.9.0
+Run in 0.10rc1
+
+What have you tried?
+
+Noticed this behaviour in Mac OS X
+Double checked by creating two Docker images having TF 0.9.0 and 0.10.0 rc0 respectively installed on top of Ubuntu 14.04.
+
+Logs or other output that would be helpful
+TensorFlow 0.9.0 output
+['a' 'b' 'c' 'd' 'e' 'f' 'g' 'h' 'i' 'j']
+['k' 'l' 'm' 'n' 'o' 'p' 'q' 'r' 's' 't']
+['A' 'B' 'C' 'D' 'E' 'F' 'G' 'H' 'I' 'J']
+['K' 'L' 'M' 'N' 'O' 'P' 'Q' 'R' 'S' 'T']
+Traceback (most recent call last):
+  File "/Untitled11.py", line 23, in <module>
+    print sess.run(c)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 372, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 636, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 708, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 728, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.OutOfRangeError: PaddingFIFOQueue '_4_batch_join/padding_fifo_queue' is closed and has insufficient elements (requested 1, current size 0)
+     [[Node: batch_join = QueueDequeueMany[_class=["loc:@batch_join/padding_fifo_queue"], component_types=[DT_STRING], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](batch_join/padding_fifo_queue, batch_join/n)]]
+Caused by op u'batch_join', defined at:
+  File "/Untitled11.py", line 16, in <module>
+    c = tf.squeeze(tf.train.batch_join([(a,), (b,)], 1, enqueue_many=False, dynamic_pad=True), [0])
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/input.py", line 682, in batch_join
+    dequeued = queue.dequeue_many(batch_size, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/data_flow_ops.py", line 434, in dequeue_many
+    self._queue_ref, n=n, component_types=self._dtypes, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 465, in _queue_dequeue_many
+    timeout_ms=timeout_ms, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 704, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2260, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1230, in __init__
+    self._traceback = _extract_stack()
+
+TensorFlow 0.10.0 rc0 Output:
+E tensorflow/core/client/tensor_c_api.cc:485] Attempting to use uninitialized value input_producer/limit_epochs/epochs
+     [[Node: input_producer/limit_epochs/CountUpTo = CountUpTo[T=DT_INT64, _class=["loc:@input_producer/limit_epochs/epochs"], limit=1, _device="/job:localhost/replica:0/task:0/cpu:0"](input_producer/limit_epochs/epochs)]]
+E tensorflow/core/client/tensor_c_api.cc:485] PaddingFIFOQueue '_4_batch_join/padding_fifo_queue' is closed and has insufficient elements (requested 1, current size 0)
+     [[Node: batch_join = QueueDequeueMany[_class=["loc:@batch_join/padding_fifo_queue"], component_types=[DT_STRING], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](batch_join/padding_fifo_queue, batch_join/n)]]
+Traceback (most recent call last):
+  File "/Untitled11.py", line 23, in <module>
+    print sess.run(c)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 382, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 655, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 723, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 743, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.OutOfRangeError: PaddingFIFOQueue '_4_batch_join/padding_fifo_queue' is closed and has insufficient elements (requested 1, current size 0)
+     [[Node: batch_join = QueueDequeueMany[_class=["loc:@batch_join/padding_fifo_queue"], component_types=[DT_STRING], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](batch_join/padding_fifo_queue, batch_join/n)]]
+Caused by op u'batch_join', defined at:
+  File "/Untitled11.py", line 16, in <module>
+    c = tf.squeeze(tf.train.batch_join([(a,), (b,)], 1, enqueue_many=False, dynamic_pad=True), [0])
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/input.py", line 708, in batch_join
+    dequeued = queue.dequeue_many(batch_size, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/data_flow_ops.py", line 435, in dequeue_many
+    self._queue_ref, n=n, component_types=self._dtypes, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 867, in _queue_dequeue_many
+    timeout_ms=timeout_ms, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 703, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2310, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1232, in __init__
+    self._traceback = _extract_stack()

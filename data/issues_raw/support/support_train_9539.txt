@@ -1,0 +1,89 @@
+load a checkpoint and use it to create a new graph
+
+system information:
+I am using the latest Tensorflow code on Ubuntu 16.04
+problem:
+because the tensorflow SSD can't directly output the final bounding box that i want, so i want to use the orginal checkpoint to create my graph. But i failed, i really wish someone could help me!!! Thanks!!
+error:
+i get the error:
+Traceback (most recent call last):
+  File "haha.py", line 43, in <module>
+    select_threshold=select_threshold, img_shape=net_shape, num_classes=2, decode=True)
+  File "/home/wahaha/documents/haha/SSD-Tensorflow-master/nets/np_methods.py", line 120, in ssd_bboxes_select
+    select_threshold, img_shape, num_classes, decode)
+  File "/home/wahaha/documents/haha/SSD-Tensorflow-master/nets/np_methods.py", line 70, in ssd_bboxes_select_layer
+    localizations_layer = ssd_bboxes_decode(localizations_layer, anchors_layer)
+  File "/home/wahaha/documents/haha/SSD-Tensorflow-master/nets/np_methods.py", line 35, in ssd_bboxes_decode
+    (-1, l_shape[-2], l_shape[-1]))
+  File "/usr/lib/python2.7/dist-packages/numpy/core/fromnumeric.py", line 224, in reshape
+    return _wrapit(a, 'reshape', newshape, order=order)
+  File "/usr/lib/python2.7/dist-packages/numpy/core/fromnumeric.py", line 48, in _wrapit
+    result = getattr(asarray(obj), method)(*args, **kwds)
+ValueError: total size of new array must be unchanged
+
+Source code
+import os
+import math
+import random
+
+import numpy as np
+import tensorflow as tf
+
+slim = tf.contrib.slim
+import matplotlib.image as mpimg
+
+import sys
+sys.path.append('../')
+
+from nets import ssd_vgg_300, ssd_common, np_methods
+from preprocessing import ssd_vgg_preprocessing
+
+gpu_options = tf.GPUOptions(allow_growth=True)
+config = tf.ConfigProto(log_device_placement=False, gpu_options=gpu_options)
+
+with tf.Graph().as_default() as g:
+    with g.name_scope('haha'):
+		net_shape = (300, 300)
+		data_format = 'NHWC'
+		select_threshold=0.5
+		nms_threshold=.45
+		# Create graph
+		image_input=tf.placeholder(tf.float32,shape=[None,None,3],name='input')
+
+		height = image_input.shape[0]
+		width = image_input.shape[1]
+
+		image_pre, labels_pre, bboxes_pre, bbox_img = ssd_vgg_preprocessing.preprocess_for_eval(
+			image_input, None, None, net_shape, data_format, resize=ssd_vgg_preprocessing.Resize.WARP_RESIZE)
+		image_4d = tf.expand_dims(image_pre, 0)
+		# Define the SSD model.
+		reuse = True if 'ssd_net' in locals() else None
+		ssd_net = ssd_vgg_300.SSDNet()
+		with slim.arg_scope(ssd_net.arg_scope(data_format=data_format)):
+			predictions, localisations, _, _ = ssd_net.net(image_4d, is_training=False, reuse=reuse)
+		ssd_anchors = ssd_net.anchors(net_shape)
+		rclasses, rscores, rbboxes = np_methods.ssd_bboxes_select(
+			predictions, localisations, ssd_anchors,
+			select_threshold=select_threshold, img_shape=net_shape, num_classes=2, decode=True)
+			    
+		rbboxes = np_methods.bboxes_clip(rbbox_img, rbboxes)
+		rclasses, rscores, rbboxes = np_methods.bboxes_sort(rclasses, rscores, rbboxes, top_k=400)
+		rclasses, rscores, rbboxes = np_methods.bboxes_nms(rclasses, rscores, rbboxes, nms_threshold=nms_threshold)
+			    # Resize bboxes to original image shape. Note: useless for Resize.WARP!
+		rbboxes = np_methods.bboxes_resize(rbbox_img, rbboxes)
+
+		temp=tf.stack([height,width,height,width])
+		rbboxes=rbboxes*temp
+		facePredictions=rbboxes
+		saver = tf.train.Saver()
+
+image_test=np.ones((500,500,3))
+
+with tf.Session(config=config) as sess:
+	sess.run(tf.global_variables_initializer())
+	saver.restore(sess, "/home/wahaha/documents/haha/SSD-Tensorflow-master/log/model.ckpt-50000")
+	predictions_val=facePredictions.eval(feed_dict={image_input:image_test})
+	output_graph_def = tf.graph_until.convert_variables_to_constants(sess, g.as_graph_def, output_node_names=['haha'])
+
+	with tf.gfile.FastGFile(hahaFace.pb, mode = 'wb') as f:
+		f.write(output_graph_def.SerializeToString())

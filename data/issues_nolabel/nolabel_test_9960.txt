@@ -1,0 +1,44 @@
+Placeholder modification behavior
+
+I am using Tensorflow 1.0.1, on Mac OS Sierra 10.12.4, with CPU in a jupyter notebook (but the behavior I am describing appeared in a regular python script too).
+The problem I am having is with placeholders. I have been using tensorflow for only 1 month so I was not really comfortable with using them and I made a mistake that took me a very long time to debug.
+Here is the type of code I wrote:
+import numpy as np
+import tensorflow as tf
+x_ = tf.placeholder(tf.float64, [5])
+x_ = tf.where(tf.is_nan(x_), tf.zeros_like(x_), x_)
+a = tf.constant(1, shape=[5])
+a = tf.cast(a, tf.float64)
+c = a + x_
+init_op = tf.group(
+    tf.global_variables_initializer(),
+    tf.local_variables_initializer())
+sess = tf.Session()
+sess.run(init_op)
+x = np.arange(5, dtype=float)
+x[3] = np.nan
+sess.run(c, feed_dict={x_: x})
+To this, the output was: array([ 1., 2., 3., nan, 5.]), which is not what I expected since I had replaced all the nan with the tf.where. I understood only later that it was because tensorflow was feeding the placeholder in the latest position it appeared (maybe not exactly how it's implemented, but empirically, that is what happens).
+Therefore a good (in the sense of what I intended to do) code is:
+import numpy as np
+import tensorflow as tf
+x_ = tf.placeholder(tf.float64, [5])
+r = x_
+r = tf.where(tf.is_nan(r), tf.zeros_like(r), r)
+a = tf.constant(1, shape=[5])
+a = tf.cast(a, tf.float64)
+c = a + r
+init_op = tf.group(
+    tf.global_variables_initializer(),
+    tf.local_variables_initializer())
+sess = tf.Session()
+sess.run(init_op)
+x = np.arange(5, dtype=float)
+x[3] = np.nan
+sess.run(c, feed_dict={x_: x})
+This indeed outputs array([ 1., 2., 3., 1., 5.]). However, to me it's a bit weird that you would need to throw in an extra variable to achieve this purpose and even weirder that I didn't receive any error when modifying my placeholder.
+My suggestions are:
+
+Throw an error or a warning when reallocating a placeholder.
+State clearly that placeholders are not meant to be modified (I looked for it in the docs and didn't find it, maybe I didn't look well enough).
+Allow placeholders to be modified (might be offputting for someone who understands it well).

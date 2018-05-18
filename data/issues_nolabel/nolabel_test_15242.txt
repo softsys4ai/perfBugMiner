@@ -1,0 +1,102 @@
+Error using alexnet with Faster-RCNN?
+
+Hi everyone,
+I am doing object categories detection on COCO dataset using transfer learning (alexnet as a pre-trained with Faster RCNN). However, I am getting this error.
+
+Warning: An error occurred while using @(x)d.propose(x,minBoxSize,'MiniBatchSize',miniBatchSize) to process
+/train2014/COCO_train2014_000000256230.jpg:
+Expected input number 2, score, to be of size Mx1, but it is of size 0x0.
+Regions from this image will not be used for training.
+In fastRCNNObjectDetector.invokeRegionProposalFcn (line 268)
+In fastRCNNObjectDetector>@(x,filename)fastRCNNObjectDetector.invokeRegionProposalFcn(fcnCopy,x,filename) (line 158)
+In fastRCNNObjectDetector.extractRegionProposals (line 218)
+In fastRCNNObjectDetector.train (line 168)
+In trainFasterRCNNObjectDetector (line 359)
+In detection (line 75)
+
+**Can you please help me?
+Please have a look at the code, and let me know if there is any mistake?
+Thank you very much for your help and time in advance**
+P.S. training data (annotation) is stored in a table, where the first column contains paths and file names to images. The remaining columns contain bounding boxes related to the corresponding images. Each column represents a single object class, such as a person, bicycle, car … etc, as explained on https://uk.mathworks.com/help/vision/ref/trainfasterrcnnobjectdetector.html.
+ ‘clear all
+close all
+clc
+Train_data= load('************.mat'); %Load vehicle data set
+addpath('************'); % path of the training images
+numClasses = width(Train_data);
+Train_data(1:3,:)% Display first few rows of the data set.
+I = imread(Train_data.imageFilename{6}); % display one of the images with the bbox, 
+I = insertShape(I, 'Rectangle', Train_data.person{6});
+I = imresize(I, 3);
+figure
+imshow(I)
+net = alexnet; % loading pre-trained model (alexnet in this case)
+net.Layers
+layersTransfer = net.Layers(1:end-3);
+layers = [
+    layersTransfer
+    fullyConnectedLayer(numClasses,'WeightLearnRateFactor',20,'BiasLearnRateFactor',20)
+    softmaxLayer
+    classificationLayer];
+optionsStage1 = trainingOptions('sgdm', ...
+    'MaxEpochs', 10, ...
+    'InitialLearnRate', 1e-5);% Options for step 1.
+optionsStage2 = trainingOptions('sgdm', ...
+    'MaxEpochs', 10, ...
+    'InitialLearnRate', 1e-5);% Options for step 2.
+optionsStage3 = trainingOptions('sgdm', ...
+    'MaxEpochs', 10, ...
+    'InitialLearnRate', 1e-6); % Options for step 3.
+optionsStage4 = trainingOptions('sgdm', ...
+    'MaxEpochs', 10, ...
+    'InitialLearnRate', 1e-6);% Options for step 4.
+options = [
+    optionsStage1
+    optionsStage2
+    optionsStage3
+    optionsStage4
+    ];
+doTrainingAndEval = true; % Training network 
+if doTrainingAndEval
+    rng(0);
+    detector = trainFasterRCNNObjectDetector(Train_data, layers, options, ...
+        'NegativeOverlapRange', [0 0.3], ...
+        'PositiveOverlapRange', [0.6 1], ...
+        'BoxPyramidScale', 1.2);
+else
+    detector=load('*********.mat').
+end
+Test_data= load('************.mat');% tesing and evaluation  
+addpath('************'); % path of the testing image
+Test_data.imageFilename =Test_data.imageFilename;
+I = imread(Test_data.imageFilename{452}); % Read one of the images.
+ [bboxes, scores,label] = detect(detector, I);% Run the detector.
+I = insertObjectAnnotation(I, 'rectangle', bboxes, scores);% Annotate detections in the image.
+figure
+imshow(I)
+if doTrainingAndEval
+        resultsStruct = struct([]); % Run detector on each image in the test set and collect results.
+    for i = 1:height(Test_data)
+         I = imread(Test_data.imageFilename{i});        % Read the image.
+        [bboxes, scores, labels] = detect(detector, I);        % Run the detector.
+        resultsStruct(i).Boxes = bboxes;        % Collect the results.
+        resultsStruct(i).Scores = scores;
+       resultsStruct(i).Labels = labels;
+   end
+     results = struct2table(resultsStruct);    % Convert the results into a table.
+else
+    results = data.results;    % Load results from disk.
+end
+expectedResults = testData(:, 2:end); % Extract expected bounding box locations from test data.
+ [ap, recall, precision] = evaluateDetectionPrecision(results, expectedResults);% Evaluate the    object detector using Average Precision metric.
+figure;% Plot precision/recall curve
+plot(recall, precision)
+xlabel('Recall')
+ylabel('Precision')
+grid on
+title(sprintf('Average Precision = %.1f', ap))’
+
+Have I written custom code: I did the code, following the instructions available on matlab both Faster RCNN detection, and transfer learning webpages (https://uk.mathworks.com/help/vision/examples/object-detection-using-faster-r-cnn-deep-learning.html) and (https://uk.mathworks.com/help/nnet/ug/pretrained-convolutional-neural-networks.html#bvm8b5x) respectively
+OS Platform and Distribution: Linux, MATLAB2017a
+CUDA/cuDNN version: 8.0, V8.0.44
+GPU model and memory: NVIDIA Tesla K80

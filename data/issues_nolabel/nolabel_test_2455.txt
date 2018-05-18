@@ -1,0 +1,93 @@
+Adding a New Op Error:  can not load the customed file
+
+Environment info
+Operating System:  Ubuntu 14.04 LTS
+Installed version of CUDA and cuDNN: None
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+I use the command below to install tensorflow.
+sudo pip install --upgrade https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-0.8.0-cp27-none-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.version)".
+0.8.0
+
+What have you tried?
+I have tried to create my new operation, but there was something wrong that made me fail to load the self-defined_tensorflow_op.so. Here are steps which are exactly the same as those in the official tutorial and what I have tried.
+
+
+Copy the whole content from the official tutorial to create a  file named tensorflow/core/user_ops/zero_out.cc . What is the file is as following.
+#include "tensorflow/core/framework/op.h"
+
+REGISTER_OP("ZeroOut")
+    .Input("to_zero: int32")
+    .Output("zeroed: int32");
+
+\#include "tensorflow/core/framework/op_kernel.h"
+
+using namespace tensorflow;
+
+class ZeroOutOp : public OpKernel {
+ public:
+  explicit ZeroOutOp(OpKernelConstruction* context) : OpKernel(context) {}
+
+  void Compute(OpKernelContext* context) override {
+    // Grab the input tensor
+    const Tensor& input_tensor = context->input(0);
+    auto input = input_tensor.flat<int32>();
+
+    // Create an output tensor
+    Tensor* output_tensor = NULL;
+    OP_REQUIRES_OK(context, context->allocate_output(0, input_tensor.shape(),
+                                                     &output_tensor));
+    auto output = output_tensor->template flat<int32>();
+
+    // Set all but the first element of the output tensor to 0.
+    const int N = input.size();
+    for (int i = 1; i < N; i++) {
+      output(i) = 0;
+    }
+
+    // Preserve the first input value if possible.
+    if (N > 0) output(0) = input(0);
+  }
+};
+
+REGISTER_KERNEL_BUILDER(Name("ZeroOut").Device(DEVICE_CPU), ZeroOutOp);
+
+
+
+Then I compile the zero_out.cc with following commands:
+TF_INC=$(python -c 'import tensorflow as tf; print(tf.sysconfig.get_include())')
+
+g++ -std=c++11 -shared zero_out.cc -o zero_out.so -fPIC -I $TF_INC
+
+
+
+Trying not to miss anything, I also create the BUILD file and run the corresponding commands.
+\# Here is the BUILD file
+load("//tensorflow:tensorflow.bzl", "tf_custom_op_library")
+
+tf_custom_op_library(
+    name = "zero_out.so",
+    srcs = ["zero_out.cc"],
+)
+
+\# Then run this command
+$ bazel build -c opt //tensorflow/core/user_ops:zero_out.so
+
+
+
+When I try to use the new op, the error comes out.
+# Run in python 2.7.11, with following command
+import tensorflow as tf
+zero_out_module = tf.load_op_library('zero_out.so')
+
+
+Here is the error message
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in <module>
+        File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/load_library.py", line 71, in load_op_library
+            raise errors._make_specific_exception(None, None, error_msg, error_code)
+            tensorflow.python.framework.errors.NotFoundError: zero_out.so: cannot open shared object file: No such file or directory
+
+Please help me out with this. I have spent lots of time trying to figure out what is wrong and searching for the answer, but nothing works. Any advice is also will welcome. Thanks

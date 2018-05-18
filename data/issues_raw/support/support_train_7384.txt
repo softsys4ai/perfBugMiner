@@ -1,0 +1,251 @@
+freeze_graph.py script fails with FailedPreconditionError: 01
+
+I want to freeze a graph for the usage on a mobile device. The code I wrote was motivated by the freeze_graph_test.py script.
+import modules
+import os
+import numpy as np
+import tensorflow as tf
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+from tensorflow.core.framework import graph_pb2
+from tensorflow.core.protobuf import saver_pb2
+from tensorflow.python.client import session
+
+import imp
+graph_io = imp.load_source('graph_io.py', 
+'/export/home/oblum/bibs/tensorflow/tensorflow/python/framework/graph_io.py')   
+
+from tensorflow.python.framework import ops
+from tensorflow.python.framework import test_util
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import variables
+from tensorflow.python.platform import test
+from tensorflow.python.tools import freeze_graph
+from tensorflow.python.training import saver as saver_lib
+
+set path and file names
+checkpoint_prefix     = "01/saved_checkpoint"
+checkpoint_state_name = "checkpoint_state"
+input_graph_name      = "input_graph.pb"
+output_graph_name     = "output_graph.pb"
+checkpoint_path       = "01"
+
+define the graph, load weights and and save checkpoint
+with ops.Graph().as_default():
+
+
+    # load weights
+    fname = "alex_finetuned.npy"
+    pretrained_net = np.load(fname).item()
+
+    # save weights in dictionary
+    weights = { 
+            "conv1": tf.Variable(pretrained_net["conv1"][0]),
+            "conv2": tf.Variable(pretrained_net["conv2"][0]),
+            "conv3": tf.Variable(pretrained_net["conv3"][0]),
+            "conv4": tf.Variable(pretrained_net["conv4"][0]),
+            "conv5": tf.Variable(pretrained_net["conv5"][0]),
+            "fc6": tf.Variable(pretrained_net["fc6"][0]),
+            "fc7": tf.Variable(pretrained_net["fc7"][0]),
+            "fc8": tf.Variable(pretrained_net["fc8"][0])
+              }
+
+    # save biases to dictionary
+    biases = { 
+            "conv1": tf.Variable(pretrained_net["conv1"][1]),
+            "conv2": tf.Variable(pretrained_net["conv2"][1]),
+            "conv3": tf.Variable(pretrained_net["conv3"][1]),
+            "conv4": tf.Variable(pretrained_net["conv4"][1]),
+            "conv5": tf.Variable(pretrained_net["conv5"][1]),
+            "fc6": tf.Variable(pretrained_net["fc6"][1]),
+            "fc7": tf.Variable(pretrained_net["fc7"][1]),
+            "fc8": tf.Variable(pretrained_net["fc8"][1])
+              }
+
+
+    def conv(input, kernel, biases, k_h, k_w, c_o, s_h, s_w,  
+             padding="VALID", group=1):
+        '''
+        From https://github.com/ethereon/caffe-tensorflow
+        '''
+        c_i = input.get_shape()[-1]
+        assert c_i%group==0
+        assert c_o%group==0
+        convolve = lambda i, k: tf.nn.conv2d(i, k, [1, s_h, s_w, 1], 
+                                             padding=padding)
+
+
+        if group==1:
+            conv = convolve(input, kernel)
+        else:
+            input_groups = tf.split(3, group, input)
+            kernel_groups = tf.split(3, group, kernel)
+            output_groups = [convolve(i, k) for i,k in zip(input_groups, 
+                                                           kernel_groups)]
+            conv = tf.concat(3, output_groups)
+        return  tf.reshape(tf.nn.bias_add(conv, biases), 
+                           [-1]+conv.get_shape().as_list()[1:])
+
+
+    # input
+    #####################################################################
+    x = tf.placeholder(tf.float32, (None, 227, 227, 3), name="input")
+    #####################################################################
+
+    #conv1
+    k_h = 11; k_w = 11; c_o = 96; s_h = 4; s_w = 4
+    conv1_in = conv(x, weights["conv1"], biases["conv1"], k_h, k_w, c_o, 
+                    s_h, s_w, padding="SAME", group=1)
+    conv1 = tf.nn.relu(conv1_in)
+
+    #lrn1
+    radius = 2; alpha = 2e-05; beta = 0.75; bias = 1.0
+    lrn1 = tf.nn.local_response_normalization(conv1,
+                                              depth_radius=radius,
+                                              alpha=alpha,
+                                              beta=beta,
+                                              bias=bias)
+
+    #maxpool1
+    k_h = 3; k_w = 3; s_h = 2; s_w = 2; padding = 'VALID'
+    maxpool1 = tf.nn.max_pool(lrn1, ksize=[1, k_h, k_w, 1], 
+                              strides=[1, s_h, s_w, 1], padding=padding)
+
+
+    #conv2
+    k_h = 5; k_w = 5; c_o = 256; s_h = 1; s_w = 1; group = 2
+    conv2_in = conv(maxpool1, weights["conv2"], biases["conv2"], k_h, k_w, 
+                    c_o, s_h, s_w, padding="SAME", group=group)
+    conv2 = tf.nn.relu(conv2_in)
+
+
+    #lrn2
+    radius = 2; alpha = 2e-05; beta = 0.75; bias = 1.0
+    lrn2 = tf.nn.local_response_normalization(conv2,
+                                              depth_radius=radius,
+                                              alpha=alpha,
+                                              beta=beta,
+                                              bias=bias)
+
+    #maxpool2
+    k_h = 3; k_w = 3; s_h = 2; s_w = 2; padding = 'VALID'
+    maxpool2 = tf.nn.max_pool(lrn2, ksize=[1, k_h, k_w, 1], 
+                              strides=[1, s_h, s_w, 1], padding=padding)
+
+    #conv3
+    k_h = 3; k_w = 3; c_o = 384; s_h = 1; s_w = 1; group = 1
+    conv3_in = conv(maxpool2, weights["conv3"], biases["conv3"], k_h, k_w, 
+                    c_o, s_h, s_w, padding="SAME", group=group)
+    conv3 = tf.nn.relu(conv3_in)
+
+    #conv4
+    k_h = 3; k_w = 3; c_o = 384; s_h = 1; s_w = 1; group = 2
+    conv4_in = conv(conv3, weights["conv4"], biases["conv4"], k_h, k_w, 
+                    c_o, s_h, s_w, padding="SAME", group=group)
+    conv4 = tf.nn.relu(conv4_in)
+
+
+    #conv5
+    k_h = 3; k_w = 3; c_o = 256; s_h = 1; s_w = 1; group = 2
+    conv5_in = conv(conv4, weights["conv5"], biases["conv5"], k_h, k_w, 
+                    c_o, s_h, s_w, padding="SAME", group=group)
+    conv5 = tf.nn.relu(conv5_in)
+
+    #maxpool5
+    k_h = 3; k_w = 3; s_h = 2; s_w = 2; padding = 'VALID'
+    maxpool5 = tf.nn.max_pool(conv5, ksize=[1, k_h, k_w, 1], 
+                              strides=[1, s_h, s_w, 1], padding=padding)
+
+    #fc6
+    reshape = tf.reshape(maxpool5,
+                         [-1, int(np.prod(maxpool5.get_shape()[1:]))]) 
+    fc6 = tf.nn.relu(tf.matmul(reshape,  weights["fc6"]) + biases["fc6"])
+
+    #fc7
+    fc7 = tf.nn.relu(tf.matmul(fc6, weights["fc7"]) + biases["fc7"])
+
+    #fc8
+    fc8 = tf.nn.xw_plus_b(fc7, weights["fc8"], biases["fc8"])
+
+    # output
+    #####################################################################
+    prob = tf.nn.softmax(fc8, name = "output")
+    #####################################################################
+        
+    sess = session.Session()
+    
+    init = variables.global_variables_initializer()
+    sess.run(init)
+    
+#     output = sess.run(prob)
+    
+#     self.assertNear(2.0, output, 0.00001)
+    
+    saver = saver_lib.Saver()
+    checkpoint_path = saver.save(
+      sess,
+      checkpoint_prefix,
+      global_step = 0,
+      latest_filename = checkpoint_state_name)
+    
+    graph_io.write_graph(sess.graph, "01", input_graph_name)
+    
+
+set further paths for freezing the graph
+input_graph_path     = input_graph_name
+input_saver_def_path = "01"
+input_binary         = False
+output_node_names    = "output"
+restore_op_name      = "save/restore_all"
+filename_tensor_name = "save/Const:0"
+output_graph_path    = output_graph_name
+clear_devices        = False
+initializer_nodes    = "input"
+
+freeze the graph
+freeze_graph.freeze_graph(input_graph_path, input_saver_def_path,
+                          input_binary, checkpoint_path, output_node_names,
+                          restore_op_name, filename_tensor_name,
+                          output_graph_path, clear_devices, initializer_nodes)
+
+when I run the code I get an FailedPreconditionError: 01 error in the last function freeze_graph.freeze_graph():
+FailedPreconditionError                   Traceback (most recent call last)
+<ipython-input-6-5251505a5d45> in <module>()
+      2                           input_binary, checkpoint_path, output_node_names,
+      3                           restore_op_name, filename_tensor_name,
+----> 4                           output_graph_path, clear_devices, initializer_nodes)
+
+/net/hciserver03/storage/oblum/bibs/venv_new/local/lib/python2.7/site-packages/tensorflow/python/tools/freeze_graph.pyc in freeze_graph(input_graph, input_saver, input_binary, input_checkpoint, output_node_names, restore_op_name, filename_tensor_name, output_graph, clear_devices, initializer_nodes)
+    111           saver_def.ParseFromString(f.read())
+    112         else:
+--> 113           text_format.Merge(f.read(), saver_def)
+    114         saver = tf.train.Saver(saver_def=saver_def)
+    115         saver.restore(sess, input_checkpoint)
+
+/net/hciserver03/storage/oblum/bibs/venv_new/local/lib/python2.7/site-packages/tensorflow/python/lib/io/file_io.pyc in read(self, n)
+    110       else:
+    111         length = n
+--> 112       return pywrap_tensorflow.ReadFromStream(self._read_buf, length, status)
+    113 
+    114   def seek(self, position):
+
+/usr/lib/python2.7/contextlib.pyc in __exit__(self, type, value, traceback)
+     22         if type is None:
+     23             try:
+---> 24                 self.gen.next()
+     25             except StopIteration:
+     26                 return
+
+/net/hciserver03/storage/oblum/bibs/venv_new/local/lib/python2.7/site-packages/tensorflow/python/framework/errors_impl.pyc in raise_exception_on_not_ok_status()
+    467           None, None,
+    468           compat.as_text(pywrap_tensorflow.TF_Message(status)),
+--> 469           pywrap_tensorflow.TF_GetCode(status))
+    470   finally:
+    471     pywrap_tensorflow.TF_DeleteStatus(status)
+
+FailedPreconditionError: 01
+
+does anyone has suggestions how to resolve this?

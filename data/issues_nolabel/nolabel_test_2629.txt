@@ -1,0 +1,38 @@
+Tensorflow distributed master worker saves unexpected: not raise exception and return the store checkpoint filepath,but check point file is not exist
+
+**In distribution tensorflow  environment. the master worker saves checkpoint  fail.
+saver.save  has return ok_(not raise exception and return the expected checkpoint file path) *_but, the return checkpoint file is not exist.
+this is different from the description of the tensorflow api
+=============
+the related code is below:
+ def def_ps(self):
+    self.saver = tf.train.Saver(max_to_keep=100,keep_checkpoint_every_n_hours=3)
+
+def save(self,idx):    
+    ret = self.saver.save(self.sess,self.save_model_path,global_step=None,write_meta_graph=False)
+    if not os.path.exists(ret):
+        msg = "save model for %u path %s not exists."%(idx,ret)
+        lg.error(msg)
+        raise Exception(msg);
+
+=============
+the log is below:
+2016-06-02 21:33:52,323 root         ERROR    save model for 2 path model_path/rl_model_2 not exists.
+2016-06-02 21:33:52,323 root         ERROR    has error:save model for 2 path model_path/rl_model_2 not exists.
+Traceback (most recent call last):
+File "d_rl_main_model_dist_0.py", line 755, in run_worker
+model_a.save(next_model_idx)
+File "d_rl_main_model_dist_0.py", line 360, in save
+Trainer.save(self,save_idx)
+File "d_rl_main_model_dist_0.py", line 289, in save
+raise Exception(msg);
+Exception: save model for 2 path model_path/rl_model_2 not exists.
+===========
+not meets the tensorflow api which define Saver.save as below:
+https://www.tensorflow.org/versions/master/api_docs/python/state_ops.html#Saver
+tf.train.Saver.save(sess, save_path, global_step=None, latest_filename=None, meta_graph_suffix='meta', write_meta_graph=True)
+Returns:
+A string: path at which the variables were saved. If the saver is sharded, this string ends with: '-?????-of-nnnnn' where 'nnnnn' is the number of shards created.
+Raises:
+TypeError: If sess is not a Session.
+ValueError: If latest_filename contains path components.

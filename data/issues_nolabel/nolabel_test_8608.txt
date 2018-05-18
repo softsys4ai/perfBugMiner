@@ -1,0 +1,87 @@
+gradient_override_map not working for tf.matmul
+
+gradient_override_map not working for tf.matmul
+I want to mask the gradient of tf.matmul, but I found that the gradient_override_map didn't work while it worked for tf.square.
+Gradient override for tf.matmul: failed
+import tensorflow as tf
+
+@tf.RegisterGradient("CustomMatmul")
+def _custom_matmul_grad(op, grad):
+    mask = tf.eye(3)
+    return [tf.multiply(grad, mask)]
+
+with tf.Graph().as_default() as g:
+    w = tf.Variable(tf.eye(3), dtype=tf.float32)
+    x = tf.constant([1,2,3], dtype=tf.float32, shape=[3,1])
+    with g.gradient_override_map({"Matmul": "CustomMatmul"}):
+            logits = tf.matmul(w, x, a_is_sparse=True, name="Matmul")
+    loss = logits
+    optimizer = tf.train.GradientDescentOptimizer(0.1)#.minimize(loss)
+    grad_val = optimizer.compute_gradients(loss)
+    # I do not use the following method because my actual code has many other gradients
+    # mask = tf.eye(3)
+    # grad_val = [(tf.multiply(g, mask), v) for g, v in grad_val]
+    train_op = optimizer.apply_gradients(grad_val)
+
+with tf.Session(graph=g) as session:
+    session.run(tf.global_variables_initializer())
+    _, g_v, w = session.run([train_op, grad_val, w])
+
+    for g, v in g_v:
+        print(g)
+        print('*' * 80)
+        print(v)    
+The output:
+[[ 1.  2.  3.]
+ [ 1.  2.  3.]
+ [ 1.  2.  3.]]
+
+[[ 0.89999998 -0.2        -0.30000001]
+ [-0.1         0.80000001 -0.30000001]
+ [-0.1        -0.2         0.69999999]]
+
+The expected output:
+[[ 1.  0.  0.]
+ [ 0.  2.  0.]
+ [ 0.  0.  3.]]
+
+[[ 0.89999998  0.          0.        ]
+ [ 0.          0.80000001  0.        ]
+ [ 0.          0.          0.69999999]]
+
+Gradient override for tf.square: worked
+import tensorflow as tf
+
+@tf.RegisterGradient("CustomSquare")
+def _custom_square_grad(op, grad):
+  return tf.constant([101.0])
+
+with tf.Graph().as_default() as g:
+  c = tf.Variable([5.0], dtype=tf.float32)
+  s_1 = tf.square(c)  # Uses the default gradient for tf.square.
+  with g.gradient_override_map({"Square": "CustomSquare"}):
+    s_2 = tf.square(c, name='Square')
+
+  optimizer = tf.train.GradientDescentOptimizer(0.1)#.minimize(loss)
+  grad_val = optimizer.compute_gradients(s_2)
+  train_op = optimizer.apply_gradients(grad_val)
+
+with tf.Session(graph=g) as session:
+  session.run(tf.global_variables_initializer())
+
+  _, g_v = session.run([train_op, grad_val])
+
+  for g, v in g_v:
+      print(g)
+      print('*' * 80)
+      print(v)
+The output:
+[ 101.]
+
+[-5.10000038]
+
+Environment info
+Operating System:
+Ubuntu 16.04
+TensorFlow:
+1.0.1

@@ -1,0 +1,75 @@
+Support complex numbers in Tensor Transformation Operations
+
+A number of changes have been made to support complex128, but the the tensor transformation op suite seems to be missing this support (At least in tf.pack and tf.concat). See the example script below which works for float32 and float64, but not complex64 and complex128.
+Environment info
+Operating System: Ubuntu 14.04.4
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+$ ls -l /usr/local/cuda-7.5/lib64/libcud*
+-rw-r--r-- 1 root root    322936 Aug 15  2015 /usr/local/cuda-7.5/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root        16 Aug 15  2015 /usr/local/cuda-7.5/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root        19 Aug 15  2015 /usr/local/cuda-7.5/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root    383336 Aug 15  2015 /usr/local/cuda-7.5/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root    720192 Aug 15  2015 /usr/local/cuda-7.5/lib64/libcudart_static.a
+lrwxrwxrwx 1 3319 users       13 Feb  9 19:48 /usr/local/cuda-7.5/lib64/libcudnn.so -> libcudnn.so.4
+lrwxrwxrwx 1 3319 users       17 Feb  9 19:48 /usr/local/cuda-7.5/lib64/libcudnn.so.4 -> libcudnn.so.4.0.7
+-rwxrwxr-x 1 3319 users 61453024 Feb  9 00:12 /usr/local/cuda-7.5/lib64/libcudnn.so.4.0.7
+-rw-rw-r-- 1 3319 users 62025862 Feb  9 00:12 /usr/local/cuda-7.5/lib64/libcudnn_static.a
+If installed from binary pip package, provide:
+
+Which pip package you installed. Python 2 GPU nightly
+The output from python -c "import tensorflow; print(tensorflow.version)". 0.8.0
+
+If installed from sources, provide the commit hash:
+Steps to reproduce
+
+
+Vary dtype in the following test script between float32, float64, complex64, complex128
+import numpy as np
+import tensorflow as tf
+
+# Data type for this test case
+dtype=np.float64
+
+# Array shapes
+shape=(10,20,30,1)
+# Expected concatenated array shape
+cshape=(10,20,30,4)
+
+# Helpful lambda
+rn = lambda s, d: tf.random_normal(shape=s, dtype=d)
+
+# Produce random arrays of shape depending on the type
+def r(shape, dtype):
+    if dtype in (np.float32, np.float64):
+        return rn(shape, dtype)
+    elif dtype == np.complex64:
+        return tf.complex(rn(shape, np.float32), rn(shape, np.float32))
+    elif dtype == np.complex128:
+        return tf.complex(rn(shape, np.float64), rn(shape, np.float64))
+    else:
+        raise ValueError("Unhandled dtype '{dt}'".format(dt=dtype))
+
+XX = r(shape, dtype)
+XY = r(shape, dtype)
+YX = r(shape, dtype)
+YY = r(shape, dtype)
+
+with tf.device('/gpu:0'):
+    concat = tf.concat(3, [XX, XY, YX, YY],)
+
+with tf.Session() as S:
+    result = S.run(concat)
+    assert result.shape == cshape
+
+
+If dtype is np.complex64 of np.complex128, the following is thrown:
+tensorflow.python.framework.errors.InvalidArgumentError: Cannot assign a device to node 'concat': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+     [[Node: concat = Concat[N=4, T=DT_COMPLEX64, _device="/device:GPU:0"](concat/concat_dim, Complex, Complex_1, Complex_2, Complex_3)]]
+Caused by op u'concat', defined at:
+  File "tmp/concat_fail.py", line 32, in <module>
+    concat = tf.concat(3, [XX, XY, YX, YY],)
+
+
+What have you tried?
+N/A

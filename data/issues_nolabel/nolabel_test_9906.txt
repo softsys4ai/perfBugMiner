@@ -1,0 +1,84 @@
+tf.import_graph_def() restricts the order of nodes in graph proto.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 14.04
+TensorFlow installed from (source or binary):
+source
+TensorFlow version (use command below):
+commit 3bee923
+Bazel version (if compiling from source):
+0.4.5
+CUDA/cuDNN version:
+cuda 8.0/cudnn 5.1.5
+GPU model and memory:
+Tesla P40
+Exact command to reproduce:
+
+Describe the problem
+I used auto parallel optimizer in grappler for cifar10 example, but grappler changes the order of nodes in graph proto. It causes the failure of import_graph_def, because ops.set_shapes_for_outputs(op), which is line 407 of tensorflow/tensorflow/python/framework/importer.py is failed. This is because all of the input nodes must be defined before to define a node. importer restricts the order of nodes for graph definition proto, but I think importer shoud be flexible to the order of nodes.
+Source code / logs
+with tf.Graph().as_default() as graph:
+  #global_step = tf.contrib.framework.get_or_create_global_step()
+  global_step = tf.get_variable(
+      'global_step', [], dtype=tf.int32,
+      initializer=tf.constant_initializer(0), trainable=False)
+
+  # Get images and labels for CIFAR-10.
+  images, labels = cifar10.distorted_inputs()
+
+  # Build a Graph that computes the logits predictions from the
+  # inference model.
+  logits = cifar10.inference(images)
+
+  # Calculate loss.
+  loss = cifar10.loss(logits, labels)
+
+  # Build a Graph that trains the model with one batch of examples and
+  # updates the model parameters.
+  train_op = cifar10.train(loss, global_step)
+
+  init_op = tf.global_variables_initializer()
+
+  queue_runners = []
+  for qr in ops.get_collection(ops.GraphKeys.QUEUE_RUNNERS):
+    queue_runners.append(qr.to_proto())
+
+  mg = meta_graph.create_meta_graph_def(graph=graph)
+
+#Auto-parallel
+rewriter_config = rewriter_config_pb2.RewriterConfig()
+rewriter_config.optimizers.append('autoparallel')
+rewriter_config.auto_parallel.num_replicas = FLAGS.num_gpus
+
+graph_def = tf_optimizer.OptimizeGraph(rewriter_config, mg)
+
+with tf.Graph().as_default() as g:
+  tf.import_graph_def(graph_def=graph_def, name='')
+
+This is the log
+ File "/cmsdata/ssd0/soojeong/tensorflow_venv/local/lib/python2.7/site-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "tensorflow_rdag/examples/distributed/cifar10/cifar10_in_graph_auto_parallel.py", line 157, in main
+    train()
+  File "tensorflow_rdag/examples/distributed/cifar10/cifar10_in_graph_auto_parallel.py", line 105, in train
+    tf.import_graph_def(graph_def=graph_def, name='')
+  File "/cmsdata/ssd0/soojeong/tensorflow_venv/local/lib/python2.7/site-packages/tensorflow/python/framework/importer.py", line 404, in import_graph_def
+    ops.set_shapes_for_outputs(op)
+  File "/cmsdata/ssd0/soojeong/tensorflow_venv/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1723, in set_shapes_for_outputs
+    shapes = shape_func(op)
+  File "/cmsdata/ssd0/soojeong/tensorflow_venv/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1673, in call_with_requiring
+    return call_cpp_shape_fn(op, require_shape_fn=True)
+  File "/cmsdata/ssd0/soojeong/tensorflow_venv/local/lib/python2.7/site-packages/tensorflow/python/framework/common_shapes.py", line 610, in call_cpp_shape_fn
+    debug_python_shape_fn, require_shape_fn)
+  File "/cmsdata/ssd0/soojeong/tensorflow_venv/local/lib/python2.7/site-packages/tensorflow/python/framework/common_shapes.py", line 653, in _call_cpp_shape_fn_impl
+    v = tensor_util.constant_value(op.inputs[idx])
+  File "/cmsdata/ssd0/soojeong/tensorflow_venv/local/lib/python2.7/site-packages/tensorflow/python/framework/tensor_util.py", line 710, in constant_value
+    ret = _ConstantValue(tensor)
+  File "/cmsdata/ssd0/soojeong/tensorflow_venv/local/lib/python2.7/site-packages/tensorflow/python/framework/tensor_util.py", line 676, in _ConstantValue
+    fill_value = constant_value(tensor.op.inputs[1])
+  File "/cmsdata/ssd0/soojeong/tensorflow_venv/local/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1443, in __getitem__
+    return self._op._inputs[i]
+IndexError: list index out of range

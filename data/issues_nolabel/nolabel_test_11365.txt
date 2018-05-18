@@ -1,0 +1,32 @@
+seq2seq.AttentionWrapper cannot implement Bahdanau model (RNNsearch)
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes, but there is no stock example script
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): OSX 10.12.5
+TensorFlow installed from (source or binary): source (via virtualenv/pip3)
+TensorFlow version (use command below):v1.2.0-5-g435cdfc 1.2.1
+Python version: 3.6.1
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:  N/A
+
+Describe the problem
+RNNsearch has two different RNN cells in it (the encoder and decoder). At a given time step, the inputs to the attention mechanism are all the encoder's outputs (the "annotations" in the Bahdanau paper, aka the memory of the BahdanauAttention constructor) and the decoder's previous state.
+Crucially, AttentionWrapper.call is running its input through the passed in cell before applying AttentionMechanism to the cell's output. (Docstring; source confirms this.)
+This precludes the encoder cell from being passed to AttentionWrapper, because AttentionWrapper depends on BahdanauAttention, whose memory depends on the encoder cell's output. (So you would need to run the encoder once to get the memory and AttentionWrapper would run it again.)
+But the decoder cell can also not be the cell passed in, because in the Bahdanau paper, the decoder's output is not used by the attention mechanism at all. Moreover, neither cell takes the previous step's attention (in Bahdanau).
+I'm hoping I've misunderstood, but currently the API doesn't seem like it can be made to align with the paper, which would be sort of curious – but perhaps intentional!
+Source code / logs
+bahdanau = tf.contrib.seq2seq.BahdanauAttention(
+    num_units=params['ATTENTION_SIZE'],
+    memory=annotations,  # annotations, _ = tf.nn.static_rnn(encoder, time_major_input)
+    normalize=False,
+    name='BahdanauAttention')
+decoder = tf.nn.rnn_cell.BasicLSTMCell(
+    params['DECODER_SIZE'],
+    forget_bias=1.0)
+attn_cell = tf.contrib.seq2seq.AttentionWrapper(
+    cell=decoder,
+    attention_mechanism=bahdanau,
+    output_attention=False,
+    name="AttentionWrappedDecoder")

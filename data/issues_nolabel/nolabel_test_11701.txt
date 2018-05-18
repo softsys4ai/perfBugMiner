@@ -1,0 +1,53 @@
+tf.contrib.learn.KMeansClustering squeeze problem when using predict()
+
+This is a problem with every version of tensorflow I've tried (1.1, 1.2, 1.3).
+After using the fit() method train a KMeansClustering model, if the predict() method is used to predict a single data point's cluster then there is an internal error (predicting two data points works fine)...
+In ./tensorflow/contrib/learn/python/learn/estimators/estimator.py in _predict_generator() the batch_length is rightly determined by asking for the first dimension of the shape, but the problem is (at least for KMeansClustering) ./tensorflow/contrib/factorization/python/ops/clustering_ops.py _infer_graph() uses tf.squeeze to remove all dimensions with size of 1 for the distances and indices.  An error occurs when computing batch_size because the value will have rank 0 after the squeeze.  This appears to have been there since gardener@ originally imported that code for computing kmeans.
+A) This certainly does not need to squeeze the first dimension as, in my case, if predict() is called for a single value, then the distances and indices are both just one element.
+B) I cannot really see why a squeeze should be done there in the first place.  Perhaps flatten? (that doesn't make sense either)
+I have a pull request ready which just removes the squeeze.  But I wanted to file an issue to which the original developer might be able to comment.
+Or I can try to make it squeeze all but the first dimension, though the shape of those tensors are unknown when the graph is built. I'll have to figure out how to do that. I'd prefer to just not squeeze if it's not necessary.
+Here is a script that demonstrates the problem:
+#/usr/bin/python3
+
+import tensorflow as tf
+
+K = 4    # K classes
+km = tf.contrib.learn.KMeansClustering(K, '/tmp/test-kmeans-tf-model')
+
+X = [[1.1, 1.2],
+     [2.2, 2.5],
+     [3.3, 3.6],
+     [2.4, 2.7],
+     [14.1, 3.2],
+     [4.12, 15.2],
+     [3.14, 3.6],
+     [2.4, 13.7],
+     [3.1, 3.2],
+     [4.1, 4.2],
+     [13.1, 13.2],
+     [4.11, 14.2],
+     [5.1, 15.2]]
+
+def train_input_fn():
+    data = tf.constant(X, tf.float32)
+    return (data, None)
+
+
+# train
+km.fit(input_fn=train_input_fn, steps=1000)
+
+def predict_input_fn():
+    ### WORKS FINE
+    #data = tf.constant([[2.1, 3.1], [1.1, 1.2]])
+
+    ### FAILS TO PREDICT
+    data = tf.constant([[1.1, 1.2]])
+    return data
+
+gen = km.predict(input_fn=predict_input_fn, as_iterable=True)
+for t in gen:
+    print("predict returned: %s" % t['cluster_idx'])
+
+
+Removing the squeeze in clustering_ops.py fixes this script's problem (or give it two data points to predict).

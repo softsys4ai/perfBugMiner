@@ -1,0 +1,171 @@
+Distributed Tensorflow :: Worker is getting terminated after running few training steps
+
+Hi,
+I am having 2 nodes cluster and running parameter server and first worker on one machine, and second worker on another machine.
+Environment and version details are below,
+Have I written custom code - Yes
+OS Platform and Distribution - CentOS 7.2.1511
+TensorFlow installed from - Binary
+TensorFlow version - 1.3.0
+Bazel version - N/A
+CUDA/cuDNN version - N/A
+GPU model and memory - N/A
+Exact command to reproduce - N/A
+Parameter server and first worker that is also the chief(master) worker, starts correctly.
+When I start send worker that also starts and training runs for few steps and then the worker is terminated with below exception.
+Plz noote all are CPU machines (no GPUs)
+INFO:tensorflow:global step 482: loss: 0.8154 (15.70 sec/step)
+INFO:tensorflow:global step 483: loss: 1.1079 (15.20 sec/step)
+INFO:tensorflow:global step 485: loss: 0.8833 (15.21 sec/step)
+INFO:tensorflow:global step 487: loss: 1.0541 (15.78 sec/step)
+INFO:tensorflow:global step 489: loss: 0.8346 (14.84 sec/step)
+Now run summeries
+INFO:tensorflow:global step 491: loss: 1.0193 (14.91 sec/step)
+loss is done
+INFO:tensorflow:Error reported to Coordinator: <class 'tensorflow.python.framewo                                                                                           rk.errors_impl.CancelledError'>, Step was cancelled by an explicit call to Session::Close().
+Traceback (most recent call last):
+File "./DTF_train_image_classifier.py", line 464, in 
+tf.app.run()
+On parameter server, I see below error logs,
+2018-04-05 14:47:12.860894: W tensorflow/core/kernels/queue_base.cc:295] _0_parallel_read/filenames: Skipping cancelled enqueue attempt with queue not closed
+2018-04-05 14:47:12.861414: W tensorflow/core/kernels/queue_base.cc:295] _2_parallel_read/common_queue: Skipping cancelled enqueue attempt with queue not closed
+2018-04-05 14:47:12.861552: W tensorflow/core/kernels/queue_base.cc:295] _4_batch/fifo_queue: Skipping cancelled enqueue attempt with queue not closed
+2018-04-05 14:47:12.864402: W tensorflow/core/kernels/queue_base.cc:295] _4_batch/fifo_queue: Skipping cancelled enqueue attempt with queue not closed
+2018-04-05 14:47:12.864472: W tensorflow/core/kernels/queue_base.cc:295] _4_batch/fifo_queue: Skipping cancelled enqueue attempt with queue not closed
+2018-04-05 14:47:12.864504: W tensorflow/core/kernels/queue_base.cc:295] _4_batch/fifo_queue: Skipping cancelled enqueue attempt with queue not closed
+I am attaching below my code snippet ,
+server = tf.train.Server(
+cluster,
+job_name=FLAGS.job_name,
+task_index=FLAGS.task_index)
+if FLAGS.pipeline_id is None:
+    raise ValueError('pipeline_id [%s] was not recognized', FLAGS.pipeline_id)
+
+#print('job name '+FLAGS.job_name)
+#print('task index name ' + FLAGS.task_index)
+if FLAGS.job_name == "ps":
+    server.join()
+elif FLAGS.job_name == "worker":
+dataset = get_split(FLAGS.dataset_split_name, FLAGS.tf_records_dir, 'flowers', FLAGS.num_classes, labels_file)
+print 'num of classes ------------------->', dataset.num_classes
+images, _, labels = load_batch(FLAGS, dataset, batch_size=FLAGS.training_batch_size, height=FLAGS.image_resize,
+                                   width=FLAGS.image_resize, is_training=True)
+
+# Get number of steps to decay
+num_batches_per_epoch = int(dataset.num_samples / FLAGS.training_batch_size)
+num_steps_per_epoch = num_batches_per_epoch  # Because one step is one batch processed
+decay_steps = int(FLAGS.num_epochs_before_decay * num_steps_per_epoch)
+
+with tf.device(tf.train.replica_device_setter(
+		worker_device="/job:worker/task:%d" % FLAGS.task_index,
+		cluster=cluster)):
+					with slim.arg_scope(inception_v3_arg_scope()):
+		logits, end_points = inception_v3(images, num_classes = dataset.num_classes, is_training = True)
+
+
+
+	exclude = ['InceptionV3/Logits', 'InceptionV3/AuxLogits']
+	#exclude = get_variables_to_exclude()
+	for i in exclude:
+	   print "var to exclude -> ",i
+	variables_to_restore = slim.get_variables_to_restore(exclude = exclude)
+
+	#Perform one-hot-encoding of the labels
+	one_hot_labels = slim.one_hot_encoding(labels, dataset.num_classes)
+
+	#Calculate loss
+	loss = tf.losses.softmax_cross_entropy(onehot_labels = one_hot_labels, logits = logits)
+	total_loss = tf.losses.get_total_loss()
+
+	#Create the global step
+	global_step = get_or_create_global_step()
+
+
+	#Define your exponentially decaying learning rate
+	lr = tf.train.exponential_decay(
+		learning_rate = FLAGS.initial_learning_rate,
+		global_step = global_step,
+		decay_steps = decay_steps,
+		decay_rate = FLAGS.learning_rate_decay_factor,
+		staircase = True)
+
+	#Get optimizer as configured by user
+	optimizer = tf.train.AdamOptimizer(learning_rate = lr)
+	#optimizer = getOptimizer(learning_rate = lr)
+
+	#Create the train_op.
+	variables_to_train = get_variables_to_train()
+	#for j in variables_to_train:
+	  #print "var to train ",j
+	#vn = tf.trainable_variables()
+	train_op = slim.learning.create_train_op(total_loss, optimizer,variables_to_train=variables_to_train)
+
+
+	predictions = tf.argmax(end_points['Predictions'], 1)
+	probabilities = end_points['Predictions']
+	accuracy, accuracy_update = tf.contrib.metrics.streaming_accuracy(predictions, labels)
+	metrics_op = tf.group(accuracy_update, probabilities)
+
+
+	#create all the summaries you need to monitor
+	tf.summary.scalar('losses/Total_Loss', total_loss)
+	tf.summary.scalar('accuracy', accuracy)
+	tf.summary.scalar('learning_rate', lr)
+	my_summary_op = tf.summary.merge_all()
+
+	#Define train step to run training operation
+	def train_step(sess, train_op, global_step):
+
+		start_time = time.time()
+		total_loss, global_step_count, _ = sess.run([train_op, global_step, metrics_op])
+		time_elapsed = time.time() - start_time
+
+
+		logging.info('global step %s: loss: %.4f (%.2f sec/step)', global_step_count, total_loss, time_elapsed)
+
+		return total_loss, global_step_count
+		
+saver = tf.train.Saver(variables_to_restore)
+    def restore_fn(sess):
+        return saver.restore(sess, FLAGS.checkpoint_path)
+
+#Create supervisor
+sv = tf.train.Supervisor(is_chief=(FLAGS.task_index == 0),global_step=global_step,logdir = train_logs_path, summary_op = None, init_fn = restore_fn)
+
+
+#Run the managed session
+with sv.prepare_or_wait_for_session(server.target) as sess:
+	for step in xrange(num_steps_per_epoch * FLAGS.training_num_epochs):
+		#Log info at each epoch:
+		if step % num_batches_per_epoch == 0:
+			logging.info('Epoch %s/%s', step/num_batches_per_epoch + 1, FLAGS.training_num_epochs)
+			learning_rate_value, accuracy_value = sess.run([lr, accuracy])
+			logging.info('Current Learning Rate: %s', learning_rate_value)
+			logging.info('Current Streaming Training Accuracy: %s', accuracy_value)
+
+
+			logits_value, probabilities_value, predictions_value, labels_value = sess.run([logits, probabilities, predictions, labels])
+			print 'logits: \n', logits_value
+			print 'Probabilities: \n', probabilities_value
+			print 'predictions: \n', predictions_value
+			print 'Labels:\n:', labels_value
+
+		#Log the summaries every 10 step.
+		if step % FLAGS.steps_update_frequency == 0 and step != 0:
+			loss, gs = train_step(sess, train_op, sv.global_step)
+			summaries = sess.run(my_summary_op)
+			sv.summary_computed(sess, summaries)
+			print "**** SAVE THE MODEL ****"
+			sv.saver.save(sess,sv.save_path,global_step=sv.global_step)
+			##
+
+			checkpoint_path = tf.train.latest_checkpoint(train_logs_path)
+			training_json = '{"model_path":"'+ checkpoint_path +'","no_of_steps":' +str(gs)+',"loss":'+str(loss)+'}'
+			current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+			#dbClient.store_metrices([(FLAGS.pipeline_id,FLAGS.operation_type,training_json,current_time)])
+
+			
+
+
+		else:
+			loss, _ = train_step(sess, train_op, sv.global_step)

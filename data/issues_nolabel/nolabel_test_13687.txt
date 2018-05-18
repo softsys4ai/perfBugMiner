@@ -1,0 +1,37 @@
+scatter_nd doesn't check indices for out-of-bounds on GPU when using float32
+
+I noticed that the scatter_nd command behaves inconsistently with respect to checking the given indices. In most cases the command raises an error when trying to set an index that is out of bound for the given shape. However, on the GPU when updates is of dtype tf.float32 this check is not performed and invalid indices are just ignored. In the case of tf.int32 or always when on the CPU, and exception is raised. See below for detailed information and a minimal example that has been adapted from the scatter_nd documentation.
+Additionally I noticed that the scatter_nd documentation doesn't state whether a bound check is performed or not. That might be worth adding.
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):
+installed from binary via pip (GPU version)
+TensorFlow version (use command below):
+v1.3.0-rc2-20-g0787eee 1.3.0
+Python version:
+3.5.2
+CUDA/cuDNN version:
+cuda8.0/cuDNN6 (via docker container nvidia/cuda:8.0-cudnn6-devel)
+GPU model and memory:
+GeForce GTX 1080 (8112 MB)
+Exact command to reproduce:
+
+# doesn't fail with invalid index on GPU (but it should)
+with tf.Graph().as_default() as g:
+    indices = tf.constant([[0, 4], [0, 3], [0, 1], [2, 7]])
+    updates = tf.constant([9, 10, 11, 12], dtype=tf.float32)
+    scatter = tf.scatter_nd(indices, updates, (1, 10))
+    with tf.Session(graph=g) as session:
+        print(session.run(scatter))
+
+# fails with invalid index error
+with tf.Graph().as_default() as g:
+    indices = tf.constant([[0, 4], [0, 3], [0, 1], [2, 7]])
+    updates = tf.constant([9, 10, 11, 12], dtype=tf.int32)
+    scatter = tf.scatter_nd(indices, updates, (1, 10))
+    with tf.Session(graph=g) as session:
+        print(session.run(scatter))

@@ -1,0 +1,65 @@
+Eager: tfe.implicit_value_and_gradients uses functions operating on raw tf variables
+
+System information
+
+Tensorflow version: 1.5.0-dev20171126
+Python version: Python 3.5.0 (v3.5.0:374f501f4567, Sep 12 2015, 11:00:19)
+
+Problem
+Forgive me if I'm re-iterating something that's discussed before. Even though I don't think the issue described here is a bug, I nevertheless believe it is worthy to point out. The specific issue is that when we pass a loss function, e.g. loss, to tfe.implicit_value_and_gradients, it seems that backprop only happens if the variables used by loss are is their "raw states". Here's an example:
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+
+tfe.enable_eager_execution()
+v = tf.get_variable(name='v', initializer=1., trainable=True)
+v_add_1 = v + 1.  # this causes the problem
+
+def loss():
+    return 2. * v_add_1
+value_and_gradients_fn = tfe.implicit_value_and_gradients(loss)
+print (value_and_gradients_fn())
+In this case I get the error as follows:
+Traceback (most recent call last):
+  File "test.py", line 17, in <module>
+    val = g()
+  File "/Library/Frameworks/Python.framework/Versions/3.5/lib/python3.5/site-packages/tensorflow/python/eager/backprop.py", line 360, in grad_fn
+    raise ValueError("No trainable variables were accessed while the "
+ValueError: No trainable variables were accessed while the function was being computed.
+
+After a little bit of pondering, I found the problem to be the line v = v + 1.. As soon as we delete this line, the program runs without bugs. My understanding of this behavior is that, the gradients and the backprop process somehow only "live" in the scope of the loss function. We cannot backprop to some variable that is modified outside of loss, even if, implicitly, the computed loss depends on that variable.
+Here's a more obscure example:
+import tensorflow as tf
+import tensorflow.contrib.eager as tfe
+
+tfe.enable_eager_execution()
+
+v = tf.get_variable(name='v', initializer=1., trainable=True)
+v_add_1 = v + 1.
+u = tf.get_variable(name='u', initializer=20., trainable=True)
+
+
+def loss():
+    result = v_add_1 + u
+    return 2. * result
+
+value_and_gradients_fn = tfe.implicit_value_and_gradients(loss)
+optimizer = tf.train.AdamOptimizer(1e-1)
+
+# before training
+print (v)
+print (u)
+
+for i in range(100):
+    _, gradients_and_variables = value_and_gradients_fn()
+    optimizer.apply_gradients(gradients_and_variables)
+
+# after training
+print (v)
+print (u)
+After running, we could see that u is updated and v is not:
+<tf.Variable 'v:0' shape=() dtype=float32, numpy=1.0>
+<tf.Variable 'u:0' shape=() dtype=float32, numpy=20.0>
+<tf.Variable 'v:0' shape=() dtype=float32, numpy=1.0>
+<tf.Variable 'u:0' shape=() dtype=float32, numpy=9.9999638>
+
+This might be irrelevant, but is there a way we could by pass the restriction and have gradient pass outside the function given to tfe.implicit_value_and_gradients?

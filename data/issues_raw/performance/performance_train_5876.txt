@@ -1,0 +1,166 @@
+Error in hessians() and _hessian_vector_product() for tf.nn.sparse_softmax_cross_entropy_with_logits()
+
+On a simple model that implements logistic regression, constructing the loss using tf.nn.sparse_softmax_cross_entropy_with_logits() makes both hessians() and _hessian_vector_product() return identically zero vectors, which is incorrect. If I instead write the loss function manually using tf.log, tf.sigmoid, etc., hessians() and _hessian_vector_product return the correct answer. These two versions of the loss function agree on their values and their gradients; however, the Hessian output is different.
+Here is some sample output:
+Using sparse_softmax_cross_entropy_with_logits:
+Loss before first step: 0.686726
+Loss after first step : 0.686181
+Actual diff in grad:
+[ 0.000122    0.00014928]
+Predicted diff in grad using _hessian_vector_product:
+[array([ 0.,  0.], dtype=float32)]
+Hessian:
+[array([[ 0.,  0.],
+       [ 0.,  0.]], dtype=float32)]
+
+Using custom loss function:
+Loss before first step: 0.686726
+Loss after first step : 0.686181
+Actual diff in grad:
+[ 0.00012201  0.00014931]
+Predicted diff in grad using _hessian_vector_product:
+[array([ 0.00012199,  0.0001493 ], dtype=float32)]
+Hessian:
+[array([[ 0.08229966,  0.        ],
+       [ 0.        ,  0.08278375]], dtype=float32)]
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+None that I can find. The code below uses hessians() and _hessian_vector_product() from https://github.com/tensorflow/tensorflow/blob/a4c8df209d7413068f4ed3e71c43eb798fbd5580/tensorflow/python/ops/gradients_impl.py
+Here is the PR that implemented hessians(): #5329
+Environment info
+Operating System: Ubuntu 16.04
+Installed version of CUDA and cuDNN:
+-rw-r--r-- 1 root root   558720 Oct  1 00:18 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16 Oct  1 00:18 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root       19 Oct  1 00:18 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rwxr-xr-x 1 root root   415432 Oct  1 00:18 /usr/local/cuda/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root   775162 Oct  1 00:18 /usr/local/cuda/lib64/libcudart_static.a
+-rwxr-xr-x 1 root root 78065952 Oct  1 16:19 /usr/local/cuda/lib64/libcudnn.so
+-rwxr-xr-x 1 root root 78065952 Oct  1 16:19 /usr/local/cuda/lib64/libcudnn.so.5
+-rwxr-xr-x 1 root root 78065952 Oct  1 16:19 /usr/local/cuda/lib64/libcudnn.so.5.0.5
+-rw-r--r-- 1 root root 68709594 Oct  1 16:19 /usr/local/cuda/lib64/libcudnn_static.a
+
+The same behavior occurs when running on CPU only.
+Installed from: https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.11.0-cp27-none-linux_x86_64.whl
+v0.11.0
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+tf.set_random_seed(0)
+
+### Setup toy data and weights
+images_placeholder = tf.placeholder(tf.float32, shape=(3, 2))
+labels_placeholder = tf.placeholder(tf.int32, shape=(3))
+feed_dict = {
+    images_placeholder: np.array([[0, 0], [0, 1], [1, 0]]),
+    labels_placeholder: np.array([0, 1, 1]),
+}
+  
+weights = tf.Variable(
+  tf.truncated_normal([2],
+                      stddev=1.0 / math.sqrt(float(2))),
+  name='weights')
+
+### Calculate loss using built-in TF function
+weights_with_zeros = tf.pack([tf.zeros([2]), weights], axis=1)
+logits = tf.matmul(images_placeholder, weights_with_zeros)
+cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, labels_placeholder)
+loss = tf.reduce_mean(cross_entropy)
+
+### Calculate loss using manually constructed TF function
+logits2 = tf.matmul(images_placeholder, tf.reshape(weights, [2, 1]))
+labels2 = (tf.to_float(labels_placeholder) * 2) - 1
+logits_mul_labels = tf.mul(tf.reshape(logits2, [-1]), tf.reshape(labels2, [-1]))
+cross_entropy2 = - tf.log(tf.sigmoid(logits_mul_labels))
+loss2 = tf.reduce_mean(cross_entropy2)
+
+### Create train_op
+optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.01)
+global_step = tf.Variable(0, name='global_step', trainable=False)
+train_op = optimizer.minimize(loss, global_step=global_step)
+
+### Calculate gradients, Hessians, and Hessian-vector products for both versions of loss
+grad = tf.gradients(loss, [weights])
+grad2 = tf.gradients(loss2, [weights])
+v_placeholder = tf.placeholder(tf.float32, shape=weights.get_shape())
+hessian_vector = _hessian_vector_product(loss, [weights], [v_placeholder])
+hessian_vector2 = _hessian_vector_product(loss2, [weights], [v_placeholder])
+hessian = hessians(loss, [weights])
+hessian2 = hessians(loss2, [weights])
+
+### Run training for a single step to get the parameters to change.
+init = tf.initialize_all_variables()
+sess = tf.Session()
+sess.run(init)
+
+old_weights_val, old_loss_val, old_grad_val, old_loss2_val, old_grad2_val= sess.run(
+  [weights, loss, grad, loss2, grad2], 
+  feed_dict=feed_dict)
+
+_ = sess.run(train_op, feed_dict=feed_dict)
+
+new_weights_val, new_loss_val, new_grad_val, new_loss2_val, new_grad2_val = sess.run(
+  [weights, loss, grad, loss2, grad2], 
+  feed_dict=feed_dict)
+
+hessian_val, hessian2_val = sess.run(
+  [hessian, hessian2], 
+  feed_dict=feed_dict)
+
+### Calculate the actual difference in gradients before and after the train step,
+### and compare with the predicted difference in gradients based on the Hessian.
+diff_in_weights = new_weights_val - old_weights_val
+actual_diff_in_grad = new_grad_val[0] - old_grad_val[0]
+actual_diff_in_grad2 = new_grad2_val[0] - old_grad2_val[0]
+
+feed_dict[v_placeholder] = diff_in_weights
+predicted_diff_in_grad = sess.run(hessian_vector, feed_dict=feed_dict)
+predicted_diff_in_grad2 = sess.run(hessian_vector2, feed_dict=feed_dict)
+
+print('Diff in weights:\n%s' % diff_in_weights)
+
+print('\nUsing sparse_softmax_cross_entropy_with_logits:')
+print('Loss before first step: %s' % old_loss_val)
+print('Loss after first step : %s' % new_loss_val)
+print('Actual diff in grad:\n%s' % actual_diff_in_grad)
+print('Predicted diff in grad using _hessian_vector_product:\n%s' % predicted_diff_in_grad)
+print('Hessian:\n%s' % hessian_val)
+
+print('\nUsing custom loss function:')
+print('Loss before first step: %s' % old_loss2_val)
+print('Loss after first step : %s' % new_loss2_val)
+print('Actual diff in grad:\n%s' % actual_diff_in_grad2)
+print('Predicted diff in grad using _hessian_vector_product:\n%s' % predicted_diff_in_grad2)
+print('Hessian:\n%s' % hessian2_val)
+
+sess.close()
+
+
+What other attempted solutions have you tried?
+Running in CPU or GPU makes no difference.
+Using more complicated networks (i.e., adding some non-linear hidden layers before the linear softmax step) makes the Hessian returned from sparse_softmax_cross_entropy_with_logits() non-zero, but the returned value is still wrong in the sense that it does not match the empirical values. In contrast, using the same custom loss function above returns the correct Hessians.
+The same problem occurs when using "real" data (e.g., MNIST) or with more examples.
+Logs or other output that would be helpful
+Full output when using CPU:
+Diff in weights:
+[ 0.00148226  0.0018035 ]
+
+Using sparse_softmax_cross_entropy_with_logits:
+Loss before first step: 0.686726
+Loss after first step : 0.686181
+Actual diff in grad:
+[ 0.000122    0.00014928]
+Predicted diff in grad using _hessian_vector_product:
+[array([ 0.,  0.], dtype=float32)]
+Hessian:
+[array([[ 0.,  0.],
+       [ 0.,  0.]], dtype=float32)]
+
+Using custom loss function:
+Loss before first step: 0.686726
+Loss after first step : 0.686181
+Actual diff in grad:
+[ 0.00012201  0.00014931]
+Predicted diff in grad using _hessian_vector_product:
+[array([ 0.00012199,  0.0001493 ], dtype=float32)]
+Hessian:
+[array([[ 0.08229966,  0.        ],
+       [ 0.        ,  0.08278375]], dtype=float32)]

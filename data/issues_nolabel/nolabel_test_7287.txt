@@ -1,0 +1,109 @@
+SKFLOW/TFLearn SKCompat does not properly implement SKLearn predict and predict_proba
+
+NOTE: Only file GitHub issues for bugs and feature requests.  All other topics will be closed.
+For general support from the community, see StackOverflow.
+To make bugs and feature requests more easy to find and organize, we close issues that are deemed
+out of scope for GitHub Issues and point people to StackOverflow.
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+None seem to apply, this is a new issue just introduced with 1.0.0-rc1
+Environment info
+Operating System:
+Mac
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+
+export TF_BINARY_URL=https://storage.googleapis.com/tensorflow/mac/cpu/tensorflow-1.0.0rc1-py3-none-any.whl
+
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+1.0.0-rc1
+If installed from source, provide
+
+
+The commit hash (git rev-parse HEAD)
+
+
+The output of bazel version
+
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+TFLearn has incorrect implementations of predict and predict_proba, per the sklearn developer's guide.  The current (v1.0.0-rc1) version's predict actually performs as would be expected for predict_proba and SKCompat does not include a predict_proba.
+SKFLOW/TFLearn's compatibility with sklearn has been broken in various ways since when v0.8 (which worked) was refactored into SKCompat (see #6584).
+The following code shows how the accuracy function fails due to this issue.  This could be fixed with an argmax call, but the core problem is that SKCompat does not properly implement the sklearn functions.
+Note, this code is based on the Contrib TF Learn example here:  https://www.tensorflow.org/tutorials/tflearn/
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from sklearn import cross_validation
+from sklearn import metrics
+import tensorflow as tf
+
+def main(unused_argv):
+  # Load dataset.
+  iris = tf.contrib.learn.datasets.load_dataset('iris')
+  x_train, x_test, y_train, y_test = cross_validation.train_test_split(
+      iris.data, iris.target, test_size=0.2, random_state=42)
+
+  # Build 3 layer DNN with 10, 20, 10 units respectively.
+  feature_columns = tf.contrib.learn.infer_real_valued_columns_from_input(
+      x_train)
+  classifier = tf.contrib.learn.DNNClassifier(
+      feature_columns=feature_columns, hidden_units=[10, 20, 10], n_classes=3)
+  classifier = tf.contrib.learn.SKCompat(classifier)
+
+  # Fit and predict.
+  classifier.fit(x_train, y_train, steps=200)
+
+  # This outputs something with shape [30,3] should output single class predictions
+  # See http://scikit-learn.org/stable/developers/contributing.html#coding-guidelines
+  # See predict vs predict_proba
+  #predictions = classifier.predict(x_test)
+  #score = metrics.accuracy_score(y_test, predictions)
+  #print('Accuracy: {0:f}'.format(score))
+
+  # predict_proba does not work either:
+  classifier.predict_proba(x_test)
+  # Generates a: AttributeError: 'SKCompat' object has no attribute 'predict_proba'
+
+if __name__ == '__main__':
+  tf.app.run()
+
+What other attempted solutions have you tried?
+http://scikit-learn.org/stable/developers/contributing.html#coding-guidelines
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+/Users/jeff/anaconda/envs/tf-latest/bin/python /Users/jeff/Dropbox/school/teaching/wustl/classes/T81_558_deep_learning/code/test3.py
+/Users/jeff/anaconda/envs/tf-latest/lib/python3.5/site-packages/sklearn/cross_validation.py:44: DeprecationWarning: This module was deprecated in version 0.18 in favor of the model_selection module into which all the refactored classes and functions are moved. Also note that the interface of the new CV iterators are different from that of this module. This module will be removed in 0.20.
+  "This module will be removed in 0.20.", DeprecationWarning)
+WARNING:tensorflow:float64 is not supported by many models, consider casting to float32.
+WARNING:tensorflow:Using temporary folder as model directory: /var/folders/bs/_w74fpx157v3vs82q0fwnflr0000gn/T/tmpl7bwdnzy
+WARNING:tensorflow:float64 is not supported by many models, consider casting to float32.
+WARNING:tensorflow:From /Users/jeff/anaconda/envs/tf-latest/lib/python3.5/site-packages/tensorflow/contrib/learn/python/learn/estimators/head.py:1362: scalar_summary (from tensorflow.python.ops.logging_ops) is deprecated and will be removed after 2016-11-30.
+Instructions for updating:
+Please switch to tf.summary.scalar. Note that tf.summary.scalar uses the node name instead of the tag. This means that TensorFlow will automatically de-duplicate summary names based on the scope they are created in. Also, passing a tensor or list of tags to a scalar summary op is no longer supported.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.1 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use SSE4.2 instructions, but these are available on your machine and could speed up CPU computations.
+W tensorflow/core/platform/cpu_feature_guard.cc:45] The TensorFlow library wasn't compiled to use AVX instructions, but these are available on your machine and could speed up CPU computations.
+WARNING:tensorflow:float64 is not supported by many models, consider casting to float32.
+Traceback (most recent call last):
+  File "/Users/jeff/Dropbox/school/teaching/wustl/classes/T81_558_deep_learning/code/test3.py", line 52, in <module>
+    tf.app.run()
+  File "/Users/jeff/anaconda/envs/tf-latest/lib/python3.5/site-packages/tensorflow/python/platform/app.py", line 44, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "/Users/jeff/Dropbox/school/teaching/wustl/classes/T81_558_deep_learning/code/test3.py", line 44, in main
+    score = metrics.accuracy_score(y_test, predictions)
+  File "/Users/jeff/anaconda/envs/tf-latest/lib/python3.5/site-packages/sklearn/metrics/classification.py", line 172, in accuracy_score
+    y_type, y_true, y_pred = _check_targets(y_true, y_pred)
+  File "/Users/jeff/anaconda/envs/tf-latest/lib/python3.5/site-packages/sklearn/metrics/classification.py", line 72, in _check_targets
+    check_consistent_length(y_true, y_pred)
+  File "/Users/jeff/anaconda/envs/tf-latest/lib/python3.5/site-packages/sklearn/utils/validation.py", line 181, in check_consistent_length
+    " samples: %r" % [int(l) for l in lengths])
+ValueError: Found input variables with inconsistent numbers of samples: [30, 3]
+
+Process finished with exit code 1

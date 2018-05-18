@@ -1,0 +1,124 @@
+Bidirectional_dynamic_rnn in while_loop results in: AttributeError: 'GradLoopState' object has no attribute 'forward_ctxt'
+
+I'm attempting to recreate this model in TensorFlow but I can not seem to get anywhere close to the speed of the original code. On average the TensorFlow implementation is taking 60 ms per document on a GPU, while the pycnn is taking 12 ms per document on a CPU.
+What appears to be the issue is that _rnn_step will call the LSTM cell on every time step regardless of whether the input at that position is padding or not and then simply fill those values with zeros after the fact using sequence_length. This seems like a lot of unnecessary calculations.
+Processing the tokens sequentially in multiple session.run calls with one token per batch in a similar performance to the original code but the embeddings do not update as the flow is broken.
+Current working (but slow) code is below.
+def char_encoding(config, graph, doc_len):
+    """Create graph nodes for character encoding"""
+
+    c2i = config["c2i"]
+    max_tokens = config["max_tokens"]
+
+    with graph.as_default():
+
+        # Character Embedding
+        word_lengths = tf.placeholder(tf.int64, [None], name="word_lengths")
+        word_lengths = tf.gather(word_lengths, tf.range(tf.to_int32(doc_len)))
+        char_inputs = tf.placeholder(tf.int32, [None, max_tokens], name="char_inputs")
+        cembed_matrix = tf.Variable(tf.random_uniform([len(c2i.keys()), config["ce_dim"]], -0.25, 0.25), name="cembeds")
+
+        char_inputs = tf.transpose(char_inputs, perm=[1,0])
+        cembeds = tf.nn.embedding_lookup(cembed_matrix, char_inputs, name="ce_lookup")
+        cembeds = tf.gather(cembeds, tf.range(tf.to_int32(doc_len)))
+        cembeds = tf.transpose(cembeds, perm=[1,0,2])
+
+        # Create LSTM for Character Encoding
+        fw_lstm = tf.nn.rnn_cell.BasicLSTMCell(config["ce_dim"], state_is_tuple=True)
+        bw_lstm = tf.nn.rnn_cell.BasicLSTMCell(config["ce_dim"], state_is_tuple=True)
+
+        # Encode Characters with LSTM
+        options = {
+            "dtype": tf.float32,
+            "sequence_length": word_lengths,
+            "time_major": True
+        }
+
+        (output_fw, output_bw), output_states = tf.nn.bidirectional_dynamic_rnn(fw_lstm, bw_lstm, cembeds, **options)
+        output_fw = tf.transpose(output_fw, perm=[1,0,2])
+        output_bw = tf.transpose(output_bw, perm=[1,0,2])
+
+        return output_fw, output_bw, word_lengths
+
+
+An alternate approach where I loop through the tokens in the graph itself seems like it should be faster but is throwing an odd error:
+Code:
+def char_encoding(config, graph, doc_len):
+    """Create graph nodes for character encoding"""
+
+    c2i = config["c2i"]
+    max_tokens = config["max_tokens"]
+
+    with graph.as_default():
+
+        # Character Embedding
+        word_lengths = tf.placeholder(tf.int64, [None], name="word_lengths")
+        word_lengths = tf.gather(word_lengths, tf.range(tf.to_int32(doc_len)))
+        char_inputs = tf.placeholder(tf.int32, [None, max_tokens], name="char_inputs")
+        char_inputs = tf.transpose(char_inputs, perm=[1, 0])
+        cembed_matrix = tf.Variable(tf.random_uniform([len(c2i.keys()), config["ce_dim"]], -0.25, 0.25), name="cembeds")
+
+        # Create LSTM for Character Encoding
+        fw_lstm = tf.nn.rnn_cell.BasicLSTMCell(config["ce_dim"], state_is_tuple=True)
+        bw_lstm = tf.nn.rnn_cell.BasicLSTMCell(config["ce_dim"], state_is_tuple=True)
+
+        def one_pass(i, o_fw, o_bw):
+
+            int_i = tf.to_int32(i)
+
+            options = {
+                "dtype": tf.float32,
+                "sequence_length": tf.expand_dims(tf.gather(word_lengths, int_i), 0),
+                "time_major": True
+            }
+
+            cembeds_invert = tf.nn.embedding_lookup(cembed_matrix, tf.gather(char_inputs, int_i))
+            cembeds_invert = tf.transpose(tf.expand_dims(cembeds_invert, 0), perm=[1,0,2])
+
+            (output_fw, output_bw), output_states = tf.nn.bidirectional_dynamic_rnn(fw_lstm, bw_lstm, cembeds_invert, **options)
+
+            # Get Last Relevant
+            output_fw = tf.gather(output_fw, tf.gather(word_lengths, int_i) - 1)
+            output_bw = tf.gather(output_bw, tf.gather(word_lengths, int_i) - 1)
+
+            # Append to Previous Token Encodings
+            o_fw = o_fw.write(int_i, tf.squeeze(output_fw))
+            o_bw = o_bw.write(int_i, tf.squeeze(output_bw))
+
+            return tf.add(i, 1), o_fw, o_bw
+
+        # Build Loop in Graph
+        i = tf.constant(0.0)
+        float_doc_len = tf.to_float(doc_len)
+        o_fw = tensor_array_ops.TensorArray(dtype=tf.float32, size=tf.to_int32(doc_len))
+        o_bw = tensor_array_ops.TensorArray(dtype=tf.float32, size=tf.to_int32(doc_len))
+        cond = lambda i, *_: tf.less(i, float_doc_len)
+        i, char_embeds, rev_char_embeds = tf.while_loop(cond, one_pass, [i, o_fw, o_bw])
+
+        return char_embeds.pack(), rev_char_embeds.pack()
+
+Error:
+Traceback (most recent call last):
+  File "/usr/lib/python3.4/runpy.py", line 170, in _run_module_as_main
+    "__main__", mod_spec)
+  File "/usr/lib/python3.4/runpy.py", line 85, in _run_code
+    exec(code, run_globals)
+  File "/home/ubuntu/git/Meerkat/meerkat/longtail/bilstm_tagger.py", line 445, in <module>
+    run_from_command_line()
+  File "/home/ubuntu/git/Meerkat/meerkat/longtail/bilstm_tagger.py", line 441, in run_from_command_line
+    graph, saver = build_graph(config)
+  File "/home/ubuntu/git/Meerkat/meerkat/longtail/bilstm_tagger.py", line 311, in build_graph
+    optimizer = tf.train.GradientDescentOptimizer(config["learning_rate"]).minimize(loss, name="optimizer")
+  File "/usr/local/lib/python3.4/dist-packages/tensorflow/python/training/optimizer.py", line 196, in minimize
+    grad_loss=grad_loss)
+  File "/usr/local/lib/python3.4/dist-packages/tensorflow/python/training/optimizer.py", line 253, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "/usr/local/lib/python3.4/dist-packages/tensorflow/python/ops/gradients.py", line 478, in gradients
+    in_grads = _AsList(grad_fn(op, *out_grads))
+  File "/usr/local/lib/python3.4/dist-packages/tensorflow/python/ops/control_flow_grad.py", line 202, in _EnterGrad
+    result = grad_ctxt.AddBackPropAccumulator(op, grad)
+  File "/usr/local/lib/python3.4/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 1646, in AddBackPropAccumulator
+    forward_ctxt = self.grad_state.forward_ctxt
+AttributeError: 'GradLoopState' object has no attribute 'forward_ctxt'
+
+Let me know if seeing the full graph will help at all. Right now that higher level LSTM isn't causing issues because I can just run one document at a time.

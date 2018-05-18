@@ -1,0 +1,108 @@
+Host a TensorBuilder patch for TensorFlow
+
+Hi,
+
+TensorBuilder is light-weight extensible library that enables you to easily create complex deep neural networks using functions from any Tensor-based library through a functional fluent immutable API based on the Builder Pattern. As a side effect, TensorBuilder is a library that gives expressive power to any Tensor-based library that decide to implement a TensorBuilder patch.
+
+TensorBuilder hosts a patch for tensorflow, using this patch you can rewrite the code like this
+import tensorflow as tf
+
+x = tf.placeholder(tf.float32, shape=[None, 5])
+keep_prob = tf.placeholder(tf.float32)
+
+net = tf.contrib.layers.fully_connected(x, 10, activation_fn=tf.nn.tanh) # tanh(x * w + b)
+net = tf.nn.dropout(net, keep_prob) # dropout(x, keep_prob)
+h =  tf.contrib.layers.fully_connected(net, 3, activation_fn=tf.nn.softmax) # softmax(x * w + b)
+
+as this
+import tensorflow as tf
+import tensorbuilder as tb
+import tensorbuilder.patches.tensorflow.slim
+
+x = tf.placeholder(tf.float32, shape=[None, 5])
+keep_prob = tf.placeholder(tf.float32)
+
+h = (
+    x.builder()
+    .fully_connected(10, activation_fn=tf.nn.tanh)
+    .map(tf.nn.dropout, keep_prob)
+    .fully_connected(3, activation_fn=tf.nn.softmax)
+    .tensor()
+)
+
+or even like this using a stronger patch
+import tensorflow as tf
+import tensorbuilder as tb
+import tensorbuilder.patches.tensorflow.patch
+
+x = tf.placeholder(tf.float32, shape=[None, 5])
+keep_prob = tf.placeholder(tf.float32)
+
+h = (
+    x.builder()
+    .tanh_layer(10) 
+    .dropout(keep_prob)
+    .softmax_layer(3)
+    .tensor()
+)
+
+The patch for the tensorflow library currently has full support for branching, see this example with the strong patch
+import tensorflow as tf
+import tensorbuilder as tb
+import tensorbuilder.patches.tensorflow.patch
+
+x = tf.placeholder(tf.float32, shape=[None, 5])
+keep_prob = tf.placeholder(tf.float32)
+
+h = (
+    x.builder()
+    .fully_connected(10)
+    .branch(lambda root:
+    [
+        root
+        .relu_layer(3)
+    ,
+        root
+        .tanh_layer(9)
+        .branch(lambda root2:
+        [
+          root2
+          .sigmoid_layer(6)
+        ,
+          root2
+          .dropout(keep_prob)
+          .softmax_layer(8)
+        ])
+    ])
+    .sigmoid_layer(6) #<== This connects all the branches to a single output layer
+    .tensor()
+)
+TensorBuilder even has a DSL that you get for free, so you could rewrite the previous as
+import tensorflow as tf
+import tensorbuilder as tb
+import tensorbuilder.patches.tensorflow.patch
+import tensorbuilder.dsl as dl #<== Notice the alias
+
+x = tf.placeholder(tf.float32, shape=[None, 5])
+keep_prob = tf.placeholder(tf.float32)
+
+h = x.builder().pipe(
+    dl.fully_connected(10),
+    [
+        dl.relu_layer(3)
+    ,
+        (dl.tanh_layer(9),
+        [
+            dl.sigmoid_layer(6)
+        ,
+            dl
+            .dropout(keep_prob)
+            .softmax_layer(8)
+        ])
+    ],
+    dl.sigmoid_layer(6)
+    .tensor()
+)
+
+Invitation
+I'd like to invite you to eventually host the TensorFlow patch for TensorBuilder on the TensorFlow library, because TensorBuilder really is just an empty shell, it doesn't even know about tensors, its a sort of functional tool for making non-composable/fluent APIs into composable/fluent APIs (in e.g. Elixir or Elm you wouldn't even need it), but it benefits a lot from libraries, and I am sure that tensorflow users will benefit a lot from it too.

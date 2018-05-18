@@ -1,0 +1,82 @@
+some op frequently disappears in the log of tfprof
+
+Please go to Stack Overflow for help and support:
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Red Hat 4.8.3-9
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.0
+Bazel version (if compiling from source): 0.4.5
+CUDA/cuDNN version: N.A   the code is runned with CPU
+GPU model and memory: N.A
+Exact command to reproduce: python the_source_code.py
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+I tried to use the scripts below to profile the running time of tf.matmul(). But, with each different runs, some ops frequently disappear from the log of tfprof. I tried to add time stamp in the Compute() method of the underlying op, and it shows that the running time is quite stable for different runs. The same problem also happens with larger networks. I'm using CPU other than GPU in this case.
+sometimes the log is like this, MatMul reports 0us, which is definitely not true:
+==================Model Analysis Report======================
+_TFProfRoot (0B/47.32MB, 0us/104.00ms)
+MatMul (6.76MB/6.76MB, 0us/0us)
+random_normal (6.76MB/20.28MB, 1.20ms/52.71ms)
+random_normal/RandomStandardNormal (6.76MB/6.76MB, 50.20ms/50.20ms)
+random_normal/mean (4B/4B, 0us/0us)
+random_normal/mul (6.76MB/6.76MB, 1.30ms/1.30ms)
+random_normal/shape (8B/8B, 2us/2us)
+random_normal/stddev (4B/4B, 0us/0us)
+random_normal_1 (6.76MB/20.28MB, 0us/51.29ms)
+random_normal_1/RandomStandardNormal (6.76MB/6.76MB, 51.29ms/51.29ms)
+random_normal_1/mean (0B/0B, 0us/0us)
+random_normal_1/mul (6.76MB/6.76MB, 0us/0us)
+random_normal_1/shape (0B/0B, 0us/0us)
+random_normal_1/stddev (0B/0B, 0us/0us)
+some times like this, which is expected:
+==================Model Analysis Report======================
+_TFProfRoot (0B/47.32MB, 0us/82.61ms)
+MatMul (6.76MB/6.76MB, 36.83ms/36.83ms)
+random_normal (6.76MB/20.28MB, 2.21ms/41.42ms)
+random_normal/RandomStandardNormal (6.76MB/6.76MB, 37.09ms/37.09ms)
+random_normal/mean (4B/4B, 0us/0us)
+random_normal/mul (6.76MB/6.76MB, 2.13ms/2.13ms)
+random_normal/shape (8B/8B, 0us/0us)
+random_normal/stddev (4B/4B, 0us/0us)
+random_normal_1 (6.76MB/20.28MB, 2.17ms/4.36ms)
+random_normal_1/RandomStandardNormal (6.76MB/6.76MB, 0us/0us)
+random_normal_1/mean (0B/0B, 0us/0us)
+random_normal_1/mul (6.76MB/6.76MB, 2.19ms/2.19ms)
+random_normal_1/shape (0B/0B, 0us/0us)
+random_normal_1/stddev (0B/0B, 0us/0us)
+Source code / logs
+Include any logs or source code that would be helpful to diagnose the problem. If including tracebacks, please include the full traceback. Large logs and files should be attached. Try to provide a reproducible test case that is the bare minimum necessary to generate the problem.
+import tensorflow as tf
+import time
+
+size = 1300
+
+def main():
+  x = tf.random_normal(shape = [1, size])
+  w = tf.random_normal(shape = [size, 2*size])
+  y = tf.matmul(x,w)
+
+  with tf.Session(config=tf.ConfigProto(device_count={'GPU': 0, 'CPU': 1}, \
+    inter_op_parallelism_threads = 1, intra_op_parallelism_threads = 1, \
+    log_device_placement=True)) as sess:
+
+    run_metadata = tf.RunMetadata()
+    opts = tf.contrib.tfprof.model_analyzer.PRINT_ALL_TIMING_MEMORY
+    opts['min_micros'] = 0
+    opts['min_bytes'] = 0
+    predictions = sess.run(y,
+                         options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
+                         run_metadata=run_metadata)
+    tf.contrib.tfprof.model_analyzer.print_model_analysis(
+                        tf.get_default_graph(),
+                        run_meta=run_metadata,
+                        tfprof_options=opts)
+ 
+if __name__ == '__main__':
+  main()

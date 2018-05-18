@@ -1,0 +1,69 @@
+Bugs in TensorFlowYoloDetector
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+None
+Environment info
+Operating System: Windows 10
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v8.0
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+099ef38
+The output of bazel version
+Build label: 0.4.2
+Build target: bazel-out/local-fastbuild/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Dec 7 18:47:13 2016 (1481136433)
+Build timestamp: 1481136433
+Build timestamp as int: 1481136433
+
+
+It looks like there are bugs in TensorfFlowYoloDetector.
+
+The confidence calculation is broken
+In line 218:
+
+final float confidence = output[offset + 4];
+Should be
+final float confidence = expit( output[offset + 4] );
+You can see line 42 at DarkFlow file
+
+The RGB values might be read as BGR in line 152:
+
+    for (int i = 0; i < intValues.length; ++i) {
+      floatValues[i * 3 + 0] = (intValues[i] & 0xFF) / 255.0f;
+      floatValues[i * 3 + 1] = ((intValues[i] >> 8) & 0xFF) / 255.0f;
+      floatValues[i * 3 + 2] = ((intValues[i] >> 16) & 0xFF) / 255.0f;
+    }
+
+Unless there is a bug in DarkFlow, in order to have the same results, one must change to:
+    for (int i = 0; i < intValues.length; ++i) {
+      floatValues[i * 3 + 2] = (intValues[i] & 0xFF) / 255.0f;
+      floatValues[i * 3 + 1] = ((intValues[i] >> 8) & 0xFF) / 255.0f;
+      floatValues[i * 3 + 0] = ((intValues[i] >> 16) & 0xFF) / 255.0f;
+    }
+
+
+The NMS calculation is completely different from DarkFlow and DarkNet
+See line 242, it just return top K results, without any non-maximum suppression
+
+Here is the code from the file:
+    final ArrayList<Recognition> recognitions = new ArrayList<Recognition>();
+    for (int i = 0; i < Math.min(pq.size(), MAX_RESULTS); ++i) {
+      recognitions.add(pq.poll());
+    }
+
+Here is the correct code from DarkFlow, line 52:
+	# non max suppress boxes
+	for c in range(C):
+		for i in range(len(boxes)):
+			boxes[i].class_num = c
+		boxes = sorted(boxes, key = prob_compare)
+		for i in range(len(boxes)):
+			boxi = boxes[i]
+			if boxi.probs[c] == 0: continue
+			for j in range(i + 1, len(boxes)):
+				boxj = boxes[j]
+				if box_iou(boxi, boxj) >= .4:
+					boxes[j].probs[c] = 0.

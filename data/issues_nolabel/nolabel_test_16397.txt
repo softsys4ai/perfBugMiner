@@ -1,0 +1,72 @@
+S3 accessing reports "Curl returned error code 6" after AWS SDK upgrading to 1.3.15
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): CentOS 7.2
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.5.0rc1 (tag) and master (2e5ff39)
+Python version: 2.7
+Bazel version (if compiling from source): 0.9.0
+GCC/Compiler version (if compiling from source): 4.8
+CUDA/cuDNN version: 8
+GPU model and memory: /
+Exact command to reproduce:
+
+Describe the problem
+TensorFlow 1.4.X was working well with S3 in my environment. After upgrading to 1.5.0rc1, I found that S3 could not be accessed. "Curl returned error code 6" is reported.
+I noticed that AWS SDK had been upgraded from 1.0.90 to 1.3.15 in r1.5 and master branches. Thus, I pulled the master (2e5ff39) and tried to change AWS SDK 1.3.15 into 1.0.90 in tensorflow/workspace.bzl. After this modification, it works well!
+I tried with both AWS S3 (with http proxy) and Minio (localhost), and the results are the same. (AWS SDK 1.0.90 is Ok, but 1.3.15 reports error)
+I guess there might be some incompatible changes after AWS SDK 1.3.15. Could you please take a look? Thanks! @yongtang
+I noticed that AWS SDK required gcc 4.9, but I was using 4.8. Thus, this issue might be related to the old versions of gcc and glib on my server. I will try with some new systems as well.
+Source code / logs
+Logs when using TensorFlow master (2e5ff39):
+>>> import tensorflow as tf
+>>> tf.gfile.Exists('s3://xxxxxxxxx/f.txt')
+2018-01-25 15:34:45.145317: I tensorflow/core/platform/s3/aws_logging.cc:54] Initializing config loader against fileName /home/xxxxxxxx//.aws/config and using profilePrefix = 1
+2018-01-25 15:34:45.145354: I tensorflow/core/platform/s3/aws_logging.cc:54] Initializing config loader against fileName /home/xxxxxxxx//.aws/credentials and using profilePrefix = 0
+2018-01-25 15:34:45.145367: I tensorflow/core/platform/s3/aws_logging.cc:54] Setting provider to read credentials from /home/xxxxxxxx//.aws/credentials for credentials file and /home/xxxxxxxx//.aws/config for the config file , for use with profile default
+2018-01-25 15:34:45.145383: I tensorflow/core/platform/s3/aws_logging.cc:54] Creating HttpClient with max connections2 and scheme http
+2018-01-25 15:34:45.145401: I tensorflow/core/platform/s3/aws_logging.cc:54] Initializing CurlHandleContainer with size 2
+2018-01-25 15:34:45.145414: I tensorflow/core/platform/s3/aws_logging.cc:54] Creating Instance with default EC2MetadataClient and refresh rate 900000
+2018-01-25 15:34:45.145456: I tensorflow/core/platform/s3/aws_logging.cc:54] Unable to open config file /home/xxxxxxxx//.aws/credentials for reading.
+2018-01-25 15:34:45.145468: I tensorflow/core/platform/s3/aws_logging.cc:54] Failed to reload configuration.
+2018-01-25 15:34:45.145479: I tensorflow/core/platform/s3/aws_logging.cc:54] Unable to open config file /home/xxxxxxxx//.aws/config for reading.
+2018-01-25 15:34:45.145487: I tensorflow/core/platform/s3/aws_logging.cc:54] Failed to reload configuration.
+2018-01-25 15:34:45.145495: I tensorflow/core/platform/s3/aws_logging.cc:54] Credentials have expired attempting to repull from EC2 Metadata Service.
+2018-01-25 15:34:45.145614: I tensorflow/core/platform/s3/aws_logging.cc:54] Pool grown by 2
+2018-01-25 15:34:45.145628: I tensorflow/core/platform/s3/aws_logging.cc:54] Connection has been released. Continuing.
+2018-01-25 15:34:46.146625: E tensorflow/core/platform/s3/aws_logging.cc:60] Curl returned error code 28
+2018-01-25 15:34:46.146655: E tensorflow/core/platform/s3/aws_logging.cc:60] Http request to Ec2MetadataService failed.
+2018-01-25 15:34:46.146666: I tensorflow/core/platform/s3/aws_logging.cc:54] Failed to reload configuration.
+2018-01-25 15:34:46.146715: I tensorflow/core/platform/s3/aws_logging.cc:54] Initializing CurlHandleContainer with size 25
+2018-01-25 15:34:46.146849: I tensorflow/core/platform/s3/aws_logging.cc:54] Pool grown by 2
+2018-01-25 15:34:46.146863: I tensorflow/core/platform/s3/aws_logging.cc:54] Connection has been released. Continuing.
+2018-01-25 15:34:46.147677: E tensorflow/core/platform/s3/aws_logging.cc:60] Curl returned error code 6
+2018-01-25 15:34:46.147704: W tensorflow/core/platform/s3/aws_logging.cc:57] If the signature check failed. This could be because of a time skew. Attempting to adjust the signer.
+2018-01-25 15:34:46.147716: W tensorflow/core/platform/s3/aws_logging.cc:57] Request failed, now waiting 0 ms before attempting again.
+2018-01-25 15:34:46.147802: I tensorflow/core/platform/s3/aws_logging.cc:54] Connection has been released. Continuing.
+2018-01-25 15:34:46.148107: E tensorflow/core/platform/s3/aws_logging.cc:60] Curl returned error code 6
+...
+False
+
+Logs after replacing AWS SDK 1.3.15 with 1.0.90:
+>>> import tensorflow as tf
+>>> tf.gfile.Exists('s3://xxxxxxxxx/f.txt')
+2018-01-25 15:44:29.134077: I tensorflow/core/platform/s3/aws_logging.cc:54] Initializing config loader against fileName /home/xxxxxxxx//.aws/config and using profilePrefix = 1
+2018-01-25 15:44:29.134108: I tensorflow/core/platform/s3/aws_logging.cc:54] Initializing config loader against fileName /home/xxxxxxxx//.aws/credentials and using profilePrefix = 0
+2018-01-25 15:44:29.134121: I tensorflow/core/platform/s3/aws_logging.cc:54] Setting provider to read credentials from /home/xxxxxxxx//.aws/credentials for credentials file and /home/xxxxxxxx//.aws/config for the config file , for use with profile default
+2018-01-25 15:44:29.134133: I tensorflow/core/platform/s3/aws_logging.cc:54] Creating HttpClient with max connections -864887560 and scheme Creating HttpClient with max connections %d and scheme %s
+2018-01-25 15:44:29.134147: I tensorflow/core/platform/s3/aws_logging.cc:54] Initializing CurlHandleContainer with size 2
+2018-01-25 15:44:29.134157: I tensorflow/core/platform/s3/aws_logging.cc:54] Creating Instance with default EC2MetadataClient and refresh rate 900000
+2018-01-25 15:44:29.134176: I tensorflow/core/platform/s3/aws_logging.cc:54] Found credential in environment with access key id ********************
+2018-01-25 15:44:29.134184: I tensorflow/core/platform/s3/aws_logging.cc:54] Found secret key
+2018-01-25 15:44:29.134223: I tensorflow/core/platform/s3/aws_logging.cc:54] Initializing CurlHandleContainer with size 25
+2018-01-25 15:44:29.134264: I tensorflow/core/platform/s3/aws_logging.cc:54] Found credential in environment with access key id ********************
+2018-01-25 15:44:29.134273: I tensorflow/core/platform/s3/aws_logging.cc:54] Found secret key
+2018-01-25 15:44:29.134429: I tensorflow/core/platform/s3/aws_logging.cc:54] Pool successfully grown by 2
+2018-01-25 15:44:29.134442: I tensorflow/core/platform/s3/aws_logging.cc:54] Connection has been released. Continuing.
+2018-01-25 15:44:30.048051: I tensorflow/core/platform/s3/aws_logging.cc:54] Found credential in environment with access key id ********************
+2018-01-25 15:44:30.048084: I tensorflow/core/platform/s3/aws_logging.cc:54] Found secret key
+2018-01-25 15:44:30.048159: I tensorflow/core/platform/s3/aws_logging.cc:54] Connection has been released. Continuing.
+True

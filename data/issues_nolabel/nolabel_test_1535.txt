@@ -1,0 +1,32 @@
+google.protobuf imports are resolving to /usr/local instead of TF's local copy
+
+Environment info
+Operating System: Current Goobuntu
+TF commit 945a4b4
+google/protobuf@fb714b3
+Steps to reproduce
+$ bazel run -c opt //tensorflow/python:default_platform__resource_loader_test
+
+Results in
+Traceback (most recent call last):
+  File "/usr/local/google/home/jlebar/.cache/bazel/_bazel_jlebar/b1c0b5b92791600151e68af1e7d712c0/tensorflow/bazel-out/local_linux-opt/bin/tensorflow/python/default_platform__resource_loader_test.runfiles/tensorflow/python/platform/default/_resource_loader_test.py", line 20, in <module>
+from tensorflow.python.platform import googletest
+  File "/usr/local/google/home/jlebar/.cache/bazel/_bazel_jlebar/b1c0b5b92791600151e68af1e7d712c0/tensorflow/bazel-out/local_linux-opt/bin/tensorflow/python/default_platform__resource_loader_test.runfiles/tensorflow/__init__.py", line 23, in <module>
+from tensorflow.python import *
+  File "/usr/local/google/home/jlebar/.cache/bazel/_bazel_jlebar/b1c0b5b92791600151e68af1e7d712c0/tensorflow/bazel-out/local_linux-opt/bin/tensorflow/python/default_platform__resource_loader_test.runfiles/tensorflow/python/__init__.py", line 49, in <module>
+from tensorflow.core.framework.graph_pb2 import *
+  File "/usr/local/google/home/jlebar/.cache/bazel/_bazel_jlebar/b1c0b5b92791600151e68af1e7d712c0/tensorflow/bazel-out/local_linux-opt/bin/tensorflow/python/default_platform__resource_loader_test.runfiles/tensorflow/core/framework/graph_pb2.py", line 9, in <module>
+from google.protobuf import symbol_database as _symbol_database
+  File "/usr/local/google/home/jlebar/.cache/bazel/_bazel_jlebar/b1c0b5b92791600151e68af1e7d712c0/tensorflow/bazel-out/local_linux-opt/bin/tensorflow/python/default_platform__resource_loader_test.runfiles/google/protobuf/symbol_database.py", line 186, in <module>
+_DEFAULT = SymbolDatabase(pool=descriptor_pool.Default())
+AttributeError: 'module' object has no attribute 'Default'
+
+With @Yhg1s help, I've traced this down some, but now I'm stuck.
+The issue seems to be that the descriptor_pool we import is not TF's local copy, but is instead the copy from /usr/lib/python2.7/dist-packages.
+TF's local copy of symbol_database.py imports google.protobuf.descriptor_pool, and when it does so, it has the correct sys.path.  Yet somehow we end up at the wrong descriptor_pool.
+Thomas's idea was that maybe we're importing google from the wrong path before this point, and that's what's causing us to find the wrong path to descriptor_pool.  Indeed, judging from a -vv log [1], this seems to be the case.
+Here we import TF's local copy of google, and then reimport it from /usr/lib.  Python doesn't normally do this, so Thomas's idea was that someone may be messing with sys.modules or performing other dark rituals.
+At this point I'm kind of lost.
+I suspect things will work fine if I use a virtualenv, and Thomas gave me enough of an idea of how to do this.  But the build should work without that, right?  (It's not even documented how to build within a virtualenv.)
+[1] http://pastebin.com/raw/M3PTCTfY
+(Edit: Wrong twouters.)

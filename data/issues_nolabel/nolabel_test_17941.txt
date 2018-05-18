@@ -1,0 +1,46 @@
+initial  large tf.variable error
+
+System information
+
+**Have I written custom code: yes
+OS Platform and Distribution Ubuntu 16.04:
+**TensorFlow installed from source **:
+TensorFlow version 1.6:
+Python version 3.5:
+Bazel version 0.11.1:
+GCC/Compiler version (5):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+when i'm using same code, only the weight variable have different size
+and when weight array is small everything is fine, but when too big it show shape issue
+Source code / logs
+souce code:
+with tf.device('/cpu:0'):
+W_fc1 = weight_variable([32768, 35000],"W_fc1")#32768
+b_fc1 = bias_variable([35000],"b_fc1")
+h_pool5_flat = tf.reshape(h_pool5, [-1, 1616128])
+h_fc1 = tf.nn.relu(tf.matmul(h_pool5_flat, W_fc1) + b_fc1,name="h_fc1")
+h_fc1_drop = tf.clip_by_value(tf.cast(tf.nn.dropout(tf.cast(h_fc1,tf.float32), keep_prob),tf.float16, name="h_fc1_drop"),min_clip,max_clip, name="h_fc1_drop")
+h_fc1_drop_1 = tf.where(tf.is_nan(h_fc1_drop), tf.constant(min_clip,dtype=tf.float16, shape=h_fc1_drop.shape), h_fc1_drop)
+##down sampleing fc2 layer##
+#with tf.device('/cpu:0'):
+W_fc2 = weight_variable([35000,65536],"W_fc2")
+b_fc2 = bias_variable([65536],"b_fc2")
+h_fc2 = tf.clip_by_value(tf.nn.relu(tf.matmul(h_fc1_drop_1, W_fc2) + b_fc2),min_clip,max_clip, name="h_fc2")
+h_fc2_1 = tf.where(tf.is_nan(h_fc2), tf.constant(min_clip,dtype=tf.float16, shape=h_fc2.shape), h_fc2)
+..........
+loss = tf.losses.mean_squared_error(y_reshape,prediction_1)
+train_step = tf.train.AdamOptimizer(lr).minimize(loss)
+when W_fc1 is as big as the above
+it show the error
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+op_def=op_def)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 3271, in create_op
+op_def=op_def)
+File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 1650, in init
+self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+InvalidArgumentError (see above for traceback): Assign requires shapes of both tensors to match. lhs shape= [35000,65536] rhs shape= [32768,35000]
+[[Node: W_fc2/Adam_1/Assign = Assign[T=DT_HALF, _class=["loc:@W_fc2"], use_locking=true, validate_shape=true, _device="/job:localhost/replica:0/task:0/device:CPU:0"](W_fc2/Adam_1, W_fc2/Adam/Initializer/zeros)]]

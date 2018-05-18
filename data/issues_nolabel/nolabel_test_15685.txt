@@ -1,0 +1,98 @@
+fake_quant_with_min_max_vars doesn't change min, max vars
+
+System Information
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): pip3 install --upgrade tensorflow-gpu
+TensorFlow version (use command below): v1.4.0-19-ga52c8d9, 1.4.1
+Python version:3.5.2
+Bazel version (if compiling from source): 0.7.0
+GCC/Compiler version (if compiling from source): GCC 5.4.0
+CUDA/cuDNN version: Cuda compilation tools, release 8.0, V8.0.61, cuDNN : 6.0.21
+GPU model and memory: Two GeForce GTX 1080 Ti devices.
+Exact command to reproduce: N/A
+
+Problem description
+I've got a problem with tf-lite conversion tool. There is learned graph which should be converted in tflite format and quantinized.
+I have read the answer https://stackoverflow.com/questions/47463204/tensorflow-lite-convert-error-for-the-quantized-graphdef where authors recommend to create new network with fake_quant operations and retrain it. However variables passed in tf.fake_quant_with_min_max_vars op did not change their values during training. Here is modeling code which shows the problem.
+Code to reproduce
+import tensorflow as tf
+import numpy as np
+
+khe_init = tf.random_normal_initializer(mean=0.0, stddev=np.sqrt(2.0 / 1000))
+
+
+def quant_conv_op(inpt, num_filters, filter_size=[3, 3], strides=[1, 1, 1, 1], padding="VALID", layer_name="layer1", use_acivation=True):
+    num_input_map = inpt.get_shape().as_list()[-1]
+    kernel_shape = filter_size + [num_input_map, num_filters]    
+    with tf.variable_scope(layer_name):
+        W = tf.get_variable("weights", shape=kernel_shape, initializer=khe_init)
+        max_w = tf.get_variable("max_quant_weights", shape=[], initializer=tf.constant_initializer(1), trainable=True)
+        min_w = tf.get_variable("min_quant_weights", shape=[], initializer=tf.constant_initializer(-1), trainable=True)
+        b = tf.get_variable("bias", shape=[num_filters, ], initializer=tf.zeros_initializer)
+ 
+        q_W = tf.fake_quant_with_min_max_vars(W, min_w, max_w)
+        out = tf.nn.conv2d(inpt, q_W, strides=strides, padding=padding, name="2d_convolution_operation")
+        out = tf.nn.bias_add(out, b)
+        
+        if use_acivation: 
+            out = tf.nn.relu6(out, name=layer_name+"out")
+            out = tf.fake_quant_with_min_max_args(out, 0, 6)
+        else:
+            max_out = tf.get_variable("max_quant_output", shape=[], initializer=tf.constant_initializer(1), trainable=True)
+            min_out = tf.get_variable("min_quant_output", shape=[], initializer=tf.constant_initializer(-1), trainable=True)  
+            out = tf.fake_quant_with_min_max_vars(out, min_out, max_out, name="fake_quant_with_min_max_out_quantinization")
+    
+    return out, max_w, min_w, W
+
+
+def loss(logits, batch):
+    return tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=tf.ones(shape=[batch, 1]))
+
+
+def build_net(ph_input):
+    inp = tf.fake_quant_with_min_max_args(ph_input, -1, 1)
+    out, max_w1, min_w1, W1 = quant_conv_op(inp, num_filters=64, filter_size=[3, 3], layer_name="layer1")    
+    out, max_w2, min_w2, W2 = quant_conv_op(out, num_filters=128, filter_size=[3, 3], layer_name="layer2")
+    out, max_w3, min_w3, W3 = quant_conv_op(out, num_filters=256, filter_size=[3, 3], layer_name="layer3")
+    out = tf.reduce_mean(out, axis=[1, 2], keep_dims=True, name="avg_pool")
+    out = tf.fake_quant_with_min_max_args(out, 0, 6, name="fake_quant_with_min_max_avgpool_quantinization")
+    logits, max_w4, min_w4, W4 = quant_conv_op(out, num_filters=1, filter_size=[1, 1], layer_name="layer4", use_acivation=False)
+    
+    max_list = [max_w1, max_w2, max_w3, max_w4]
+    min_list = [min_w1, min_w2, min_w3, min_w4]
+    W_list = [W1, W2, W3, W4]
+    logits = tf.reshape(logits, [-1, 1])
+    sig_loss = tf.reduce_mean(loss(logits, batch=64))
+    adam_op = tf.train.AdamOptimizer(10**-0)
+    train_op = adam_op.minimize(sig_loss, var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)) 
+    return train_op, max_list, min_list, sig_loss, W_list
+
+
+def main():
+    sess = tf.InteractiveSession()
+    ph_input = tf.placeholder(tf.float32, [None, 28, 28, 3], name="network_input") 
+    train_op, max_list, min_list, sig_loss, W_list = build_net(ph_input)
+    sess.run(tf.global_variables_initializer())
+    tf.summary.FileWriter('.', graph=tf.get_default_graph())
+    trainable_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+    for t in trainable_vars:
+        if len(t.shape) == 0:
+           print(t.name, sess.run(t))
+        if len(t.shape) == 4:
+           v = sess.run(t)
+           print(t.name, np.max(v), np.min(v))
+
+    for i in range(10):
+        res = sess.run([train_op, sig_loss, W_list[0]]+max_list, feed_dict={ph_input:np.random.uniform(low=-1, high=1, size=[64, 28, 28, 3])})
+    
+    print("=========")
+    for t in trainable_vars:
+        if len(t.shape) == 0:
+           print(t.name, sess.run(t))
+        if len(t.shape) == 4:
+           v = sess.run(t)
+           print(t.name, np.max(v), np.min(v))
+
+if __name__ == "__main__":
+    main()

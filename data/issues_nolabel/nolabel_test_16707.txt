@@ -1,0 +1,52 @@
+Can't initialize an all zero SparseTensor
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Kind of?
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Mac 10.12.6 (not relevant)
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.5.0
+Python version: 3.6.3
+Bazel version (if compiling from source): NA
+GCC/Compiler version (if compiling from source): NA
+CUDA/cuDNN version: NA
+GPU model and memory: NA
+Exact command to reproduce: NA
+
+Describe the problem
+It doesn't seem possible to initialize a tf.SparseTensor with all zero entries.
+A call doing this would look something like:
+tf.SparseTensor(indices=[], values=[], dense_shape=(10, 10))
+
+However, attempting this initialization produces the error:
+ ValueError: Shape (0,) must have rank 2
+
+Source code / logs
+Current relevant section from SparseTensor.__init__:
+indices_shape = indices.get_shape().with_rank(2) # <--- .with_rank(2) is what causes the problem
+values_shape = values.get_shape().with_rank(1)
+dense_shape_shape = dense_shape.get_shape().with_rank(1)
+
+# Assert number of rows in indices match the number of elements in values.
+indices_shape[0].merge_with(values_shape[0])
+# Assert number of columns in indices matches the number of elements in
+# dense_shape.
+indices_shape[1].merge_with(dense_shape_shape[0])
+
+Example solution:
+tf.cond(tf.equal(indices.get_shape()[0], 0),
+        true_fn=lambda: None,
+        false_fn=self._validate_input)
+
+def _validate_input(self):
+    indices_shape = self._indices.get_shape().with_rank(2)
+    values_shape = self._values.get_shape().with_rank(1)
+    dense_shape_shape = self._dense_shape.get_shape().with_rank(1)
+
+    # Assert number of rows in indices match the number of elements in values.
+    indices_shape[0].merge_with(values_shape[0])
+    # Assert number of columns in indices matches the number of elements in
+    # dense_shape.
+    indices_shape[1].merge_with(dense_shape_shape[0])
+
+My only worry with the example solution is that tf.cond is too high level a function and there's some alternative that would be better. Is that the case?

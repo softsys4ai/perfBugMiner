@@ -1,0 +1,17 @@
+Tensorflow crashes on AVX512 systems (Core i9 / Xeon etc)
+
+(for now, placeholder for notes while investigating)
+using the r1.5 branch (but 1.4 and earlier have the same issues)
+Tensorflow crashes when compiled for AVX512. The cause is a misalignment exception; AVX512 has a 64 byte natural alignment, and Eigen and others often use instructions that explicitly fault on misaligned loads.
+tensorflow/core/framework/allocator.h has this code
+class Allocator {
+public:
+#ifdef EIGEN_VECTORIZE_AVX512
+// Align to 64 byte boundary.
+static constexpr size_t kAllocatorAlignment = 64;
+#else
+// Align to 32 byte boundary.
+static constexpr size_t kAllocatorAlignment = 32;
+#endif
+which implies that at least this allocator tries to do the right thing, however it seems EIGEN_VECTORIZE_AVX512 is not properly defined (in cpp meaning) at this place, because when adding an #error in the 32 byte alignment case, the #error hits, so the 64 bit alignment case is not used.
+This is not the only case; brute forcing the 32 to be 64 still faults in misalignment... just later on in a different place.

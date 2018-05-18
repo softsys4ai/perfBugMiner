@@ -1,0 +1,53 @@
+Profiling: libcupti.so cannot be loaded
+
+Environment info
+Operating System: Linux Ubuntu 14.04 LTS (64bit)
+Installed version of CUDA and cuDNN: CUDA 7.5.18 and CUDNN 4.0.7
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+❯❯❯ ls -l /usr/local/cuda-7.5/lib/libcud*
+-rw----r-- 1 root root 189170  2월 24 18:12 /usr/local/cuda-7.5/lib/libcudadevrt.a
+lrwxrwxrwx 1 root root     16  2월 24 18:12 /usr/local/cuda-7.5/lib/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19  2월 24 18:12 /usr/local/cuda-7.5/lib/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwx---r-x 1 root root 311596  2월 24 18:12 /usr/local/cuda-7.5/lib/libcudart.so.7.5.18
+-rw----r-- 1 root root 558020  2월 24 18:12 /usr/local/cuda-7.5/lib/libcudart_static.a
+
+❯❯❯ ls -l /usr/local/cuda-7.5/lib64/libcud*
+-rw----r-- 1 root root   322936  2월 24 18:12 /usr/local/cuda-7.5/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root       16  2월 24 18:12 /usr/local/cuda-7.5/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root       19  2월 24 18:12 /usr/local/cuda-7.5/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwx---r-x 1 root root   383336  2월 24 18:12 /usr/local/cuda-7.5/lib64/libcudart.so.7.5.18
+-rw----r-- 1 root root   720192  2월 24 18:12 /usr/local/cuda-7.5/lib64/libcudart_static.a
+lrwxrwxrwx 1 root root       13  3월  3 03:30 /usr/local/cuda-7.5/lib64/libcudnn.so -> libcudnn.so.4
+lrwxrwxrwx 1 root root       17  3월  3 03:30 /usr/local/cuda-7.5/lib64/libcudnn.so.4 -> libcudnn.so.4.0.7
+-rwxr-xr-x 1 root root 61453024  3월  3 03:30 /usr/local/cuda-7.5/lib64/libcudnn.so.4.0.7
+
+If installed from binary pip package, provide:
+
+Which pip package you installed : Tensorflow 0.8.0 Nightly Python2.7 Linux (GPU) e.g. Build 118
+The output from python -c "import tensorflow; print(tensorflow.version)". : 0.8.0
+
+If installed from sources, provide the commit hash:
+Steps to reproduce
+Although it is experimental, I am using the GPU profiling functionality with CUPTI.
+
+Run any tensorflow code that uses CUPTI or tf.RunOptions.FULL_TRACE.
+The following error (segfault) occurs.
+
+I tensorflow/stream_executor/dso_loader.cc:102] Couldn't open CUDA library libcupti.so. LD_LIBRARY_PATH:
+F tensorflow/core/common_runtime/gpu/cupti_wrapper.cc:57] Check failed: f != nullptr could not find cuptiActivityRegisterCallbacksin libcupti DSO; dlerror: /home/wookayin/.virtualenvs/tfdebug/local/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so: undefined symbol: cuptiActivityRegisterCallbacks
+[1]    82604 abort (core dumped)  python 19-mnist-profiling.py
+
+Any TF code that invokes loading of libcupti.so will face the same error, but for convenience I will share a code that can run standalone: 19-mnist-profiling.py
+What have you tried?
+The problem is that the shared library libcupti.so cannot be loaded. However, in some older nightly version (such as Build 103) it worked.
+UPD: I binary-searched to find the changeset to be blamed. Build 103 works, but Build 104 (Failed) and Build 105 does not work.
+I highly suspect that this regression is since commit 6bd964c (but not sure):
+
+The path to libcupti.so would be /usr/local/cuda/extras/CUPTI/lib64/libcupti.so.
+After this commit, it seems that path to libcupti.so goes wrong. (but why?)
+
+A strange thing to me is that tensorflow already has a unit test for CUPTI and GPU tracing functionalities, so CI must have run this test as well. This bug might be happening in some environments only (like nightly build I installed via pip), or it can be a a bazel-related problem (when generating packages).
+I have not investigated into this problem in detail; it looks that after some troubleshooting I can figure out what the cause is.
+Thanks!
+Logs or other output that would be helpful
+N/A

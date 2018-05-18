@@ -1,0 +1,34 @@
+tf.variable_scope() does not allow variables to be defined for individual towers under a scope, in tensorflow/tensorflow/contrib/slim/python/slim/nets/inception_v3.py
+
+I have been working with inception_v3 model from past few weeks and I came across this issue with the inception model defined under tensorflow/tensorflow/contrib/slim/python/slim/nets/inception_v3.py.
+This newer inception model cannot create variables for individual towers in a multi-gpu environment defined under a tower scope and fails with the following error:
+ValueError: Variable tower_1//Conv2d_1a_3x3/weights does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+The source of this error stems from defining logits with scope, as follows,
+logits = inception.inception_v3(inputs=images, num_classes=num_classes,
+                                          is_training=is_training,
+                                          dropout_keep_prob=dropout_rate,
+                                          reuse=None,
+                                          scope=scope)
+
+The aforementioned error arises despite setting reuse=None.
+Suppose, scope isn't defined,
+logits = inception.inception_v3(inputs=images, num_classes=num_classes,
+                                                is_training=is_training,
+                                                dropout_keep_prob=dropout_rate)
+
+logits layer then builds for multiple GPUs, in my training environment without ending up with a ValueError. The model was indeed designed to be defined without a scope? My investigation of the code showed that the source of this error arises from the following 2 lines within ..slim/nets/inception_v3.py file,
+   with tf.variable_scope(scope, 'InceptionV3', [inputs, num_classes],
+                                                reuse=reuse) as scope:
+  
+   with tf.variable_scope(scope, 'InceptionV3', [inputs]):
+
+Tower variables are successfully created for the first tower (or a single GPU) whilst failing to creating the same variables for remaining towers (remainder of GPUs), with a 'scope' defined, the model ends up producing a ValueError. As one of the workarounds, I began using this model without defining a scope for tower creation in multi-gpu environment.
+OPTIONAL WORKAROUND:
+As an optional workaround, I figured changing the way the variables are defined by changing variable definition from with tf.variable_scope to  with tf.name_scope. This seems to have fixed the ValueError issue. I'm now able to define logits for 'n' GPU setting, with "scope" as a functional parameter (the towers and their respective variables are successfully created for each of the several available GPUs, in a multi-GPU setting). Also, as an added bonus I did observe that the "graph" view on tensorboard looked more organized and nicely segmented in contrast to the default code (default code is the one that made use of with tf.variable_scope). Please let me know if this is indeed an existing issue with this newer inception_v3 model or am I doing something wrong in the way I am defining my logits layer.
+I am confident, I am following the right steps because,
+
+My model seems to train and test perfectly without a scope defined while using the default inception_v3.py to build the logits,
+My model seems to train and test perfectly after replacing variable_scope with name_scope and passing individual tower scope as an argument to build the logits layer.
+I am following the same methodology used in the following code, https://github.com/tensorflow/models/blob/master/inception/inception/inception_train.py to define my logits layers for multiple towers in the tower_loss function of my train file.
+
+Any inputs would be much appreciated,

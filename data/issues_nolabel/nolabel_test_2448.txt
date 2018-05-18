@@ -1,0 +1,35 @@
+Session got stuck after fork
+
+Version: nightly prebuilt for Python2 w/ GPU (just now)
+I'm expecting the following code to print "10.0" 3 times, but session.run got stuck in all forked processes.
+import tensorflow as tf
+import multiprocessing as mp
+import os
+
+class Worker(mp.Process):
+    def __init__(self, gid):
+        self.gid = gid
+        super(Worker, self).__init__()
+
+    def run(self):
+        G = tf.Graph()
+        with G.as_default():
+            x = tf.placeholder(tf.float32, shape=[])
+            y = x * 2
+            sess = tf.Session()
+            print sess.run(y, feed_dict={x: 5})
+
+G = tf.Graph()
+with G.as_default():
+    sess = tf.Session()
+    with sess.as_default():
+        x = tf.placeholder(tf.float32, shape=[])
+        y = x * 2
+        print sess.run(y, feed_dict={x: 5})
+
+procs = [Worker(k) for k in range(2)]
+for p in procs: p.start()
+for p in procs: p.join()
+Removing the graph/session in master process will solve the problem. So it seems like once there is a session, we cannot use fork?
+The problem exists with and without GPU.
+NOTE:  this code doesn't terminate normally. You'll probably need to manually kill the forked processes after the master exited.

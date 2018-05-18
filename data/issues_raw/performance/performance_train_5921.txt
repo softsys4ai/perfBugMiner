@@ -1,0 +1,78 @@
+IOS - No OpKernel was registered to support Op ‘SpaceToBatchND' with these attrs
+
+I am trying to use tf.nn.atrous_conv2d to solve a segmentation problem. It works on my mac but when I saved this graph using convert_variables_to_constants and tf.train.write_graph then read it in using C++ API trying to get it running on my iPad, I got this error:
+Could not create TensorFlow Graph: Invalid argument: No OpKernel was registered to support Op 'SpaceToBatchND' with these attrs.  Registered devices: [CPU], Registered kernels:
+  <no registered kernels>
+
+	 [[Node: CCC/SpaceToBatchND = SpaceToBatchND[T=DT_FLOAT, Tblock_shape=DT_INT32, Tpaddings=DT_INT32](BBB, CCC/SpaceToBatchND/block_shape, CCC/SpaceToBatchND/paddings)]]
+F /workplace/testTensorFlow/testTensorFlowXcode/Classes/test_tensorflow.mm:162] test_tensorflow.mm : Couldn't load model: Invalid argument: No OpKernel was registered to support Op 'SpaceToBatchND' with these attrs.  Registered devices: [CPU], Registered kernels:
+  <no registered kernels>
+
+	 [[Node: CCC/SpaceToBatchND = SpaceToBatchND[T=DT_FLOAT, Tblock_shape=DT_INT32, Tpaddings=DT_INT32](BBB, CCC/SpaceToBatchND/block_shape, CCC/SpaceToBatchND/paddings)]]
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+#1269
+#2680
+#2929
+If possible, provide a minimal reproducible example
+In Python:
+import tensorflow as tf
+from tensorflow.python.framework.graph_util import convert_variables_to_constants
+
+flt = tf.Variable(tf.random_normal([3, 3, 3, 3], stddev=0.35), name='AAA')
+inputs = tf.placeholder(shape=(1, 224, 224, 3), dtype=tf.float32, name='BBB')
+conv = tf.nn.atrous_conv2d(value=inputs, filters=flt, rate=2, padding='SAME', name='CCC')
+
+sess = tf.Session(config=config)
+init = tf.initialize_all_variables()
+sess.run(init)
+
+with sess.as_default():
+    minimal_graph = convert_variables_to_constants(sess, sess.graph_def, ["CCC"])
+    tf.train.write_graph(minimal_graph, '.', 'rand_init_min_cpu.pb', as_text=False)
+
+I can load and run graphs not using atrous_conv2d correctly, so I think my C++ code is ok.
+What other attempted solutions have you tried?
+Following the related issues above, I tried to add SpaceToBatchND kernel to
+tensorflow/contrib/makefile/tf_op_files.txt
+I found SpaceToBatchND in array_ops.cc (which has already been included in tf_op_files.txt)
+and maybe in these two files:
+tensorflow/core/kernels/spacetobatch_op.cc
+tensorflow/core/kernels/batchtospace_op.cc
+So I added them to tf_op_files.txt, but then when I ./build_all_ios.sh, I got these errors (short version, I can post them all out if you need):
+Undefined symbols for architecture armv7:     
+"tensorflow::functor::SpaceToBatchFunctor<Eigen::ThreadPoolDevice, float, 4, $
+rue>::operator()(Eigen::ThreadPoolDevice const&, Eigen::TensorMap<Eigen::Tensor$
+float, 6, 1, int>, 16, Eigen::MakePointer>, long long const*, long long const*, 
+Eigen::TensorMap<Eigen::Tensor<float const, 6, 1, int>, 16, Eigen::MakePointer>$
+", referenced from: 
+
+...
+
+void tensorflow::(anonymous namespace)::SpaceToBatchOpCompute<Eigen::Threa
+dPoolDevice, int>(tensorflow::OpKernelContext*, tensorflow::Tensor const&, tenso
+rflow::Tensor const&, tensorflow::Tensor const&) in libtensorflow-core-armv7.a(s
+pacetobatch_op.o)
+ld: symbol(s) not found for architecture armv7
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+make: *** [workingspace/tensorflow/tensorflow/contrib/makefile/gen/b
+in/ios_ARMV7/benchmark] Error 1
++ '[' 2 -ne 0 ']'
++ echo 'armv7 compilation failed.'
+armv7 compilation failed.
+
+Environment info
+Operating System:
+mac: OSX 10.11.6
+iPad: IOS 10.1.1
+Installed version of CUDA and cuDNN:
+None
+Source:
+commit d6b2598
+bazel version:
+.................................................
+Build label: 0.4.0-homebrew
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Wed Nov 2 19:15:37 2016 (1478114137)
+Build timestamp: 1478114137
+Build timestamp as int: 1478114137

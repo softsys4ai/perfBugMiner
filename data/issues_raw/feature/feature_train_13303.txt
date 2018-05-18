@@ -1,0 +1,31 @@
+[Missing Feature] Input Pipeline for Models with Multi-step Optimization
+
+Describe the problem
+After some searching and reading (e.g. #7951), I found the current input pipeline framework
+is generally lack of support for models with multi-step optimization.
+In most of the models before GAN (General Adversarial Networks), a model almost has one
+optimization function, that is, we optimize over a mini-batch of input data once in a step. While
+starting from GAN, many models have two or more optimization functions, in other words, they
+sequentially optimize on several functions using the same batch of data (Adversarial Autoencoders).
+The current input pipeline works fine with a unique optimization operation per step, where the tf.Session will pull a batch of data from the input queue once. For multi-step optimization models, if you link all steps with a unique input queue, then the queue will be pulled several times
+if you link all sequential optimization steps with that queue. Apparently, this is completely wrong.
+From my point of view, I think we should add a peek() op in tf.QueueBase for supporting
+multistep sequential optimization. So for example, for GAN, we can link optimization over discriminator with a peek_many op and link optimization over generator with a dequeue_many op.
+In general, for multiple steps, we can do peek_many -> peek_many -> ... -> dequeue_many.
+For the new tf.data.Dataset API, when we called session.run(), we advance the iterator. So in the new data importing API, we still lack of this feature.
+I think currently a workaround of this would be building a buffer with tf.Variable. and make all subsequent optimization step depends on the snapshot of the buffer. Like,
+buffer = tf.get_variable("buffer",
+                                        shape=(**, **),
+                                        trainable=False,
+                                        initializer=tf.zeros_initializer)
+input_op = input_function()
+assign_op = tf.assign(buffer, input_op)
+
+cache = buffer.value()
+# based everything on cache for the subsequent step.
+
+with tf.Session() as sess:
+    sess.run(assign_op)
+    # then run all other steps.
+
+In this case, we have to copy the entire batch of data for each step.

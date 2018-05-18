@@ -1,0 +1,63 @@
+Multiple simultaneous distributed-TF runs on single machine
+
+I am running multiple distributed-TF sessions simultaneously on a single machine. I am setting up the configuration as described below. However, I am not getting the expected parallelism speedup.
+I am running 4 different runs simultaneously, each of them with following config:
+# Run - 1
+tf.train.ClusterSpec({
+	"ps": ["localhost:5000"]
+	"worker": [
+		"localhost:5001",
+		"localhost:5002",
+		"localhost:5003"],
+	})
+
+# Run - 2
+tf.train.ClusterSpec({
+	"ps": ["localhost:6000"]
+	"worker": [
+		"localhost:6001",
+		"localhost:6002",
+		"localhost:6003"],
+	})
+
+# Run - 3
+tf.train.ClusterSpec({
+	"ps": ["localhost:7000"]
+	"worker": [
+		"localhost:7001",
+		"localhost:7002",
+		"localhost:7003"],
+	})
+
+# Run - 4
+tf.train.ClusterSpec({
+	"ps": ["localhost:8000"]
+	"worker": [
+		"localhost:8001",
+		"localhost:8002",
+		"localhost:8003"],
+	})
+
+The command that I use to setup each server looks exactly like this for each worker and parameter server respectively:
+# worker: index varies from 0 to 2
+server = tf.train.Server(clusterSpec, job_name="worker", task_index=0,
+                                 config=tf.ConfigProto(intra_op_parallelism_threads=1,
+                                 inter_op_parallelism_threads=2))
+
+### ps
+server = tf.train.Server(clusterSpec, job_name="ps", task_index=0,
+                                 config=tf.ConfigProto(device_filters=["/job:ps"]))
+
+While setting up the network variables, the device is setup exactly like this for all runs:
+ps_device = "/job:ps"
+worker_device = "/job:worker/task:0/cpu:0"
+worker_device = "/job:worker/task:1/cpu:0"
+worker_device = "/job:worker/task:2/cpu:0"
+
+There are 80 cores and enough memory. Each job has 3 workers and 1 ps. In some fixed amount of time, I get following performance:
+1 run on machine: x iterations
+4 runs on machine: approx. x/2 iterations
+6 runs on machine: approx. x/3 iterations
+
+The number of cores are enough such that I would expect 4 simultaneous runs to go as fast as single run, but it is no where close. Is there some mistake in my usage of the distributed-tf api ? I suspect there might be issue in the way I am using cpu device for worker: cpu:0. But as I read from docs, it seems to mention that cpu:0 would do automatic scheduling. Does this hold even if I am running 4 different runs of distributed-tf on single machine? Should I be setting up cpu:1 , cpu:2, cpu:3, cpu:4 for workers of 4 different runs ? Any help would be greatly appreciated.
+Thanks in advance !!

@@ -1,0 +1,55 @@
+Docs generation is broken in Python 3.5
+
+System information
+
+Have I written custom code: No
+OS Platform and Distribution: Ubuntu 16.04
+TensorFlow installed from: Source
+TensorFlow version: b6bafad
+Bazel version: 0.4.5
+Exact command to reproduce: bazel run -- //tensorflow/tools/docs:generate --src_dir=tensorflow/docs_src --output_dir=/tmp/tf_docs
+
+Describe the problem
+Problem 1: Since python 3.5, namedtuple objects have no __dict__ property. See here and here for more details. This problem is easily fixed by changing all instances of h3.format(**info.__dict__) to h3.format(**info._asdict()) in pretty_docs.py.
+Problem 2: The codegen library used by the docs generator is 5 years old and doesn't work with python 3.5 (the problem I'm getting is identical to berkerpeksag/astor#48 and alecthomas/importmagic#25).
+Source code / logs
+Initial stack trace:
+Traceback (most recent call last):
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/generate.py", line 49, in <module>
+    sys.exit(doc_generator.build(flags))
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/generate_lib.py", line 473, in build
+    write_docs(output_dir, parser_config, yaml_toc=self.yaml_toc)
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/generate_lib.py", line 127, in write_docs
+    f.write(pretty_docs.build_md_page(page_info))
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/pretty_docs.py", line 39, in build_md_page
+    return _build_class_page(page_info)
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/pretty_docs.py", line 126, in _build_class_page
+    parts.append(h3.format(**method_info.__dict__))
+AttributeError: '_MethodInfo' object has no attribute '__dict__'
+ERROR: Non-zero return code '1' from command: Process exited with status 1.
+
+Stack trace after fixing dictionary problem:
+Traceback (most recent call last):
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/generate.py", line 49, in <module>
+    sys.exit(doc_generator.build(flags))
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/generate_lib.py", line 473, in build
+    write_docs(output_dir, parser_config, yaml_toc=self.yaml_toc)
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/generate_lib.py", line 119, in write_docs
+    page_info = parser.docs_for_object(full_name, py_object, parser_config)
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/parser.py", line 1201, in docs_for_object
+    page_info.set_signature(py_object, parser_config.reverse_index)
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/parser.py", line 797, in set_signature
+    self._signature = _generate_signature(function, reverse_index)
+  File "/home/amcrae/.cache/bazel/_bazel_amcrae/c5da01ed82406ffc0f71b490859f88cc/execroot/tf_docs/bazel-out/local-py3-opt/bin/tensorflow/tools/docs/generate.runfiles/org_tensorflow/tensorflow/tools/docs/parser.py", line 638, in _generate_signature
+    default_text = codegen.to_source(ast_default)
+  File "/home/amcrae/workspace/tf_docs/venv/lib/python3.5/site-packages/codegen.py", line 68, in to_source
+    generator.visit(node)
+  File "/usr/lib/python3.5/ast.py", line 245, in visit
+    return visitor(node)
+  File "/home/amcrae/workspace/tf_docs/venv/lib/python3.5/site-packages/codegen.py", line 386, in visit_Call
+    if node.starargs is not None:
+AttributeError: 'Call' object has no attribute 'starargs'
+ERROR: Non-zero return code '1' from command: Process exited with status 1.
+
+UPDATE: Command for fixing dictionary issue is
+sed -i -e 's/__dict__/_asdict()/' tensorflow/tools/docs/pretty_docs.py

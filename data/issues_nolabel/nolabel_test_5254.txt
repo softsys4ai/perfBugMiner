@@ -1,0 +1,78 @@
+Error when using tf.contrib.crf and tflearn to build sequential labeling tasks
+
+I'm using tf.contrib.crf and tflearn to build sequential labeling tasks,
+Build when testing the implementation, the InvalidArgumentError occurs in sess.run
+Here's the snippet code.
+import numpy as np
+import tensorflow as tf
+import tflearn
+
+def retrieve_sequence_length(data):
+    with tf.name_scope('sequence_length'):
+        used = tf.sign(tf.abs(data))
+        length = tf.cast(tf.reduce_sum(used, reduction_indices=[1, 2]), tf.int32)
+    return length 
+
+def loss(x, y, sequence_length):
+    with tf.name_scope('loss'):
+        n_states = x.get_shape()[-1].value
+        transition_params = tflearn.variable(name='transition_params', shape=[n_states, n_states], 
+                                             initializer='xavier', dtype=tf.float32)
+        loss = tf.contrib.crf.crf_log_norm(x, sequence_length, transition_params)
+        # loss, _ = tf.contrib.crf.crf_log_likelihood(x, y, sequence_length, transition_params)
+    return tf.reduce_mean(loss)
+
+# Data settings.
+num_examples = 10000
+num_words = 20
+num_features = 100
+num_tags = 5
+
+# Random features.
+x = np.random.uniform(low=0.1, high=1.1, size=(num_examples, num_words, num_features)).astype(np.float32)
+
+# Random tag indices representing the gold sequence.
+y = np.random.randint(num_tags, size=[num_examples, num_words]).astype(np.int32)
+
+# All sequences in this example have the same length, but they can be variable in a real model.
+# sequence_lengths = np.full(num_examples, num_words - 1, dtype=np.int32)
+
+
+input0 = tflearn.input_data(shape=[None, num_words, num_features], dtype=tf.float32)
+sequence_length = retrieve_sequence_length(input0)
+print 'sequence_length: ', sequence_length
+
+unary_scores = tflearn.time_distributed(input0, tflearn.fully_connected, [num_tags, 'softmax'])
+print 'unary_score: ', unary_scores
+
+net = tflearn.regression(unary_scores,
+                         placeholder=tf.placeholder(shape=[None, num_words], dtype=tf.int32),
+                         learning_rate=0.001,
+                         optimizer='sgd',
+                         loss=lambda x, y: loss(x, y, sequence_length),
+                         metric=None,
+                         n_classes=num_tags,
+                         to_one_hot=False)
+
+model = tflearn.DNN(net)
+
+model.fit(x, y, batch_size=32)
+The stacktrace is :
+Traceback (most recent call last):
+  File "c.py", line 54, in <module>
+    model.fit(x, y, batch_size=32)
+  File "/home/weiguo.fwg/envs/tensorflow/lib/python2.7/site-packages/tflearn/models/dnn.py", line 214, in fit
+    callbacks=callbacks)
+  File "/home/weiguo.fwg/envs/tensorflow/lib/python2.7/site-packages/tflearn/helpers/trainer.py", line 304, in fit
+    show_metric)
+  File "/home/weiguo.fwg/envs/tensorflow/lib/python2.7/site-packages/tflearn/helpers/trainer.py", line 762, in _train
+    feed_batch)
+  File "/home/weiguo.fwg/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 717, in run
+    run_metadata_ptr)
+  File "/home/weiguo.fwg/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 915, in _run
+    feed_dict_string, options, run_metadata)
+  File "/home/weiguo.fwg/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 965, in _do_run
+    target_list, options, run_metadata)
+  File "/home/weiguo.fwg/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 985, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: All inputs to node SGD/gradients/loss/RNN/while/expand_dims_state_grad/Reshape/StackPush must be from the same frame.

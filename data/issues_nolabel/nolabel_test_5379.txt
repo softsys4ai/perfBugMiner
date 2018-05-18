@@ -1,0 +1,56 @@
+C++ SetDefaultDevice does not appear to work properly
+
+I'm using a simple C++ session that works fine otherwise. Trying to use tensorflow::graph::SetDefaultDevice to pin on either CPU or GPU (per id) does not appear to work:
+
+without SetDefaultDevice:
+
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:982] 1:   Y Y   
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla K40c, pci bus i
+d: 0000:02:00.0)  
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Creating TensorFlow device (/gpu:1) -> (device: 1, name: Tesla K40c, pci bus i
+d: 0000:03:00.0) 
+
+all goes well beyond this point.
+
+now trying to pin on GPU0:
+
+tensorflow::graph::SetDefaultDevice("/gpu:0", &graph_def);
+
+yields
+E tensorflow/core/common_runtime/direct_session.cc:132] Invalid argument: Could not parse entry in 'visible_device_list': '/gpu:0'.  visible_device_list = /gpu:0
+
+Same with /cpu:0, no surprise.
+
+looking at 
+  
+    
+      tensorflow/tensorflow/core/common_runtime/gpu/gpu_device.cc
+    
+    
+         Line 808
+      in
+      f7ec995
+    
+    
+    
+    
+
+        
+          
+           if (!strings::safe_strto32(gpu_id_str, &gpu_id)) { 
+        
+    
+  
+
+ it seems the code is rather looking for an int ? Trying it out:
+
+tensorflow::graph::SetDefaultDevice("0",&graph_def);
+
+yields
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:972] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:982] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla K40c, pci bus id: 0000:02:00.0)
+E tensorflow/core/common_runtime/gpu/process_state.cc:108] Invalid allocator type: 0
+
+Am I doing something wrong or has something changed (maybe due to 3e8c4fd ?)
+The tutorial at https://github.com/tensorflow/tensorflow/blob/master/tensorflow/cc/tutorials/example_trainer.cc#L104 still calls on SetDefaultDevice the way I tried to use it, this seems odd :)

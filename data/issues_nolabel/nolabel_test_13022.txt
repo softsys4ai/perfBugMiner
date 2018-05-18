@@ -1,0 +1,11 @@
+Give accumulate_n op a gradient
+
+This pull request addresses issue #10607 by adding a gradient to the existing accumulate_n operator. I followed the approach suggested by @alextp: rewrite accumulate_n as an atomic op which has a gradient defined for it and which gets rewritten by the runtime into the current implementation. Previously, this op had been implemented in Python as a constellation of lower-level ops, some of which are not differentiable.
+Implementation Details
+I have added a new C++ op, AccumulateN, which serves as a placeholder for type inference and gradient computation. A new rewrite, implemented in accumulate_n_optimizer.cc, replaces this placeholder with a group of AssignAdd ops and some additional ops that create, initialize, and destroy temporary variables.
+The original Python code for accumulate_n has been replaced by a function that validates its arguments and creates an instance of the AccumulateN placeholder op.
+Testing
+I added a more complete set of tests for accumulate_n in a previous pull request (#12196) to ensure that the op would still be correct after the changes in the current pull request. I also added one additional test to verify that accumulate_n now has a gradient. All the tests under //tensorflow/python/... currently pass on my MacOS and Linux test machines.
+Things to Note
+The semantics of the new implementation are broadly the same as the original, with the exception of one corner case. The original implementation allowed all the inputs to accumulate_n to have an undefined shape. My new code requires that at least one input have a defined shape; or that the user provides a shape using the shape argument to the accumulate_n function.
+While implementing the AccumulateN op, I noticed that the code to do the kind of shape initialization I needed was repeated verbatim at several places in the TensorFlow code base. I refactored this code into a new function shape_inference::ExplicitShape() and replaced all the existing copies.

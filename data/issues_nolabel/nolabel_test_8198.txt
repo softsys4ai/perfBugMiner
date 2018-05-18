@@ -1,0 +1,51 @@
+OOM although very small network
+
+Operating System:
+Ubuntu 16.04
+Installed version of CUDA and cuDNN:
+CUDA 8.0
+CuDNN 5.1
+TensorFlow v0.12.1
+Hi,
+I'm getting an OOM message on a very small network, and running on 2 GTX 1080.
+It's a 2 layer network, first 2 layers of VGG, conv1_1, conv1_2.
+The input image is 400x400 and I am trying to run a batch of size 16.
+My training is taking a feature vector from 4 spatial positions and training with some loss on it.
+So for example, after 2 VGG conv layers I will have a feature vector of size 64 at each pixel, or to be exact, a tensor of size [16,400,400,64].
+I want to take these vectors from 4 locations, meaning I will have 4 vectors of length 64, then calculating some loss function on them.
+So this is my inference function:
+def inference(images, x1, y, x2, z, train=False):
+  # conv1_1
+  with tf.variable_scope('conv1_1') as scope:
+    kernel = _variable_with_weight_decay('weights', shape=[3, 3, 3, 64], wd=0.000, layer_name=scope.name)
+    conv = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.0), layer_name=scope.name)
+    conv1_1 = tf.nn.relu(tf.nn.bias_add(conv, biases), name=scope.name)
+
+  # conv1_2
+  with tf.variable_scope('conv1_2') as scope:
+    kernel = _variable_with_weight_decay('weights', shape=[3, 3, 64, 64], wd=0.000, layer_name=scope.name)
+    conv = tf.nn.conv2d(conv1_1, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.0), layer_name=scope.name)
+    conv1_2 = tf.nn.relu(tf.nn.bias_add(conv, biases), name=scope.name)
+
+  in1=tf.reshape(conv1_2[0, x1[0][0], x1[0][1], :],[1,64])
+  in2=tf.reshape(conv1_2[0, y[0][0], y[0][1], :],[1,64])
+  in3=tf.reshape(conv1_2[0, x2[0][0], x2[0][1], :],[1,64])
+  in4=tf.reshape(conv1_2[0, z[0][0], z[0][1], :],[1,64])
+
+  for i in range (1, FLAGS.batch_size):
+      in1 = tf.concat(0,[in1,tf.reshape(conv1_2[i, x1[i][0], x1[i][1], :],[1,64])])
+      in2 = tf.concat(0,[in2,tf.reshape(conv1_2[i, y[i][0], y[i][1], :],[1,64])])
+      in3 = tf.concat(0,[in3,tf.reshape(conv1_2[i, x2[i][0], x2[i][1], :],[1,64])])
+      in4 = tf.concat(0,[in4,tf.reshape(conv1_2[i, z[i][0], z[i][1], :],[1,64])])
+
+Now, each in1,in2,in3,in4 is of size [16,64]
+From here on I calculate some loss with that.
+For some reason I am getting an OOM message, although this is a very small network. I guess that the way I am taking these feature vectors makes the tool allocate way bigger memory than needed.
+
+ResourceExhaustedError (see above for traceback): OOM when allocating tensor with shape[16,400,400,64]
+[[Node: gradients/strided_slice_84_grad/StridedSliceGrad = StridedSliceGrad[Index=DT_INT32, T=DT_FLOAT, begin_mask=8, ellipsis_mask=0, end_mask=8, new_axis_mask=0, shrink_axis_mask=7, _device="/job:localhost/replica:0/task:0/gpu:0"](gradients/strided_slice_84_grad/Shape, strided_slice_84/stack, strided_slice_84/stack_1, strided_slice_84/stack_2, gradients/Reshape_16_grad/Reshape)]]
+[[Node: gradients/conv1_1/BiasAdd_grad/tuple/control_dependency_1/_99 = _Recvclient_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_2359_gradients/conv1_1/BiasAdd_grad/tuple/control_dependency_1", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]]
+
+Thanks in advance for the help!

@@ -1,0 +1,55 @@
+tf.gradients return NaN when batch_norm is in inference mode (is_training=False)?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):Linux Ubuntu 16.04
+TensorFlow installed from (source or binary):binary
+TensorFlow version (use command below):('v1.3.0-rc2-20-g0787eee', '1.3.0')
+Python version: Python 2.7.11 |Anaconda custom (64-bit)
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:/usr/local/cuda-8.0 & libcudnn.so.6.0.21
+GPU model and memory:GeForce GTX 1080
+Exact command to reproduce:
+
+git clone https://github.com/wenwei202/models.git
+cd models
+git checkout bug-fixing
+cd research/slim
+python eval_image_classifier_bn_grad.py -alsologtostderr --checkpoint_path /tmp/resnet_v1_152.ckpt  --dataset_dir /tmp/imagenet-data \
+--dataset_name imagenet \
+--dataset_split_name validation \
+--model_name resnet_v1_152 \
+--batch_size 5 --eval_dir /tmp/bn_grad \
+--labels_offset=1  --max_num_batches 1
+
+Describe the problem, Source code / logs
+I need to compute the gradients of dy/dx, where y is the max logit and x is input image. I just add a few lines to the standard research/slim/eval_image_classifier.py:
+    max_logits = tf.reduce_max(logits, axis=1)
+    themaps = tf.gradients(max_logits, images)
+    themaps = themaps[0]
+    with tf.control_dependencies([tf.Print(themaps,[themaps],first_n=3)]):
+      themaps = tf.abs(themaps)
+
+which is here.
+When I run eval_image_classifier_bn_grad.py to evaluate models here, vgg and lenet work well, but tf.gradients always return nan when I evaluate inception and resnet models.
+Command:
+python eval_image_classifier_bn_grad.py -alsologtostderr --checkpoint_path /tmp/resnet_v1_152.ckpt  --dataset_dir /tmp/imagenet-data \
+--dataset_name imagenet \
+--dataset_split_name validation \
+--model_name resnet_v1_152 \
+--batch_size 5 --eval_dir /tmp/bn_grad \
+--labels_offset=1  --max_num_batches 1
+
+Output:
+...
+2017-11-05 23:25:19.751859: I tensorflow/core/kernels/logging_ops.cc:79] [[[[nan nan nan]]]...]
+...
+
+I guess the issue comes from theslim.batch_norm when it is in inference mode, and somehow, tf.gradients does not work anymore. Why?
+
+vgg and lenet without batch_norm layers work well
+inception and resnet with batch_norm layers return nan
+inception and resnet work after I enforce the is_training=True of slim.batch_norm
+it seems "reasonable" to ignore the possibility of the usage of tf.gradients when batch_norm is in inference mode.

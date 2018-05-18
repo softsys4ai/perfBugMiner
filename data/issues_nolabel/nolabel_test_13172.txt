@@ -1,0 +1,110 @@
+send/recv operators bug in constructing the graph.
+
+Running the following snippet several times shows some weird operator in the graph.
+import tensorflow as tf
+
+with tf.device("/gpu:0"):
+    x = tf.constant(1.0)
+
+graph_def = tf.get_default_graph().as_graph_def()
+options = tf.RunOptions(output_partition_graphs=True)
+metadata = tf.RunMetadata()
+config = tf.ConfigProto(device_count={"CPU": 8},
+                        inter_op_parallelism_threads=1,
+                        intra_op_parallelism_threads=1)
+sess = tf.Session(config=config)
+sess.run(x, options=options, run_metadata=metadata)
+for partition_graph_def in metadata.partition_graphs:
+   print "\n" * 5
+   print partition_graph_def
+in the cpu part of graph, it shows
+node {
+  name: "Const/_1"
+  op: "_Recv"
+  device: "/job:localhost/replica:0/task:0/cpu:0"
+  attr {
+    key: "client_terminated"
+    value {
+      b: false
+    }
+  }
+  attr {
+    key: "recv_device"
+    value {
+      s: "/job:localhost/replica:0/task:0/cpu:0"
+    }
+  }
+  attr {
+    key: "send_device"
+    value {
+      s: "/job:localhost/replica:0/task:0/gpu:0"
+    }
+  }
+  attr {
+    key: "send_device_incarnation"
+    value {
+      i: 1
+    }
+  }
+  attr {
+    key: "tensor_name"
+    value {
+      s: "edge_5_Const"
+    }
+  }
+  attr {
+    key: "tensor_type"
+    value {
+      type: DT_FLOAT
+    }
+  }
+}
+node {
+  name: "_send_Const_0"
+  op: "_Send"
+  input: "Const/_1"
+  device: "/job:localhost/replica:0/task:0/cpu:0"
+  attr {
+    key: "T"
+    value {
+      type: DT_FLOAT
+    }
+  }
+  attr {
+    key: "client_terminated"
+    value {
+      b: true
+    }
+  }
+  attr {
+    key: "recv_device"
+    value {
+      s: "/job:localhost/replica:0/task:0/cpu:0"
+    }
+  }
+  attr {
+    key: "send_device"
+    value {
+      s: "/job:localhost/replica:0/task:0/cpu:0"
+    }
+  }
+  attr {
+    key: "send_device_incarnation"
+    value {
+      i: -3155862594799619836
+    }
+  }
+  attr {
+    key: "tensor_name"
+    value {
+      s: "Const:0"
+    }
+  }
+}
+versions {
+  producer: 21
+}
+
+There is a weird operator in it. name: "_send_Const_0" just send tensor from cpu0 to cpu0. This device already has the right result of Add operator.
+And I notice the send_device_incarnation is a random number, which generates by New64.
+The whole log of this snippet available in https://gist.github.com/dzhwinter/3c2257351774260382dd3e130aaa072b. Thanks.

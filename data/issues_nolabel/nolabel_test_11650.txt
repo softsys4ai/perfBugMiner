@@ -1,0 +1,80 @@
+BUG: DropoutWrapper incorrectly updates memory state
+
+Describe the problem
+GRU units (wikipedia):
+
+tf.contrib.rnn.DropoutWrapper documentation:
+state_keep_prob: unit Tensor or float between 0 and 1, output keep probability; if it is constant and 1, no output dropout will be added. State dropout is performed on the output states of the cell.
+In GRU units, the output state is the memory state. When variational_recurrent=True, the same temporal dropout mask is applied to the output state, in each time step, with the remaining outputs divided by the dropout probability. This leads to exponential growth of the memory state and exploding outputs (given long enough time series):
+
+The correct way is probably to divide U_z, U_r and U_h and not the output state.
+Source code / logs
+################################### 
+def length(sequence):
+	used = tf.sign(tf.reduce_max(tf.abs(sequence), axis=2))
+	length = tf.reduce_sum(used, axis=1)
+	return length
+################################### 
+def GRU(x, units, act, in_dp, out_dp, tmp_dp):
+	gru_cell = tf.contrib.rnn.GRUCell(units, activation=act, kernel_initializer=tf.contrib.layers.xavier_initializer(uniform=True))
+	wrapped_gru_cell = tf.contrib.rnn.DropoutWrapper(gru_cell, input_keep_prob=in_dp, output_keep_prob=out_dp, state_keep_prob=tmp_dp, variational_recurrent=True, dtype=x.dtype, input_size=x.get_shape()[2])
+	outputs, state = tf.nn.dynamic_rnn(wrapped_gru_cell, x, dtype=x.dtype, sequence_length=length(x))
+	return [outputs, state]
+################################### 
+Running with parameters (all exploded):
+act=tf.nn.tanh, in_dp=1., out_dp=1., tmp_dp=0.5/0.9, n_hidden = 32/64/128
+
+System information
+== cat /etc/issue ===============================================
+Linux mvdslab 4.4.0-83-generic #106-Ubuntu SMP Mon Jun 26 17:54:43 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="16.04.2 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+== are we in docker =============================================
+No
+== compiler =====================================================
+c++ (Ubuntu 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+== uname -a =====================================================
+Linux mvdslab 4.4.0-83-generic #106-Ubuntu SMP Mon Jun 26 17:54:43 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+== check pips ===================================================
+numpy (1.12.1)
+numpydoc (0.6.0)
+protobuf (3.3.0)
+tensorflow (1.2.0)
+tensorflow-gpu (1.2.0)
+== check for virtualenv =========================================
+False
+== tensorflow import ============================================
+tf.VERSION = 1.2.0
+tf.GIT_VERSION = v1.2.0-1131-gbc691dd
+tf.COMPILER_VERSION = v1.2.0-1131-gbc691dd
+Sanity check: array([1], dtype=int32)
+== env ==========================================================
+LD_LIBRARY_PATH /home/anton/torch/install/lib:/usr/local/cuda-8.0/lib64
+DYLD_LIBRARY_PATH /home/anton/torch/install/lib:/home/anton/torch/install/lib:
+== nvidia-smi ===================================================
+Thu Jul 20 10:36:06 2017
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 375.66                 Driver Version: 375.66                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  Quadro K1200        Off  | 0000:01:00.0      On |                  N/A |
+| 39%   38C    P0     1W /  35W |    459MiB /  4034MiB |      3%      Default |
++-------------------------------+----------------------+----------------------+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0      1183    G   /usr/lib/xorg/Xorg                             110MiB |
+|    0      6218    G   ...el-token=544D2517E333A364F4E0C0630D2C9DD1   347MiB |
++-----------------------------------------------------------------------------+
+== cuda libs  ===================================================
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0.61
+/usr/local/cuda-8.0/lib64/libcudart_static.a
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7

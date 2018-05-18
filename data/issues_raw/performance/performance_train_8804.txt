@@ -1,0 +1,26 @@
+why use unknown batch_size in BasicDecoder class?
+
+I found that in the source code:https://github.com/tensorflow/tensorflow/blob/master/tensorflow/contrib/seq2seq/python/ops/basic_decoder.py
+  @property
+  def batch_size(self):
+    return self._helper.batch_size
+
+  def _rnn_output_size(self):
+    size = self._cell.output_size
+    if self._output_layer is None:
+      return size
+    else:
+      # To use layer's compute_output_shape, we need to convert the
+      # RNNCell's output_size entries into shapes with an unknown
+      # batch size.  We then pass this through the layer's
+      # compute_output_shape and read off all but the first (batch)
+      # dimensions to get the output size of the rnn with the layer
+      # applied to the top.
+      output_shape_with_unknown_batch = nest.map_structure(
+          lambda s: tensor_shape.TensorShape([None]).concatenate(s),
+          size)
+      layer_output_shape = self._output_layer._compute_output_shape(  # pylint: disable=protected-access
+          output_shape_with_unknown_batch)
+return nest.map_structure(lambda s: s[1:], layer_output_shape)
+As above, since we can get the batch size by calling self._helper.batch_size, why it is set to be None in
+lambda s: tensor_shape.TensorShape([None]).concatenate(s)?  Why the batch size is still unknown? Couldn't we set to be lambda s: tensor_shape.TensorShape([self._helper.batch_size]).concatenate(s)?

@@ -1,0 +1,58 @@
+Idea: support dictionary fetches with tf.Session.run()
+
+The Idea
+The tf.Session.run() method, currently supports taking either a single graph element, or a list of graph elements as input for the fetches argument, and will return either a single value or a list of values correspondingly.
+I propose adding support for using a dictionary as input for the fetch argument, and receiving a corresponding dictionary as the return value.
+Using dictionaries has at least two advantages compared to lists:
+
+
+It will make the code more readable, and keys are easier to remember than indices. In the following example the return value of the loss can be accessed as result['loss'] instead of result[2].
+fetches = {
+'train_op': train_op,
+'accuracy': accuracy,
+'loss': loss
+}
+
+result = sess.run(fetches, feed_dict)
+
+print(result['loss'], result['accuracy'])
+
+
+It will be much easier to only fetch certain elements on flexible schedules.
+For example i might want to fetch summaries for TensorBoard every 20 iterations while only fetching the loss printing to the console every 50 iterations.
+That means that the return value would be a list that sometimes have none of the extra elements, sometimes one of them, and sometimes both. As a consequence the index in the returned list that contains the loss might vary from one run to the next, and I would have to build extra logic to handle this.
+With dictionaries the key doesn't change depending on other elements in the dict, so it would be possible to do something like saving summaries without even knowing the schedule:
+if 'summaries' in result:
+    writer.add_summary(result['summaries'], i)
+
+
+Implementation
+I have recently been emulating the proposed behavior in a project using using the following wrapper function to translate from dictionary to list and back.
+I suspect that it wouldn't be hard to do something similar in tensorflow/python/client/session.py perhaps as part of _process_fetches(), but I didn't want to spend a lot of time on it before asking.
+def run(session, fetches, feed_dict):
+    """Wrapper for making Session.run() more user friendly.
+
+    With this function, fetches can be either a list or a dictionary.
+
+    If fetches is a list, this function will behave like
+    tf.session.run() and return a list in the same order as well. If
+    fetches is a dict then this function will also return a dict where
+    the returned values are associated with the corresponding keys from
+    the fetches dict.
+
+    Keyword arguments:
+    session -- An open TensorFlow session.
+    fetches -- A list or dict of ops to fetch.
+    feed_dict -- The dict of values to feed to the computation graph.
+    """
+    if isinstance(fetches, dict):
+        keys, values = fetches.keys(), list(fetches.values())
+        res = session.run(values, feed_dict)
+        return {key: value for key, value in zip(keys, res)}
+    else:
+        return session.run(fetches, feed_dict)
+Questions
+
+Is this a bad idea for some reason I don't realize? Or maybe I just overlooked some disadvantages that are worth considering?
+Why stop at dictionaries? What about tuples, nested dictionaries, or dictionaries containing lists of elements?
+General comments and thoughts?

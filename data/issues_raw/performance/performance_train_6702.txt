@@ -1,0 +1,135 @@
+Deadlock when decoding TFRecords
+
+I am storing my training examples as variable-length TFRecords using the following function for encoding:
+def convert_to_tf_example(const_exonic_seq, const_intronic_seq,
+                          alt_exonic_seq, alt_intronic_seq,
+                          psi_distribution, psi_std,
+                          alt_ss_position, alt_ss_type,
+                          const_site_id, const_site_position,
+                          n_alt_ss, event_type):
+    """Encode a COSSMO example as a TFRecord"""
+
+    assert len(alt_exonic_seq) == n_alt_ss
+    assert len(alt_intronic_seq) == n_alt_ss
+    # assert len(psi_distribution) == n_alt_ss
+    # assert len(psi_std) == n_alt_ss
+    assert event_type in ['acceptor', 'donor']
+    assert len(alt_ss_type) == n_alt_ss
+    assert all([t in ('annotated', 'gtex', 'maxent', 'hard_negative')
+                for t in alt_ss_type])
+
+    example = tf.train.SequenceExample(
+        context=tf.train.Features(feature={
+            'n_alt_ss': tf.train.Feature(
+                int64_list=tf.train.Int64List(value=[n_alt_ss])
+            ),
+            'event_type': tf.train.Feature(
+                bytes_list=tf.train.BytesList(value=[event_type])
+            ),
+            'const_seq': tf.train.Feature(
+                bytes_list=tf.train.BytesList(
+                    value=[const_exonic_seq, const_intronic_seq])
+            ),
+            'const_site_id': tf.train.Feature(
+                bytes_list=tf.train.BytesList(
+                    value=[const_site_id])
+            ),
+            'const_site_position': tf.train.Feature(
+                int64_list=tf.train.Int64List(
+                    value=[const_site_position])
+            )
+        }),
+        feature_lists=tf.train.FeatureLists(feature_list={
+            'alt_seq': tf.train.FeatureList(
+                feature=[tf.train.Feature(
+                    bytes_list=tf.train.BytesList(value=[aes, ais])
+                ) for aes, ais in
+                         zip(alt_exonic_seq, alt_intronic_seq)]
+            ),
+            'psi': tf.train.FeatureList(
+                feature=[tf.train.Feature(
+                    float_list=tf.train.FloatList(value=psi))
+                         for psi in psi_distribution]),
+            'psi_std': tf.train.FeatureList(
+                feature=[tf.train.Feature(
+                    float_list=tf.train.FloatList(value=psi_sd))
+                         for psi_sd in psi_std]),
+            'alt_ss_position': tf.train.FeatureList(
+                feature=[tf.train.Feature(
+                    int64_list=tf.train.Int64List(value=[pos]))
+                         for pos in alt_ss_position]),
+            'alt_ss_type': tf.train.FeatureList(
+                feature=[tf.train.Feature(
+                    bytes_list=tf.train.BytesList(value=[t]))
+                        for t in alt_ss_type])
+        })
+    )
+    return example
+
+The data stored here is genomic, but the details shouldn't matter.
+When I'm training, I use the following function to decode the TFRecords:
+def read_single_cossmo_example(serialized_example, n_tissues):
+    """Decode a single COSSMO example"""
+
+    decoded_features = tf.parse_single_sequence_example(
+        serialized_example,
+        context_features={
+            'n_alt_ss': tf.FixedLenFeature([], tf.int64),
+            'event_type': tf.FixedLenFeature([], tf.string),
+            'const_seq': tf.FixedLenFeature([2], tf.string),
+            'const_site_id': tf.FixedLenFeature([], tf.string),
+            'const_site_position': tf.FixedLenFeature([], tf.int64)
+        },
+        sequence_features={
+            'alt_seq': tf.FixedLenSequenceFeature([2], tf.string),
+            'psi': tf.FixedLenSequenceFeature([n_tissues], tf.float32),
+            'psi_std': tf.FixedLenSequenceFeature([n_tissues], tf.float32),
+            'alt_ss_position': tf.FixedLenSequenceFeature([], tf.int64),
+            'alt_ss_type': tf.FixedLenSequenceFeature([], tf.string)
+        }
+    )
+    return decoded_features
+
+During training, I've been getting deadlocks with triple-digit CPU loads during training (running on a six-core i7) and I've isolated the problem to the above decoding function. A simple Tensorflow program like the following will reproduce the deadlock:
+ with tf.device('/cpu:0'):
+    filename_queue = tf.train.string_input_producer(
+        train_files, num_epochs=num_epochs, shuffle=shuffle)
+    file_reader = tf.TFRecordReader()
+    tf_record_key, serialized_example = file_reader.read(filename_queue)
+    decoded_example = read_single_cossmo_example(serialized_example,
+                                                  n_tissues)
+
+with tf.Session() as sess:
+    sess.run(
+        tf.variables_initializer(
+            tf.global_variables() + tf.local_variables()
+        )
+    )
+
+    # Start queue runners
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+    try:
+        while not coord.should_stop():
+            fetch_vals = sess.run(decoded_example)
+    except tf.errors.OutOfRangeError:
+        pass
+    except KeyboardInterrupt:
+        print "Training stopped by Ctrl+C."
+    finally:
+        coord.request_stop()
+    coord.join(threads)
+
+Now, setting intra_op_threads = 1 and inter_op_threads = 1 will prevent the small script from deadlocking. However, even when restricting the thread pool I have run into deadlocks when using these TFRecords in long running training sessions, so I suspect there is a deeper issue.
+Environment info
+Operating System: Ubuntu 14.04
+Installed version of CUDA and cuDNN:
+CUDA: 8.0
+cuDNN: 5.1.5
+If installed from binary pip package, provide:
+https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-0.12.1-cp27-none-linux_x86_64.whl
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+What other attempted solutions have you tried?
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).

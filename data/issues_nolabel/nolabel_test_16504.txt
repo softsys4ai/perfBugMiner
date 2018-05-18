@@ -1,0 +1,76 @@
+Issue propagating gradients through tf.while_loop
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Ubuntu wheezy
+
+
+TensorFlow installed from (source or binary):
+pip
+
+
+TensorFlow version (use command below):
+tf.VERSION = 1.4.0
+tf.GIT_VERSION = v1.4.0-4-g9283868
+tf.COMPILER_VERSION = v1.4.0-4-g9283868
+Sanity check: array([1], dtype=int32)
+
+
+Python version:
+3.5
+
+
+Describe the problem
+I've found a few issues when trying to propagate gradients through tf.while_loops.
+One issue is ops like this inside the loop body break gradients
+k = tf.Print( k + 1, [k + 1, eta, loss( w_n ), chg_w, G_inf], 'EG:: k, eta, loss(w), chg_w, G_inf = ' )
+but more concerningly, conjoined conditions such as this:
+tf.logical_and( k < max_its-1, chg_w > tol )
+or even this
+tf.cast( max_its-k, DTYPE) *(chg_w - tol)
+breaks the differentiablity across the while loop.
+Source code / logs
+tf.reset_default_graph()
+sess = tf.InteractiveSession()
+g = tf.Graph().as_default()
+
+max_its = 10
+tol = 1e-3
+
+c = tf.constant( np.arange(100), dtype=DTYPE)
+w = tf.Variable( initial_value=np.ones(100),  dtype=DTYPE)/100
+k = tf.Variable( 0, dtype=tf.int32 )
+chg_w = tf.constant( np.inf, dtype=DTYPE )
+
+
+def _eg_step( k, w, chg_w): 
+    grad = tf.gradients( -tf.reduce_sum( w * c ) , w )[0]
+    w_n = w * tf.exp( -0.1  * grad )
+    w_n = w_n / tf.reduce_sum( w_n ) 
+    chg_w = tf.reduce_sum( tf.abs( w_n - w) ) / tf.reduce_sum( tf.abs( w ) )
+    k = k + 1
+    **# !! this busts the differentiablity !!
+    # k = tf.Print( k + 1, [k + 1, eta, loss( w_n ), chg_w, G_inf], 'EG:: k, eta, loss(w), chg_w, G_inf = ' )**
+    return k, w_n, chg_w
+
+def _continue_cond( k, w, chg_w, *args ):
+    **# NOTE either of this conjoined conditions
+    #        tf.logical_and( k < max_its-1, chg_w > tol  )
+    # OR     tf.cast( max_its-k, DTYPE) *(chg_w - tol)
+    # do no propagate gradients correctly**
+    return  k < max_its # tf.logical_and( k < max_its-1, chg_w > tol  )
+
+k, w, chg_w = tf.while_loop(
+    cond=_continue_cond,  body=_eg_step,
+    loop_vars=[k, w, chg_w],
+    name='while_loop', parallel_iterations=1
+)
+
+# see if the gradient is propagated
+tf.gradients( w, c)

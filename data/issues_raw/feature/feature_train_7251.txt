@@ -1,0 +1,29 @@
+Native GPU version of `tf.dynamic_stitch`
+
+Environment info
+Operating System: Windows 10
+Installed version of CUDA and cuDNN: 8.0, 5105
+tensorflow release 0.12.1
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+from tensorflow.python.client.timeline import Timeline
+
+with tf.device("/gpu:0"):
+    x = tf.ones(100)
+    idxs = tf.range(100)
+
+    for _ in range(10):
+        y = tf.identity(x)
+        x = tf.dynamic_stitch([idxs, idxs], [x, y])
+        # x = tf.gather(y, idxs)
+
+with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
+    metadata = tf.RunMetadata()
+    sess.run(x, options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
+             run_metadata=metadata)
+
+timeline = Timeline(metadata.step_stats)
+with open("profile.json", "w") as f:
+    f.write(timeline.generate_chrome_trace_format())
+The log_device_placement output shows that everything is assigned to the GPU, as expected.  However, inspecting the trace output shows that data is being copied on and off the GPU for each call to dynamic_stitch.  This is something specific to the dynamic_stitch implementation, because using tf.gather (a similar indexed read operation, and functionally equivalent in this case), doesn't show this behaviour.
+Is this intended behaviour for dynamic_stitch (i.e., the copying to and from the GPU is necessary)?  Or is this a bug?  If it isn't a bug, is there some equivalent solution that doesn't require the data to be copied back and forth?

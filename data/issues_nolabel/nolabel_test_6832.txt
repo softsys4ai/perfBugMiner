@@ -1,0 +1,57 @@
+GridRNN cell uses tuples for output and states
+
+In response to this (#2560) and recent changes in LSTMCell, this PR added state_is_tuple=True and output_is_tuple=True into the constructor of GridRNNCell:
+> cell = tf.contrib.grid_rnn.Grid2LSTMCell(3, use_peepholes=True)
+> cell.state_size
+       (LSTMStateTuple(c=3, h=3), LSTMStateTuple(c=3, h=3))
+> cell.output_size
+       (3,)
+
+This means there are 2 LSTM cells in the grid, and the state of each cell has size of (c=3, h=3). There is only one output dimension, whose size is 3.
+In contrast:
+> cell = tf.contrib.grid_rnn.Grid2BasicRNNCell(3)
+> cell.state_size
+     (3, 3)
+> cell.output_size
+     (3,)
+
+This means there are 2 BasicRNN cell in the grid, and the state of each cell has size of 3. There is only one output dimension, whose size is 3.
+Previous behaviour is maintained by using state_is_tuple=False, output_is_tuple=False when creating the cell.
+> cell = tf.contrib.grid_rnn.Grid2LSTMCell(3, use_peepholes=True, state_is_tuple=False, output_is_tuple=False)
+    WARNING:tensorflow:<tensorflow.contrib.grid_rnn.python.ops.grid_rnn_cell.Grid2LSTMCell object at 0x10de68f50>: Using a concatenated state is slower and will soon be deprecated.  Use state_is_tuple=True.
+    WARNING:tensorflow:<tensorflow.contrib.grid_rnn.python.ops.grid_rnn_cell.Grid2LSTMCell** object at 0x10de68f50>: Using a concatenated output is slower and will soon be deprecated.  Use output_is_tuple=True.
+
+> cell.state_size
+    12
+> cell.output_size
+    3
+
+> cell = tf.contrib.grid_rnn.Grid2BasicRNNCell(3, state_is_tuple=False, output_is_tuple=False)
+    WARNING:tensorflow:<tensorflow.contrib.grid_rnn.python.ops.grid_rnn_cell.Grid2BasicRNNCell object at 0x10de4b950>: Using a concatenated state is slower and will soon be deprecated.  Use state_is_tuple=True.
+    WARNING:tensorflow:<tensorflow.contrib.grid_rnn.python.ops.grid_rnn_cell.Grid2BasicRNNCell object at 0x10de4b950>: Using a concatenated output is slower and will soon be deprecated.  Use output_is_tuple=True.
+
+> cell.state_size
+   6
+> cell.output_size
+   3
+
+This also fixes #4296
+Backward compatibility
+This change is not fully backward-compatible:
+
+The old implementation concatenates the output and the state tensors, so when you have g, s = cell(...) then g and s are simply two tensors.
+This implementation, by default, returns g and s as tuples of tensors.
+
+g is a tuple of length equals to the size of output_dims of the cell. Normally you only have one output dimension, so g will be a tuple of length 1.
+s is a tuple of length equals to the size of recurrent_dims of the cell, containing the states of all the recurrent cells in all recurrent dimensions.
+Now if you use LSTM cells for the recurrent dimensions, the state of each LSTM cell is a tuple of tensors (with c and h components). So for instance, the state of a Grid2LSTMCell will be a tuple of tuples: ((c=<tensor>, h=<tensor>), (c=<tensor>, h=<tensor>))
+If you use GRU or vanila RNN cells for the recurrent dimensions, the state of each cell is a tensor. So for instance, the state of a Grid2GRUCell will be a tuple of tensors: (<tensor>, <tensor>)
+
+
+
+Code that depends on this cell can use the old behaviour by setting state_is_tuple=False and output_is_tuple=False when constructing the cell.
+cell = tf.contrib.grid_rnn.Grid2LSTMCell(2, use_peepholes=True,
+                                             state_is_tuple=False,
+                                             output_is_tuple=False)
+
+Breaking change: state_is_tuple and output_is_tuple are True by default.

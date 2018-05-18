@@ -1,0 +1,153 @@
+tf.data.Iterator.from_string_handle() breaking behaviour in r1.4 compared to r1.3.1
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): +
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): v1.4.0-rc1-11-g130a514 1.4.0
+Python version: Python 3.5.2
+Bazel version (if compiling from source): -
+GCC/Compiler version (if compiling from source): -
+CUDA/cuDNN version: nvidia/cuda:8.0-cudnn6-devel-ubuntu16.04
+GPU model and memory: NVIDIA® Tesla® K80 (GCE)
+Exact command to reproduce:
+
+Context:
+Same setup/context as in the previous issue #12859 including this fix #12859 (comment).
+In addition the training is now in a Multi-task Learning mode, so feedable contrib Iterator was used to accommodate different datasets for each task.
+Simplified snippet:
+        self.handle = tf.placeholder(tf.string, shape=[])
+
+        ...
+
+        # targets -> Multi-task training targets.
+        # datasets -> dict of Multi-task target tf.Datasets.
+        for target in self.targets:
+            self.datasets[target] = self.create_TFDataset()
+
+        self.iterator = tf.contrib.data.Iterator.from_string_handle(
+            self.handle,
+            self.datasets[targets[-1]].output_types,
+            self.datasets[targets[-1]].output_shapes)
+
+        # iter_init_ops and iter_handles -> init_ops & handles per each task.
+        for target in self.targets:
+            self.iterators[target] = self.datasets[target].make_initializable_iterator()
+            self.iter_init_ops[target] = self.iterators[target].initializer
+            self.iter_handles[target] = self.iterators[target].string_handle()
+
+        ...
+        # Within tf.train.MonitoredTrainingSession as mon_sess.
+        for target in targets:
+            # Get all target datasets handles.
+            handle[target] = mon_sess._coordinated_creator.tf_sess.run(
+                training_model.iter_handles[target])
+            # Init all target datasets.
+            mon_sess._coordinated_creator.tf_sess.run(training_model.iter_init_ops[target])
+
+        ...
+        # Training step for a specific target.
+        input_feed = {self.handle:handle[target]}
+        output_feed = [
+            self.update_ops[target],
+            self.losses[target], 
+            self.metrics[target],
+        ]
+        outputs = session.run(output_feed, input_feed, options=options,
+                                             run_metadata=run_metadata)
+Problem:
+This system worked flawlessly for tf 1.3 & tf 1.3.1.
+After a planned update this week to tf 1.4 the following Error would appear at absolute random (it might appear after 5 seconds or after a few hours of training):
+...
+W tensorflow/core/framework/op_kernel.cc:1192] Unavailable: Endpoint read failed
+	 [[Node: Model/Generate_BiRNN/BiRNN_Logic/bidirectional_rnn/fw/carry_w_S543 = _Recv[_start_time=0, client_terminated=false, recv_device="/job:worker/replica:0/task:0/device:GPU:0", send_device="/job:ps/replica:0/task:1/device:CPU:0", send_device_incarnation=-458934800929363750, tensor_name="edge_9_Model/Generate_BiRNN/BiRNN_Logic/bidirectional_rnn/fw/carry_w", tensor_type=DT_FLOAT, _device="/job:worker/replica:0/task:0/device:GPU:0"]()]]
+	 [[Node: Training_Graph/Model/TARGET/TARGET_Metrics/Select_G315 = _Recv[client_terminated=false, recv_device="/job:worker/replica:0/task:0/device:CPU:0", send_device="/job:worker/replica:0/task:0/device:GPU:0", send_device_incarnation=3243841103411587778, tensor_name="edge_4692_Training_Graph/Model/TARGET/TARGET_Metrics/Select", tensor_type=DT_DOUBLE, _device="/job:worker/replica:0/task:0/device:CPU:0"]()]]
+...
+W tensorflow/core/framework/op_kernel.cc:1192] Not found: Resource worker/_3_Training_Graph/Model/Iterator/N10tensorflow12_GLOBAL__N_116IteratorResourceE does not exist.
+	 [[Node: Training_Graph/Model/IteratorFromStringHandle = IteratorFromStringHandle[output_shapes=[[?,?,?], [?,?,?], [?], [?,?], [?,?], [?], [?]], output_types=[DT_INT64, DT_INT64, DT_INT64, DT_INT64, DT_INT64, DT_FLOAT, DT_INT32], _device="/job:worker/replica:0/task:0/device:CPU:0"](_recv_Training_Graph/Model/Placeholder_0)]]
+	 [[Node: Training_Graph/Model/TARGET/TARGET_Metrics/DenseToDenseSetOperation_26_G1265 = _Recv[client_terminated=false, recv_device="/job:worker/replica:0/task:0/device:GPU:0", send_device="/job:worker/replica:0/task:0/device:CPU:0", send_device_incarnation=-3380386273340330983, tensor_name="edge_4280_Training_Graph/Model/TARGET/TARGET_Metrics/DenseToDenseSetOperation_26", tensor_type=DT_INT64, _device="/job:worker/replica:0/task:0/device:GPU:0"]()]]
+...
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1323, in _do_call
+    return fn(*args)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1302, in _run_fn
+    status, run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/errors_impl.py", line 473, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.NotFoundError: Resource worker/_3_Training_Graph/Model/Iterator/N10tensorflow12_GLOBAL__N_116IteratorResourceE does not exist.
+	 [[Node: Training_Graph/Model/IteratorFromStringHandle = IteratorFromStringHandle[output_shapes=[[?,?,?], [?,?,?], [?], [?,?], [?,?], [?], [?]], output_types=[DT_INT64, DT_INT64, DT_INT64, DT_INT64, DT_INT64, DT_FLOAT, DT_INT32], _device="/job:worker/replica:0/task:0/device:CPU:0"](_recv_Training_Graph/Model/Placeholder_0)]]
+	 [[Node: Training_Graph/Model/TARGET/TARGET_Metrics/DenseToDenseSetOperation_26_G1265 = _Recv[client_terminated=false, recv_device="/job:worker/replica:0/task:0/device:GPU:0", send_device="/job:worker/replica:0/task:0/device:CPU:0", send_device_incarnation=-3380386273340330983, tensor_name="edge_4280_Training_Graph/Model/TARGET/TARGET_Metrics/DenseToDenseSetOperation_26", tensor_type=DT_INT64, _device="/job:worker/replica:0/task:0/device:GPU:0"]()]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "dist_train.py", line 684, in <module>
+    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "dist_train.py", line 640, in main
+    create_job()
+  File "dist_train.py", line 628, in create_job
+    run_worker(server, cluster)
+  File "dist_train.py", line 429, in run_worker
+    profile=profile
+  File "/HARNN.py", line 1576, in step_dist_gpu
+    run_metadata=run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/monitored_session.py", line 521, in run
+    run_metadata=run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/monitored_session.py", line 892, in run
+    run_metadata=run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/monitored_session.py", line 967, in run
+    raise six.reraise(*original_exc_info)
+  File "/usr/local/lib/python3.5/dist-packages/six.py", line 693, in reraise
+    raise value
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/monitored_session.py", line 952, in run
+    return self._sess.run(*args, **kwargs)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/monitored_session.py", line 1024, in run
+    run_metadata=run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/training/monitored_session.py", line 827, in run
+    return self._sess.run(*args, **kwargs)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 889, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1120, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1317, in _do_run
+    options, run_metadata)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/client/session.py", line 1336, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.NotFoundError: Resource worker/_3_Training_Graph/Model/Iterator/N10tensorflow12_GLOBAL__N_116IteratorResourceE does not exist.
+	 [[Node: Training_Graph/Model/IteratorFromStringHandle = IteratorFromStringHandle[output_shapes=[[?,?,?], [?,?,?], [?], [?,?], [?,?], [?], [?]], output_types=[DT_INT64, DT_INT64, DT_INT64, DT_INT64, DT_INT64, DT_FLOAT, DT_INT32], _device="/job:worker/replica:0/task:0/device:CPU:0"](_recv_Training_Graph/Model/Placeholder_0)]]
+	 [[Node: Training_Graph/Model/TARGET/TARGET_Metrics/DenseToDenseSetOperation_26_G1265 = _Recv[client_terminated=false, recv_device="/job:worker/replica:0/task:0/device:GPU:0", send_device="/job:worker/replica:0/task:0/device:CPU:0", send_device_incarnation=-3380386273340330983, tensor_name="edge_4280_Training_Graph/Model/TARGET/TARGET_Metrics/DenseToDenseSetOperation_26", tensor_type=DT_INT64, _device="/job:worker/replica:0/task:0/device:GPU:0"]()]]
+
+Caused by op 'Training_Graph/Model/IteratorFromStringHandle', defined at:
+  File "dist_train.py", line 684, in <module>
+    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "dist_train.py", line 640, in main
+    create_job()
+  File "dist_train.py", line 628, in create_job
+    run_worker(server, cluster)
+  File "dist_train.py", line 272, in run_worker
+    training_model.build_graph()
+  File "/HARNN.py", line 221, in build_graph
+    self._init_dataset()
+  File "/HARNN.py", line 329, in _init_dataset
+    self.datasets[self.targets[-1]].output_shapes)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/data/ops/iterator_ops.py", line 189, in from_string_handle
+    output_shapes=nest.flatten(output_shapes))
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/ops/gen_dataset_ops.py", line 662, in iterator_from_string_handle
+    output_types=output_types, output_shapes=output_shapes, name=name)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 2956, in create_op
+    op_def=op_def)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/ops.py", line 1470, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+NotFoundError (see above for traceback): Resource worker/_3_Training_Graph/Model/Iterator/N10tensorflow12_GLOBAL__N_116IteratorResourceE does not exist.
+	 [[Node: Training_Graph/Model/IteratorFromStringHandle = IteratorFromStringHandle[output_shapes=[[?,?,?], [?,?,?], [?], [?,?], [?,?], [?], [?]], output_types=[DT_INT64, DT_INT64, DT_INT64, DT_INT64, DT_INT64, DT_FLOAT, DT_INT32], _device="/job:worker/replica:0/task:0/device:CPU:0"](_recv_Training_Graph/Model/Placeholder_0)]]
+	 [[Node: Training_Graph/Model/TARGET/TARGET_Metrics/DenseToDenseSetOperation_26_G1265 = _Recv[client_terminated=false, recv_device="/job:worker/replica:0/task:0/device:GPU:0", send_device="/job:worker/replica:0/task:0/device:CPU:0", send_device_incarnation=-3380386273340330983, tensor_name="edge_4280_Training_Graph/Model/TARGET/TARGET_Metrics/DenseToDenseSetOperation_26", tensor_type=DT_INT64, _device="/job:worker/replica:0/task:0/device:GPU:0"]()]]
+Statement:
+What exactly have changed in tf.data.Iterator between versions r1.4 and r1.3.1 that causes such an unpleasant behaviour? What can be done to counteract NotFoundError?

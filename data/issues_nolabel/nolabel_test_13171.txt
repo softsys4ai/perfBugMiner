@@ -1,0 +1,52 @@
+tf.reduce_*(mean/sum) runs very slow on GPU
+
+I notice that tf.reduce_*(mean/sum) runs very slow on GPU in some cases, which can happen in the following simple examle:
+x = tf.Variable(tf.ones([80, 80, 80, 80])) # 4-D tensor.
+y = tf.reduce_sum(x, [0, 2, 3]) # Sum over all dims except the 2nd.
+The execution time on GPU is very large and is approximate same as (or more than) the time on CPU, which probably means the GPU is not used at all. The same result can be obtained by choosing the other axes, except for the first and the last axes, in which case the execution on GPU is significantly faster than CPU.
+Here is the code that reproduces the problem. You can run with --keep_dim k k=0,1,2,3 to select different axes.
+I am using the following PC system:
+
+Kubuntu 16.04
+TensorFlow 1.2.1 ('v1.2.0-5-g435cdfc', '1.2.1')
+Python 2.7
+GeForce GTX 1080 Ti
+CUDA-8.0
+
+The execution time on GPU, CPU, and NumPy is given as follows:
+
+
+
+exec time (s)
+[1,2,3]
+[0,2,3]
+[0,1,3]
+[0,1,2]
+
+
+
+
+GPU
+0.00918
+0.40572
+0.55388
+0.01905
+
+
+CPU
+0.05921
+0.22461
+0.56524
+0.16172
+
+
+NumPy
+0.24799
+0.24847
+0.24886
+0.26601
+
+Similar result was observed also on my laptop.
+
+I met this problem when I tried to implement Batch Normalization (initially when I ran tf.nn.moment(), then realized the key was tf.reduce_*). I wanted to collect means of different channels. Using NHWC data format the problem does not matter as C is the last dimension. However, slow execution occurs if I want to implement for NCHW format as C is the second dimension, this makes the execution time on Batch Normalization overwhelms all other ops such as convolutions. This is surely a nightmare for training and evaluation.
+I hope it will be fixed if it is a bug. Or, if the reason is that the oprations are just not implemented for GPU by now, I wonder if there is a way to walk around.

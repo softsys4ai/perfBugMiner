@@ -1,0 +1,43 @@
+Duplicate variable shown in Tensorboard expected?
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+MacOS Sierra 12.12.4
+TensorFlow installed from (source or binary):
+pip
+TensorFlow version (use command below):
+1.1.0 (CPU)
+
+Describe the problem
+I am trying to implement E2C (available from https://arxiv.org/pdf/1506.07365.pdf). Basically it is a neural network that is used for learning a transition model using neural networks. In the training set I have data of the form (X_t, X_t+1) where both X_t and X_t+1 needs to be transformed by an encoding network (e.g. a variational autoencoder). I use the following snippet for creating the encoding network (adapted from https://github.com/ericjang/e2c):
+    def encode(self, x, share=None):
+        fc = tf.contrib.layers.fully_connected
+        with tf.variable_scope('Encoder', reuse=share):
+            l1 = fc(x, 400, weights_initializer=tf.orthogonal_initializer(),
+                    activation_fn=tf.nn.relu)
+            l2 = fc(l1, 100, weights_initializer=tf.orthogonal_initializer(),
+                    activation_fn=tf.nn.relu)
+            return l2
+
+    def decode(self, z, share=None):
+        fc = tf.contrib.layers.fully_connected
+        with tf.variable_scope("Decoder", reuse=share):
+            l1 = fc(z, 100, weights_initializer=tf.orthogonal_initializer(1.1),
+                    activation_fn=tf.nn.relu)
+            l2 = fc(l1, 400, weights_initializer=tf.orthogonal_initializer(1.1),
+                    activation_fn=tf.nn.relu)
+
+            return fc(l2, self.x_dim,
+                      weights_initializer=tf.orthogonal_initializer(1.1),
+                      activation_fn=tf.nn.sigmoid)
+Then I would use something like
+h_enc_t = encoder(X_t)
+h_enc_t_next = encoder(X_{t+1}, share=True)
+to create the encoded output for the model.
+The problem is that when visualizing this on Tensorboard, while it is sharing the variables by setting share=True for the variable scope, on the graph visulisation you will have Encoder and Encoder_1 instead of just a Decoder scope. Of course they took different input since we need to transform X_t and X_t+1, but shouldn't the network be wrapped in the same scope since underneath we are reusing the same weights? I wonder if it is a feature to have Encoder_1 and Encoder separately or it is a limitation of the variable scoping. The problem is illustrated in the screenshot below, you will see duplicates for 'Encoder' 'SampleQPhi" etc:
+
+However, I would expect something like this (as appeared in the paper) to be a more reasonable visualization (h_enc) with input x_t and x_t+1 are the same network:
+
+Many thanks in advance!

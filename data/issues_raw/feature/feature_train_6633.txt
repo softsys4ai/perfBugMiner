@@ -1,0 +1,23 @@
+CudnnRnnSequenceTensorDescriptor should support different sequence lengths
+
+According to the cuDNN docs, the functions cudnnRNNForwardInference / cudnnRNNForwardTraining get the argument cudnnTensorDescriptor_t* xDesc, where:
+xDesc: Array of tensor descriptors. Each must have the same second dimension. The first dimension may decrease from element n to element n + 1 but may not increase.
+The usage of xDesc is a bit non-straight-forward. I wrote about that in more detail here.
+According to a comment in the CNTK code about the dimensions of each xDesc[t]:
+
+these dimensions are what CUDNN expects: (the minibatch dimension, the data dimension, and the number 1 (because each descriptor describes one frame of data)
+
+TensorFlow sets the same minibatch dimension for each xDesc[t] in CudnnRnnSequenceTensorDescriptor:
+int dims[] = {batch_size, data_size, 1};
+int strides[] = {dims[1] * dims[2], dims[2], 1};
+status = dynload::cudnnSetTensorNdDescriptor(
+    parent, handle /*tensorDesc*/, data_type /*dataType*/,
+    sizeof(dims) / sizeof(dims[0]) /*nbDims*/, dims /*dimA*/,
+    strides /*strideA*/);
+CUDNN_RETURN_IF_FAIL(status, "Failed to update tensor descriptor");
+// Replicate handle across the number of steps.
+handles_.assign(seq_length, handle);
+
+Also createRnnSequenceTensorDescriptor needs a new API to allow for that.
+And I'm not sure if there are ways to prepare the input x for cudnnRNNForwardTraining so that it has all sequences contiguously behind each other, and the sequences are sorted by sequences length.
+Similar as PackSequencesForCuDNN in CNTK.

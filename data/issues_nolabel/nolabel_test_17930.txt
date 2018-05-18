@@ -1,0 +1,243 @@
+Memory Leak in SavedModelBundle.load() in the TensorFlow Java API
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.6.0
+Python version: 2.7.12
+Java version: OpenJDK 1.8.0_151
+Bazel version (if compiling from source): 0.6.1
+GCC/Compiler version (if compiling from source): gcc 5.4.0
+CUDA/cuDNN version: CUDA 9.0 / cuDNN 7.0
+GPU model and memory: name: TITAN Xp, compute capability: 6.1, total memory: 11.90GiB
+Exact command to reproduce: SavedModelBundle.load() and Runner.run() from Java API
+
+Describe the problem
+There seems to be a memory leak when using the Tensorflow Java API when executing the load static method of SavedModelBundle class and the run method of the Runner class.  In the process of debugging, I've attached the VisualVM profiler and a remote Java debugger to step through code execution.  Additionally, I've been using htop to monitor the memory usage from active processes running on the server hosting the API.
+From this, I've been able to observe
+
+each time the inference is invoked, it increases my total memory consumption by about 0.18G - 0.19G, which is approximately the size of my saved model files being loaded.
+my Java heap memory is not permanently increasing; after the inference has finished all heap memory returns to the amount before the inference started.
+
+I've been sure to invoke the close method of each class that extends AutoCloseable that I've used.  I do not explicitly invoke the close method on the Session and Graph managed by the SavedModelBundle, as its close method invokes the close methods of its Session and Graph.  This is reflected in the code example provided below.
+This memory leak occurs whether I'm building with GPU acceleration or not.
+To build the native libraries and Java API from source with GPU acceleration, I'm using the following bazel command (from the 1.6.0 release tag):
+bazel build --verbose_failures --action_env="LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0"  --config=opt --config=cuda //tensorflow/java:tensorflow //tensorflow/java:libtensorflow_jni
+
+To build the native libraries and Java API from source without GPU acceleration, I'm using the following bazel command (from the 1.6.0 release tag):
+bazel build --verbose_failures --action_env="LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0"    //tensorflow/java:tensorflow //tensorflow/java:libtensorflow_jni
+
+In an attempt to get more information about the execution of the native code, I've tried to enable debug mode while building the native libraries by repliacing --config=opt with -c dbg --strip=never --compilation_mode=dbg, however this causes the following exception:
+external/eigen_archive/unsupported/Eigen/CXX11/src/Tensor/TensorExecutor.h:262: static void Eigen::internal::TensorExecutor<Expression, Eigen::GpuDevice, Vectorizable>::run(const Expression&, const Eigen::GpuDevice&) [with Expression = const Eigen::TensorAssignOp<Eigen::TensorMap<Eigen::Tensor<float, 1, 1, long int>, 16, Eigen::MakePointer>, const Eigen::TensorCwiseBinaryOp<Eigen::internal::scalar_max_op<const float, const float>, const Eigen::TensorMap<Eigen::Tensor<const float, 1, 1, long int>, 16, Eigen::MakePointer>, const Eigen::TensorCwiseNullaryOp<Eigen::internal::scalar_constant_op, const Eigen::TensorMap<Eigen::Tensor<const float, 1, 1, long int>, 16, Eigen::MakePointer> > > >; bool Vectorizable = true]: Assertion `cudaGetLastError() == cudaSuccess' failed.
+
+I originally found the memory leak while using TensorFlow 1.4.0, CUDA 8.0, and cuDNN 6.0.  Before updating the versions, each inference was retaining about 1.4-1.5G of memory; by updating, I managed to reduce this significantly, however still need to eliminate the memory leak altogether.
+I've spent hours trying to figure out how to profile the native code execution, most recently by following these answers from Stack Overflow:
+
+How to profile Native JNI library
+gprof : How to generate call graph for functions in shared library that is linked to main program
+
+I've been unable to successfully compile the native libraries with the debug flag (-g) to profile.  I've poked around the bazel build scripts a bit, as I don't believe that the debug mode indicated by the --compilation_mode=dbg flag actually compiles the libraries for debugging, however have been unable to locate where I'd add the -g compilation flag.
+Source code / logs
+Here is my configuration output when configuring with GPU acceleration.
+ilats-admin$ ./configure
+You have bazel 0.6.1 installed.
+Please specify the location of python. [Default is /usr/bin/python]: 
+
+
+Found possible Python library paths:
+  /usr/local/lib/python2.7/dist-packages
+  /usr/lib/python2.7/dist-packages
+Please input the desired Python library path to use.  Default is [/usr/local/lib/python2.7/dist-packages]
+
+Do you wish to build TensorFlow with jemalloc as malloc support? [Y/n]: N
+No jemalloc as malloc support will be enabled for TensorFlow.
+
+Do you wish to build TensorFlow with Google Cloud Platform support? [Y/n]: N
+No Google Cloud Platform support will be enabled for TensorFlow.
+
+Do you wish to build TensorFlow with Hadoop File System support? [Y/n]: N
+No Hadoop File System support will be enabled for TensorFlow.
+
+Do you wish to build TensorFlow with Amazon S3 File System support? [Y/n]: N
+No Amazon S3 File System support will be enabled for TensorFlow.
+
+Do you wish to build TensorFlow with Apache Kafka Platform support? [y/N]: N
+No Apache Kafka Platform support will be enabled for TensorFlow.
+
+Do you wish to build TensorFlow with XLA JIT support? [y/N]: N
+No XLA JIT support will be enabled for TensorFlow.
+
+Do you wish to build TensorFlow with GDR support? [y/N]: N
+No GDR support will be enabled for TensorFlow.
+
+Do you wish to build TensorFlow with VERBS support? [y/N]: N
+No VERBS support will be enabled for TensorFlow.
+
+Do you wish to build TensorFlow with OpenCL SYCL support? [y/N]: N
+No OpenCL SYCL support will be enabled for TensorFlow.
+
+Do you wish to build TensorFlow with CUDA support? [y/N]: Y
+CUDA support will be enabled for TensorFlow.
+
+Please specify the CUDA SDK version you want to use, e.g. 7.0. [Leave empty to default to CUDA 9.0]: 
+
+
+Please specify the location where CUDA 9.0 toolkit is installed. Refer to README.md for more details. [Default is /usr/local/cuda]: /usr/local/cuda-9.0
+
+
+Please specify the cuDNN version you want to use. [Leave empty to default to cuDNN 7.0]: 
+
+
+Please specify the location where cuDNN 7 library is installed. Refer to README.md for more details. [Default is /usr/local/cuda-9.0]:
+
+
+Do you wish to build TensorFlow with TensorRT support? [y/N]: N
+No TensorRT support will be enabled for TensorFlow.
+
+Please specify a list of comma-separated Cuda compute capabilities you want to build with.
+You can find the compute capability of your device at: https://developer.nvidia.com/cuda-gpus.
+Please note that each additional compute capability significantly increases your build time and binary size. [Default is: 6.1]
+
+
+Do you want to use clang as CUDA compiler? [y/N]: N
+nvcc will be used as CUDA compiler.
+
+Please specify which gcc should be used by nvcc as the host compiler. [Default is /usr/bin/gcc]: 
+
+
+Do you wish to build TensorFlow with MPI support? [y/N]: N
+No MPI support will be enabled for TensorFlow.
+
+Please specify optimization flags to use during compilation when bazel option "--config=opt" is specified [Default is -march=native]: 
+
+
+Would you like to interactively configure ./WORKSPACE for Android builds? [y/N]: N
+Not configuring the WORKSPACE for Android builds.
+
+Preconfigured Bazel build configs. You can use any of the below by adding "--config=<>" to your build command. See tools/bazel.rc for more details.
+	--config=mkl         	# Build with MKL support.
+	--config=monolithic  	# Config for mostly static monolithic build.
+	--config=tensorrt    	# Build with TensorRT support.
+Configuration finished
+
+I've created a sample application below that is a minimal version of my custom code, and still causes the memory leak to occur.  I've used a simple while loop to perform an inference whenever a character is entered from stdin, to demonstrate the memory being used not released while the application is still running.
+This code is used for inference against a trained version of Object Detection model architecture found here.  I've prepared a custom dataset and performed training similar to the Quick Start guide for Training a Pet Detector.  Following this guide through the section titled Exporting the Tensorflow Graph should produce a saved model that can be used with this code sample.  You'll need to adjust the path to the saved model, the labels to those used for the guide, and the file path to the image to detect objects in, which are all captured as static final variables towards the top of the class.
+import java.io.*;
+import org.tensorflow.Tensor;
+import org.tensorflow.SavedModelBundle;
+import org.tensorflow.types.UInt8;
+import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
+import javax.imageio.ImageIO;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.List;
+
+public class Main {
+  private static final String[] LABELS = {"label1", "label2", "label3", "label4", "label5", "label6", "label7"};
+  private static final String SAVED_MODEL_PATH = "/usr/repositories/resources/models/ilats-targets-4/saved_model";
+  private static final String FILE_PATH = "/tmp/inference_image.jpeg";
+
+  // Definite input and output Tensors for detection_graph
+  private static final String IMAGE_TENSOR_NAME = "image_tensor:0";
+
+  // Each box represents a part of the image where a particular object was detected.
+  private static final String DETECTION_BOXES_NAME = "detection_boxes:0";
+
+  // Each score represent how level of confidence for each of the objects.
+  // Score is shown on the result image, together with the class label.
+  private static final String DETECTION_SCORES_NAME = "detection_scores:0";
+
+  private static final String DETECTION_CLASSES_NAME = "detection_classes:0";
+
+  public static void main(String[] args) {
+    int ch;
+    try {
+
+      while ((ch = System.in.read()) != -1) {
+        performInference();
+      }
+
+    } catch (Exception e) {
+    }
+  }
+
+  public static void performInference() {
+    SavedModelBundle model = null;
+    Tensor<UInt8> imageTensor = null;
+    List<Tensor<?>> outputs = null;
+
+    try {
+      model = SavedModelBundle.load(SAVED_MODEL_PATH, "serve");
+      imageTensor = makeImageTensor(FILE_PATH);
+      
+      outputs = model
+        .session()
+        .runner()
+        .feed(IMAGE_TENSOR_NAME, imageTensor)
+        .fetch(DETECTION_SCORES_NAME)
+        .fetch(DETECTION_CLASSES_NAME)
+        .fetch(DETECTION_BOXES_NAME)
+        .run();
+
+    } catch (Exception e) {
+      throw new RuntimeException(e.getMessage(), e);
+    } finally {
+      // this closes Session and Graph that belongs to model as well
+      if (model != null) {
+        model.close();
+      }
+
+      if (imageTensor != null) {
+        imageTensor.close();
+      }
+
+      if (outputs != null) {
+        for (Tensor output : outputs) {
+          if (output != null) {
+            output.close();
+          }
+        }
+      }
+    }
+    
+
+  }
+
+  public static Tensor<UInt8> makeImageTensor(String filename) throws IOException {
+    BufferedImage img = ImageIO.read(new File(filename));
+    if (img.getType() != BufferedImage.TYPE_3BYTE_BGR) {
+      throw new IOException(
+        String.format("Expected 3-byte BGR encoding in BufferedImage, found %d (file: %s). This code could be made more robust", img.getType(), filename)
+      );
+    }
+
+    byte[] data = ((DataBufferByte) img.getData().getDataBuffer()).getData();
+    // ImageIO.read seems to produce BGR-encoded images, but the model expects RGB.
+    bgr2rgb(data);
+    final long BATCH_SIZE = 1;
+    final long CHANNELS = 3;
+    long[] shape = new long[] {BATCH_SIZE, img.getHeight(), img.getWidth(), CHANNELS};
+    Tensor<UInt8> imageTensor = Tensor.create(UInt8.class, shape, ByteBuffer.wrap(data));
+    img.flush();
+    return imageTensor;
+  }
+
+  public static void bgr2rgb(byte[] data) {
+    for (int i = 0; i < data.length; i += 3) {
+      byte tmp = data[i];
+      data[i] = data[i + 2];
+      data[i + 2] = tmp;
+    }
+  }
+
+}
+
+The instructions to compile and run this are similar to those found in the TensorFlow for Java Readme.
+$ GENFILE_DIR=/usr/repositories/tensorflow/bazel-bin/tensorflow/java
+$ javac -cp ./:$GENFILE_DIR/libtensorflow.jar Main.java
+$ java -cp ./:$GENFILE_DIR/libtensorflow.jar \
+  -Djava.library.path=$GENFILE_DIR \
+  Main

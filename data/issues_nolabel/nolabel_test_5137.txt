@@ -1,0 +1,75 @@
+tf.train.batch does not work with tf.train.string_input_producer
+
+When I try to batch results from tf.train.string_input_producer nothing happens and timeouts occur on a regular basis. Identical code is located at tensorflow documentation. Please see the code below.
+Environment info
+Operating System:
+ElementaryOS Freya
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+ ~   ls -l /usr/local/cuda-7.5/lib64/libcud*
+
+-rw-r--r-- 1 root root 322936 авг.  15  2015 /usr/local/cuda-7.5/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 авг.  15  2015 /usr/local/cuda-7.5/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root     19 авг.  15  2015 /usr/local/cuda-7.5/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root 383336 авг.  15  2015 /usr/local/cuda-7.5/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root 720192 авг.  15  2015 /usr/local/cuda-7.5/lib64/libcudart_static.a
+
+If installed from binary pip package, provide:
+
+A link to the pip package you installed: https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.11.0rc0-cp35-cp35m-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+ ~  python -c "import tensorflow; print(tensorflow.__version__)"
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcurand.so locally
+0.11.0rc0
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import tensorflow as tf
+
+def load_png(input_queue):
+    reader = tf.WholeFileReader()
+    _, data = reader.read(input_queue)
+    data = tf.image.decode_png(data)
+    data.set_shape([28, 28, 3])
+    return data
+
+tf.reset_default_graph()
+config = tf.ConfigProto()
+# config.operation_timeout_in_ms=100000
+
+train_dataset = notMNISTDataset(url='http://yaroslavvb.com/upload/notMNIST/', 
+                    filename='notMNIST_large.tar.gz',
+                   num_classes=10)
+
+filenames = glob.glob(train_dataset._data_folder + '/**/*.png', recursive=True)
+filename_queue = tf.train.string_input_producer(filenames, name='filename_queue', shuffle=False, capacity=100)
+data = train_dataset._load_png(filename_queue)
+
+# all breaks when we try to batch Reader results
+label_batch = tf.train.batch([data],
+                              batch_size=5,
+                              capacity=100,
+                              allow_smaller_final_batch=True, 
+                              name='batch_queue')
+
+with tf.Session(config=config) as sess:
+    print("Starting session")
+    tf.initialize_local_variables().run()
+    coordinator = tf.train.Coordinator()
+
+    while not coordinator.should_stop():  
+        print("Running batch reading op")
+        threads = tf.train.start_queue_runners(coord=coordinator)
+        b = sess.run([label_batch])
+        print(b)
+
+    print("Requesting stop...")
+    coordinator.request_stop()
+    coordinator.join(threads)
+
+What other attempted solutions have you tried?
+Variations of this code from SO

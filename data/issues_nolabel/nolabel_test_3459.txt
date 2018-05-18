@@ -1,0 +1,29 @@
+tf.cond blocks forever when one branch calls tf.random_crop trough tf.map_fn
+
+I'm running tensorflow 0.9.0 on Python 3.5.2 using CUDA 7.5 on CentOS 7, and I keep running into very weird behaviour: tf.cond seems to stall forever when the non-active branch calls tf.random_crop. I've reduced my code to the following minimal example:
+import numpy as np
+import tensorflow as tf
+
+IMG_WIDTH = 32
+IMG_HEIGHT = 32
+IMG_CHANNELS = 3
+
+def distort_image(image):
+    # this should crop the whole image, i.e. do nothing!
+    return tf.random_crop(image, [IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS])
+
+xx = np.random.normal(size=(4, IMG_HEIGHT, IMG_WIDTH, 3)).astype(np.float32)
+
+tf.reset_default_graph()
+x = tf.placeholder(tf.float32, shape=(None, IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS))
+is_training = tf.placeholder(tf.bool)
+xp = tf.cond(is_training,  
+        lambda: tf.map_fn(distort_image, x, back_prop=False),  
+        lambda: tf.identity(x))  
+
+init = tf.initialize_all_variables()
+with tf.Session() as sess:
+    sess.run(init)
+    p = sess.run(xp, feed_dict={x: xx, is_training: False})
+
+The weird thing is that if is_training is set to True, the function runs through without problems. I.e., when you actually call the tf.map_fn branch, everything works out fine.

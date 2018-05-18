@@ -1,0 +1,195 @@
+Running out of memory, even on small network
+
+Operating System: Ubuntu 14.04 on a PC
+Pip Installation: 64-bit, GPU-enabled, Version 0.7.1
+
+My issue is that Tensor Flow is running out of memory when building my network, even though based on my calculations, there should easily be sufficient room on my GPU.
+Below is a minimal example of my code, which is based on the Tensor Flow MNIST tutorial. The network is a two-layer fully-connected network, and the number of nodes in the hidden layer is defined by the variable n. The size of the training minibatch is 1. Here is my code:
+n = 23000
+
+mnist = read_data_sets('MINST_Data', one_hot=True)
+session = tf.InteractiveSession()
+x = tf.placeholder(tf.float32, [None, 784])
+W1 = tf.Variable(tf.truncated_normal([784, n], stddev=0.1))
+b1 = tf.Variable(tf.constant(0.1, shape=[n]))
+nn1 = tf.matmul(x, W1) + b1
+W2 = tf.Variable(tf.truncated_normal([n, 10], stddev=0.1))
+b2 = tf.Variable(tf.constant(0.1, shape=[10]))
+nn2 = tf.matmul(nn1, W2) + b2
+y = tf.nn.softmax(nn2)
+y_ = tf.placeholder(tf.float32, [None, 10])
+cross_entropy = -tf.reduce_sum(y_*tf.log(y))
+train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
+correct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
+accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
+init = tf.initialize_all_variables()
+sess = tf.Session()
+sess.run(init)
+for i in range(1000):
+  batch_xs, batch_ys = mnist.train.next_batch(1)
+  sess.run(train_step, feed_dict={x: batch_xs, y_: batch_ys})
+
+Now, if n <= 22000, then the network runs fine. However, if n >= 23000, I get the following error:
+W tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:211] Ran out of memory trying to allocate 877.38MiB.  See logs for memory state
+W tensorflow/core/kernels/cwise_ops_common.cc:56] Resource exhausted: OOM when allocating tensor with shape[10000,23000]
+
+However, according to my calculations, there should not be a problem with the memory. The number of parameters in the network is as follows:
+First layer weights: 784 * n
+First layer biases: n
+Second layer weights: 10 * n
+Second layer biases: 10
+Total: 795n + 10
+
+So with n = 23000, and using float32 data, the total memory required for the network should therefore be 73.1 MB.
+Now, my graphics card is the NVIDIA GeForce GTX 780 Ti, which has 3072 MB of memory. After finding my graphics card, Tensor Flow prints out the following:
+Total memory: 3.00GiB
+Free memory: 2.32GiB
+
+So, there should be around 2.32 GB memory available, which is far greater than the 73.1 MB calculated above. The minibatch size is 1, so this has minimal effect. Why am I getting this error?
+
+I have also now tried this on my laptop, which has an NVIDIA GeForce GTX 880M GPU. Here, Tensor Flow reads out Free memory: 7.60GiB. Running the same code as above, it gives me a memory error at around n = 700,000, which is equivalent to 2.2 GB. This makes a bit more sense, and is significantly higher than the point at which my PC code breaks. However, it is still puzzling to me why it does not break closer to the 7.6 GB mark.
+
+The full output from Tensor Flow whilst running the above code on my PC, with n = 23000, is:
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:900] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:102] Found device 0 with properties: 
+name: GeForce GTX 780 Ti
+major: 3 minor: 5 memoryClockRate (GHz) 1.0455
+pciBusID 0000:01:00.0
+Total memory: 3.00GiB
+Free memory: 2.32GiB
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:717] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 780 Ti, pci bus id: 0000:01:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 1.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 2.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 4.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 8.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 16.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 32.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 64.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 128.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 256.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 512.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 1.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 2.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 4.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 8.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 16.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 32.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 64.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 128.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 256.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 512.00MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 1.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 2.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:51] Creating bin of max chunk size 4.00GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:717] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 780 Ti, pci bus id: 0000:01:00.0)
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:73] Allocating 2.03GiB bytes.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:83] GPU 0 memory begins at 0xb04720000 extends to 0xb86295000
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (256):   Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (1024):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (2048):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (4096):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (8192):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (16384):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (32768):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (65536):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (131072):    Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (262144):    Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (524288):    Total Chunks: 2, Chunks in use: 0 819.0KiB allocated for chunks. 390.6KiB client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (1048576):   Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (2097152):   Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (4194304):   Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (8388608):   Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (16777216):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (33554432):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (67108864):  Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (134217728):     Total Chunks: 1, Chunks in use: 0 68.79MiB allocated for chunks. 29.91MiB client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (268435456):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (536870912):     Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (1073741824):    Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (2147483648):    Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:431] Bin (4294967296):    Total Chunks: 0, Chunks in use: 0 0B allocated for chunks. 0B client-requested for chunks. 0B in use in bin. 0B client-requested in use in bin.
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:450] Bin for 877.38MiB was 1.00GiB, Chunk State: 
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d239400 of size 80128
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d1d7600 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d24cd00 of size 438528
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d1d7500 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb1a3e3200 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb1a302800 of size 920064
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb15d58800 of size 920064
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb08cf7500 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb04736b00 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d2b7f00 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb15e39200 of size 72128000
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb08c16b00 of size 920064
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb15c61500 of size 92160
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb04736d00 of size 72128000
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d2b8100 of size 72128000
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb15c4ad00 of size 92160
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb04736a00 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d2b7e00 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d1d7900 of size 400128
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb04720200 of size 92160
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb04736c00 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb08cf7600 of size 72128000
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb1a3e3300 of size 1810570496
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d1c0c00 of size 92160
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb08c00300 of size 92160
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d2b8000 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d1d7800 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb04720100 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d1d7700 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb04720000 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb0d1d7400 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb11781700 of size 72128000
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb15c77d00 of size 256
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:465] Chunk at 0xb15c77e00 of size 920064
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:468]      Summary of in-use Chunks by size: 
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:471] 16 Chunks of size 256 totalling 4.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:471] 1 Chunks of size 80128 totalling 78.2KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:471] 5 Chunks of size 92160 totalling 450.0KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:471] 1 Chunks of size 400128 totalling 390.8KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:471] 1 Chunks of size 438528 totalling 428.2KiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:471] 4 Chunks of size 920064 totalling 3.51MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:471] 5 Chunks of size 72128000 totalling 343.93MiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:471] 1 Chunks of size 1810570496 totalling 1.69GiB
+I tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:475] Sum Total of in-use chunks: 2.03GiB
+W tensorflow/core/common_runtime/gpu/gpu_bfc_allocator.cc:211] Ran out of memory trying to allocate 877.38MiB.  See logs for memory state
+W tensorflow/core/kernels/cwise_ops_common.cc:56] Resource exhausted: OOM when allocating tensor with shape[10000,23000]
+W tensorflow/core/common_runtime/executor.cc:1102] 0x50f40e0 Compute status: Resource exhausted: OOM when allocating tensor with shape[10000,23000]
+     [[Node: add = Add[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"](MatMul, Variable_1/read)]]
+W tensorflow/core/common_runtime/executor.cc:1102] 0x3234d30 Compute status: Resource exhausted: OOM when allocating tensor with shape[10000,23000]
+     [[Node: add = Add[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"](MatMul, Variable_1/read)]]
+     [[Node: range_1/_13 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_97_range_1", tensor_type=DT_INT32, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+W tensorflow/core/common_runtime/executor.cc:1102] 0x3234d30 Compute status: Resource exhausted: OOM when allocating tensor with shape[10000,23000]
+     [[Node: add = Add[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"](MatMul, Variable_1/read)]]
+     [[Node: Cast/_11 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_96_Cast", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+Traceback (most recent call last):
+  File "/home/jrowlay/Projects/Tensor_Flow_Tutorial/MNIST_CNN_Simple/memory_test.py", line 232, in <module>
+    print(sess.run(accuracy, feed_dict={x: mnist.test.images, y_: mnist.test.labels}))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 315, in run
+    return self._run(None, fetches, feed_dict)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 511, in _run
+    feed_dict_string)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 564, in _do_run
+    target_list)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 586, in _do_call
+    e.code)
+tensorflow.python.framework.errors.ResourceExhaustedError: OOM when allocating tensor with shape[10000,23000]
+     [[Node: add = Add[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"](MatMul, Variable_1/read)]]
+     [[Node: range_1/_13 = _Recv[client_terminated=false, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/gpu:0", send_device_incarnation=1, tensor_name="edge_97_range_1", tensor_type=DT_INT32, _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+Caused by op u'add', defined at:
+  File "/home/jrowlay/Projects/Tensor_Flow_Tutorial/MNIST_CNN_Simple/memory_test.py", line 215, in <module>
+    nn1 = tf.matmul(x, W1) + b1
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/math_ops.py", line 468, in binary_op_wrapper
+    return func(x, y, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_math_ops.py", line 44, in add
+    return _op_def_lib.apply_op("Add", x=x, y=y, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 655, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2040, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1087, in __init__
+    self._traceback = _extract_stack()

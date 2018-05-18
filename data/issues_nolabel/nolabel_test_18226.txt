@@ -1,0 +1,94 @@
+After applying dataset.batch(batchsize), could the batchsize show in items' dimension?
+
+System information
+
+Have I written custom code (https://github.com/umich-vl/px2graph/blob/master/util/loader.py):
+OS Platform and Distribution (CentOS Linux release 7.4.1708 (Core)):
+TensorFlow installed from (binary):
+TensorFlow version (1.4):
+Python version (3.6):
+Bazel version (N/A):
+CUDA/cuDNN version (Cuda 8, Cudnn v6):
+GPU model and memory (Titan X, 12 G):
+Exact command to reproduce: The original code is from https://github.com/umich-vl/px2graph, the author use a queue-based input data method, and I want to change it to use tf.data API. Basically only the util/loader.py need to be changed, and the main parts have been shown as follows.:
+
+Describe the problem
+I would like to change the original queue based data load mechanism to tf.data API.
+The original code is:
+        # Index queue
+        self.input_idxs = tf.placeholder(tf.int64, shape=[None, 2])
+        idx_queue = tf.FIFOQueue(1e8, tf.int64)
+        self.enq_idxs = idx_queue.enqueue_many(self.input_idxs)
+        get_idx = idx_queue.dequeue()
+
+        # Image loading queue
+        img_queue = tf.FIFOQueue(opt.max_queue_size, task.proc_arg_dtype)
+        load_data = tf.py_func(task.load_sample_data, [get_idx], task.proc_arg_dtype)
+        enq_img = img_queue.enqueue(load_data)
+        init_sample = img_queue.dequeue()
+
+        # Preprocessing queue
+        # (for any preprocessing that can be done with TF operations)
+        data_queue = tf.FIFOQueue(opt.max_queue_size, task.data_arg_dtype,
+                                  shapes=task.data_shape)
+        enq_data = data_queue.enqueue(task.preprocess(init_sample, train_flag))
+        self.get_sample = data_queue.dequeue_many(opt.batchsize)
+
+After the change, it is:
+        # Dataset
+        self.input_idxs = tf.placeholder(tf.int64, shape=[None, 2])
+        dataset = tf.data.Dataset.from_tensor_slices(self.input_idxs)
+
+        def load_sample(idx):
+            sample = task.load_sample_data(idx)
+            sample = task.preprocess(sample, train_flag)
+            return sample
+
+        dataset = dataset.map(lambda idx: tf.py_func(load_sample, [idx], task.proc_arg_dtype), num_parallel_calls=self.num_threads)
+
+        def gen(dataset):
+            yield dataset.make_one_shot_iterator().get_next()
+
+        dataset = tf.data.Dataset.from_generator(gen, tuple(task.proc_arg_dtype), tuple(task.data_shape)) # set task.data_shape
+        dataset = dataset.batch(opt.batchsize)
+        self.iterator = dataset.make_initializable_iterator()
+        self.get_sample = self.iterator.get_next()
+
+where task.proc_arg_dtype and task.data_shape are:
+    proc_arg_dtype = [tf.float32, tf.float32, tf.int32, tf.int32, tf.int32, tf.float32, tf.int32, tf.int32, tf.int32]
+    data_shape = [
+        [opt.input_res, opt.input_res, 3],
+        [opt.output_res, opt.output_res, opt.det_inputs],
+        [2, opt.max_nodes, 2],
+        [4],
+        [opt.max_nodes, opt.obj_slots + opt.rel_slots],
+        [opt.max_nodes, opt.obj_slots, 5],
+        [opt.max_nodes, opt.rel_slots, 2],
+        [opt.max_nodes, 7],
+        [1]
+    ]
+
+Since I find tf.py_func doesn't have data_shape argument so that I add additional gen function and use the tf.data.Dataset.from_generator to specify the data_shape of items in a dataset.
+My problem is the shape of item in dataset.batch(opt.batchsize) is
+[<tf.Tensor 'IteratorGetNext:0' shape=(?, 512, 512, 3) dtype=float32>, <tf.Tensor 'IteratorGetNext:1' shape=(?, 64, 64, 300) dtype=float32>, <tf.Tensor 'IteratorGetNext:2' shape=(?, 2, 200, 2) dtype=int32>, <tf.Tensor 'IteratorGetNext:3' shape=(?, 4) dtype=int32>, <tf.Tensor 'IteratorGetNext:4' shape=(?, 200, 9) dtype=int32>, <tf.Tensor 'IteratorGetNext:5' shape=(?, 200, 3, 5) dtype=float32>, <tf.Tensor 'IteratorGetNext:6' shape=(?, 200, 6, 2) dtype=int32>, <tf.Tensor 'IteratorGetNext:7' shape=(?, 200, 7) dtype=int32>, <tf.Tensor 'IteratorGetNext:8' shape=(?, 1) dtype=int32>]
+
+But I need
+[<tf.Tensor 'IteratorGetNext:0' shape=(8, 512, 512, 3) dtype=float32>, <tf.Tensor 'IteratorGetNext:1' shape=(8, 64, 64, 300) dtype=float32>, <tf.Tensor 'IteratorGetNext:2' shape=(8, 2, 200, 2) dtype=int32>, <tf.Tensor 'IteratorGetNext:3' shape=(8, 4) dtype=int32>, <tf.Tensor 'IteratorGetNext:4' shape=(8, 200, 9) dtype=int32>, <tf.Tensor 'IteratorGetNext:5' shape=(8, 200, 3, 5) dtype=float32>, <tf.Tensor 'IteratorGetNext:6' shape=(8, 200, 6, 2) dtype=int32>, <tf.Tensor 'IteratorGetNext:7' shape=(8, 200, 7) dtype=int32>, <tf.Tensor 'IteratorGetNext:8' shape=(8, 1) dtype=int32>]
+
+where 8 is the batchsize.
+I tried the following code to solve it:
+        def add_batch_shape(data):
+            for d in data:
+                shapes = [int(s) for s in d.shape[1:]]
+                shapes.insert(0, opt.batchsize)
+                d.set_shape(shapes)
+
+        def wrapped_add(data):
+            return tf.py_func(add_batch_shape, [data], task.proc_arg_dtype)
+
+        dataset = dataset.map(wrapped_add, num_parallel_calls=self.num_threads) # (?, 512, 512, 3) to (batchsize, 512, 512, 3)
+
+But it will give out an error:
+TypeError: wrapped_add() takes 1 positional argument but 9 were given
+The [data] has a data_shape as above.
+I am wondering after applying dataset.batch(batchsize), could the first dimension of items be the batchsize but not None. (and whether tf.py_func could add a new argument which specify the data's shape)

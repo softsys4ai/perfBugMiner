@@ -1,0 +1,113 @@
+learner.run Couldn't find trained model
+
+I have built my custom experiment like this:
+def experiment_fn(run_config, hparams):
+    hooks = [
+        tf.train.CheckpointSaverHook ( 
+            checkpoint_dir = run_config.model_dir,
+            save_steps = 5,
+        ), 
+        
+        tf.train.SummarySaverHook ( 
+            save_steps = 5, 
+            output_dir = run_config.model_dir, 
+            scaffold= tf.train.Scaffold(),
+            summary_op=tf.summary.merge_all()
+        )
+    ]
+    
+    return learn.Experiment (
+        estimator = learn.Estimator (
+            model_fn = model_fn, 
+            config = run_config,
+            params = hparams
+        ),
+        train_input_fn = lambda: input_fun(train_set),
+        eval_input_fn = lambda: input_fun(eval_set),
+        eval_metrics = model_eval_metrics(),
+        train_steps = 20,
+        train_monitors = hooks,
+        eval_hooks = hooks,
+        min_eval_frequency = 1,
+        export_strategies = saved_model_export_utils.make_export_strategy (
+            serving_input_fn = serving_input_fn,
+        )
+    )
+
+learn_runner.run (
+    experiment_fn = experiment_fn,
+    run_config = tf.contrib.learn.RunConfig (
+        model_dir = output_dir,
+    ),
+    schedule = "train_and_evaluate",
+    hparams =  tf.contrib.training.HParams (
+        ...some parameters...
+    )
+)
+
+When I run it, I have files created in \model with names like 'model.ckpt-6.meta' plus the monitor shows the following results:
+
+Monitors are deprecated. Please use tf.train.SessionRunHook.
+INFO:tensorflow:step = 1, loss = 0.0437659
+INFO:tensorflow:Saving checkpoints for 1 into model\model.ckpt.
+INFO:tensorflow:Saving checkpoints for 6 into model\model.ckpt.
+INFO:tensorflow:Saving checkpoints for 11 into model\model.ckpt.
+INFO:tensorflow:Saving checkpoints for 16 into model\model.ckpt.
+INFO:tensorflow:Saving checkpoints for 20 into model\model.ckpt.
+INFO:tensorflow:Loss for final step: 0.0438498.
+
+
+
+NotFittedError                            Traceback (most recent call last)
+ in ()
+177         learning_rate = 0.01,
+178         decay_rate = 0.96,
+--> 179         decay_steps = 10
+180     )
+181 )
+C:\Program Files\Anaconda3\lib\site-packages\tensorflow\contrib\learn\python\learn\learn_runner.py in run(experiment_fn, output_dir, schedule, run_config, hparams)
+208   schedule = schedule or _get_default_schedule(run_config)
+209
+--> 210   return _execute_schedule(experiment, schedule)
+211
+212
+C:\Program Files\Anaconda3\lib\site-packages\tensorflow\contrib\learn\python\learn\learn_runner.py in _execute_schedule(experiment, schedule)
+45     logging.error('Allowed values for this experiment are: %s', valid_tasks)
+46     raise TypeError('Schedule references non-callable member %s' % schedule)
+---> 47   return task()
+48
+49
+C:\Program Files\Anaconda3\lib\site-packages\tensorflow\contrib\learn\python\learn\experiment.py in train_and_evaluate(self)
+499                                       metrics=self._eval_metrics,
+500                                       name=eval_dir_suffix,
+--> 501                                       hooks=self._eval_hooks)
+502     export_results = self._maybe_export(eval_result)
+503     return eval_result, export_results
+C:\Program Files\Anaconda3\lib\site-packages\tensorflow\contrib\learn\python\learn\experiment.py in _call_evaluate(self, _sentinel, input_fn, steps, metrics, name, checkpoint_path, hooks)
+686                                       name=name,
+687                                       checkpoint_path=checkpoint_path,
+--> 688                                       hooks=hooks)
+689
+690
+C:\Program Files\Anaconda3\lib\site-packages\tensorflow\python\util\deprecation.py in new_func(*args, **kwargs)
+287             'in a future version' if date is None else ('after %s' % date),
+288             instructions)
+--> 289       return func(*args, **kwargs)
+290     return tf_decorator.make_decorator(func, new_func, 'deprecated',
+291                                        _add_deprecated_arg_notice_to_docstring(
+C:\Program Files\Anaconda3\lib\site-packages\tensorflow\contrib\learn\python\learn\estimators\estimator.py in evaluate(self, x, y, input_fn, feed_fn, batch_size, steps, metrics, name, checkpoint_path, hooks, log_progress)
+541         checkpoint_path=checkpoint_path,
+542         hooks=hooks,
+--> 543         log_progress=log_progress)
+544
+545     if eval_results is not None:
+C:\Program Files\Anaconda3\lib\site-packages\tensorflow\contrib\learn\python\learn\estimators\estimator.py in _evaluate_model(self, input_fn, steps, feed_fn, metrics, name, checkpoint_path, hooks, log_progress)
+814       if not latest_path:
+815         raise NotFittedError("Couldn't find trained model at %s."
+--> 816                              % self._model_dir)
+817       checkpoint_path = latest_path
+818
+NotFittedError: Couldn't find trained model at \model.
+
+Why it cannot find the model ?
+Thanks for assistance!

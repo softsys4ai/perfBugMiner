@@ -1,0 +1,42 @@
+CMake: If/else statement in CMAKE_CACHE_ARGS breaks CMake build on Ubuntu 17.10
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 17.10.
+TensorFlow installed from (source or binary): Source (CMake)
+TensorFlow version (use command below): 2cfb088 (tip of master at time of writing)
+Python version: 2.7
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source): 7.2.0
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce: cmake ../../tensorflow/contrib/cmake && make
+
+Source code / logs
+[  1%] Performing build step for 'zlib'
+[ 40%] Built target zlibstatic
+[ 42%] Linking C shared library libz.so
+/usr/bin/ld: CMakeFiles/zlib.dir/deflate.o: relocation R_X86_64_PC32 against symbol `deflate' can not be used when making a shared object; recompile with -fPIC
+/usr/bin/ld: final link failed: Bad value
+collect2: error: ld returned 1 exit status
+
+Cause
+In v1.4.0, you will find the argument -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON given to  CMAKE_CACHE_ARGS for several external projects (png, zlip, sqlite etc). In master, this has been changed to
+CMAKE_CACHE_ARGS
+	if(tensorflow_ENABLE_POSITION_INDEPENDENT_CODE)
+		-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON
+	else()
+		-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=OFF
+	endif()
+
+which yields the following init cache entries on my machine:
+set(CMAKE_POSITION_INDEPENDENT_CODE "ON;if;(;tensorflow_ENABLE_POSITION_INDEPENDENT_CODE;);else;(;)" CACHE BOOL "Initial cache" FORCE)
+set(CMAKE_POSITION_INDEPENDENT_CODE "OFF;endif;(;)" CACHE BOOL "Initial cache" FORCE)
+
+and the build fails because CMAKE_POSITION_INDEPENDENT_CODE ends up not being set to ON. I could imagine this breaks a lot of builds. Perhaps CMake behaves differently on Windows and therefore this has not been caught? Is there a reason for this change I am not aware of?
+Solution
+A possible solution is to not inline the if/else statement and instead use the argument
+-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=${tensorflow_ENABLE_POSITION_INDEPENDENT_CODE}
+
+Are you interested in a PR?

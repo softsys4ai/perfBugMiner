@@ -1,0 +1,65 @@
+tf.gradients(colocate_gradients_with_ops=True) set wrong device when using CPU param weight decay
+
+System information
+
+OS Platform and Distribution: CentOS Linux 7(x86-64)
+TensorFlow installed from (source or binary): binary
+TensorFlow version: 1.4.1
+Python version: 2.7.6
+CUDA/cuDNN version: 8.0/6.0
+Have I written custom code: YES
+Bazel version: N/A
+GPU model and memory: PS Toy model
+Exact command to reproduce: List at the end
+
+I am trying to define a two-layered dnn for mnist classification, first fc on cpu second on gpu. The devices are set with replica_device_setter. I computed gradients with colocate_gradients_with_ops=True. If as expected, the gradient of first layer should be on /job:worker/replica:0/task:0/device:CPU:0 and gradient of the second layer on /job:worker/task:0/device:GPU:0.
+However, i was confused that gradient of the first layer is on device /job:ps/replica:0/task:0/device:CPU:0!
+I noticed that this error can be avoided by omitting loss += l2_loss * weight_decay, BUT WHY? It's there some conflict between CPU param weight_decay and gradients with colocate_gradients_with_ops=True?
+Source Code
+import tensorflow as tf
+
+# cluster specification
+parameter_servers = ["10.194.43.100:2222"]
+workers = ["10.194.43.100:%d"%(2230+i) for i in range(2)]
+
+cluster = tf.train.ClusterSpec({"ps":parameter_servers, "worker":workers})
+worker_prefix = "/job:worker/task:%d"%0
+cpu_device = tf.train.replica_device_setter(worker_device=worker_prefix+'/cpu:0', cluster=cluster)
+gpu_device = tf.train.replica_device_setter(worker_device=worker_prefix+'/gpu:0', cluster=cluster, ps_strategy=tf.contrib.training.GreedyLoadBalancingStrategy(1, tf.contrib.training.byte_size_load_fn))
+
+normal_initializer = tf.truncated_normal_initializer(stddev=0.1, dtype="float32")
+weight_decay = 1e-2
+
+with tf.device(cpu_device):
+    W0 = tf.get_variable('W0', shape=[784, 100], initializer=normal_initializer, dtype="float32")
+    b0 = tf.get_variable('b0', shape=[100], initializer=tf.constant_initializer(0), dtype="float32")
+    x = tf.placeholder(tf.float32, shape=[None, 784], name="x-input_%d"%i)
+    y_ = tf.placeholder(tf.float32, shape=[None, 10], name="y-input_%d"%i)
+
+    cpu_output = tf.add(tf.matmul(x, W0), b0)
+
+with tf.variable_scope('v', reuse=False), tf.name_scope('tower_0') as name_scope:
+    with tf.device(gpu_device):
+        W1 = tf.get_variable('W1', shape=[100, 10], initializer=normal_initializer, dtype="float32")
+        b1 = tf.get_variable('b1', shape=[10], initializer=tf.constant_initializer(0), dtype="float32")
+
+        gpu_output = tf.add(tf.matmul(cpu_output, W1), b1)
+        loss = tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=gpu_output)
+        loss = tf.reduce_mean(loss)
+
+        params = tf.trainable_variables()
+        l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in params])
+        loss += l2_loss * weight_decay
+        grads = tf.gradients(loss, params, colocate_gradients_with_ops=True, aggregation_method=tf.AggregationMethod.DEFAULT)
+
+with tf.device(cpu_device):
+    for grad in grads:
+        print grad, grad.device
+print 'done'
+
+Logs
+Tensor("v/tower_0/gradients/AddN_3:0", shape=(784, 100), dtype=float32, device=/job:ps/task:0) /job:ps/task:0
+Tensor("v/tower_0/gradients/AddN_2:0", shape=(100,), dtype=float32, device=/job:ps/task:0) /job:ps/task:0
+Tensor("v/tower_0/gradients/AddN_1:0", shape=(100, 10), dtype=float32, device=/job:worker/task:0/device:GPU:0) /job:worker/task:0/device:GPU:0
+Tensor("v/tower_0/gradients/AddN:0", shape=(10,), dtype=float32, device=/job:worker/task:0/device:GPU:0) /job:worker/task:0/device:GPU:0
+done

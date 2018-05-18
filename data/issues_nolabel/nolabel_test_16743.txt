@@ -1,0 +1,68 @@
+MonitoredSession after_run hook returning empty SessionRunValues results
+
+System information
+
+Have I written custom code: yes
+OS Platform and Distribution: Arch Linux 4.14.15-1
+TensorFlow installed from: source (master)
+TensorFlow version: v1.5.0-2123-g66105a6144
+Python version: 3.6.4
+Bazel version (if compiling from source): 0.9.0
+GCC/Compiler version (if compiling from source): 7.3.0
+CUDA/cuDNN version: 9.1.85/7.0.5
+GPU model and memory: Nvidia GTX 1080 8GB
+Exact command to reproduce: python test.py
+
+Describe the problem
+When running a MonitoredSession with after_run hooks, the result passed to run_values is None, when there should be output.
+Source code / logs
+test.py:
+import tensorflow as tf
+
+one = tf.Variable(1)
+
+class TestHook(tf.train.SessionRunHook):
+    def __init__(self):
+        super().__init__()
+        self.result = None
+
+    def after_run(self, run_context, run_values):
+        # run_values.results should be 1 here
+        self.result = run_values.results
+
+hook = TestHook()
+with tf.train.MonitoredSession(hooks=[hook]) as sess:
+    print('Eval result: {}'.format(
+        one.eval(session=sess)))
+    print('Hook result: {}'.format(
+        hook.result))
+Expected output:
+Eval result: 1
+Hook result: 1
+
+Actual output:
+Eval result: 1
+Hook result: None
+
+I've changed this in my fork by replacing 
+  
+    
+      tensorflow/tensorflow/python/training/monitored_session.py
+    
+    
+         Line 1176
+      in
+      3fb4761
+    
+    
+    
+    
+
+        
+          
+           results=outputs[hook] if hook in outputs else None, 
+        
+    
+  
+
+ with results=outputs['caller'],. However, this breaks training with an Estimator wrapping a MonitoredSession. If I'm misinterpreting the usage of the after_run hook please let me know!

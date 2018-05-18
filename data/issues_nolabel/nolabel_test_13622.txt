@@ -1,0 +1,69 @@
+CudnnLSTM returns all Ones(1) after the 10th sequence
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): 16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.3
+Python version: 3.5
+Bazel version (if compiling from source): v1.3.0-rc1-1486-g752dcb6 1.3.0
+CUDA/cuDNN version: 8.0/6.0
+GPU model and memory: GTX1050Ti
+Exact command to reproduce:
+
+Describe the problem
+I tried to use CudnnLSTM to speed up the training, but found it only returns one after the 10th step, following code generate the output.
+Source code / logs
+import tensorflow as tf
+from tensorflow.contrib.cudnn_rnn import CudnnLSTM
+import numpy as np
+
+
+np.set_printoptions(linewidth=240, edgeitems=6)
+# Reset default graph
+tf.reset_default_graph()
+
+num_layer = 5
+num_unit = 256
+input_size = 400
+seq_lenght = 20
+
+with tf.device('/gpu:0'):
+    x = tf.random_uniform([seq_lenght, input_size], maxval=1, dtype=tf.float32)
+    x1 = tf.expand_dims(x, 1)
+    lstm = CudnnLSTM(num_layers=num_layer, num_units=num_unit, input_size=input_size,
+                 input_mode='linear_input',
+                 direction='unidirectional')
+
+    # CudnnLSTM parameter
+    lstm_para_size = lstm.params_size()
+    lstm_para = tf.Variable(tf.random_uniform([lstm_para_size]), validate_shape=False, name='lstm_para')
+
+    state_c = tf.Variable(tf.zeros(shape=[num_layer, 1, num_unit]), trainable=False)
+    state_h = tf.Variable(tf.zeros(shape=[num_layer, 1, num_unit]), trainable=False)
+
+    lstm_output, lstm_h, lstm_c = lstm(input_data=x1, input_h=state_h, input_c=state_c, params=lstm_para)
+
+# Variable initializing op
+init = tf.global_variables_initializer()
+
+with tf.Session() as sess:
+    sess.run(init)
+cudnn_output = sess.run(lstm_output)
+print(cudnn_output)
+
+###LSTM output
+[[[ 0.76159418  0.76159418  0.76159418  0.76159418  0.76159418  0.76159418 ...,  0.76159418  0.76159418  0.76159418  0.76159418  0.76159418  0.76159418]]
+[[ 0.96402758  0.96402758  0.96402758  0.96402758  0.96402758  0.96402758 ...,  0.96402758  0.96402758  0.96402758  0.96402758  0.96402758  0.96402758]]
+[[ 0.99505478  0.99505478  0.99505478  0.99505478  0.99505478  0.99505478 ...,  0.99505478  0.99505478  0.99505478  0.99505478  0.99505478  0.99505478]]
+[[ 0.99932933  0.99932933  0.99932933  0.99932933  0.99932933  0.99932933 ...,  0.99932933  0.99932933  0.99932933  0.99932933  0.99932933  0.99932933]]
+[[ 0.99990922  0.99990922  0.99990922  0.99990922  0.99990922  0.99990922 ...,  0.99990922  0.99990922  0.99990922  0.99990922  0.99990922  0.99990922]]
+[[ 0.99998772  0.99998772  0.99998772  0.99998772  0.99998772  0.99998772 ...,  0.99998772  0.99998772  0.99998772  0.99998772  0.99998772  0.99998772]]
+...,
+[[ 1.          1.          1.          1.          1.          1.         ...,  1.          1.          1.          1.          1.          1.        ]]
+[[ 1.          1.          1.          1.          1.          1.         ...,  1.          1.          1.          1.          1.          1.        ]]
+[[ 1.          1.          1.          1.          1.          1.         ...,  1.          1.          1.          1.          1.          1.        ]]
+[[ 1.          1.          1.          1.          1.          1.         ...,  1.          1.          1.          1.          1.          1.        ]]
+[[ 1.          1.          1.          1.          1.          1.         ...,  1.          1.          1.          1.          1.          1.        ]]
+[[ 1.          1.          1.          1.          1.          1.         ...,  1.          1.          1.          1.          1.          1.        ]]]

@@ -1,0 +1,41 @@
+`TF_AddGradients` incorrectly reports `Add` has no gradient
+
+System information
+OS X with a CPU libtensorflow.so built off master (2336cdf)
+Describe the problem
+TF_AddGradients reports
+No gradient defined for op: Add. Please see https://www.tensorflow.org/code/tensorflow/cc/gradients/README.md for instructions on how to add C++ gradients.
+
+when asked to compute dz/dx for z=x+y (see code example).
+and yet Add has a registered gradient. Mul also doesn't work, although gradients of other operations (like Sin) do work.
+Source code / logs
+#include "c_api.h"
+
+void check_status(TF_Status* status) {
+  auto code = TF_GetCode(status);
+  if (code != TF_OK) {
+    cout<<TF_Message(status)<<endl;
+    exit(0);
+  }
+}
+
+int main() {
+  auto graph = TF_NewGraph();
+  auto x_desc = TF_NewOperation(graph, "Placeholder", "x");
+  TF_SetAttrType(x_desc, "dtype", TF_FLOAT);
+  auto status = TF_NewStatus();
+  auto x = TF_FinishOperation(x_desc, status);
+  auto y_desc = TF_NewOperation(graph, "Placeholder", "y");
+  TF_SetAttrType(y_desc, "dtype", TF_FLOAT);
+  auto y = TF_FinishOperation(y_desc, status);
+  auto z_desc = TF_NewOperation(graph, "Add", "z");
+  TF_AddInput(z_desc, {x, 0});
+  TF_AddInput(z_desc, {y, 0});
+  auto z = TF_FinishOperation(z_desc, status);
+  TF_Output output = {z, 0};
+  TF_Output input = {x, 0};
+  TF_Output grad;
+  TF_AddGradients(graph, &output, 1, &input, 1, NULL, status, &grad);
+  check_status(status);
+  return 0;
+}

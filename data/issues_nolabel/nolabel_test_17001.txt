@@ -1,0 +1,52 @@
+Minor issue with TF Lite building natively on aarch64
+
+Linux qds101 4.4.65 #1 SMP PREEMPT Mon Sep 18 13:34:00 CDT 2017 aarch64 aarch64 aarch64 GNU/Linux
+VERSION="16.04.2 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+== are we in docker =============================================
+No
+== compiler =====================================================
+c++ (Ubuntu/Linaro 5.4.0-6ubuntu1~16.04.4) 5.4.0 20160609
+== uname -a =====================================================
+Linux qds101 4.4.65 #1 SMP PREEMPT Mon Sep 18 13:34:00 CDT 2017 aarch64 aarch64 aarch64 GNU/Linux
+== check pips ===================================================
+numpy (1.13.3)
+protobuf (3.4.0)
+tensorflow (1.3.0)
+tensorflow-tensorboard (0.1.5)
+== check for virtualenv =========================================
+False
+== tensorflow import ============================================
+tf.VERSION = 1.3.0
+tf.GIT_VERSION = v1.3.0-rc1-1607-gbe4e5ef
+tf.COMPILER_VERSION = v1.3.0-rc1-1607-gbe4e5ef
+Describe the problem
+When I try to compile TF Lite example on my aarch64 machine, i get an error from gcc.
+The problem, i think, is that kernels/internal/BUILD file does not support aarch64 properly:
+NEON_FLAGS_IF_APPLICABLE = select({
+":arm": [
+"-O3",
+"-mfpu=neon",
+"-mfloat-abi=softfp",
+But for aarch64 gcc those options do not exist (https://gcc.gnu.org/onlinedocs/gcc/AArch64-Options.html#AArch64-Options). If I remove those two options, compilation is successful.
+Source code / logs
+user@qds101:~/ml/tf_lite/tensorflow$ bazel build --verbose_failures --config opt  --cxxopt=-std=c++11 --config monolithic  //tensorflow/contrib/lite/examples/label_image:label_image
+WARNING: /home/user/.cache/bazel/bazel_user/5b7d3a270696b210c6b4e035929a0ce1/external/protobuf_archive/WORKSPACE:1: Workspace name in /home/user/.cache/bazel/bazel_user/5b7d3a270696b210c6b4e035929a0ce1/external/protobuf_archive/WORKSPACE (@com_google_protobuf) does not match the name given in the repository's definition (@protobuf_archive); this will cause a build error in future versions
+INFO: Analysed target //tensorflow/contrib/lite/examples/label_image:label_image (1 packages loaded).
+INFO: Found 1 target...
+ERROR: /home/user/ml/tf_lite/tensorflow/tensorflow/contrib/lite/kernels/internal/BUILD:308:1: C++ compilation of rule '//tensorflow/contrib/lite/kernels/internal:tensor_utils' failed (Exit 1): gcc failed: error executing command
+(cd /home/user/.cache/bazel/bazel_user/5b7d3a270696b210c6b4e035929a0ce1/execroot/org_tensorflow && 
+exec env - 
+PATH=/home/user/bin:/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games 
+PWD=/proc/self/cwd 
+PYTHON_BIN_PATH=/usr/bin/python 
+PYTHON_LIB_PATH=/usr/local/lib/python2.7/dist-packages 
+TF_NEED_CUDA=0 
+TF_NEED_OPENCL_SYCL=0 
+/usr/bin/gcc -U_FORTIFY_SOURCE -fstack-protector -Wall -B/usr/bin -B/usr/bin -Wunused-but-set-parameter -Wno-free-nonheap-object -fno-omit-frame-pointer -g0 -O2 '-D_FORTIFY_SOURCE=1' -DNDEBUG -ffunction-sections -fdata-sections -DGEMMLOWP_ALLOW_SLOW_SCALAR_FALLBACK '-march=native' '-std=c++0x' '-std=c++11' -MD -MF bazel-out/arm-opt/bin/tensorflow/contrib/lite/kernels/internal/objs/tensor_utils/tensorflow/contrib/lite/kernels/internal/tensor_utils.d '-frandom-seed=bazel-out/arm-opt/bin/tensorflow/contrib/lite/kernels/internal/objs/tensor_utils/tensorflow/contrib/lite/kernels/internal/tensor_utils.o' -iquote . -iquote bazel-out/arm-opt/genfiles -iquote external/bazel_tools -iquote bazel-out/arm-opt/genfiles/external/bazel_tools -iquote external/arm_neon_2_x86_sse -iquote bazel-out/arm-opt/genfiles/external/arm_neon_2_x86_sse -iquote external/gemmlowp -iquote bazel-out/arm-opt/genfiles/external/gemmlowp -isystem external/bazel_tools/tools/cpp/gcc3 -O3 '-mfpu=neon' '-mfloat-abi=softfp' -fno-canonical-system-headers -Wno-builtin-macro-redefined '-D__DATE="redacted"' '-D__TIMESTAMP="redacted"' '-D__TIME_="redacted"' -c tensorflow/contrib/lite/kernels/internal/tensor_utils.cc -o bazel-out/arm-opt/bin/tensorflow/contrib/lite/kernels/internal/_objs/tensor_utils/tensorflow/contrib/lite/kernels/internal/tensor_utils.o)
+gcc: error: unrecognized command line option '-mfpu=neon'
+gcc: error: unrecognized command line option '-mfloat-abi=softfp'
+Target //tensorflow/contrib/lite/examples/label_image:label_image failed to build
+INFO: Elapsed time: 1.052s, Critical Path: 0.03s
+FAILED: Build did NOT complete successfully

@@ -1,0 +1,62 @@
+Can not import graph after transform_graph with quantize_nodes
+
+System information
+
+What is the top-level directory of the model you are using: models/object_detection
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.4.0-rc0
+Bazel version (if compiling from source): 0.7.0
+CUDA/cuDNN version: 375.82
+GPU model and memory: GeForce GTX 770 4GB
+Exact command to reproduce:
+
+bazel-bin/tensorflow/tools/graph_transforms/transform_graph \
+  --in_graph="/home/.../mobilenet_v2.pb" \
+  --out_graph="/home/.../mobilenet_v2_clean.pb" \
+  --inputs=image_tensor\
+  --outputs="detection_boxes,detection_scores,detection_classes,num_detections"\
+  --transforms='add_default_attributes
+  strip_unused_nodes
+  remove_nodes(op=Identity, op=CheckNumerics)
+  fold_constants(ignore_errors=true)
+  fold_batch_norms
+  fold_old_batch_norms
+  quantize_weights
+  quantize_nodes
+  sort_by_execution_order'
+
+Problem
+I'm trying to quantize default SSD Mobilenet from models rep.
+After execution transformation as above, I can not import graph:
+detection_graph = tf.Graph()
+with detection_graph.as_default():
+  od_graph_def = tf.GraphDef()
+  with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
+    serialized_graph = fid.read()
+    od_graph_def.ParseFromString(serialized_graph)
+    tf.import_graph_def(od_graph_def, name='')
+
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-5-0d8b8f2357e8> in <module>()
+      5     serialized_graph = fid.read()
+      6     od_graph_def.ParseFromString(serialized_graph)
+----> 7     tf.import_graph_def(od_graph_def, name='')
+
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/util/deprecation.py in new_func(*args, **kwargs)
+    314                 'in a future version' if date is None else ('after %s' % date),
+    315                 instructions)
+--> 316       return func(*args, **kwargs)
+    317     return tf_decorator.make_decorator(func, new_func, 'deprecated',
+    318                                        _add_deprecated_arg_notice_to_docstring(
+
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/importer.py in import_graph_def(graph_def, input_map, return_elements, name, op_dict, producer_op_list)
+    337                 raise ValueError('Specified colocation to an op that '
+    338                                  'does not exist during import: %s in %s' % (
+--> 339                                      op_to_bind_to, node.name))
+    340               original_op = name_to_op[op_to_bind_to]
+    341               new_class_values.append(compat.as_bytes(
+
+ValueError: Specified colocation to an op that does not exist during import: Postprocessor/BatchMultiClassNonMaxSuppression/map/while/strided_slice in Postprocessor/BatchMultiClassNonMaxSuppression/map/while/TensorArrayWrite_4/TensorArrayWriteV3/Enter

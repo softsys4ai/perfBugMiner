@@ -1,0 +1,53 @@
+Error: the tensor's graph is different from the session's graph
+
+I am using my previously trained models to generate deep dream images as decscribe in one of the tutorials. But when I try to call the render_deepdream method I am getting below error:
+
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 0
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:136] 0:   Y
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:806] Creating TensorFlow device (/gpu:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:83:00.0)
+Succesfully loaded model from /data/model_cache/model.ckpt-39 at step=39.
+(3648, 5472)
+Traceback (most recent call last):
+File "imagenet_eval.py", line 46, in 
+tf.app.run()
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+sys.exit(main(sys.argv))
+File "imagenet_eval.py", line 42, in main
+inception_eval.evaluate(dataset)
+File "/home/ubuntu/experiment/models/inception/inception/inception_eval.py", line 192, in evaluate
+_eval_once(saver, summary_writer, top_1_op, top_5_op, summary_op)
+File "/home/ubuntu/experiment/models/inception/inception/inception_eval.py", line 156, in _eval_once
+render_deepdream(tf.square(T('inception_v3/mixed_8x8x2048b/concat',graph)), img0=img0, session=sess)
+File "/home/ubuntu/experiment/models/inception/inception/inception_eval.py", line 94, in render_deepdream
+lo = resize(img, np.int32(np.float32(hw)/octave_scale), session=session)
+File "/home/ubuntu/experiment/models/inception/inception/inception_eval.py", line 66, in wrapper
+return out.eval(dict(zip(placeholders, args)), session=kw.get('session'))
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 555, in eval
+return _eval_using_default_session(self, feed_dict, self.graph, session)
+File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 3495, in _eval_using_default_session
+raise ValueError("Cannot use the given session to evaluate tensor: "
+ValueError: Cannot use the given session to evaluate tensor: the tensor's graph is different from the session's graph.
+
+
+Below is the code that is causing the issue:
+def tffunc(*argtypes):
+    '''Helper that transforms TF-graph generating function into a regular one.
+    See "resize" function below.
+    '''
+    placeholders = list(map(tf.placeholder, argtypes))
+    def wrap(f):
+        out = f(*placeholders)
+        def wrapper(*args, **kw):
+            #from IPython import embed
+            #embed()
+            return out.eval(dict(zip(placeholders, args)), session=kw.get('session'))
+        return wrapper
+    return wrap
+
+def resize(img, size):
+    img = tf.expand_dims(img, 0)
+    return tf.image.resize_bilinear(img, size)[0,:,:,:]
+resize = tffunc(np.float32, np.int32)(resize)
+
+This is the line causing issue: https://github.com/umerebryx/Inference/blob/master/inference_eval.py#L60
+You can also view full code in above mentioned repo. Any help would be much appreciated as I am stuck at this for days now. Thanks in advance.

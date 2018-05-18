@@ -1,0 +1,68 @@
+Batch Norm variance output mismatches with tf 1.4.0
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from  binary: binary
+TensorFlow version (use command below): 1.4.0
+Python version:  2.7.0
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 8.0/5.0
+GPU model and memory: GTX1080 and 8 GB
+Exact command to reproduce: python test_google_bn.py
+
+Describe the problem
+Batch normalization test failed with tensorflow version 1.4.0 but the same test passed with tensorflow version 1.3.0.
+Source code / logs
+# test_google_bn.py
+import numpy as np
+import pytest
+import tensorflow as tf
+from numpy.testing import assert_array_almost_equal
+from tensorflow.python.ops import control_flow_ops
+def test_delayed_update_moving_vars():
+    with tf.Session() as sess:
+        height, width = 3, 3
+        image_shape = (10, height, width, 3)
+        image_values = np.random.rand(*image_shape)
+        expected_mean = np.mean(image_values, axis=(0, 1, 2))
+        expected_var = np.var(image_values, axis=(0, 1, 2))
+        images = tf.constant(image_values, shape=image_shape, dtype=tf.float32)
+        decay = 0.1
+        epsilon = 1e-5
+        output = tf.contrib.layers.batch_norm(images, is_training=True, reuse=None, decay=decay, epsilon=epsilon,
+                            updates_collections=tf.GraphKeys.UPDATE_OPS, name='BatchNorm')
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        # updates_ops are added to UPDATE_OPS collection.
+        assert len(update_ops) == 2
+        with tf.control_dependencies(update_ops):
+            barrier = tf.no_op(name='barrier')
+        output = control_flow_ops.with_dependencies([barrier], output)
+        # Initialize all variables
+        sess.run(tf.global_variables_initializer())
+        moving_mean = tf.contrib.framework.get_variables('BatchNorm/moving_mean')[0]
+        moving_variance = tf.contrib.framework.get_variables('BatchNorm/moving_variance')[0]
+        mean, variance = sess.run([moving_mean, moving_variance])
+        # After initialization moving_mean == 0 and moving_variance == 1.
+        assert_array_almost_equal(mean, [0] * 3)
+        assert_array_almost_equal(variance, [1] * 3)
+        for _ in range(10):
+            sess.run([output])
+        mean = moving_mean.eval()
+        variance = moving_variance.eval()
+        # After 10 updates with decay 0.1 moving_mean == expected_mean and
+        # moving_variance == expected_var.
+        assert_array_almost_equal(mean, expected_mean, decimal=4)
+        assert_array_almost_equal(variance, expected_var, decimal=4)
+
+      assert_array_almost_equal(variance, expected_var, decimal=4)
+
+
+       AssertionError: 
+       Arrays are not almost equal to 4 decimals
+       
+       (mismatch 100.0%)
+        x: array([ 0.08  ,  0.0908,  0.0773], dtype=float32)
+        y: array([ 0.0792,  0.0898,  0.0764])

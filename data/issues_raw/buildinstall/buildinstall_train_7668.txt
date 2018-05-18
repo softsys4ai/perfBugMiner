@@ -1,0 +1,65 @@
+Building from source - PYTHONPATH not respected
+
+So I'm trying to build tensorflow from source, main reason is that I do not have root access and the GLIBC version was incompatible with the binaries. Additionally, I can not install packages on the python3.
+Steps so far:
+
+Build gcc-4.9.1 from source - SUCCESS
+Build bazel-0.4.4 from source - SUCCESS
+Install all CUDA stuff - SUCCESS
+Install extra packages in a separate directory (protobuf, nose, argparse, numpy, six etc..) - SUCCESS
+Build tensorflow with the bazel binary - FAIL
+
+OS:
+LSB Version:	:base-4.0-amd64:base-4.0-noarch:core-4.0-amd64:core-4.0-noarch:graphics-4.0-amd64:graphics-4.0-noarch:printing-4.0-amd64:printing-4.0-noarch
+Distributor ID:	CentOS
+Description:	CentOS release 6.5 (Final)
+Release:	6.5
+Codename:	Final
+
+The new gcc is installed in /share/apps/barber/system/ together with the other library dependencies gcc needs (gmp, mpfr, mpc, elf).
+The bazel binary is also copied into /share/apps/barber/system/bin
+CUDA is installed under /share/apps/barber/cuda and CuDNN under /share/apps/barber/cudnn.
+The python I'm using is not the default one and lives in /share/apps/python-3.6.0-shared/bin/python3. The alternative directory for my own packages is /share/apps/barber/system/lib/python3.6/site-packages/ (it contains protobuf, argparse, nose etc...).
+Given all this my environment has the following modified deifnitions:
+export BARBER_PATH=/share/apps/barber
+export LD_LIBRARY_PATH=${BARBER_PATH}/system/lib/:${BARBER_PATH}/system/lib64/:/opt/gridengine/lib/linux-x64:/opt/openmpi/lib/
+export PATH=${BARBER_PATH}/system/bin/:$PATH
+export CC=${BARBER_PATH}/system/bin/gcc
+export CXX=${BARBER_PATH}/system/bin/g++
+export CUDA_ROOT=${BARBER_PATH}/cuda
+export CUDA_HOME=${CUDA_ROOT}
+export CUDNN_PATH=${BARBER_PATH}/cudnn
+export CPATH=${CUDNN_PATH}/include:$CPATH
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CUDA_ROOT}/lib64/:${CUDA_ROOT}/nvvm/lib64/:${CUDA_ROOT}/extras/CUPTI/lib64:${CUDNN_PATH}/lib64/
+export PYTHONPATH=${BARBER_PATH}/system/lib/python3.6/site-packages/
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/share/apps/python-3.6.0-shared/lib/
+alias python=/share/apps/python-3.6.0-shared/bin/python3
+alias pip=/share/apps/python-3.6.0-shared/bin/pip
+
+Getting back to the tensorflow build, I'm selecting corretly the python to use and the gcc to use when using CUDA. The ./configure completes fine and works (I think I only had to change something to _async). However, when I try to run
+ bazel build --config=opt --config=cuda //tensorflow/tools/pip_package:build_pip_package --verbose_failures
+
+I get the following error:
+WARNING: Output base '/home/abotev/.cache/bazel/_bazel_abotev/9abd1d3abe11b8f0417e465a29633fc7' is on NFS. This may lead to surprising failures and undetermined behavior.
+INFO: Found 1 target...
+ERROR: /home/abotev/.cache/bazel/_bazel_abotev/9abd1d3abe11b8f0417e465a29633fc7/external/farmhash_archive/BUILD.bazel:12:1: C++ compilation of rule '@farmhash_archive//:farmhash' failed: crosstool_wrapper_driver_is_not_gcc failed: error executing command 
+  (cd /home/abotev/.cache/bazel/_bazel_abotev/9abd1d3abe11b8f0417e465a29633fc7/execroot/tensorflow && \
+  exec env - \
+    LD_LIBRARY_PATH=/share/apps/barber/system/lib/:/share/apps/barber/system/lib64/:/opt/gridengine/lib/linux-x64:/opt/openmpi/lib/:/share/apps/barber/cuda//lib64/:/share/apps/barber/cuda//nvvm/lib64/:/share/apps/barber/cuda//extras/CUPTI/lib64:/share/apps/barber/cudnn_5_1/lib64/:/share/apps/barber/arrayfire-3/lib/:/share/apps/python-3.6.0-shared/lib/ \
+    PATH=/share/apps/java/bin/:/share/apps/barber/system/bin/:/opt/openmpi/bin:/usr/lib64/qt-3.3/bin:/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/opt/bio/ncbi/bin:/opt/bio/mpiblast/bin:/opt/bio/EMBOSS/bin:/opt/bio/clustalw/bin:/opt/bio/tcoffee/bin:/opt/bio/hmmer/bin:/opt/bio/phylip/exe:/opt/bio/mrbayes:/opt/bio/fasta:/opt/bio/glimmer/bin:/opt/bio/glimmer/scripts:/opt/bio/gromacs/bin:/opt/bio/gmap/bin:/opt/bio/tigr/bin:/opt/bio/autodocksuite/bin:/opt/bio/wgs/bin:/opt/eclipse:/opt/ganglia/bin:/opt/ganglia/sbin:/usr/java/latest/bin:/opt/rocks/bin:/opt/rocks/sbin:/opt/gridengine/bin/linux-x64:/home/abotev/bin \
+  external/local_config_cuda/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc -U_FORTIFY_SOURCE '-D_FORTIFY_SOURCE=1' -fstack-protector -fPIE -Wall -Wunused-but-set-parameter -Wno-free-nonheap-object -fno-omit-frame-pointer -g0 -O2 -DNDEBUG -ffunction-sections -fdata-sections -g0 '-std=c++11' -MD -MF bazel-out/host/bin/external/farmhash_archive/_objs/farmhash/external/farmhash_archive/src/farmhash.d '-frandom-seed=bazel-out/host/bin/external/farmhash_archive/_objs/farmhash/external/farmhash_archive/src/farmhash.o' -iquote external/farmhash_archive -iquote bazel-out/host/genfiles/external/farmhash_archive -iquote external/bazel_tools -iquote bazel-out/host/genfiles/external/bazel_tools -isystem external/farmhash_archive/src -isystem bazel-out/host/genfiles/external/farmhash_archive/src -isystem external/bazel_tools/tools/cpp/gcc3 -no-canonical-prefixes -Wno-builtin-macro-redefined '-D__DATE__="redacted"' '-D__TIMESTAMP__="redacted"' '-D__TIME__="redacted"' -fno-canonical-system-headers -c external/farmhash_archive/src/farmhash.cc -o bazel-out/host/bin/external/farmhash_archive/_objs/farmhash/external/farmhash_archive/src/farmhash.o): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+Traceback (most recent call last):
+  File "external/local_config_cuda/crosstool/clang/bin/crosstool_wrapper_driver_is_not_gcc", line 41, in <module>
+    from argparse import ArgumentParser
+ImportError: No module named argparse
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+INFO: Elapsed time: 16.723s, Critical Path: 0.88s
+
+Thi suggests that the bazel build for some reason is ignoring my $PYTHONPATH and can not find argparse. If I run my python argparse is imported with no problems.
+Now, I really am not that much concerned with why this is happening, but more of how could I can bypass it to build tensorflow?
+Related issues:
+#190 - most related. However, the solution there is only for the case of uncompatible gcc, no resolution for the import error.
+http://stackoverflow.com/questions/15093444/importerror-no-module-named-argparse - I can't install system packages
+rg3/youtube-dl#4483 - does not help me for tensorflow
+#2860 - does not resolve the issue, but seems pretty similar
+#2021 - this shows this might be a bazel issue

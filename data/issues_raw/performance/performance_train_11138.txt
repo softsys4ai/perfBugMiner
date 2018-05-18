@@ -1,0 +1,71 @@
+Hang when fitting tensorflow learn model which contains crossed sparse_column_with_* columns and the data is loaded with pandas_input_fn
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Run on Databricks GPU cluster (Ubuntu 16.04.1 LTS)
+TensorFlow installed from (source or binary): pip installed tensorflow-gpu
+TensorFlow version (use command below): v1.2.0-rc2-21-g12f033d 1.2.0
+Bazel version (if compiling from source): n/a
+CUDA/cuDNN version: CUDA: Version 8.0, cuDNN: Version 5.1 for CUDA 8.0
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+When building Linear models with the tensorflow learn libraries the program hangs if the pandas input function (tensorflow.estimator.inputs.pandas_input_fn) is used and a crossed_column (tensorflow.contrib.layers.crossed_column) is constructed from a sparse_column_with_*. This issue is not seen in the tensorflow tutorials as they use constant tensor's to input the data which does not scale to large datasets. This also only occurs if crossing sparse_column_with_* columns, bucketized continuous columns do not cause a hang.
+The final line of output before the code hangs is: INFO:tensorflow:Create CheckpointSaverHook.
+Source code / logs
+Minimum working example of bug (with example of code that works and code that breaks):
+import pandas as pd
+import tensorflow as tf
+
+# Some sample data
+df = pd.DataFrame({'label' : [0,1,1,0], 'con1' : [10,20,30,40], 'con2' : [1,4,9,16], 'cat1' : ['a','a','b','b'], 'cat2' : ['c','d','c','d']})
+
+# Sparse base columns
+from tensorflow.contrib.layers import sparse_column_with_keys, sparse_column_with_hash_bucket
+sparse_cat1 = sparse_column_with_keys('cat1', keys=['a','b'])
+sparse_cat2 = sparse_column_with_hash_bucket('cat2', hash_bucket_size=10)
+
+# Bucketised columns
+from tensorflow.contrib.layers import real_valued_column, bucketized_column
+bucket_con1 = bucketized_column(real_valued_column('con1'), boundaries=[5,15,25,35])
+bucket_con2 = bucketized_column(real_valued_column('con2'), boundaries=[5,15,25,35])
+
+# Crossed columns
+from tensorflow.contrib.layers import crossed_column
+# This works with both inputs:
+cross_bb = crossed_column([bucket_con1, bucket_con2], hash_bucket_size=100)
+# Both these hang with pandas input:
+cross_cc = crossed_column([sparse_cat1, sparse_cat2], hash_bucket_size=100)
+cross_bc = crossed_column([bucket_con1, sparse_cat1], hash_bucket_size=100)
+
+feature_columns = [sparse_cat1, sparse_cat2, cross_bb, cross_cc, cross_bc]
+model = tf.contrib.learn.LinearClassifier(feature_columns=feature_columns)
+
+# Use pandas input - doesn't work
+train_gen_fun = tf.estimator.inputs.pandas_input_fn(df, batch_size=len(df), num_epochs=None, shuffle=True)
+# Split out the label from the features
+def input_fn1(gen) :
+  features = gen()
+  target = features.pop('label')
+  return features, target
+
+# Use constant input - does work
+def input_fn2(df):
+  feature_cols = {
+    'con1' : tf.constant(df['con1'].values),
+    'con2' : tf.constant(df['con2'].values),
+    'cat1' : tf.SparseTensor(indices=[[i, 0] for i in range(df['cat1'].size)],
+                             values=df['cat1'].values, dense_shape=[df['cat1'].size, 1]),
+    'cat2' : tf.SparseTensor(indices=[[i, 0] for i in range(df['cat2'].size)],
+                             values=df['cat2'].values, dense_shape=[df['cat2'].size, 1]),
+  }
+  label = tf.constant(df['label'].values)
+  return feature_cols, label
+
+# This hangs
+model.fit(input_fn=lambda:input_fn1(train_gen_fun), steps=10)
+
+# This works
+model.fit(input_fn=lambda:input_fn2(df), steps=10)

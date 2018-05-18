@@ -1,0 +1,77 @@
+DNNLinearCombinedClassifier weight_column_name doesn't work in v1.0
+
+After migrating to tensorflow v1.0 of my sources, weight_column_name in estimators (tested in tf.contrib.learn.DNNLinearCombinedClassifier) seems to not working now.
+Scripts now outputs this error:
+ERROR:tensorflow:Could not create metric ops for MetricSpec(metric_fn=_predictions_streaming_mean, prediction_key=logistic, label_key=None, weight_key=class_weights)
+Environment info
+Operating System:
+CentOS Linux release 7.3.1611 (Core)
+Docker image within TF package:
+
+Docker latest image: tensorflow/tensorflow
+Created container:
+docker run -it -p 8888:8888 -v ..... --memory=12g tensorflow/tensorflow
+The output from python -c "import tensorflow; print(tensorflow.__version__)":
+1.0.0
+
+Reproducing
+
+Download wide_n_deep_tutorial.py: https://github.com/tensorflow/tensorflow/blob/master/tensorflow/examples/learn/wide_n_deep_tutorial.py
+(This solely works fine)
+Then add weightings (insert lines at):
+line 26 import numpy as np
+line 130 weight_column_name='class_weights',
+line 153 feature_cols['class_weights'] = tf.constant(np.ones(np.shape(df[LABEL_COLUMN].values)))
+Code executes with error:
+ERROR:tensorflow:Could not create metric ops for MetricSpec(metric_fn=_predictions_streaming_mean, prediction_key=logistic, label_key=None, weight_key=class_weights)
+Full trace of error is below.
+
+If we repeat this procedures with version 0.10, code works well.
+I tried to reshape weight feature col to [2, n], to [n, 2] - also, doesn't help.
+Trace
+ERROR:tensorflow:Could not create metric ops for MetricSpec(metric_fn=_predictions_streaming_mean, prediction_key=logistic, label_key=None, weight_key=class_weights).
+Traceback (most recent call last):
+  File "wide_n_deep_tutorial.py", line 236, in <module>
+    tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 44, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "wide_n_deep_tutorial.py", line 199, in main
+    FLAGS.train_data, FLAGS.test_data)
+  File "wide_n_deep_tutorial.py", line 188, in train_and_eval
+    m.fit(input_fn=lambda: input_fn(df_train), steps=train_steps)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/util/deprecation.py", line 280, in new_func
+    return func(*args, **kwargs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 426, in fit
+    loss = self._train_model(input_fn=input_fn, hooks=hooks)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 934, in _train_model
+    model_fn_ops = self._call_legacy_get_train_ops(features, labels)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1003, in _call_legacy_get_train_ops
+    train_ops = self._get_train_ops(features, labels)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1162, in _get_train_ops
+    return self._call_model_fn(features, labels, model_fn_lib.ModeKeys.TRAIN)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 1133, in _call_model_fn
+    model_fn_results = self._model_fn(features, labels, **kwargs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/dnn_linear_combined.py", line 312, in _dnn_linear_combined_model_fn
+    features, labels, mode, _make_training_op, logits=logits)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/head.py", line 531, in head_ops
+    labels, predictions)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/head.py", line 1390, in _eval_metric_ops
+    return estimator._make_metrics_ops(metrics, features, labels, predictions)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/estimator.py", line 258, in _make_metrics_ops
+    result[name] = metric.create_metric_ops(features, labels, predictions)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/metric_spec.py", line 220, in create_metric_ops
+    weights=inputs[self.weight_key])
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/learn/python/learn/estimators/head.py", line 1440, in _predictions_streaming_mean
+    return metrics_lib.streaming_mean(predictions, weights=weights)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/metrics/python/ops/metric_ops.py", line 392, in streaming_mean
+    updates_collections=updates_collections, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/metrics_impl.py", line 262, in mean
+    math_ops.to_float(weights), values)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/weights_broadcast_ops.py", line 166, in broadcast_weights
+    with ops.control_dependencies((assert_broadcastable(weights, values),)):
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/weights_broadcast_ops.py", line 102, in assert_broadcastable
+    weights_rank_static))
+
+Update 3/10/2017
+Somehow in process of editing/formatting this post, forgot one line at the end of traceback:
+ValueError: weights can not be broadcast to values. values.rank=2. weights.rank=1.

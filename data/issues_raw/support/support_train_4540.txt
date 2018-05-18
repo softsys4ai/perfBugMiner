@@ -1,0 +1,54 @@
+error when using embedding_lookup with random initial embeddings
+
+Hi all. I'm working on variable-length sequence data. eg. a sequence data = np.array([4,2,3,2,0,-1,-1])(padded to length 7, the real sequence length is 5). They are word ids. So I can get word embeddings through tf.nn.embedding_lookup.
+import tensorflow as tf
+import numpy as np
+import os
+import cPickle
+
+
+vocab_size = 105374
+embed_dim = 200
+input_x = tf.placeholder(dtype=tf.int32, shape=[7], name="x")
+embedding_matrix = tf.placeholder(dtype=tf.float32, shape=[vocab_size, embed_dim], name="embeddings")
+with tf.device("/cpu:0"), tf.variable_scope("embedding"):
+    embedded_inputs = tf.nn.embedding_lookup(embedding_matrix, input_x)
+
+
+## Test
+data = np.array([4,2,3,2,0,-1,-1])
+embedding_path = os.path.join("/home/lan/data/dataset-TSU", "IMDB", "embinit.save")
+with open(embedding_path, 'rb') as f:
+    embed_init = cPickle.load(f)
+with tf.Session() as sess:
+    sess.run(tf.initialize_all_variables())
+    print sess.run(embedded_inputs, feed_dict={input_x:data, embedding_matrix:embed_init})
+
+If I use placeholder to hold my pre-trained word vectors embinit.save, id = -1 is ok to work.
+I got result from the code above like that. As I expected, the last two ids are both -1, which cannot be found in word embedding matrix. So it returned all zeros.
+[[ 0.26877201  0.239695   -0.08297    ..., -0.030947    0.199618
+  -0.24129499]
+ [ 0.115232    0.123859   -0.055312   ..., -0.040216    0.176268   -0.259417  ]
+ [ 0.132403    0.134068   -0.059557   ..., -0.010268    0.16242801
+  -0.240173  ]
+ ..., 
+ [ 0.20500401  0.125486   -0.116052   ...,  0.066659    0.15658499
+  -0.227872  ]
+ [ 0.          0.          0.         ...,  0.          0.          0.        ]
+ [ 0.          0.          0.         ...,  0.          0.          0.        ]]
+
+But if I randomly initialized word embedding matrix, like that
+vocab_size = 105374
+embed_dim = 200
+input_x = tf.placeholder(dtype=tf.int32, shape=[7], name="x")
+with tf.device("/cpu:0"), tf.variable_scope("embedding"):
+    embedding_matrix = tf.get_variable(name="embedding_matrix",
+                                            dtype=tf.float32,
+                                            shape=[vocab_size,embed_dim],
+                                            initializer=tf.random_uniform_initializer(-1.0, 1.0))
+    embedded_inputs = tf.nn.embedding_lookup(embedding_matrix, input_x)
+
+I got such an error:
+tensorflow.python.framework.errors.InvalidArgumentError: indices[5] = -1 is not in [0, 105374)
+
+That's to say I cannot use id=-1 in this way. Why?? Is there any solution?

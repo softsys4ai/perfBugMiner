@@ -1,0 +1,96 @@
+Problem with operating system allocated ports in distributed Tensorflow
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes (simple test case to reproduce)
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Reproduced on Ubuntu 16.04.1 and MacOS Sierra (10.12.5).
+TensorFlow installed from (source or binary): Binary
+TensorFlow version (use command below): v1.2.0-rc2-21-g12f033d 1.2.0
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce: See source code below
+
+Describe the problem
+When using operating system allocated ports (specifying port zero in the cluster spec), distributed Tensorflow seems to wait forever with the message "CreateSession still waiting for response from worker: /job:ps/replica:0/task:0" when initializing variables on the parameter server.
+The same code works fine with explicitly allocated ports.
+See below for code to reproduce the issue.
+Source code / logs
+This code works fine:
+import tensorflow as tf
+
+cluster = tf.train.ClusterSpec({"ps": ["localhost:65062"], "worker": ["localhost:65063"]})
+
+ps = tf.train.Server(cluster, job_name="ps", task_index=0)
+worker = tf.train.Server(cluster, job_name="worker", task_index=0)
+
+print("PS: {0}".format(ps.target))
+print("Worker: {0}".format(worker.target))
+
+with tf.Session(worker.target) as sess:
+
+    with tf.device("/job:ps/task:0"):
+        W = tf.Variable(tf.zeros([784, 10]))
+        b = tf.Variable(tf.zeros([10]))
+
+    init = tf.global_variables_initializer()
+
+    print("RUNNING SESSION")
+    sess.run(init)
+    print("SESSION FINISHED")
+
+It gets to the end and prints "SESSION FINISHED", producing the following output:
+2017-06-27 10:12:58.482841: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:65062}
+2017-06-27 10:12:58.482857: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:65063}
+2017-06-27 10:12:58.483156: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:316] Started server with target: grpc://localhost:65062
+2017-06-27 10:12:58.493057: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:65062}
+2017-06-27 10:12:58.493077: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:65063}
+2017-06-27 10:12:58.493263: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:316] Started server with target: grpc://localhost:65063
+PS: b'grpc://localhost:65062'
+Worker: b'grpc://localhost:65063'
+RUNNING SESSION
+2017-06-27 10:12:58.525303: I tensorflow/core/distributed_runtime/master_session.cc:999] Start master session 78091edd7d24288b with config: 
+
+SESSION FINISHED
+
+However, this code does not work:
+import tensorflow as tf
+
+cluster = tf.train.ClusterSpec({"ps": ["localhost:0"], "worker": ["localhost:0"]})
+
+ps = tf.train.Server(cluster, job_name="ps", task_index=0)
+worker = tf.train.Server(cluster, job_name="worker", task_index=0)
+
+print("PS: {0}".format(ps.target))
+print("Worker: {0}".format(worker.target))
+
+with tf.Session(worker.target) as sess:
+
+    with tf.device("/job:ps/task:0"):
+        W = tf.Variable(tf.zeros([784, 10]))
+        b = tf.Variable(tf.zeros([10]))
+
+    init = tf.global_variables_initializer()
+
+    print("RUNNING SESSION")
+    sess.run(init)
+    print("SESSION FINISHED")
+
+The only difference in the above code is that we let the operating system allocate ports by specifying zero as the port number, rather than explicitly allocating them.
+This code does not reach the end, but instead prints the message "CreateSession still waiting for response from worker: /job:ps/replica:0/task:0" repeatedly. The following output is produced:
+2017-06-27 10:11:31.238753: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:65062}
+2017-06-27 10:11:31.238770: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:0}
+2017-06-27 10:11:31.239114: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:316] Started server with target: grpc://localhost:65062
+2017-06-27 10:11:31.247859: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job ps -> {0 -> localhost:0}
+2017-06-27 10:11:31.247877: I tensorflow/core/distributed_runtime/rpc/grpc_channel.cc:215] Initialize GrpcChannelCache for job worker -> {0 -> localhost:65063}
+2017-06-27 10:11:31.248059: I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:316] Started server with target: grpc://localhost:65063
+PS: b'grpc://localhost:65062'
+Worker: b'grpc://localhost:65063'
+RUNNING SESSION
+2017-06-27 10:11:41.283559: I tensorflow/core/distributed_runtime/master.cc:209] CreateSession still waiting for response from worker: /job:ps/replica:0/task:0
+2017-06-27 10:11:51.287739: I tensorflow/core/distributed_runtime/master.cc:209] CreateSession still waiting for response from worker: /job:ps/replica:0/task:0
+2017-06-27 10:12:01.290028: I tensorflow/core/distributed_runtime/master.cc:209] CreateSession still waiting for response from worker: /job:ps/replica:0/task:0
+2017-06-27 10:12:11.290560: I tensorflow/core/distributed_runtime/master.cc:209] CreateSession still waiting for response from worker: /job:ps/replica:0/task:0
+2017-06-27 10:12:21.292900: I tensorflow/core/distributed_runtime/master.cc:209] CreateSession still waiting for response from worker: /job:ps/replica:0/task:0
+
+Note the messages Initialize GrpcChannelCache for job worker -> {0 -> localhost:0} above, which may indicate the source of the problem.

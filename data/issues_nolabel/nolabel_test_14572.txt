@@ -1,0 +1,90 @@
+it's slow to train model when loading dataset and checkpoints from S3
+
+System information
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):  No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Amazon Linux, P2 Instance
+TensorFlow installed from (source or binary): pip
+TensorFlow version (use command below): 1.5.0.dev20171113
+Python version: 2.7
+CUDA/cuDNN version: CUDA 8.0 / cuDNN 6.0
+GPU model and memory: Tesla K80 12GB
+Describe the problem
+The dataset and checkpoints are stored in S3 filesystem. It's slowly when training model. Howevery, The structure of network is simple and the speed is fast when load dataset and checkpoints from local filesystem
+Source code / logs
+some code like
+def input_fn(mode):
+    """ Input callback for Estimator
+    
+    Arguments
+    ----
+    mode: str, tf.estimator.ModelKey
+    file_pattern: tensorflow file pattern, refer to `tf.gfile.Glob`
+
+    Return
+    ---
+    features: dict of Tensor, the input features for model
+    label: single Tensor, the input label for model, must be integeral
+    """
+    is_train = tf.estimator.ModeKeys.TRAIN == mode
+
+    vocab_dir = hparams.vocab_dir
+
+    ds_dir = 'train' if is_train else 'test'
+    file_pattern = os.path.join(hparams.dataset_dir, ds_dir, 'part-')
+
+    tfrecords_files = [] 
+    if file_pattern.startswith('s3'):
+        tfrecords_files = list_s3_file(file_pattern)
+    else:
+        tfrecords_files = tf.gfile.Glob(file_pattern)
+
+    example = create_example(vocab_dir)
+    example_spec = tf.feature_column.make_parse_example_spec(feature_columns=example)
+
+    batch_size = hparams.batch_size
+    num_epochs = hparams.num_epochs if is_train else 1
+    example_parsed = tf.contrib.learn.read_batch_record_features(file_pattern=tfrecords_files,
+                            batch_size=batch_size,
+                            num_epochs=num_epochs,
+                            features=example_spec)
+
+    label = example_parsed.pop('label')
+    features = example_parsed
+
+    return features, label
+The log
+INFO:tensorflow:Into main function
+INFO:tensorflow:vocab_dir: s3://experiements/yajun/youtube-match/data/raw/vocab
+INFO:tensorflow:Create Estimator
+INFO:tensorflow:Using config: {'_save_checkpoints_secs': 600, '_session_config': None, '_keep_checkpoint_max': 5, '_tf_random_seed': None, '_task_type': 'worker', '_is_chief': True, '_cluster_spec': <tensorflow.python.training.server_lib.ClusterSpec object at 0x7efcfa4bff90>, '_model_dir': 's3://experiements/yajun/youtube-match/data/model', '_num_worker_replicas': 1, '_task_id': 0, '_log_step_count_steps': 100, '_master': '', '_save_checkpoints_steps': None, '_keep_checkpoint_every_n_hours': 10000, '_service': None, '_save_summary_steps': 100, '_num_ps_replicas': 0}
+INFO:tensorflow:Begin to train model
+INFO:tensorflow:List files in S3 according to the file pattern: s3://experiements/yajun/youtube-match/data/raw/train/part-
+INFO:tensorflow:Create CheckpointSaverHook.
+2017-11-15 03:03:41.798030: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2017-11-15 03:03:45.623759: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:892] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-11-15 03:03:45.624258: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1031] Found device 0 with properties:
+name: Tesla K80 major: 3 minor: 7 memoryClockRate(GHz): 0.8235
+pciBusID: 0000:00:1e.0
+totalMemory: 11.17GiB freeMemory: 11.11GiB
+2017-11-15 03:03:45.624285: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1121] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:00:1e.0, compute capability: 3.7)
+INFO:tensorflow:Restoring parameters from s3://experiements/yajun/youtube-match/data/model/model.ckpt-1400
+^[[O^[[I
+^[[OINFO:tensorflow:Saving checkpoints for 1401 into s3://experiements/yajun/youtube-match/data/model/model.ckpt.
+INFO:tensorflow:loss = 4.90536, step = 1401
+INFO:tensorflow:global_step/sec: 188.871
+INFO:tensorflow:loss = 7.86743, step = 1501 (0.530 sec)
+INFO:tensorflow:global_step/sec: 219.692
+INFO:tensorflow:loss = 2.34025, step = 1601 (0.455 sec)
+INFO:tensorflow:global_step/sec: 224.707
+INFO:tensorflow:loss = 2.32145, step = 1701 (0.445 sec)
+2017-11-15 03:14:24.980234: W tensorflow/core/framework/op_kernel.cc:1192] Out of range: FIFOQueue '_4_dequeue_record_examples/fifo_queue' is closed and has insufficient elements (requested 1, current size 0)
+	 [[Node: dequeue_record_examples/fifo_queue_Dequeue = QueueDequeueV2[component_types=[DT_INT64, DT_INT64, DT_STRING, DT_INT64, DT_STRING], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/device:CPU:0"](dequeue_record_examples/fifo_queue)]]
+INFO:tensorflow:Saving checkpoints for 1750 into s3://experiements/yajun/youtube-match/data/model/model.ckpt.
+INFO:tensorflow:Loss for final step: 6.49392.
+INFO:tensorflow:Begin to export model to s3://experiements/yajun/youtube-match/data/model/exports
+2017-11-15 03:14:29.600289: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1121] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:00:1e.0, compute capability: 3.7)
+INFO:tensorflow:Restoring parameters from s3://experiements/yajun/youtube-match/data/model/model.ckpt-1750
+INFO:tensorflow:Assets added to graph.
+INFO:tensorflow:No assets to write.
+INFO:tensorflow:SavedModel written to: s3://experiements/yajun/youtube-match/data/model/exports/temp-1510715669/saved_model.pb
+INFO:tensorflow:Finish to run

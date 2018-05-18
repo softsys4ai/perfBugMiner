@@ -1,0 +1,162 @@
+tensorflow-"ValueError: Operation 'init' has been marked as not fetchable" Plz Help
+
+I started working with LSTMs for conversation modelling. I have got a sample piece of code with a persistent error. The code is given below.
+'''
+A Dynamic Recurrent Neural Network (LSTM) implementation example using
+TensorFlow library. This example is using a toy dataset to classify linear
+sequences. The generated sequences have variable length.
+Long Short Term Memory paper: http://deeplearning.cs.cmu.edu/pdfs/Hochreiter97_lstm.pdf
+Author: Aymeric Damien
+Project: https://github.com/aymericdamien/TensorFlow-Examples/
+'''
+from future import print_function
+import tensorflow as tf
+import random
+data_path="C:/Users/AnacondaProjects/Convmodels/CleanedData/embeddings/"
+====================
+TOY DATA GENERATOR
+====================
+class ToySequenceData(object):
+def init(self, n_samples=100, max_seq_len=10, min_seq_len=2):
+self.data = []
+self.labels = []
+self.seqlen = []
+dummy_vector=[float(0.0) for i in range(300)]
+for i in range(n_samples):
+with open(data_path+str(i)+".txt","r",encoding="utf-8") as inp:
+input_line=[[float(i) for i in line.split()] for line in inp]
+current_input=[]
+for j in range(min(10,len(input_line)-1)):
+current_input.append(input_line[j])
+temp_data=current_input[:]
+temp_data=temp_data+[dummy_vector[:] for k in range(max_seq_len-j-1)]
+current_input=temp_data[:]
+self.data.append(temp_data)
+self.labels.append(input_line[j+1])
+self.seqlen.append(j+1)
+i=i+(min(10,len(input_line)-1)-1)
+self.batch_id = 0
+def next(self, batch_size):
+    """ Return a batch of data. When dataset end is reached, start over.
+    """
+    if self.batch_id == len(self.data):
+        self.batch_id = 0
+    batch_data = (self.data[self.batch_id:min(self.batch_id +
+                                              batch_size, len(self.data))])
+    batch_labels = (self.labels[self.batch_id:min(self.batch_id +
+                                              batch_size, len(self.data))])
+    batch_seqlen = (self.seqlen[self.batch_id:min(self.batch_id +
+                                              batch_size, len(self.data))])
+    self.batch_id = min(self.batch_id + batch_size, len(self.data))
+    return batch_data, batch_labels, batch_seqlen
+
+==========
+MODEL
+==========
+Parameters
+learning_rate = 0.01
+training_iters = 1000
+batch_size = 128
+display_step = 10
+Network Parameters
+seq_max_len = 10 # Sequence max length
+n_hidden = 64 # hidden layer num of features
+n_classes = 300 # linear sequence or not
+trainset = ToySequenceData(n_samples=100, max_seq_len=seq_max_len)
+testset = ToySequenceData(n_samples=20, max_seq_len=seq_max_len)
+tf Graph input
+x = tf.placeholder("float", [None, seq_max_len, n_classes])
+y = tf.placeholder("float", [None, n_classes])
+A placeholder for indicating each sequence length
+seqlen = tf.placeholder(tf.int32, [None])
+Define weights
+Weights = {
+'out': tf.Variable(tf.random_normal([n_hidden, n_classes]))
+}
+Biases = {
+'out': tf.Variable(tf.random_normal([n_classes]))
+}
+def dynamicRNN(x, seqlen, Weights, Biases):
+# Prepare data shape to match `rnn` function requirements
+# Current data input shape: (batch_size, n_steps, n_input)
+# Required shape: 'n_steps' tensors list of shape (batch_size, n_input)
+
+# Unstack to get a list of 'n_steps' tensors of shape (batch_size, n_input)
+x = tf.unstack(x, seq_max_len, 1)
+
+# Define a lstm cell with tensorflow
+with tf.variable_scope('lstm_cell_def'):
+    lstm_cell = tf.contrib.rnn.BasicLSTMCell(n_hidden)
+
+# Get lstm cell output, providing 'sequence_length' will perform dynamic
+# calculation.
+with tf.variable_scope('rnn_cell_def',reuse=True): 
+    outputs, states = tf.contrib.rnn.static_rnn(lstm_cell, x, dtype=tf.float32,
+                        sequence_length=seqlen)
+
+# When performing dynamic calculation, we must retrieve the last
+# dynamically computed output, i.e., if a sequence length is 10, we need
+# to retrieve the 10th output.
+# However TensorFlow doesn't support advanced indexing yet, so we build
+# a custom op that for each sample in batch size, get its length and
+# get the corresponding relevant output.
+
+# 'outputs' is a list of output at every timestep, we pack them in a Tensor
+# and change back dimension to [batch_size, n_step, n_input]
+outputs = tf.stack(outputs)
+outputs = tf.transpose(outputs, [1, 0, 2])
+
+# Hack to build the indexing and retrieve the right output.
+batch_size = tf.shape(outputs)[0]
+# Start indices for each sample
+index = tf.range(0, batch_size) * seq_max_len + (seqlen - 1)
+# Indexing
+outputs = tf.gather(tf.reshape(outputs, [-1, n_hidden]), index)
+
+# Linear activation, using outputs computed above
+return tf.matmul(outputs, Weights['out']) + Biases['out']
+
+pred = dynamicRNN(x, seqlen, Weights, Biases)
+Define loss and optimizer
+cos_dist=tf.losses.cosine_distance(predictions=pred,labels=y,dim=1)
+#cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=pred, labels=y))
+optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate).minimize(cos_dist)
+Evaluate model
+#correct_pred = tf.equal(tf.argmax(pred,1), tf.argmax(y,1))
+normalize_pred = tf.nn.l2_normalize(pred,1)
+normalize_y = tf.nn.l2_normalize(y,1)
+correct_pred=(1+tf.reduce_sum(tf.multiply(normalize_pred,normalize_y)))/2
+accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+Initializing the variables
+init = tf.global_variables_initializer()
+Launch the graph
+with tf.Session() as sess:
+sess.run(init)
+step = 1
+# Keep training until reach max iterations
+while step * batch_size < training_iters:
+batch_x, batch_y, batch_seqlen = trainset.next(batch_size)
+# Run optimization op (backprop)
+sess.run(optimizer, feed_dict={x: batch_x, y: batch_y,
+seqlen: batch_seqlen})
+if step % display_step == 0:
+# Calculate batch accuracy
+acc = sess.run(accuracy, feed_dict={x: batch_x, y: batch_y,
+seqlen: batch_seqlen})
+# Calculate batch loss
+loss = sess.run(cost, feed_dict={x: batch_x, y: batch_y,
+seqlen: batch_seqlen})
+print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + 
+"{:.6f}".format(loss) + ", Training Accuracy= " + 
+"{:.5f}".format(acc))
+step += 1
+print("Optimization Finished!")
+# Calculate accuracy
+test_data = testset.data
+test_label = testset.labels
+test_seqlen = testset.seqlen
+print("Testing Accuracy:", \
+    sess.run(accuracy, feed_dict={x: test_data, y: test_label,
+                                  seqlen: test_seqlen}))
+
+When I run this, it get " ValueError: Operation 'init' has been marked as not fetchable " and pointing to line: " sess.run(init) " Please kindly help! Thanks in advance.

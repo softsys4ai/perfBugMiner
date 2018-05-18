@@ -1,0 +1,107 @@
+Using foldl inside while_loop doesn't seem to work
+
+Environment info
+Operating System: OSX
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+
+tensorflow (0.1.0)       - UNKNOWN
+INSTALLED: 0.9.0rc0
+LATEST:    0.1.0
+
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+
+0.9.0rc0
+What have you tried?
+I'm trying to use foldl inside while_loop and wrote reduced test case to find what I'm doing wrong. However looks like this might be bug in foldl implementation.
+import tensorflow as tf
+from tensorflow.python.ops import functional_ops as fops
+
+s = tf.InteractiveSession()
+
+print("Evaluating foldl part",
+  fops.foldl(
+    lambda x,y: x+y,
+    tf.constant([1,2])
+  ).eval()
+)
+
+print("Evaluating while without fold",
+  tf.while_loop(
+    lambda i: tf.less(i, 10), 
+    lambda i: tf.add(i, 3), 
+    [tf.constant(0)]
+  ).eval()
+)
+
+# This one fails for some reason... 
+print("Evaluating while with fold inside",
+  tf.while_loop(
+    lambda i: tf.less(i, 10), 
+    lambda i: tf.add(i, 
+      fops.foldl(
+        lambda x,y: x+y,
+        tf.constant([1,2])
+      )
+    ), 
+    [tf.constant(0)]
+  ).eval()
+)
+output:
+Evaluating foldl part 3
+Evaluating while without fold 12
+
+W tensorflow/core/framework/op_kernel.cc:909] Already exists: Resource _tensor_arrays/while_1/foldl/TensorArray/N10tensorflow11TensorArrayE
+Traceback (most recent call last):
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 715, in _do_call
+    return fn(*args)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 697, in _run_fn
+    status, run_metadata)
+  File "/usr/local/Cellar/python3/3.5.1/Frameworks/Python.framework/Versions/3.5/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/framework/errors.py", line 450, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors.AlreadyExistsError: Resource _tensor_arrays/while_1/foldl/TensorArray/N10tensorflow11TensorArrayE
+     [[Node: while_1/foldl/TensorArray = TensorArray[clear_after_read=true, dtype=DT_INT32, dynamic_size=false, tensor_array_name="", _device="/job:localhost/replica:0/task:0/cpu:0"](while_1/foldl/Squeeze)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "fops_test.py", line 58, in <module>
+    [tf.constant(0)]
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 555, in eval
+    return _eval_using_default_session(self, feed_dict, self.graph, session)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 3498, in _eval_using_default_session
+    return session.run(tensors, feed_dict)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 372, in run
+    run_metadata_ptr)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 636, in _run
+    feed_dict_string, options, run_metadata)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 708, in _do_run
+    target_list, options, run_metadata)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 728, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.AlreadyExistsError: Resource _tensor_arrays/while_1/foldl/TensorArray/N10tensorflow11TensorArrayE
+     [[Node: while_1/foldl/TensorArray = TensorArray[clear_after_read=true, dtype=DT_INT32, dynamic_size=false, tensor_array_name="", _device="/job:localhost/replica:0/task:0/cpu:0"](while_1/foldl/Squeeze)]]
+Caused by op 'while_1/foldl/TensorArray', defined at:
+  File "fops_test.py", line 58, in <module>
+    [tf.constant(0)]
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1873, in while_loop
+    result = context.BuildLoop(cond, body, loop_vars)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/ops/control_flow_ops.py", line 1749, in BuildLoop
+    body_result = body(*vars_for_body_with_tensor_arrays)
+  File "fops_test.py", line 55, in <lambda>
+    tf.constant([1,2])
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/ops/functional_ops.py", line 102, in foldl
+    infer_shape=True)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 132, in __init__
+    tensor_array_name=tensor_array_name, name=scope)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 759, in _tensor_array
+    name=name)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/ops/op_def_library.py", line 704, in apply_op
+    op_def=op_def)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 2260, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/Users/mikaelle/Projects/Omat/tensorflow-grouping/venv/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1230, in __init__
+    self._traceback = _extract_stack()

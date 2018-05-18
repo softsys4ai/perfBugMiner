@@ -1,0 +1,106 @@
+Using classifiers with scikit-learn ensemble methods
+
+NOTE: Only file GitHub issues for bugs and feature requests.  All other topics will be closed.
+For general support from the community, see StackOverflow.
+To make bugs and feature requests more easy to find and organize, we close issues that are deemed
+out of scope for GitHub Issues and point people to StackOverflow.
+For bugs or installation issues, please provide the following information.
+The more information you provide, the more easily we will be able to offer
+help and advice.
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?: http://stackoverflow.com/questions/35464652/how-to-create-ensemble-in-tensorflow
+Environment info
+Operating System: Ubuntu 16.04.1 LTS
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*): Using CPU only version of TensorFlow
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+The output from python -c "import tensorflow; print(tensorflow.__version__)": 0.12.0-rc0
+
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)
+The output of bazel version
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+It would be useful if the TensorFlow Learn classifiers had a get_params method so that they could be used with the VotingClassifier in scikit-learn. Note that XGBoost does currently work well with VotingClassifier
+from sklearn.svm import SVC
+from sklearn import tree
+from sklearn.ensemble import RandomForestClassifier
+from sklearn import neighbors
+from sklearn.ensemble import VotingClassifier
+
+import tensorflow as tf
+from tensorflow.contrib import learn
+
+clf_svm = SVC(C=1000, gamma=1)
+clf_dt = tree.DecisionTreeClassifier(max_depth=30)
+clf_knn = neighbors.KNeighborsClassifier(7, weights="distance")
+feature_columns = learn.infer_real_valued_columns_from_input(X_train)
+clf_dnn = learn.DNNClassifier(feature_columns=feature_columns, hidden_units=[200, 400, 200], n_classes=10)
+clf_rf = RandomForestClassifier(n_estimators=10, max_depth=None, min_samples_split=2, random_state=0)
+
+eclf = VotingClassifier(estimators=[('SVM', clf_svm), 
+                                    ('DecisionTree', clf_dt), 
+                                    ('KNN', clf_knn), 
+                                    ('DNN', clf_dnn), 
+                                    ('RandomForest', clf_rf),], 
+                        voting='hard')
+
+eclf.fit(X_train, y_train)
+predicted_labels = eclf.predict(X_test)
+What other attempted solutions have you tried?
+Logs or other output that would be helpful
+(If logs are large, please upload as attachment or provide link).
+---------------------------------------------------------------------------
+TypeError                                 Traceback (most recent call last)
+<ipython-input-117-461ecf12b1de> in <module>()
+     17                         voting='hard')
+     18 
+---> 19 eclf.fit(X_train, y_train)
+     20 predicted_labels = eclf.predict(X_test)
+     21 
+
+/usr/local/lib/python3.5/dist-packages/sklearn/ensemble/voting_classifier.py in fit(self, X, y, sample_weight)
+    163                 delayed(_parallel_fit_estimator)(clone(clf), X, transformed_y,
+    164                     sample_weight)
+--> 165                     for _, clf in self.estimators)
+    166 
+    167         return self
+
+/usr/local/lib/python3.5/dist-packages/sklearn/externals/joblib/parallel.py in __call__(self, iterable)
+    756             # was dispatched. In particular this covers the edge
+    757             # case of Parallel used with an exhausted iterator.
+--> 758             while self.dispatch_one_batch(iterator):
+    759                 self._iterating = True
+    760             else:
+
+/usr/local/lib/python3.5/dist-packages/sklearn/externals/joblib/parallel.py in dispatch_one_batch(self, iterator)
+    601 
+    602         with self._lock:
+--> 603             tasks = BatchedCalls(itertools.islice(iterator, batch_size))
+    604             if len(tasks) == 0:
+    605                 # No more tasks available in the iterator: tell caller to stop.
+
+/usr/local/lib/python3.5/dist-packages/sklearn/externals/joblib/parallel.py in __init__(self, iterator_slice)
+    125 
+    126     def __init__(self, iterator_slice):
+--> 127         self.items = list(iterator_slice)
+    128         self._size = len(self.items)
+    129 
+
+/usr/local/lib/python3.5/dist-packages/sklearn/ensemble/voting_classifier.py in <genexpr>(.0)
+    163                 delayed(_parallel_fit_estimator)(clone(clf), X, transformed_y,
+    164                     sample_weight)
+--> 165                     for _, clf in self.estimators)
+    166 
+    167         return self
+
+/usr/local/lib/python3.5/dist-packages/sklearn/base.py in clone(estimator, safe)
+     63                             "it does not seem to be a scikit-learn estimator "
+     64                             "as it does not implement a 'get_params' methods."
+---> 65                             % (repr(estimator), type(estimator)))
+     66     klass = estimator.__class__
+     67     new_object_params = estimator.get_params(deep=False)
+
+TypeError: Cannot clone object '<tensorflow.contrib.learn.python.learn.estimators.dnn.DNNClassifier object at 0x7f1d773f80f0>' (type <class 'tensorflow.contrib.learn.python.learn.estimators.dnn.DNNClassifier'>): it does not seem to be a scikit-learn estimator as it does not implement a 'get_params' methods.

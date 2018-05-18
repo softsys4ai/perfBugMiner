@@ -1,0 +1,179 @@
+Keras metrics raise RuntimeError with MirroredStrategy
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): YES
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Docker built on nvidia/cuda:9.0-devel-ubuntu16.04
+TensorFlow installed from: binary
+TensorFlow version: v1.8.0-0-g93bc2e2072 1.8.0
+Cuda version: 9.0
+Bazel version: N/A (binary install)
+Python version: Python 3.5.2
+GPU model and memory:  4x1080 w/8G / See output from tf_env_collect.sh below
+Exact command to reproduce: python3 simple_tfkeras_example.py ./simple_model/
+
+Describe the problem
+Trying to adapt Keras code to be distributed using tf.contrib.distribute.MirroredStrategy, however, using metrics in the Keras model causes an Exception to be raised:
+    "Use DistributionStrategy.update() to modify a MirroredVariable.")
+RuntimeError: Use DistributionStrategy.update() to modify a MirroredVariable.
+Exception ignored in: <generator object get_controller at 0x7f7be0048f68>
+
+If the strategy is set to None or OneDeviceStrategy, the metrics perform as expected.  When strategy is MirroredStrategy, the exception is raised.  If the metrics are removed from the model.compile call, the code works as expected.
+This appears to be a bug, or an unimplemented feature, with the understanding that MirroredStrategy is new in TF 1.8.
+Source code / logs
+simple_tfkeras_example.py (slightly modified from the examples)
+# Copyright 2018 The TensorFlow Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+"""An example tf.keras model that is trained using MirroredStrategy."""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from sys import argv
+import numpy as np
+import tensorflow as tf
+
+sz = 16
+nchannels = 5
+sh = (sz,sz,sz,nchannels)
+def input_fn():
+  x = np.random.random((2,sz,sz,sz,nchannels))
+  y = np.random.randint(2, size=(2,sz,sz,sz,nchannels))
+  x = tf.cast(x, tf.float32)
+  dataset = tf.data.Dataset.from_tensor_slices((x, y))
+  dataset = dataset.repeat(10)
+  dataset = dataset.batch(32)
+  return dataset
+
+
+def main(args):
+  if len(args) < 2:
+    print('You must specify  model_dir for checkpoints such as'
+          ' /tmp/tfkeras_example./')
+    return
+
+  print('Using %s to store checkpoints.' % args[1])
+
+  # These strategies work
+  # strategy = None
+  # strategy = tf.contrib.distribute.OneDeviceStrategy('/device:GPU:0')
+  
+  # These strategies fail with:
+  # "Use DistributionStrategy.update() to modify a MirroredVariable.")
+  # RuntimeError: Use DistributionStrategy.update() to modify a MirroredVariable.
+  # Exception ignored in: <generator object get_controller at 0x7f7be0048f68>
+  strategy = tf.contrib.distribute.MirroredStrategy(
+      ['/device:GPU:0', '/device:GPU:1'])
+  strategy = tf.contrib.distribute.MirroredStrategy(num_gpus=4)
+  
+  config = tf.estimator.RunConfig(train_distribute=strategy)
+  optimizer = tf.train.GradientDescentOptimizer(0.2)
+
+  optimizer = tf.train.AdadeltaOptimizer()
+  
+  model = tf.keras.Sequential()
+  l = tf.keras.layers
+  model.add(l.Conv3D(5,3, padding='same', activation='relu', input_shape=sh))
+  # model.add(tf.keras.layers.Dense(16, activation='relu', input_shape=(10,)))
+  # model.add(tf.keras.layers.Dense(1, activation='sigmoid'))
+
+  # works correctly with OneDeviceStrategy and MirroredStrategy
+  metrics = None
+  # works correctly with OneDeviceStrategy, but not with MirroredStrategy
+  metrics = ['binary_accuracy']
+    
+  model.compile(loss='binary_crossentropy', optimizer=optimizer, metrics=metrics)
+  model.summary()
+  tf.keras.backend.set_learning_phase(True)
+  keras_estimator = tf.keras.estimator.model_to_estimator(
+      keras_model=model, config=config, model_dir=args[1])
+
+  keras_estimator.train(input_fn=input_fn, steps=1000)
+  eval_result = keras_estimator.evaluate(input_fn=input_fn)
+  print('Eval result: {}'.format(eval_result))
+
+if __name__ == '__main__':
+  tf.app.run(argv=argv)
+
+Output of tf_env_collect.sh
+== cat /etc/issue ===============================================
+Linux c036785af2e5 3.10.0-693.17.1.el7.x86_64 #1 SMP Thu Jan 25 04:11:40 CST 2018 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="16.04.4 LTS (Xenial Xerus)"
+VERSION_ID="16.04"
+VERSION_CODENAME=xenial
+
+== are we in docker =============================================
+Yes
+
+== compiler =====================================================
+c++ (Ubuntu 5.4.0-6ubuntu1~16.04.9) 5.4.0 20160609
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+== uname -a =====================================================
+Linux c036785af2e5 3.10.0-693.17.1.el7.x86_64 #1 SMP Thu Jan 25 04:11:40 CST 2018 x86_64 x86_64 x86_64 GNU/Linux
+
+== check pips ===================================================
+numpy           1.14.3
+protobuf        3.5.2.post1
+tensorflow-gpu  1.8.0
+
+== check for virtualenv =========================================
+False
+
+== tensorflow import ============================================
+tf.VERSION = 1.8.0
+tf.GIT_VERSION = v1.8.0-0-g93bc2e2072
+tf.COMPILER_VERSION = v1.8.0-0-g93bc2e2072
+Sanity check: array([1], dtype=int32)
+/usr/local/lib/python3.5/dist-packages/h5py/__init__.py:36: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+
+== env ==========================================================
+LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
+DYLD_LIBRARY_PATH is unset
+
+== nvidia-smi ===================================================
+Tue May  8 15:47:06 2018
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 384.90                 Driver Version: 384.90                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 1080    Off  | 00000000:84:00.0 Off |                  N/A |
+| 27%   35C    P0    39W / 180W |      0MiB /  8114MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   1  GeForce GTX 1080    Off  | 00000000:85:00.0 Off |                  N/A |
+| 27%   37C    P0    38W / 180W |      0MiB /  8114MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   2  GeForce GTX 1080    Off  | 00000000:88:00.0 Off |                  N/A |
+| 27%   27C    P0    39W / 180W |      0MiB /  8114MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+|   3  GeForce GTX 1080    Off  | 00000000:89:00.0 Off |                  N/A |
+| 27%   32C    P0    38W / 180W |      0MiB /  8114MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID   Type   Process name                             Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+
+== cuda libs  ===================================================
+/usr/local/cuda-9.0/targets/x86_64-linux/lib/libcudart.so.9.0.176
+/usr/local/cuda-9.0/targets/x86_64-linux/lib/libcudart_static.a

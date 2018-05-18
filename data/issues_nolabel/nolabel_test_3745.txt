@@ -1,0 +1,100 @@
+Tensorflow and import IPython errors
+
+When I use a thread-based data queue in Tensorflow and also include import IPython, I get various errors thrown at the very end of the Tensorflow session. Since I am offering a "solution" (do not import IPython), I am fine closing this immediately and re-opening if necessary. I am filing this mostly to have these errors and the cause on file in case it happens to someone else.
+Environment info
+64-bit CentOS / cuda 7.5.18 / cudnn 5.0.5 / bazel 0.2.1 / python 3.4.4 / ipython 4.0.3
+Tensorflow installed from source: 83fe2a5
+Steps to reproduce
+
+
+Create file files.txt (lines omitted):
+file0
+file1
+...
+file10
+
+
+
+Create file bug.py
+import tensorflow as tf
+import IPython  # <-- remove and errors stop happening
+
+with tf.Session() as sess:
+    filename_queue = tf.train.string_input_producer(['files.txt'], shuffle=True)
+    reader = tf.TextLineReader()
+    key, value = reader.read(filename_queue)
+    batch_size = 3
+    min_after_dequeue = 10
+    capacity = min_after_dequeue + 3 * batch_size
+    batch_fn = tf.train.shuffle_batch(
+            [value], batch_size=batch_size, capacity=capacity,
+            min_after_dequeue=min_after_dequeue)
+
+    sess.run(tf.initialize_all_variables())
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+    try:
+        while not coord.should_stop():
+            print(sess.run(batch_fn))
+            break
+    except tf.errors.OutOfRangeError:
+        pass
+    finally:
+        coord.request_stop()
+    coord.join(threads)
+
+
+
+Run python bug.py (repeatedly if no error occurs)
+
+
+What have you tried?
+Removing import IPython fixes it. I have only tested it on one platform, so I do not know if this is a universal problem.
+Of course, this might also happen if packages that import IPython are imported. It originally happened to me when I imported ipdb.
+Errors
+In the tradition of thread-related bugs, the error message is not deterministic and 100 runs breaks down as follows (I am being thorough here to make these searchable):
+
+
+
+Occurrences
+Error
+
+
+
+
+35
+No error
+
+
+34
+Error 1
+
+
+29
+Error 2
+
+
+2
+Error 3
+
+Investigating these errors further leads nowhere, since it is clear that Python is behaving erratically and variables that are clearly set one line can be corrupted the next.
+Error 1
+Exception ignored in: <bound method Session.__del__ of <tensorflow.python.client.session.Session object at 0x7f12d1d75908>>
+Traceback (most recent call last):
+  File "/.../python3.4/site-packages/tensorflow/python/client/session.py", line 524, in __del__
+AttributeError: 'NoneType' object has no attribute 'raise_exception_on_not_ok_status'
+
+Error 2
+Exception ignored in: <bound method Session.__del__ of <tensorflow.python.client.session.Session object at 0x7fde89961908>>
+Traceback (most recent call last):
+  File "/.../python3.4/site-packages/tensorflow/python/client/session.py", line 524, in __del__
+  File "/share/data/vision-greg/common/anaconda3/lib/python3.4/contextlib.py", line 126, in helper
+TypeError: 'NoneType' object is not callable
+
+Error 3
+Exception ignored in: <bound method Session.__del__ of <tensorflow.python.client.session.Session object at 0x7feec524b908>>
+Traceback (most recent call last):
+  File "/.../python3.4/site-packages/tensorflow/python/client/session.py", line 524, in __del__
+  File "/share/data/vision-greg/common/anaconda3/lib/python3.4/contextlib.py", line 59, in __enter__
+  File "/.../python3.4/site-packages/tensorflow/python/framework/errors.py", line 452, in raise_exception_on_not_ok_status
+UnboundLocalError: local variable 'status' referenced before assignment

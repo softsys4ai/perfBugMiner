@@ -1,0 +1,24 @@
+map_fn: output type error when running the graph
+
+I am adding batch support to the inception example of tensorflow serving. In order to do that I have tweaked the exporting script to support batch with a map function (I have also tweaked the inference server but I think it is not relevant for the bug):
+...
+    with tf.Graph().as_default():
+        jpegs = tf.placeholder(tf.string, shape=(None))
+        images = tf.map_fn(lambda image_buffer : tf.image.decode_jpeg(image_buffer, channels=3), jpegs, dtype=tf.uint8)
+        images = tf.map_fn(lambda decode_image : tf.image.convert_image_dtype(decode_image, dtype=tf.float32), images, dtype=tf.float32)
+        images = tf.image.resize_bilinear(images, [FLAGS.image_size, FLAGS.image_size], align_corners=False)
+        images = tf.sub(images, 0.5)
+        images = tf.mul(images, 2.0)
+        logits, _ = inception_model.inference(images, len(labels_names))
+...
+The graph is exported without any issues but when testing it in tensorflow serving the client shows this error:
+
+grpc.framework.interfaces.face.face.NetworkError: NetworkError(code=StatusCode.INTERNAL, details="Output 0 of type string does not match declared output type float for node _recv_Mul_0 = _Recvclient_terminated=true, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=3531382951825773879, tensor_name="Mul:0", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"")
+
+Somehow when the graph is executed the type of the placeholder is passed through the tensors up to the last operation before the inference graph when it shouldn't. If I comment the lines tf.sub and tf.mul the error is similar but in the tensor of the resize_bilinear function:
+
+grpc.framework.interfaces.face.face.NetworkError: NetworkError(code=StatusCode.INTERNAL, details="Output 0 of type string does not match declared output type float for node _recv_ResizeBilinear_0 = _Recvclient_terminated=true, recv_device="/job:localhost/replica:0/task:0/cpu:0", send_device="/job:localhost/replica:0/task:0/cpu:0", send_device_incarnation=-7455415421321039987, tensor_name="ResizeBilinear:0", tensor_type=DT_FLOAT, _device="/job:localhost/replica:0/task:0/cpu:0"")
+
+The error seems related with the map function.
+tensorflow-serving commit hash: 1d7a9ceae1b9630377885ae7f38129d22ae0ad93 (June 8, 2016)
+tensorflow commit: 592675b (June 7, 2016)

@@ -1,0 +1,24 @@
+Possible bug in attention seq2seq
+
+source file is seq2seq.py
+def attention(query):
+  """Put attention masks on hidden using hidden_features and query."""
+  ds = []  # Results of attention reads will be stored here.
+  for a in xrange(num_heads):
+    with vs.variable_scope("Attention_%d" % a): 
+      y = rnn_cell.linear(query, attention_vec_size, True)
+      y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
+      # Attention mask is a softmax of v^T * tanh(...).
+      s = math_ops.reduce_sum(
+          v[a] * math_ops.tanh(hidden_features[a] + y), [2, 3]) 
+      a = nn_ops.softmax(s)
+      # Now calculate the attention-weighted vector d.
+      d = math_ops.reduce_sum(
+          array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden,
+          [1, 2]) 
+      ds.append(array_ops.reshape(d, [-1, attn_size]))
+  return ds
+
+at line 440, you compute the energies, ok… then at line 441 you normalize the energies… you need to do a -FLT_MAX mask on only the part of the encoder sequence (i.e., you don’t want to pay attention to “empty” part of the sequence)... I don't see the masking op? Or am i missing something?
+I can wrap an op patch for this if nobody is working on this (let me know).
+Thanks all!

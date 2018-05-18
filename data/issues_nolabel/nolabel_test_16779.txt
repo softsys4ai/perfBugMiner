@@ -1,0 +1,73 @@
+Cross-Compiling the TensorFlow wheel for NVIDIA Jetson with CUDA support
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): 1.5.0
+Python version:  3.5.2
+Bazel version (if compiling from source): 0.10.0
+GCC/Compiler version (if compiling from source): gcc version 5.4.0 20160609
+CUDA/cuDNN version: 8.0/6.0
+GPU model and memory: Irrelevant
+Exact command to reproduce:
+
+
+Install gcc cross-compiler: sudo apt-get install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+Install the CUDA cross-aarch64 packages
+Build Python 3.5.2 for the target
+I wrote a short blog post with the details: https://jany.st/post/2018-02-05-cross-compiling-tensorflow-for-jetson-tx1-with-bazel.html
+
+git clone https://github.com/ljanyst/tensorflow.git
+cd tensorflow
+git checkout v1.5.0-cross-jetson-tx1
+cd third_party/toolchains/cpus/aarch64
+./configure.py
+cd ../../../..
+./configure
+bazel build  --config=opt --config=cuda \
+   --crosstool_top=//third_party/toolchains/cpus/aarch64:toolchain \
+    --cpu=arm  --compiler=cuda \
+    //tensorflow/tools/pip_package:build_pip_package
+
+Describe the problem
+I have succeeded, but I encountered a bunch of issues on the way. Due to my unfamiliarity with Bazel, my solution is rather hacky. It looks to me like properly fixing it is a rather low hanging fruit for a person familiar with Bazel, so I document what I have discovered here.
+1. Configuring CUDA for the target
+I could not find a way in the to check CUDA configuration script whether the source is supposed to be configured for a cross build, so I ended up changing the hardcoded paths: ljanyst/tensorflow@1a2a75f If there was a way to check if we're building for a platform that is different from the one of the build host, this could be easily turned into some sort of an if statement.
+2. Specifying target Python installation
+I could not find an easy way to patch that through, so I ended up putting it in the CROSSTOOL file:
+cxx_flag: "-isystem"
+cxx_flag: "__TARGET_PYTHON_INCLUDES__"
+
+3. Code generators depend on libtensorflow_framework.so which, in turn, depends on CUDA
+This means that I needed to have the CUDA and cuDNN libraries for the build host and needed to pass the relevant library paths to the compiler in a wrapper script.
+4. Linking of the code generators fails on the build-host side
+Bazel builds both the code generators and libtensorflow_framework.so for the host, but does not link the binaries against the framework library.
+I have worked around the two above issues by writing a compiler wrapper scripts doing the following:
+if ofile is not None:
+    is_gen = ofile.endswith('py_wrappers_cc') or ofile.endswith('gen_cc')
+    if is_cuda == 'yes' and (ofile.endswith('libtensorflow_framework.so') or is_gen):
+        cuda_libdirs = [
+            '-L', '{}/targets/x86_64-linux/lib'.format(cuda_dir),
+            '-L', '{}/targets/x86_64-linux/lib/stubs'.format(cuda_dir),
+            '-L', '{}/lib64'.format(cudnn_dir),
+        ]
+
+    if is_gen:
+        tf_libs += [
+            '-L', 'bazel-out/host/bin/tensorflow',
+            '-ltensorflow_framework'
+]
+
+call([find_executable('gcc')] + cuda_libdirs + args + tf_libs)
+5. Incomplete RPATH in the target-side libtensorflow_framwork.so
+The library gets linked using a bunch of RPATH parameters, but one seems to be missing. It causes linking errors down the road. I have added the following to the original crosstool_wrapper_driver_is_not_gcc script to fix the problem:
+  ofile = GetOptionValue(sys.argv[1:], 'o')
+  if ofile and ofile[0].endswith('libtensorflow_framework.so'):
+    cpu_compiler_flags += [
+        '-Wl,-rpath,'+os.getcwd()+'/bazel-out/arm-py3-opt/genfiles/external/local_config_cuda/cuda/cuda/lib',
+    ]
+6. Platform metadata of the resulting wheel package
+Since the build host platform is linux_x86_64, this ends up being written in the wheel metadata. The issue can be fixed by manually passing the --plat-name parameter to distutils. I have, therefore, added ljanyst/tensorflow@a9b952e to build_pip_package.sh. Please let me know if you'd like a pull request.
+It hope it's helpful.

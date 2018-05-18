@@ -1,0 +1,60 @@
+variance goes negative when set layers.batch_norm reuse=True
+
+TF 1.2.1 running on cpu & distributed version
+layers.batch_norm set reuse=True
+I use a sequence of items features which contains n (feature length) * N (sequence length) real-value features. And do batch_norm on each item of the sequence, then do some full_connected, etc. Finally concat them as dnn input.
+Here is a simple code of the this. In order to make variance quickly go negative, I set decay=0.6.
+import tensorflow as tf
+from tensorflow.contrib import layers
+import numpy as np
+
+seq_length = 1000
+batch = 100
+length = 3
+place_holders = []
+seq_raw_f = []
+for i in range(seq_length):
+  x = True if i != 0 else None
+  sequence_place_holder = tf.placeholder(dtype=tf.float32, shape=[None, length])
+  place_holders.append(sequence_place_holder)
+  sequence = layers.batch_norm(inputs=sequence_place_holder, scope="bn", reuse=x, decay=0.6, scale=True,
+                               # updates_collections=None,
+                               zero_debias_moving_mean=True)
+  seq_raw_f.append(sequence)
+
+input = tf.concat(seq_raw_f, axis=0)
+
+update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+
+sess = tf.Session()
+sess.run(tf.initialize_all_variables())
+
+place_holder = {}
+for i in range(seq_length):
+  place_holder[place_holders[i]] = np.random.rand(batch, length)
+
+for i in range(10000):
+  sess.run(update_ops, place_holder)
+  # sess.run(input, place_holder)
+  print sess.run("bn/moving_variance:0")
+
+variance can be :
+[ 0.08063364  0.08680637  0.08229597]
+[ 0.09141719  0.08313672  0.08208766]
+[ 0.07279671  0.08088712  0.08174741]
+[-0.1192904  -0.13598624 -0.31083935]
+[ 0.24966593  0.26548591  0.16420737]
+[ 0.07931737  0.07920683  0.0833094 ]
+[ 0.08559028  0.08299339  0.08146621]
+[ 0.08117087  0.08168832  0.08265808]
+
+Reason probably the code below.
+When reuse=True, this code will subtract update_delta many times according to reuse times. Then the formula goes wrong. a * m_v - (1-a) v -> a * m_v -N * (1-a) v.
+update_delta = (variable - value) * decay
+return state_ops.assign_sub(variable, update_delta, name=scope)
+
+when, updates_collections=None,  to force update variance, it still happened.
+temporary fix
+ if not zero_debias:
+   # variable * decay + value * (1 - decay)
+   state_ops.assign(variable, variable * decay + value * (1 - decay))

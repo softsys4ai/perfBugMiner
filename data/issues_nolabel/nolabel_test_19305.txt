@@ -1,0 +1,79 @@
+Inconsistent behaviour when `Dataset.repeats()` and `max_steps` differ
+
+System information
+(This issue is about an inconsistent behaviour between running TF with and without GPU. I will update the system information when it is clear to me which system that is not behaving.
+Describe the problem
+I get inconsistent behaviour when I try to train a model with/without GPU. The problem can be summarized with these few lines of code:
+    train_spec = tf.estimator.TrainSpec(
+        input_fn=lambda: make_dataset_iter(
+            n_repeats=2),  # *** THIS HAS PRECEDENCE ON GPU ***
+        max_steps=N_SAMPLES * 3)  # *** THIS HAS PRECEDENCE WITHOUT GPU ***
+
+With a make_dataset_iter function that produces 20 samples (N_SAMPLES=20) I will get a model that is trained for 60 global steps (data repeated 3 times) when I run locally without GPU, and 40 global steps (data repeated 2 times) when I run it in a Docker container on a GPU cluster. Not yet sure whether it is a GPU thing, or something else related to the way I run it in the cloud.
+Note that this also is a problem when either max_steps or Dataset.repeats() are set to the default value None and the other is set to something specific. This is probably the use-case where most people will experience this inconsistency.
+Which of the two are the expected behaviours?
+Full code and logs can be found below.
+Source code / logs
+Minimal code reproducing the issue:
+import tensorflow as tf
+
+
+BATCH_SIZE = 5
+N_SAMPLES = 20
+
+
+def lr_model_fn(features, labels, mode):
+    """Simple logistic regression model"""
+    prediction = tf.layers.dense(features, units=1)
+    loss = tf.losses.mean_squared_error(prediction, labels)
+
+    return tf.estimator.EstimatorSpec(
+        mode=mode,
+        predictions=prediction,
+        loss=loss,
+        train_op=tf.train.AdamOptimizer().minimize(
+            loss=loss,
+            global_step=tf.train.get_global_step(),
+        )
+    )
+
+
+def make_dataset_iter(n_repeats=1):
+    """Turns an instance of a generator into a Dataset"""
+    dataset = tf.data.Dataset.from_generator(
+        generator=lambda: zip(range(N_SAMPLES), range(N_SAMPLES)),
+        output_types=(tf.float32))
+    dataset = dataset.repeat(n_repeats)
+    dataset = dataset.make_one_shot_iterator()
+    dataset = dataset.get_next()
+    features, labels = dataset[0], dataset[1]
+    return tf.reshape(features, [-1, 1]), tf.reshape(labels, [-1, 1])
+
+
+def run_experiment():
+    # Create the estimator
+    estimator = tf.estimator.Estimator(
+        model_fn=lr_model_fn,
+    )
+    # Build train/eval specs
+    train_spec = tf.estimator.TrainSpec(
+        input_fn=lambda: make_dataset_iter(
+            n_repeats=2),  # *** THIS HAS PRECEDENCE ON GPU ***
+        max_steps=N_SAMPLES * 3)  # *** THIS HAS PRECEDENCE WITHOUT GPU ***
+    eval_spec = tf.estimator.EvalSpec(
+        input_fn=make_dataset_iter)
+    # Run training
+    tf.estimator.train_and_evaluate(
+        estimator,
+        train_spec,
+        eval_spec
+    )
+
+
+if __name__ == "__main__":
+    tf.logging.set_verbosity(tf.logging.INFO)
+    run_experiment()
+
+
+Logs from the model running on GPU cluster
+Logs from my local machine

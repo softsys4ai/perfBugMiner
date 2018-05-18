@@ -1,0 +1,43 @@
+TensorFlow master build failing: error: invalid initialization of reference
+
+We are building TensorFlow master (commit id  461caa8 ) using bazel on 64 bit platform.
+We need a fix for 64 bit platform as mentioned in  #1044 in google/protobuf. So we tried to change the protobuf commit id used in tensorflow/workspace.bzl file with recent protobuf commit id as mentioned below.
++++ b/tensorflow/workspace.bzl
+@@ -88,7 +88,8 @@ def tf_workspace(path_prefix = "", tf_repo_name = ""):
+   native.git_repository(
+     name = "protobuf",
+     remote = "https://github.com/google/protobuf",
+- commit = "ed87c1fe2c6e1633cadb62cf54b2723b2b25c280",
++# commit = "ed87c1fe2c6e1633cadb62cf54b2723b2b25c280",
++ commit = "c59473d53eafadd126502657e5c5c33e952b67ed",
+   )
+
+But TensorFlow build is failing with below errors:
+
+ERROR: /home/test/tensorflow_proto_commit/tensorflow/tensorflow/core/BUILD:941:1: C++ compilation of rule '//tensorflow/core:framework_internal' failed: gcc failed: error executing command /opt/gccgo/bin/gcc -U_FORTIFY_SOURCE '-D_FORTIFY_SOURCE=1' -fstack-protector -Wall -Wl,-z,-relro,-z,now -B/opt/gccgo/bin -B/usr/bin -Wunused-but-set-parameter -Wno-free-nonheap-object ... (remaining 108 argument(s) skipped): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+
+tensorflow/core/example/feature_util.cc: In function 'const typename tensorflow::internal::RepeatedFieldTrait<FeatureType>::Type& tensorflow::GetFeatureValues(const string&, const tensorflow::Example&) [with FeatureType = long long int; typename tensorflow::internal::RepeatedFieldTrait<FeatureType>::Type = google::protobuf::RepeatedField<long long int>; std::__cxx11::string = std::__cxx11::basic_string<char>]':
+tensorflow/core/example/feature_util.cc:54:66: error: invalid initialization of reference of type 'const google::protobuf::RepeatedField<long long int>&' from expression of type 'const google::protobuf::RepeatedField<long int>'
+   return example.features().feature().at(name).int64_list().value();
+                                                                  ^
+tensorflow/core/example/feature_util.cc: In function 'typename tensorflow::internal::RepeatedFieldTrait<FeatureType>::Type* tensorflow::GetFeatureValues(const string&, tensorflow::Example*) [with FeatureType = long long int; typename tensorflow::internal::RepeatedFieldTrait<FeatureType>::Type = google::protobuf::RepeatedField<long long int>; std::__cxx11::string = std::__cxx11::basic_string<char>]':
+tensorflow/core/example/feature_util.cc:62:23: error: cannot convert 'google::protobuf::RepeatedField<long int>*' to 'google::protobuf::RepeatedField<long long int>*' in return
+       ->mutable_value();
+                       ^
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+
+
+Is there any specific protobuf commit id to be used with TensorFlow?
+We could build TensorFlow without making any change in tensorflow/workspace.bzl and manually adding fix for 64 bit platform in  external/protobuf/src/google/protobuf/stubs/atomicops_internals_generic_gcc.h .
+We need to use protobuf with commit id c59473d or recent , where a fix for 64 bit platform has been committed.
+Environment info
+Operating System: RedHat , Ubuntu
+Installed version of CUDA and cuDNN:  Not installed
+The output from python -c "import tensorflow; print(tensorflow.__version__)". master
+If installed from source, provide
+
+The commit hash (git rev-parse HEAD)  461caa8
+The output of bazel version master branch (0.3.1-2016-09-12)
+
+Steps to Reproduce:
+bazel build -c opt //tensorflow/tools/pip_package:build_pip_package

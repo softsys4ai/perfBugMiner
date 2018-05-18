@@ -1,0 +1,154 @@
+Error triggers when gradients calculated inside the tf.map_fn function
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): macOS 10.13
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.6.0-rc1
+Python version: 3.6
+Bazel version (if compiling from source): 0.11.0
+GCC/Compiler version (if compiling from source): 4.2.1
+CUDA/cuDNN version: -
+GPU model and memory: -
+Exact command to reproduce:
+
+Describe the problem
+When I try to calculate jacobian using map_fn I get then following error: Could not write to TensorArray index 1 because it has already been read.
+I've checked one of the similar issues, but suggested solutions didn't help to solve my problem: #13983
+Based on the error logs it looks to me that problem happens because I try to calculate gradient multiple times with the same set of parameters. I tried to run my script with n_samples=1 (see code below) and I get the expected result without error. In addition, error happens with index 1, which again point that probably first iteration was finished properly and error appears when function reaches second  sample.
+Source code / logs
+import numpy as np
+import tensorflow as tf
+
+
+def jacobians(errors, parameters):
+    return tf.map_fn(
+        fn=lambda x, params=parameters: tf.gradients(x, params),
+        elems=errors,
+        dtype=[x.dtype for x in parameters],
+        back_prop=False,
+        name='jacobian',
+        parallel_iterations=1)
+
+
+x = tf.placeholder(tf.float32, (None, 2))
+y = tf.placeholder(tf.float32, (None, 1))
+weight = tf.Variable(np.random.random((2, 1)), dtype=tf.float32)
+bias = tf.Variable(np.random.random((1, 1)), dtype=tf.float32)
+
+prediction = tf.matmul(x, weight) + bias
+errors = tf.square(y - prediction)
+
+n_samples = 5
+Js = jacobians(errors, [weight, bias])
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer())
+    sess.run(Js, {
+        x: np.random.random((n_samples, 2)),
+        y: np.random.random((n_samples, 1)),
+    })
+When I run this code I get the following exception
+/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/h5py/__init__.py:36: FutureWarning: Conversion of the second argument of issubdtype from `float` to `np.floating` is deprecated. In future, it will be treated as `np.float64 == np.dtype(float).type`.
+  from ._conv import register_converters as _register_converters
+2018-03-03 11:15:16.808741: W tensorflow/core/framework/op_kernel.cc:1273] OP_REQUIRES failed at tensor_array_ops.cc:415 : Invalid argument: TensorArray jacobian/TensorArray_1@jacobian/while/gradients: Could not write to TensorArray index 1 because it has already been read.
+Traceback (most recent call last):
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1361, in _do_call
+    return fn(*args)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1340, in _run_fn
+    target_list, status, run_metadata)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/framework/errors_impl.py", line 516, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: TensorArray jacobian/TensorArray_1@jacobian/while/gradients: Could not write to TensorArray index 1 because it has already been read.
+	 [[Node: jacobian/while/gradients/jacobian/while/TensorArrayReadV3_grad/TensorArrayWrite/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"](jacobian/while/gradients/jacobian/while/TensorArrayReadV3_grad/TensorArrayGrad/TensorArrayGradV3, jacobian/while/Identity, jacobian/while/gradients/Fill, jacobian/while/TensorArrayReadV3/Enter_1)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/itdxer/Downloads/jacobian_fail_example.py", line 29, in <module>
+    y: np.random.random((n_samples, 1))
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 905, in run
+    run_metadata_ptr)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1137, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1355, in _do_run
+    options, run_metadata)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1374, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: TensorArray jacobian/TensorArray_1@jacobian/while/gradients: Could not write to TensorArray index 1 because it has already been read.
+	 [[Node: jacobian/while/gradients/jacobian/while/TensorArrayReadV3_grad/TensorArrayWrite/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"](jacobian/while/gradients/jacobian/while/TensorArrayReadV3_grad/TensorArrayGrad/TensorArrayGradV3, jacobian/while/Identity, jacobian/while/gradients/Fill, jacobian/while/TensorArrayReadV3/Enter_1)]]
+
+Caused by op 'jacobian/while/gradients/jacobian/while/TensorArrayReadV3_grad/TensorArrayWrite/TensorArrayWriteV3', defined at:
+  File "/Users/itdxer/Downloads/jacobian_fail_example.py", line 23, in <module>
+    Js = jacobians(errors, [weight, bias])
+  File "/Users/itdxer/Downloads/jacobian_fail_example.py", line 11, in jacobians
+    parallel_iterations=1)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/functional_ops.py", line 413, in map_fn
+    swap_memory=swap_memory)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 3278, in while_loop
+    result = loop_context.BuildLoop(cond, body, loop_vars, shape_invariants)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 3013, in BuildLoop
+    pred, body, original_loop_vars, loop_vars, shape_invariants)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2953, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/functional_ops.py", line 403, in compute
+    packed_fn_values = fn(packed_values)
+  File "/Users/itdxer/Downloads/jacobian_fail_example.py", line 7, in <lambda>
+    fn=lambda x, params=parameters: tf.gradients(x, params),
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 611, in gradients
+    lambda: grad_fn(op, *out_grads))
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 377, in _MaybeCompile
+    return grad_fn()  # Exit early
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/gradients_impl.py", line 611, in <lambda>
+    lambda: grad_fn(op, *out_grads))
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_grad.py", line 105, in _TensorArrayReadGrad
+    w_g = g.write(index, grad)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/util/tf_should_use.py", line 118, in wrapped
+    return _add_should_use_warning(fn(*args, **kwargs))
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 879, in write
+    return self._implementation.write(index, value, name=name)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/util/tf_should_use.py", line 118, in wrapped
+    return _add_should_use_warning(fn(*args, **kwargs))
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 278, in write
+    name=name)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 7385, in _tensor_array_write_v3
+    flow_in=flow_in, name=name)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 3270, in create_op
+    op_def=op_def)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1650, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+...which was originally created as op 'jacobian/while/TensorArrayReadV3', defined at:
+  File "/Users/itdxer/Downloads/jacobian_fail_example.py", line 23, in <module>
+    Js = jacobians(errors, [weight, bias])
+[elided 4 identical lines from previous traceback]
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/control_flow_ops.py", line 2953, in _BuildLoop
+    body_result = body(*packed_vars_for_body)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/functional_ops.py", line 402, in compute
+    packed_values = input_pack([elem_ta.read(i) for elem_ta in elems_ta])
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/functional_ops.py", line 402, in <listcomp>
+    packed_values = input_pack([elem_ta.read(i) for elem_ta in elems_ta])
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/util/tf_should_use.py", line 58, in fn
+    return method(self, *args, **kwargs)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/util/tf_should_use.py", line 58, in fn
+    return method(self, *args, **kwargs)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/util/tf_should_use.py", line 58, in fn
+    return method(self, *args, **kwargs)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 861, in read
+    return self._implementation.read(index, name=name)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/tensor_array_ops.py", line 260, in read
+    name=name)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/ops/gen_data_flow_ops.py", line 6468, in _tensor_array_read_v3
+    dtype=dtype, name=name)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 3270, in create_op
+    op_def=op_def)
+  File "/Users/itdxer/.pyenv/versions/neupy36/lib/python3.6/site-packages/tensorflow/python/framework/ops.py", line 1650, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): TensorArray jacobian/TensorArray_1@jacobian/while/gradients: Could not write to TensorArray index 1 because it has already been read.
+	 [[Node: jacobian/while/gradients/jacobian/while/TensorArrayReadV3_grad/TensorArrayWrite/TensorArrayWriteV3 = TensorArrayWriteV3[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/device:CPU:0"](jacobian/while/gradients/jacobian/while/TensorArrayReadV3_grad/TensorArrayGrad/TensorArrayGradV3, jacobian/while/Identity, jacobian/while/gradients/Fill, jacobian/while/TensorArrayReadV3/Enter_1)]]

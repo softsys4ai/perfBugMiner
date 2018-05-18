@@ -1,0 +1,48 @@
+TensorFlow crashing on IBM POWER; request debug advice
+
+We're seeing various crashes while running TensorFlow on IBM POWER systems with Ubuntu 16.04. We'd welcome any debugging advice or comments, especially about debug features or about reducing the size/complexity of TF to simplify debug.
+Problem isolation information:
+
+
+Occurs with any of TF 0.9, 0.10, and recent master (e.g. 2cbb9b5 of Oct 26th)
+
+
+Occurs while training inception model on ILSVRC 2012 dataset. Model is from: https://github.com/tensorflow/models.git  inception/
+
+
+Independent of CUDA / GPU; occurs even if we compile with:
+TF_NEED_CUDA=0
+TF_NEED_GCP=0
+TF_NEED_HDFS=0
+
+
+Occurs after varying run times. Appears to occur sooner with higher thread counts. Very possibly a race of some sort.
+
+
+Does not occur with Ubuntu 15.10's GLIBC 2.21 (or earlier) but does occur with Ubuntu 16.04's GLIBC 2.23 (or later). So appears to be a problem in (or at least exposed by) GLIBC 2.22 or 2.23.
+
+
+TF runs (mostly) clean under valgrind --tool=memcheck. (There are some complaints about bad behavior by python at startup, but then silence. We see similar complaints running other python apps.)
+
+
+To try to simplify analysis, we're:
+
+
+Building without CUDA, GCP, HDFS support
+
+
+Limiting threading by forcing tensorflow/core/platform/posix/port.cc NumSchedulableCPUs() to return a small value
+
+
+Forcing gcc to perform extra stack checking (updating tf_copts in tensorflow/tensorflow.bzl to include "-fstack-protector-all")
+
+
+Nature of the crash:
+The crash is usually a segfault, and often because a pointer was damaged while it was sitting on the stack.
+The damage is quite consistent. Under linux on POWER, pointers to stack and heap will generally have the form 0x00003nnn nnnnnnnn. The damage always seems to be that the high half-word is changed from 0x0000 to 0x0001 (so looks like a short/half is set or incremented).
+Occasionally the damaged pointer started life as NULL, and so we end up with a dereference of 0x0001000000000000.
+In one case the pointer that was damaged was the stack pointer (r1), which would not normally be itself stored and retrieved from the stack. So maybe in that damage occurred:
+a) while the thread was inactive and r1 sitting in a context save area,
+b) in some odd case where r1 was saved on the stack, e.g. setjmp() / longjmp().
+That suggests the crashing thread may not be the thread that's causing the damage.
+I didn't find any obvious matches on stackoverflow (no crash reports with "stack smashing" or "power"). I did see (unresolved) issue #3174 from July, but can't be sure that's related.

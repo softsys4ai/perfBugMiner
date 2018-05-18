@@ -1,0 +1,46 @@
+Distributed FIFOQueue with shared_name is not shared
+
+System information
+
+Environment:
+Shared Cluster
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+RHEL Server 7.2
+TensorFlow installed from (source or binary):
+pip install tensorflow-gpu
+TensorFlow version (use command below):
+v1.5.0-0-g37aa430d84 1.5.0
+Python version:
+3.6
+CUDA/cuDNN version:
+9.0/7.0
+GPU model and memory:
+N/A -- GPU not allocated
+
+I am attempting to use a FIFOQueue to signal the parameter servers to shut down on a multi-machine shared cluster, based on this example. After some testing, I believe that shared_name simply doesn't seem to do anything--even after removing the dequeue() operations, the number of elements in the FIFOQueue don't correlate to the number of workers.
+Minimum Reproducible Code
+# for example
+cluster = tf.train.ClusterSpec({
+    'ps': ['192.168.1.1:36598'],
+    'worker': ['192.168.1.2:40596', '192.168.1.3:47324', '192.168.1.4:38923']
+})
+# ... #
+server = tf.train.Server(cluster, job_name=job_name, task_index=task)
+
+# using server.join() causes cluster management headaches
+# use a FIFOQueue to tell the parameter server to shutdown
+if job_name == 'ps':
+    with tf.device('/job:ps/task:%d' % task):
+        queue = tf.FIFOQueue(cluster.num_tasks('worker'), tf.int32, shared_name='done_queue')
+    with tf.Session(server.target) as sess:
+        sess.run(queue.dequeue())
+        print('ps %d: quitting' % task)
+
+# MonitoredTrainingSession with FinalOpsHook not shown
+elif job_name == 'worker':
+    with tf.device('/job:worker/task:%d' % task):
+        with tf.name_scope('done_queue'):
+            queue = tf.FIFOQueue(cluster.num_tasks('worker'), tf.int32, shared_name='done_queue')
+    with tf.Session(server.target) as sess:
+        _, size = sess.run([queue.enqueue(1), queue.size()])
+        print('Worker:%d sending done to ps:%d [elements=%d]' % (task, 0, size))

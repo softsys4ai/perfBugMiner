@@ -1,0 +1,26 @@
+partial_run won't accept optimizers as fetch
+
+Environment info
+Operating System: ubuntu 14.04
+tensorflow 0.7.1
+Installed version of CUDA and cuDNN: cuda-7.5, cuDNN 4
+I'd like to use partial_run to insert some lookahead processing during training attention-based image processing, but I can't complete the step because partial_run won't accept an operation as a fetch arg, and optimizers don't return any downstream variables. See the trivial case below.
+Seems like a bug in the partial_run implementation, or do I misunderstand its use?
+....
+y_conv=tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2,name='softmax')
+cross_entropy = -tf.reduce_sum(y_*tf.log(y_conv))
+train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
+tf.initialize_all_variables().run()
+for i in range(100000):
+batch =shapes.train.next_batch(batch_size)
+h = sess.partial_run_setup([y_conv,train_step],[x,y_,keep_prob])
+im_state=sess.partial_run(h,y_conv,feed_dict={x:batch[0], y_: batch[1], keep_prob: 0.5})
+final=sess.partial_run(h,[train_step])
+looking at the code, it seems any ops put in fetch are moved to the target_list, which must be empty when _do_call is running for partial_run. As a result, this error on the "final=" last step above:
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.pyc in _prun_fn(session, handle, feed_dict, fetch_list)
+557     def _prun_fn(session, handle, feed_dict, fetch_list):
+558       if target_list:
+--> 559         raise RuntimeError('partial_run() requires empty target_list.')
+560       return tf_session.TF_PRun(session, handle, feed_dict, fetch_list)
+561
+RuntimeError: partial_run() requires empty target_list.

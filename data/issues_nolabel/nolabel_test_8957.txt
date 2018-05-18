@@ -1,0 +1,22 @@
+Tensorflow multi-GPU training and variable scope
+
+Context
+I'm working on a detector model on multiple GPUs using Tensorflow 1.0. As suggested here, Gradients are computed on multiple GPUs individually and are averaged on CPU. To share the trainable variables (e.g. weights and biases) across the GPU towers, the reuse flag is turned on using tf.get_variable_scope().reuse_variables(), as in the cifar10 example. The difference is that I am using an AdamOptimizer instead of GradientDescentOptimizer.
+Problem
+When I run the training job, it prints out a long stacktrace and raise the following error at opt.apply_gradients():
+ValueError: Variable conv1_1/kernel/Adam/ does not exist, or was not created with tf.get_variable(). Did you mean to set reuse=None in VarScope?
+
+Looking into the source code I found that the AdamOptimizer is creating a number of zero-initialized slots within the _create_slots() method, wherein it calls the _zeros_slot(). This calls a separate module called the slot_creator (source code linked).
+In line 62 of the slot_creator, it uses variable_scope.get_variable(). This used to be tf.Variable() in 0.12.
+My understanding of variable scopes is that variable_scope.get_variable() would fail to create a variable if reuse flag is on`. See here for source code.
+But the cifar10 example by Tensorflow creators seems to suggest enabling reuse to share variables across the GPU towers using tf.get_variable_scope().reuse_variables(). This happens before we average and apply the gradients. It looks like Tensorflow 1.0 refuses to create variables for the AdamOptimizer.
+This happens for all optimizers that directly or indirectly call the slot_creator module.
+Question
+As a quick fix, I added a custom function into the VariableScope class to disable the _reuse flag right before calling opt.apply_gradients. However, I am sure there is a merit to forcing the reuse flag to be only set to True. I am not sure what the better workaround would be. Any suggestions?
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+I created question here
+Environment info
+Operating System: Ubuntu 14.04 LTS
+Installed version of CUDA and cuDNN: 8.0 and 5.1 respectively
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+The commit hash (git rev-parse HEAD): 1cb9689#diff-a25cc0fc9d475568e0069e5dc0b67d85 (see slot_creator)

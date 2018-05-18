@@ -1,0 +1,59 @@
+coord.request_stop() doesn't stop the threads
+
+Environment info
+Operating System: Arch Linux
+Installed version of CUDA and cuDNN: cuda 7.5 cuDNNv4
+If installed from sources, provide the commit hash:
+commit cf1659d
+Steps to reproduce
+import tensorflow as tf
+
+queue_size = 100
+with tf.Graph().as_default():
+  sess = tf.Session()
+  queue = tf.FIFOQueue(capacity=queue_size, dtypes=tf.int32)
+  enqueue_placeholder = tf.placeholder(dtype=tf.int32)
+  enqueue_op = queue.enqueue(enqueue_placeholder)
+  dequeue_op = queue.dequeue()
+  for f in range(queue_size):
+    sess.run([enqueue_op], feed_dict={enqueue_placeholder: f})
+  queue.close()
+
+  dequeue_op = tf.reshape(dequeue_op, shape=[1])
+  queue_batch = tf.train.batch([dequeue_op], batch_size=1, num_threads=1, capacity=64)
+
+  coord = tf.train.Coordinator()
+  threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+  for i in range(queue_size):
+    print(sess.run([queue_batch]))
+
+  coord.request_stop()
+  coord.join(threads, stop_grace_period_secs=5)
+  sess.close()
+
+What have you tried?
+https://www.tensorflow.org/versions/r0.8/how_tos/reading_data/index.html#creating-threads-to-prefetch-using-queuerunner-objects
+According to documentation coord.request_stop() should stop the threads but in this case
+we get a deadlock in coord.join().
+Logs or other output that would be helpful
+...
+[array([[97]], dtype=int32)]
+[array([[98]], dtype=int32)]
+[array([[99]], dtype=int32)]
+Traceback (most recent call last):
+  File "test_queue.py", line 26, in <module>
+    sess.close()
+  File "/usr/lib/python3.5/contextlib.py", line 77, in __exit__
+    self.gen.throw(type, value, traceback)
+  File "/usr/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 3213, in get_controller
+    yield default
+  File "test_queue.py", line 25, in <module>
+    coord.join(threads, stop_grace_period_secs=5)
+  File "/usr/lib/python3.5/site-packages/tensorflow/python/training/coordinator.py", line 289, in join
+    " ".join(stragglers))
+RuntimeError: ('Coordinator stopped with threads still running: %s', 'Thread-1')
+
+If I put sess.close() before coord.join() the threads are killed but there is still a weird warning which should not exist because I called queue.close() before.
+...
+W tensorflow/core/kernels/queue_base.cc:300] _0_fifo_queue: Skipping cancelled dequeue attempt with queue not closed

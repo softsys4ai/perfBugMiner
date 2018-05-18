@@ -1,0 +1,82 @@
+pytorch 2.5x faster on VGG16
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Started on SO, and was told to post here (SO post)
+Environment info
+Operating System:
+Ubuntu 14.04 + Maxwell Titan X
+Installed version of CUDA and cuDNN:
+CUDA 8.0, cuDNN 5.1
+:~$ ls -l /usr/local/cuda/lib64/libcud*
+-rw-r--r-- 1 root root    558720 Jan 25 08:23 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root        16 Jan 25 08:23 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root        19 Jan 25 08:23 /usr/local/cuda/lib64/libcudart.so.8.0 -> libcudart.so.8.0.44
+-rwxr-xr-x 1 root root    415432 Jan 25 08:23 /usr/local/cuda/lib64/libcudart.so.8.0.44
+-rw-r--r-- 1 root root    775162 Jan 25 08:23 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 1000 users       13 Jul 27 07:55 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.5
+lrwxrwxrwx 1 1000 users       17 Jul 27 07:55 /usr/local/cuda/lib64/libcudnn.so.5 -> libcudnn.so.5.1.5
+-rwxrwxr-x 1 1000 users 79337624 Jul 27 07:53 /usr/local/cuda/lib64/libcudnn.so.5.1.5
+-rw-rw-r-- 1 1000 users 69756172 Jul 27 07:53 /usr/local/cuda/lib64/libcudnn_static.a
+Installed from binary pip package :
+
+https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow_gpu-0.12.1-cp35-cp35m-linux_x86_64.whl with an Anaconda distribution
+The output from python -c "import tensorflow; print(tensorflow.__version__)":
+
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:128] successfully opened CUDA library libcurand.so locally
+0.12.1
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Using the following code to do a forward pass on a pretrained VGG16 :
+import tensorflow as tf
+from tensorflow.contrib import slim
+from tensorflow.contrib.slim import nets
+
+tf.reset_default_graph()
+# Use RNG to avoid the feed_dict argument
+input_images = tf.random_uniform((16, 224, 224, 3), maxval=255)  
+preds = nets.vgg.vgg_16(input_images, is_training=False)[0]
+saver = tf.train.Saver()
+
+config = tf.ConfigProto(log_device_placement=True)
+sess = tf.InteractiveSession(config=config)
+saver.restore(sess, './vgg_16.ckpt')
+
+# With jupyter notebook magic
+%timeit sess.run(preds)
+Compared to the pytorch version on the same machine :
+import numpy as np
+import torch
+import torchvision.models as models
+from torch.autograd import Variable
+torch.backends.cudnn.benchmark = True
+
+net = models.vgg16()
+net.cuda()
+
+_in = Variable(torch.from_numpy(np.random.randn(16, 3, 224, 224).astype(np.float32)).cuda())
+
+# With jupyter notebook magic
+%timeit net(_in)
+I get the following results by comparing the frameworks. Surprisingly, there is a small difference with the more complicated resnet-50 while I get a huge gap for the VGG16 architecture which (almost) just uses 3x3 convolutions.
+
+
+
+Model
+TF
+pytorch
+
+
+
+
+VGG16
+160ms
+65ms
+
+
+resnet-50
+58ms
+48ms

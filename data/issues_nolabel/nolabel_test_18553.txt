@@ -1,0 +1,13 @@
+libtensorflow_cc.so on Android
+
+Hello again team TF!
+After revisions, I made a more stable solution for building libtensorflow_cc.so on android that should avoid breaking common build scenarios. There may be issues if attempting to build for non-android armeabi-v7a or arm64-v8a, but I'm unable to confirm.
+I found issues with android NDK r15 and bazel 0.11.0, forcing an update to NDK r16 and bazel 0.12.0 to ensure a working android build. As part of this, I also made a switch to the new libc++ version of STL in android for the tensorflow build, which does not suffer from the near proximity to GPLv3 with gnustl_static/shared.
+I am not certain, but it seems like the default --config=android chain still uses gnustl libraries, which are not fully C++11-compatible and due to be deprecated in the android NDK.
+A terrifying build command is still being used:
+bazel build -c opt --config=monolithic --android_crosstool_top=@androidndk//:toolchain-libcpp --crosstool_top=@androidndk//:toolchain-libcpp --host_crosstool_top=@bazel_tools//tools/cpp:toolchain --cpu=$ARCH //tensorflow:libtensorflow_cc.so --cxxopt="-std=c++11" --copt="-DMDB_USE_ROBUST=0" --cxxopt="-DTENSORFLOW_DISABLE_META" --cxxopt="-DEIGEN_HAS_C99_MATH" --cxxopt="-Wno-c++11-narrowing" --copt="-DS_IREAD=00400" --copt="-DS_IWRITE=00200" --verbose_failures --copt="-DABSL_BASE_POLICY_CHECKS_H_" --copt="-DPNG_ARM_NEON_OPT=0"
+Most of these are to avoid build issues within libraries that do not have specific checks in place for android toolchains. I presume the build command could be shortened by introducing the commands into the android_cc flag and the specific libraries in question, but it's out of scope for my case right now.
+Some of these flags may also have been resolved by using @androidndk//:toolchain-libcpp, especially the need for TENSORFLOW_DISABLE_META, EIGEN_HAS_C99_MATH and MDB_USE_ROBUST, and DS_*, but I did not have time to test all variants.
+To enable the C++ API, I created a new config, android_cc, which is checked for in all applicable places. The - beyond all others - most common fault is -lpthread being set in various files and libraries. This may be possible to resolve by instead using "-pthread", which is reportedly a flag for specifying pthread inclusion in a platform-compatible manner.
+Further, I had to add build files for gemmlowp, protobuf_archive and boringssl, to correct similar flag issues. Ideally, these should be resolved in the respective packages.
+A remaining problem is that tensorflow is currently linking the static android STL library versions. I could not find a way to resolve this with bazel. Fortunately it does not seem to be visible externally, so other libraries linked with c++_shared/static still work.

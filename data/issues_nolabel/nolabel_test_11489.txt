@@ -1,0 +1,104 @@
+import_graph_def input_map not updating all attributes
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Reproducible script below
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary/pip
+TensorFlow version (use command below): 1.2.1
+Python version: 3.5
+Bazel version (if compiling from source): N/A
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+Exact command to reproduce:
+
+import tensorflow as tf
+from tensorflow.python.framework import graph_util
+from tensorflow.core.framework import graph_pb2
+
+orig_model = "input_map_orig.pb"
+mapped_model = "input_map_modified.pb"
+
+# Create a graph with uint8 placeholder that gets
+# cast to float32 before going through image whitening
+tf.reset_default_graph()
+img = tf.placeholder(tf.uint8, shape=(1, None, None, 3), name="input_tensor")
+float_img = tf.cast(img, tf.float32, "ToFloat")
+whiten_fn = lambda img: tf.image.per_image_standardization(img)
+whitened = tf.map_fn(whiten_fn, float_img, name='image_whitening')
+identity = tf.identity(whitened, name="id")
+
+# Write graph
+output_names = ["id"]
+with tf.Session() as sess:
+  input_graph_def = sess.graph_def
+  output_graph_def = graph_util.convert_variables_to_constants(sess,
+                                                               input_graph_def,
+                                                               output_names)
+  tf.train.write_graph(output_graph_def, "./", orig_model, False)
+
+# Load the graph again
+tf.reset_default_graph()
+graph_def = graph_pb2.GraphDef()
+with open(orig_model, "rb") as f:
+  graph_def.ParseFromString(f.read())
+
+# Rewire the graph with a float32 placeholder directly
+img = tf.placeholder(tf.float32, shape=(1, None, None, 3), name="input")
+input_map = {
+  "ToFloat": img,
+  }
+tf.import_graph_def(graph_def, input_map=input_map, name="")
+
+# Write the modified graph
+graph = tf.get_default_graph()
+output_names = ["id"]
+with tf.Session(graph=graph) as sess:
+  graph = tf.get_default_graph()
+  input_graph_def = graph.as_graph_def()
+  output_graph_def = graph_util.convert_variables_to_constants(sess,
+                                                               input_graph_def,
+                                                               output_names)
+  tf.train.write_graph(output_graph_def, "./", mapped_model, False)
+
+# Try to load the modified graph
+tf.reset_default_graph()
+graph_def = graph_pb2.GraphDef()
+with open(mapped_model, "rb") as f:
+  graph_def.ParseFromString(f.read())
+
+g = tf.import_graph_def(graph_def)
+Describe the problem
+I noticed this issue trying to modify (via input_map) an object detection model (from tf/models/object_detection) to directly accept float32 instead of uint8. I have managed to reproduce the using the above minimal example. It seems like one of the attributes of one of the operations doesn't get fully updated. Possibly related to  #9925 .
+Source code / logs
+Traceback:
+Traceback (most recent call last):
+  File "input_map_bug.py", line 71, in <module>
+    g = tf.import_graph_def(graph_def)
+  File "/home/s.antol/cv/py3virtualenvs/tf1.2/lib/python3.5/site-packages/tensorflow/python/framework/importer.py", line 331, in import_graph_def
+    op_to_bind_to, node.name))
+ValueError: Specified colocation to an op that does not exist during import: ToFloat in image_whitening/TensorArrayUnstack/TensorArrayScatter/TensorArrayScatterV3
+
+Looking through the protobuf text version, the node below has s: "loc:@ToFloat" instead of (what I think should be) s:"loc:@input":
+node {
+  name: "image_whitening/TensorArrayUnstack/TensorArrayScatter/TensorArrayScatterV3"
+  op: "TensorArrayScatterV3"
+  input: "image_whitening/TensorArray"
+  input: "image_whitening/TensorArrayUnstack/range"
+  input: "input"
+  input: "image_whitening/TensorArray:1"
+  attr {
+    key: "T"
+    value {
+      type: DT_FLOAT
+    }
+  }
+  attr {
+    key: "_class"
+    value {
+      list {
+        s: "loc:@ToFloat"
+      }
+    }
+  }
+}

@@ -1,0 +1,128 @@
+embedding_lookup on multiple dimensions with AdagradOptimizer throwing exception
+
+I am completing the Udacity course on Tensorflow, and noticed that when embedding_lookup is used in 3 dimensions with AdagradOptimizer, the optimizer throws an error:
+CODE (with error):
+import math
+import tensorflow as tf
+
+batch_size = 128
+embedding_size = 128 # Dimension of the embedding vector.
+skip_window = 1 # How many words to consider left and right.
+num_sampled = 64 # Number of negative examples to sample.
+vocabulary_size = 50000
+
+graph = tf.Graph()
+
+with graph.as_default():
+
+  # Input data.
+  train_dataset = tf.placeholder(tf.int32, shape=[batch_size, 2 * skip_window])
+  train_labels = tf.placeholder(tf.int32, shape=[batch_size, 1])
+
+  # Variables.
+  embeddings = tf.Variable(
+    tf.random_uniform([vocabulary_size, embedding_size], -1.0, 1.0))
+  softmax_weights = tf.Variable(
+    tf.truncated_normal([vocabulary_size, embedding_size],
+                         stddev=1.0 / math.sqrt(embedding_size)))
+  softmax_biases = tf.Variable(tf.zeros([vocabulary_size]))
+
+  # Model.
+  # Look up embeddings for inputs.
+  embed = tf.nn.embedding_lookup(embeddings, train_dataset)
+  embed2 = tf.Variable(tf.zeros([batch_size, embedding_size]))
+  for i in xrange(2*skip_window):
+    embed2 += embed[:, i, :]
+  # Compute the softmax loss, using a sample of the negative labels each time.
+  loss = tf.reduce_mean(
+    tf.nn.sampled_softmax_loss(softmax_weights, softmax_biases, embed2,
+                               train_labels, num_sampled, vocabulary_size))
+  optimizer = tf.train.AdagradOptimizer(1.0).minimize(loss)
+
+Error message:
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-32-104452f9cf81> in <module>()
+     39     tf.nn.sampled_softmax_loss(softmax_weights, softmax_biases, embed2,
+     40                                train_labels, num_sampled, vocabulary_size))
+---> 41   optimizer = tf.train.AdagradOptimizer(1.0).minimize(loss)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.pyc in minimize(self, loss, global_step, var_list, gate_gradients, aggregation_method, name)
+    186         aggregation_method=aggregation_method)
+    187     return self.apply_gradients(grads_and_vars, global_step=global_step,
+--> 188                                 name=name)
+    189 
+    190   def compute_gradients(self, loss, var_list=None, gate_gradients=GATE_OP,
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/optimizer.pyc in apply_gradients(self, grads_and_vars, global_step, name)
+    287             update_ops.append(self._apply_dense(grad, var))
+    288           else:
+--> 289             update_ops.append(self._apply_sparse(grad, var))
+    290       if global_step is None:
+    291         return self._finish(update_ops, name)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/adagrad.pyc in _apply_sparse(self, grad, var)
+     75     return training_ops.sparse_apply_adagrad(
+     76         var, acc, self._learning_rate_tensor, grad.values, grad.indices,
+---> 77         use_locking=self._use_locking)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/gen_training_ops.pyc in sparse_apply_adagrad(var, accum, lr, grad, indices, use_locking, name)
+    200   return _op_def_lib.apply_op("SparseApplyAdagrad", var=var, accum=accum,
+    201                               lr=lr, grad=grad, indices=indices,
+--> 202                               use_locking=use_locking, name=name)
+    203 
+    204 
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.pyc in apply_op(self, op_type_name, g, name, **keywords)
+    662         op = g.create_op(op_type_name, inputs, output_types, name=scope,
+    663                          input_types=input_types, attrs=attr_protos,
+--> 664                          op_def=op_def)
+    665         outputs = op.outputs
+    666         return _Restructure(ops.convert_n_to_tensor_or_indexed_slices(outputs),
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.pyc in create_op(self, op_type, inputs, dtypes, input_types, name, attrs, op_def, compute_shapes)
+   1834                     original_op=self._default_original_op, op_def=op_def)
+   1835     if compute_shapes:
+-> 1836       set_shapes_for_outputs(ret)
+   1837     self._add_op(ret)
+   1838     self._record_op_seen_by_control_dependencies(ret)
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.pyc in set_shapes_for_outputs(op)
+   1474       raise RuntimeError("No shape function registered for standard op: %s"
+   1475                          % op.type)
+-> 1476   shapes = shape_func(op)
+   1477   if len(op.outputs) != len(shapes):
+   1478     raise RuntimeError(
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/training_ops.pyc in _SparseApplyAdagradShape(op)
+    115   _AssertInputIsScalar(op, 2)  # lr
+    116   grad_shape = op.inputs[3].get_shape().merge_with(
+--> 117       tensor_shape.TensorShape([None]).concatenate(accum_shape[1:]))
+    118   unused_indices_shape = op.inputs[4].get_shape().merge_with(
+    119       tensor_shape.vector(grad_shape[0]))
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_shape.pyc in merge_with(self, other)
+    525       return other
+    526     else:
+--> 527       self.assert_same_rank(other)
+    528       new_dims = []
+    529       for i, dim in enumerate(self._dims):
+
+/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_shape.pyc in assert_same_rank(self, other)
+    568       if self.ndims != other.ndims:
+    569         raise ValueError(
+--> 570             "Shapes %s and %s must have the same rank" % (self, other))
+    571 
+    572   def assert_has_rank(self, rank):
+
+ValueError: Shapes TensorShape([Dimension(None), Dimension(None), Dimension(None)]) and TensorShape([Dimension(None), Dimension(128)]) must have the same rank
+
+Just change it to get embedding look up once for each time for the third dimension:
+  # Look up embeddings for inputs.
+  # embed = tf.nn.embedding_lookup(embeddings, train_dataset)
+  # print embed.get_shape()
+  embed2 = tf.Variable(tf.zeros([batch_size, embedding_size]))
+  for i in xrange(2*skip_window):
+    embed2 += tf.nn.embedding_lookup(embeddings, train_dataset[:, i])
+
+The code runs smoothly!

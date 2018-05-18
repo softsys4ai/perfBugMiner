@@ -1,0 +1,59 @@
+tensorboard raises `FailedPreconditionError`
+
+Description
+Tensorboard always raises the exception FailedPreconditionError in my environment. I have it running with parameter logdir pointing to a directory that is tracking active experiments. Tensorboard raises an exception after a few minutes with a Traceback similar to the following:
+tensorboard --debug --logdir .
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:125] successfully opened CUDA library libcurand.so locally
+INFO:tensorflow:TensorBoard is in debug mode.
+INFO:tensorflow:Starting TensorBoard in directory /media/data/sarroff/experiments/source_separation/logdir3
+INFO:tensorflow:TensorBoard path_to_run is: {'/media/data/sarroff/experiments/source_separation/logdir3': None}
+INFO:tensorflow:TensorBoard is tag: 33
+Starting TensorBoard 33 on port 6006
+(You can navigate to http://127.0.1.1:6006)
+INFO:tensorflow:Adding events from directory /media/data/sarroff/experiments/source_separation/logdir3/train/161031224434
+INFO:tensorflow:Constructing EventAccumulator for /media/data/sarroff/experiments/source_separation/logdir3/train/161031224434
+DEBUG:tensorflow:Opening a record reader pointing at /media/data/sarroff/experiments/source_separation/logdir3/train/161031224434/events.out.tfevents.1477968276.eltopo
+DEBUG:tensorflow:No more events in /media/data/sarroff/experiments/source_separation/logdir3/train/161031224434/events.out.tfevents.1477968276.eltopo
+INFO:tensorflow:No path found after /media/data/sarroff/experiments/source_separation/logdir3/train/161031224434/events.out.tfevents.1477968276.eltopo
+INFO:tensorflow:Multiplexer done loading. Load took 49.9 secs
+
+... <snip> ...
+
+Exception in thread Thread-1:
+Traceback (most recent call last):
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/threading.py", line 801, in __bootstrap_inner
+    self.run()
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/threading.py", line 754, in run
+    self.__target(*self.__args, **self.__kwargs)
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/tensorboard/backend/server.py", line 126, in _ReloadForever
+    ReloadMultiplexer(multiplexer, path_to_run)
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/tensorboard/backend/server.py", line 100, in ReloadMultiplexer
+    multiplexer.AddRunsFromDirectory(path, name)
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/summary/event_multiplexer.py", line 178, in AddRunsFromDirectory
+    for subdir in GetLogdirSubdirectories(path):
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/summary/event_multiplexer.py", line 396, in <genexpr>
+    subdir
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/summary/impl/io_wrapper.py", line 50, in ListRecursively
+    for dir_path, _, filenames in gfile.Walk(top):
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/lib/io/file_io.py", line 415, in walk
+    listing = list_directory(top)
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/lib/io/file_io.py", line 391, in list_directory
+    file_list = get_matching_files(os.path.join(compat.as_str_any(dirname), "*"))
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/lib/io/file_io.py", line 260, in get_matching_files
+    compat.as_bytes(filename), status)]
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/contextlib.py", line 24, in __exit__
+    self.gen.next()
+  File "/home/sarroff/anaconda2/envs/tensorflow/lib/python2.7/site-packages/tensorflow/python/framework/errors.py", line 463, in raise_exception_on_not_ok_status
+    pywrap_tensorflow.TF_GetCode(status))
+FailedPreconditionError: /media/data/sarroff/experiments/source_separation/logdir3/train/161031224434/model.ckpt-263550.index
+The accompanying exception message mentions a different file every time and the exception is raised at some arbitrary time after execution. It is therefore not easy to replicate my issue deterministically.
+Environment
+Ubuntu 16.04LTS
+TensorFlow commit 1fcd6d1
+Proposed Cause
+This is just a guess; I'm not too familiar with the code: The exception is raised in FileSystem::GetMatchingPaths. Perhaps, while traversing the directory, some files get incorrectly marked as directories. If so, then the error probably happens during the call to opendir in PosixFileSystem::GetChildren. Error codes which are mapped to FailedPreconditionError are listed in tensorflow/core/platform/posix/error.cc. A likely error code causing the exception is ENOTDIR. I don't have an explanation as to why files would occasionally be incorrectly marked as directories. Perhaps there is a problem unique to my environment.
+I've also noticed the recent Issue #4921, which specifically mentions problems with FileSystem::GetMatchingPaths. Perhaps this issue is connected with that one.

@@ -1,0 +1,25 @@
+Log version of the SoftmaxFunctor implementation is numerically unstable
+
+The following code in the log version of SoftmaxFunctor, should use reduce_logsumexp() instead of .exp().sum().log()
+    if (log) {
+      // Calculate the log of the softmax
+      // softmax = logits - max(logits along classes);
+      softmax.device(d) = shifted_logits;
+      // softmax = softmax - log(sum(exp(softmax along classes)));
+      softmax.device(d) = (softmax -
+                           softmax.exp()
+                               .sum(along_class)
+                               .eval()
+                               .reshape(batch_by_one)
+                               .log()
+                               .broadcast(one_by_class));
+
+
+Additionally, the following code in the tests only passes without generating NANs because the data is generated using standard normals, never resulting in the values that are too small to be converted to zeroes when exponentiated:
+class LogSoftmaxTest(test_lib.TestCase):
+
+  def _log_softmax(self, x):
+    assert len(x.shape) == 2
+    m = x.max(1)[:, np.newaxis]
+    u = x - m
+    return u - np.log(np.sum(np.exp(u), 1, keepdims=True))

@@ -1,0 +1,50 @@
+add tf.assert for GPU (maybe also host-memory Const[string] for GPU) was: dynamic_rnn GPU support error
+
+When attempting to place dynamic_rnn on the gpu, I get the following error:
+tensorflow.python.framework.errors.InvalidArgumentError: Cannot assign a device to node 'RNN/Assert/data_2': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available
+         [[Node: RNN/Assert/data_2 = Const[dtype=DT_STRING, value=Tensor<type: string shape: [] values:  but saw shape: >, _device="/device:GPU:0"]()]]
+
+Full traceback:
+Traceback (most recent call last):
+  File "test_model2_parallel_buffered.py", line 84, in <module>
+    sess.run(init_op)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 333, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 573, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 648, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 668, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: Cannot assign a device to node 'RNN/Assert/data_2': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available
+         [[Node: RNN/Assert/data_2 = Const[dtype=DT_STRING, value=Tensor<type: string shape: [] values:  but saw shape: >, _device="/device:GPU:0"]()]]
+Caused by op u'RNN/Assert/data_2', defined at:
+  File "test_model2_parallel_buffered.py", line 47, in <module>
+    tower_logits_t = model.inference(frames_t, seq_length_t, BATCH_SIZE)
+  File "/home/woodward/ml/football_plays/model2.py", line 73, in inference
+    _, rnn_state_final_t = tf.nn.dynamic_rnn(rnn_cell, rnn_inputs_t, sequence_length=seq_length_t, initial_state=rnn_initial_state_t, swap_memory=True, time_major=True)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.py", line 567, in dynamic_rnn
+    [_assert_has_shape(sequence_length, [batch_size])]):
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/rnn.py", line 562, in _assert_has_shape
+    packed_shape, " but saw shape: ", x_shape])
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/logging_ops.py", line 58, in Assert
+    return gen_logging_ops._assert(condition, data, summarize, name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_logging_ops.py", line 37, in _assert
+    summarize=summarize, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 410, in apply_op
+    as_ref=input_arg.is_ref)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 664, in convert_n_to_tensor
+    ret.append(convert_to_tensor(value, dtype=dtype, name=n, as_ref=as_ref))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 620, in convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/constant_op.py", line 179, in _constant_tensor_conversion_function
+    return constant(v, dtype=dtype, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/constant_op.py", line 166, in constant
+    attrs={"value": tensor_value, "dtype": dtype_value}, name=name).outputs[0]
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2240, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1224, in __init__
+    self._traceback = _extract_stack()
+
+It seems to have some problem with a tensor shape, but I can't deduce why. This error does not occur if I enclose the tf.nn.dynamic_rnn(...) call in a tf.device('/cpu:0') statement. I am on commit 0050a20 from mid last week.
+I am doing data parallel processing and am trying to keep as much as possible on each GPU.

@@ -1,0 +1,27 @@
+assertion when running on GPU with debug enabled
+
+when I compile TensorFlow with --config=cuda  -c dbg --strip=never, I get an assertion when running the mnist example (same goes for cifar10. Also tried CUDA 7.5, with same outcome. Reproduces with both TF 0.5.0 and TF 0.6.0.)
+The GPU being used is a Titan X.
+[~/tensorflow/tensorflow/models/image/mnist] python convolutional.py
+......
+python: third_party/eigen3/unsupported/Eigen/CXX11/src/Tensor/TensorDeviceType.h:734: void Eigen::assertCudaOk(): Assertion `err == cudaSuccess' failed.
+Aborted (core dumped)
+dmesg shows that an illegal memory access was performed:
+[780540.251853] NVRM: Xid (PCI:0000:03:00): 31, Ch 0000000f, engmask 00000101, intr 10000000
+any when running with cuda-memcheck, I get:
+========= CUDA-MEMCHECK
+========= Invalid global read of size 4
+=========     at 0x000002f0 in /opt/bas/bazel/_bazel_bas/194e5d2548bb77b7040a7c94ff604a15/tensorflow/third_party/eigen3/unsupported/Eigen/CXX11/src/Tensor/TensorEvaluator.h:346:_ZNK5Eigen15TensorEvaluatorIKNS_18TensorCwiseUnaryOpINS_8internal13scalar_log_opIfEEKNS_9TensorMapINS_6TensorIfLm2ELi1ElEELi1EEEEENS_9GpuDeviceEE6packetILi1EEE6float4l
+=========     by thread (15,0,0) in block (0,0,0)
+=========     Address 0x00000000 is out of bounds
+=========     Device Frame:/opt/bas/bazel/_bazel_bas/194e5d2548bb77b7040a7c94ff604a15/tensorflow/third_party/eigen3/unsupported/Eigen/CXX11/src/Tensor/TensorEvalTo.h:122:Eigen::TensorEvaluatorEigen::TensorEvalToOp<Eigen::TensorCwiseUnaryOp<Eigen::internal::scalar_log_op<float, Eigen::TensorMap<Eigen::Tensor<float, unsigned long=2, int=1, long>, int=1> const > const > const , Eigen::GpuDevice(long)>::evalPacket (Eigen::TensorEvaluatorEigen::TensorEvalToOp<Eigen::TensorCwiseUnaryOp<Eigen::internal::scalar_log_op<float, Eigen::TensorMap<Eigen::Tensor<float, unsigned long=2, int=1, long>, int=1> const > const > const , Eigen::GpuDevice(long)>::evalPacket : 0x350)
+=========     Device Frame:/opt/bas/bazel/_bazel_bas/194e5d2548bb77b7040a7c94ff604a15/tensorflow/third_party/eigen3/unsupported/Eigen/CXX11/src/Tensor/TensorExecutor.h:407:void Eigen::internal::EigenMetaKernel_VectorizableEigen::TensorEvaluator<Eigen::TensorEvalToOp<Eigen::TensorCwiseUnaryOp<Eigen::internal::scalar_log_op<float, Eigen::TensorMap<Eigen::Tensor<float, unsigned long=2, int=1, long>, int=1> const > const > const , Eigen::GpuDevice>, long>(float, Eigen::internal::scalar_log_op) (void Eigen::internal::EigenMetaKernel_VectorizableEigen::TensorEvaluator<Eigen::TensorEvalToOp<Eigen::TensorCwiseUnaryOp<Eigen::internal::scalar_log_op<float, Eigen::TensorMap<Eigen::Tensor<float, unsigned long=2, int=1, long>, int=1> const > const > const , Eigen::GpuDevice>, long>(float, Eigen::internal::scalar_log_op) : 0x1460)
+=========     Saved host backtrace up to driver entry point at kernel launch time
+=========     Host Frame:/usr/lib/x86_64-linux-gnu/libcuda.so (cuLaunchKernel + 0x2cd) [0x15865d]
+=========     Host Frame:/usr/local/cuda/lib64/libcudart.so.7.0 [0x131b0]
+=========     Host Frame:/usr/local/cuda/lib64/libcudart.so.7.0 (cudaLaunch + 0x143) [0x2d653]
+=========     Host Frame:/home/users/bas/.python_packages/package1/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so [0xb4bc036]
+=========     Host Frame:/home/users/bas/.python_packages/package1/lib/python2.7/site-packages/tensorflow/python/_pywrap_tensorflow.so [0xb4bb2f8]
+.....
+The assertion changes from run to run (non determinism due to multi threading), but the cause is always the NULL pointer dereference in float4 Eigen::TensorEvaluatorEigen::TensorCwiseUnaryOp<Eigen::internal::scalar_log_op<float, Eigen::TensorMap<Eigen::Tensor<float, 2ul, 1, long>, 1> const> const, Eigen::GpuDevice>::packet<1>(long) const
+Could be an nvcc compiler bug  in debug mode only (kernel runs fine when optimized)

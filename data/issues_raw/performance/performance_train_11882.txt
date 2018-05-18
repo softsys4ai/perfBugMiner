@@ -1,0 +1,90 @@
+conv2d_transpose produce different results on GPU
+
+System information
+== cat /etc/issue ===============================================
+Linux ST 4.2.0-42-generic #49~14.04.1-Ubuntu SMP Wed Jun 29 20:22:11 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+VERSION="14.04.4 LTS, Trusty Tahr"
+VERSION_ID="14.04"
+== are we in docker =============================================
+No
+== compiler =====================================================
+c++ (Ubuntu 4.9.4-2ubuntu1~14.04.1) 4.9.4
+Copyright (C) 2015 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+== uname -a =====================================================
+Linux ST 4.2.0-42-generic #49~14.04.1-Ubuntu SMP Wed Jun 29 20:22:11 UTC 2016 x86_64 x86_64 x86_64 GNU/Linux
+== check pips ===================================================
+msgpack-numpy (0.4.1)
+numpy (1.13.1)
+protobuf (3.2.0)
+tensorflow (0.10.0)
+tensorflow-gpu (1.0.0)
+== check for virtualenv =========================================
+False
+== tensorflow import ============================================
+tf.VERSION = 1.0.0
+tf.GIT_VERSION = v1.0.0-rc2-15-g47bba63-dirty
+tf.COMPILER_VERSION = v1.0.0-rc2-15-g47bba63-dirty
+Sanity check: array([1], dtype=int32)
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcublas.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcudnn.so.5 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcufft.so.8.0 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:135] successfully opened CUDA library libcurand.so.8.0 locally
+== env ==========================================================
+LD_LIBRARY_PATH /home/abc/torch/install/lib:/usr/lib/x86_64-linux-gnu:/home/abc/torch/install/lib:/usr/local/cuda/lib64:/usr/local/cuda/lib64:/home/abc/torch/install/lib:/home/abc/code/torch/torch/install/lib:/usr/local/cuda/lib64::/usr/local/computecpp/lib:/data/software/gurobi652/linux64/lib
+DYLD_LIBRARY_PATH /home/abc/torch/install/lib:/home/abc/torch/install/lib:/home/abc/code/torch/torch/install/lib:
+== nvidia-smi ===================================================
+Sun Jul 30 17:45:45 2017
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 367.48                 Driver Version: 367.48                    |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  GeForce GTX 1080    Off  | 0000:01:00.0      On |                  N/A |
+|  0%   53C    P2    47W / 260W |   7909MiB /  8112MiB |      0%      Default |
++-------------------------------+----------------------+----------------------+
++-----------------------------------------------------------------------------+
+| Processes:                                                       GPU Memory |
+|  GPU       PID  Type  Process name                               Usage      |
+|=============================================================================|
+|    0      1308    G   /usr/bin/X                                     357MiB |
+|    0      2590    G   compiz                                         229MiB |
+|    0      3254    G   ...el-token=CBAE43C38254E155E78826C3F38F0092    99MiB |
+|    0      9480    C   python                                        1039MiB |
+|    0     10432    C   /usr/bin/python                               5895MiB |
+|    0     20408    C   /usr/bin/python                                283MiB |
+|    0     28024    G   /usr/local/MATLAB/R2015a/bin/glnxa64/MATLAB      2MiB |
++-----------------------------------------------------------------------------+
+== cuda libs  ===================================================
+/usr/local/lib/python2.7/dist-packages/torch/lib/libcudart.so.8.0
+/usr/local/lib/python2.7/dist-packages/torch/lib/libcudart.so
+/usr/local/cuda-8.0/lib64/libcudart.so.8.0.44
+/usr/local/cuda-8.0/lib64/libcudart_static.a
+/usr/local/cuda-8.0/doc/man/man7/libcudart.7
+/usr/local/cuda-8.0/doc/man/man7/libcudart.so.7
+/usr/local/MATLAB/R2017a/bin/glnxa64/libcudart.so.8.0.44
+/usr/local/MATLAB/R2015a/bin/glnxa64/libcudart.so.6.5.14
+Describe the problem
+I am trying to use tf.nn.conv2d_transpose but it produces different results every time on GPU. However, the result would be the same when switching the device to CPU. It seems like a bug. Please check the toy model below for more details.
+Source code / logs
+import tensorflow as tf
+import numpy as np
+
+np.random.seed(1234)
+conv_ = np.random.randn(10, 7, 7, 56)
+
+with tf.device('/gpu:0'):
+    bottom = tf.constant(conv_, dtype=tf.float32)
+    weight = tf.get_variable("weight", [9, 9, 1, 56], initializer=tf.random_normal_initializer(0, 0.001))
+    bias = tf.get_variable("bias", initializer=np.zeros(1, dtype=np.float32))	
+
+    conv = tf.nn.conv2d_transpose(bottom, weight, [10, 19, 19, 1], [1, 3, 3, 1], padding='SAME')
+    conv = tf.nn.bias_add(conv, bias)
+
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+np.array_equal(sess.run(conv), sess.run(conv))
+Out[2]: False

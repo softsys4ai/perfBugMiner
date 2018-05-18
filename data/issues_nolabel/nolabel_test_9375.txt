@@ -1,0 +1,134 @@
+Bug in the situation of multiple ps servers, NotFoundError
+
+I have 2 ps servers and 3 worker servers (Ubuntu14.04, Python 3.5.3 and Tensorflow 1.0.1 with virtualenv). I am trying the demo based on https://www.tensorflow.org/deploy/distributed.
+I got NotFoundError errors when I use 2 ps servers. (It can run well when I use 1 ps server. And It can run well with 2 ps server, when I use "save_checkpoint_secs=None" in MonitoredTrainingSession().)
+
+THE CODE:
+..........
+# Build model...
+x_data = np.random.rand(100).astype(np.float32)
+y_data = x_data0.1 + 0.3
+Weights = tf.Variable(tf.random_uniform([1], -1.0, 1.0))
+biases = tf.Variable(tf.zeros([1]))
+y = Weightsx_data + biases
+loss = tf.reduce_mean(tf.square(y-y_data))
+global_step = tf.contrib.framework.get_or_create_global_step()
+train_op = tf.train.AdagradOptimizer(0.01).minimize(
+loss, global_step=global_step)
+# The StopAtStepHook handles stopping after running given steps.
+hooks=[tf.train.StopAtStepHook(last_step=50000)]
+# The MonitoredTrainingSession takes care of session initialization,
+# restoring from a checkpoint, saving to a checkpoint, and closing when done
+# or an error occurs.
+with tf.train.MonitoredTrainingSession(master=server.target,
+                                       is_chief=(FLAGS.task_index == 0),
+                                       checkpoint_dir="./train_logs",
+                                       hooks=hooks) as mon_sess:
+  while not mon_sess.should_stop():
+
+..........
+
+THE ERROR:
+Error in worker server 0 (master):
+........
+I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:221] Started server                                                                                                              with target: grpc://localhost:22222
+I tensorflow/core/distributed_runtime/master_session.cc:1012] Start master sessi                                                                                                             on f8c75e38e6e9419a with config:
+Traceback (most recent call last):
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/client/session.                                                                                                             py", line 1022, in _do_call
+return fn(*args)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/client/session.                                                                                                             py", line 1004, in _run_fn
+status, run_metadata)
+File "/usr/local/lib/python3.5/contextlib.py", line 66, in exit
+next(self.gen)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/framework/error                                                                                                             s_impl.py", line 466, in raise_exception_on_not_ok_status
+pywrap_tensorflow.TF_GetCode(status))
+tensorflow.python.framework.errors_impl.NotFoundError: ./train_logs/model.ckpt-0                                                                                                             _temp_0205a1571bdb4f9db000d0caf3139d5a/part-00000-of-00002.index
+[[Node: save/MergeV2Checkpoints = MergeV2Checkpoints[delete_old_dirs=tr                                                                                                             ue, _device="/job:ps/replica:0/task:1/cpu:0"](save/MergeV2Checkpoints/checkpoint                                                                                                             _prefixes, _recv_save/Const_0_S63)]]
+[[Node: save/Identity_S65 = _Recvclient_terminated=false, recv_device=                                                                                                             "/job:worker/replica:0/task:0/cpu:0", send_device="/job:ps/replica:0/task:1/cpu:                                                                                                             0", send_device_incarnation=7747326126893392586, tensor_name="edge_33_save/Ident                                                                                                             ity", tensor_type=DT_STRING, _device="/job:worker/replica:0/task:0/cpu:0"]]
+During handling of the above exception, another exception occurred:
+Traceback (most recent call last):
+File "0.1.py", line 103, in 
+tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/platform/app.py
+", line 44, in run
+_sys.exit(main(_sys.argv[:1] + flags_passthrough))
+File "0.1.py", line 68, in main
+_, step, loss_v, weight, biase = mon_sess.run([train_op, global_step, loss,                                                                                                              Weights, biases])
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 462, in run
+run_metadata=run_metadata)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 786, in run
+run_metadata=run_metadata)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 744, in run
+return self.sess.run(*args, **kwargs)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 899, in run
+run_metadata=run_metadata))
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/basic                                                                                                             session_run_hooks.py", line 355, in after_run
+self.save(global_step, run_context.session)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/basic                                                                                                             session_run_hooks.py", line 371, in _save
+self._get_saver().save(session, self._save_path, global_step=step)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/saver.                                                                                                             py", line 1363, in save
+{self.saver_def.filename_tensor_name: checkpoint_file})
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/client/session.                                                                                                             py", line 767, in run
+run_metadata_ptr)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/client/session.                                                                                                             py", line 965, in _run
+feed_dict_string, options, run_metadata)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/client/session.                                                                                                             py", line 1015, in _do_run
+target_list, options, run_metadata)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/client/session.                                                                                                             py", line 1035, in _do_call
+raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.NotFoundError: ./train_logs/model.ckpt-0                                                                                                             _temp_0205a1571bdb4f9db000d0caf3139d5a/part-00000-of-00002.index
+[[Node: save/MergeV2Checkpoints = MergeV2Checkpoints[delete_old_dirs=tr                                                                                                             ue, _device="/job:ps/replica:0/task:1/cpu:0"](save/MergeV2Checkpoints/checkpoint                                                                                                             _prefixes, _recv_save/Const_0_S63)]]
+[[Node: save/Identity_S65 = _Recvclient_terminated=false, recv_device=                                                                                                             "/job:worker/replica:0/task:0/cpu:0", send_device="/job:ps/replica:0/task:1/cpu:                                                                                                             0", send_device_incarnation=7747326126893392586, tensor_name="edge_33_save/Ident                                                                                                             ity", tensor_type=DT_STRING, _device="/job:worker/replica:0/task:0/cpu:0"]]
+Caused by op 'save/MergeV2Checkpoints', defined at:
+File "0.1.py", line 103, in 
+tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/platform/app.py                                                                                                             ", line 44, in run
+_sys.exit(main(_sys.argv[:1] + flags_passthrough))
+File "0.1.py", line 62, in main
+hooks=hooks) as mon_sess:
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 315, in MonitoredTrainingSession
+return MonitoredSession(session_creator=session_creator, hooks=all_hooks)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 601, in init
+session_creator, hooks, should_recover=True)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 434, in init
+self._sess = _RecoverableSession(self._coordinated_creator)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 767, in init
+_WrappedSession.init(self, self._create_session())
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 772, in _create_session
+return self._sess_creator.create_session()
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 494, in create_session
+self.tf_sess = self._session_creator.create_session()
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito
+red_session.py", line 366, in create_session
+self._scaffold.finalize()
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 180, in finalize
+lambda: training_saver.Saver(sharded=True, allow_empty=True,
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 232, in get_or_default
+op = default_constructor()
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/monito                                                                                                             red_session.py", line 181, in 
+write_version=saver_pb2.SaverDef.V2))
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/saver.                                                                                                             py", line 1040, in init
+self.build()
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/saver.                                                                                                             py", line 1070, in build
+restore_sequentially=self._restore_sequentially)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/saver.                                                                                                             py", line 669, in build
+save_tensor = self._AddShardedSaveOps(filename_tensor, per_device)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/saver.                                                                                                             py", line 356, in _AddShardedSaveOps
+return self._AddShardedSaveOpsForV2(filename_tensor, per_device)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/training/saver.                                                                                                             py", line 338, in _AddShardedSaveOpsForV2
+sharded_prefixes, checkpoint_prefix, delete_old_dirs=True)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/ops/gen_io_ops.                                                                                                             py", line 185, in merge_v2_checkpoints
+delete_old_dirs=delete_old_dirs, name=name)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/framework/op_de                                                                                                             f_library.py", line 763, in apply_op
+op_def=op_def)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/framework/ops.p                                                                                                             y", line 2327, in create_op
+original_op=self._default_original_op, op_def=op_def)
+File "/usr/local/lib/python3.5/site-packages/tensorflow/python/framework/ops.p                                                                                                             y", line 1226, in init
+self._traceback = _extract_stack()
+NotFoundError (see above for traceback): ./train_logs/model.ckpt-0_temp_0205a157                                                                                                             1bdb4f9db000d0caf3139d5a/part-00000-of-00002.index
+[[Node: save/MergeV2Checkpoints = MergeV2Checkpoints[delete_old_dirs=tr                                                                                                             ue, _device="/job:ps/replica:0/task:1/cpu:0"](save/MergeV2Checkpoints/checkpoint                                                                                                             _prefixes, _recv_save/Const_0_S63)]]
+[[Node: save/Identity_S65 = _Recvclient_terminated=false, recv_device=                                                                                                             "/job:worker/replica:0/task:0/cpu:0", send_device="/job:ps/replica:0/task:1/cpu:                                                                                                             0", send_device_incarnation=7747326126893392586, tensor_name="edge_33_save/Ident                                                                                                             ity", tensor_type=DT_STRING, _device="/job:worker/replica:0/task:0/cpu:0"]]
+Error in ps server 1:
+........
+I tensorflow/core/distributed_runtime/rpc/grpc_server_lib.cc:221] Started server                                                                                                              with target: grpc://localhost:22222
+W tensorflow/core/framework/op_kernel.cc:993] Not found: ./train_logs/model.ckpt                                                                                                             -0_temp_0205a1571bdb4f9db000d0caf3139d5a/part-00000-of-00002.index

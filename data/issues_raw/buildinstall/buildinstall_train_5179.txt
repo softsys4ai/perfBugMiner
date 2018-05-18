@@ -1,0 +1,27 @@
+Undefined reference to CheckOpMessageBuilder::NewString() when linking libtensorflow_cc.so
+
+I am trying to use the TensorFlow Session C++ API (Python-free) to load a pre-trained model for inference. For build-time considerations, I am trying to deploy TensorFlow as a "system" package by linking against libtensorflow_cc.so and including headers into my Bazel-based workspace which has its own copies of protobuf and Eigen. I am almost there except that I have run into linker errors for missing implementations of tensorflow::internal::CheckOpMessageBuilder::NewString(). The symbols appear to be exported by libtensorflow_cc.so and it does seem to all be linking correctly, just not this symbol.
+Any help fixing this issue or suggestions for a better way of doing this would be greatly appreciated.
+Thanks,
+Hemal
+My setup is the following:
+Docker image from ubuntu:16.04 using gcc5.
+Bazel 0.3.1 (needed to upgrade from 0.3.0 because of other Tensorflow build issues)
+I matched the Eigen version but the protobuf used to build the Tensorflow wheel below is installed via apt-get and there is another copy (3.0.0) within my workspace's third_party directory.
+The following is in my Dockerfile to build and "deploy" Tensorflow:
+RUN git clone https://github.com/tensorflow/tensorflow.git /tmp/tensorflow \
+&& cd /tmp/tensorflow && git checkout r0.11 \
+&& yes '' | ./configure \
+&& bazel build -c opt //tensorflow/tools/pip_package:build_pip_package \
+&& /tmp/tensorflow/bazel-bin/tensorflow/tools/pip_package/build_pip_package /tmp/tensorflow_pkg \
+&& pip2 install --quiet --upgrade /tmp/tensorflow_pkg/*.whl \
+&& bazel build -c opt //tensorflow:libtensorflow_cc.so \
+&& cp /tmp/tensorflow/bazel-bin/tensorflow/libtensorflow_cc.so /usr/lib/libtensorflow_cc.so \
+&& ln -sv /usr/local/lib/python2.7/dist-packages/tensorflow/include/tensorflow /usr/include/tensorflow \
+&& ln -sv /usr/local/lib/python2.7/dist-packages/tensorflow/include/third_party /usr/include/third_party
+164:1: Linking of rule '//estimation/detection:playback_ground_truth' failed: clang-3.6 failed: error executing command
+(cd /code/.cache/bazel/_bazel_hemalshah/6fa7a91faa1abdfbb41bc875fa66f0f6/execroot/robotics && 
+exec env - 
+/usr/bin/clang-3.6 -o bazel-out/local_linux-opt/bin/estimation/detection/playback_ground_truth -L/usr/lib/python2.7/config-x86_64-linux-gnu -L/usr/lib -Wl,-O1 -Wl,-Bsymbolic-functions -pthread -B/usr/bin/ -Wl,/bin/estimation/detection/playback_ground_truth-2.params): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+bazel-out/local_linux-opt/bin/estimation/detection/libtof_pose_estimator.lo(tof_pose_estimator.o): In function std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >* tensorflow::internal::MakeCheckOpString<long long, long long>(long long const&, long long const&, char const*)': /usr/include/tensorflow/core/platform/default/logging.h:170: undefined reference totensorflow::internal::CheckOpMessageBuilder::NewString()'
+bazel-out/local_linux-opt/bin/estimation/detection/libtof_pose_estimator.lo(tof_pose_estimator.o): In function std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >* tensorflow::internal::MakeCheckOpString<unsigned long, unsigned long>(unsigned long const&, unsigned long const&, char const*)': /usr/include/tensorflow/core/platform/default/logging.h:170: undefined reference totensorflow::internal::CheckOpMessageBuilder::NewString()'

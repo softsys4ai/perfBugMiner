@@ -1,0 +1,76 @@
+Undefined symbol when compiling a custom op
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): https://github.com/mozilla/DeepSpeech/blob/master/native_client/beam_search.cc
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.10
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): v1.5.0-0-g37aa430 1.5.0
+Python version: 3.5.2
+Bazel version (if compiling from source): 0.9.0
+GCC/Compiler version (if compiling from source): g++ (Ubuntu 5.4.0-6ubuntu1~16.04.5) 5.4.0 20160609
+CUDA/cuDNN version: 9.1/7
+GPU model and memory: TitanX 12Gb x 2
+Exact command to reproduce:
+Makefile:
+
+CXX := g++
+CFLAGS := -Wall -O3 -std=c++11
+
+# KenLM flags.
+SRC_DIR := kenlm
+OBJ_DIR := kenlm
+
+SRC_FILES := $(filter-out $(wildcard $(SRC_DIR)/util/*main*) $(wildcard $(SRC_DIR)/util/*test*), $(wildcard $(SRC_DIR)/util/*.cc))
+SRC_FILES := $(SRC_FILES) $(filter-out $(wildcard $(SRC_DIR)/lm/*main*) $(wildcard $(SRC_DIR)/lm/*test*), $(wildcard $(SRC_DIR)/lm/*.cc))
+SRC_FILES := $(SRC_FILES) $(filter-out $(wildcard $(SRC_DIR)/util/double-conversion/*main*) $(wildcard $(SRC_DIR)/util/double-conversion/*test*), $(wildcard $(SRC_DIR)/util/double-conversion/*.cc))
+
+OBJ_FILES := $(patsubst $(SRC_DIR)/%.cc,$(OBJ_DIR)/%.o,$(SRC_FILES))
+
+KENLM_CFLAGS := -I$(shell pwd)/kenlm -DNDEBUG -DKENLM_MAX_ORDER=6
+KENLM_LFLAGS := -L$(shell pwd)/kenlm/build/lib -lkenlm -lkenlm_builder -lkenlm_filter -lkenlm_interpolate -lkenlm_util -lz -lbz2 -llzma
+
+# TensorFlow flags.
+TF_CFLAGS := -I$(shell pwd)/tensorflow
+
+TF_CFLAGS := $(TF_CFLAGS) $(shell python3 -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_compile_flags()))')
+TF_LFLAGS := $(shell python3 -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_link_flags()))')
+
+.PHONY: clean ctc_decoder.so generate_trie
+
+default: clean ctc_decoder.so generate_trie
+
+clean:
+	rm -f $(OBJ_FILES)
+	rm -f ctc_decoder.so
+	rm -f generate_trie
+
+ctc_decoder.so: $(OBJ_FILES)
+	$(CXX) $(CFLAGS) $(KENLM_CFLAGS) $(TF_CFLAGS) -fPIC -shared -o $@ beam_search.cc $^ $(TF_LFLAGS)
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cc
+	$(CXX) $(CFLAGS) $(KENLM_CFLAGS) -fPIC -c -o $@ $<
+
+generate_trie:
+	$(CXX) $(CFLAGS) $(KENLM_CFLAGS) generate_trie.cc -o $@ $(KENLM_LFLAGS)
+
+
+Python:
+import tensorflow as tf
+ctc_module = tf.load_op_library('/home/thomas/projects/deepspeech2/deepspeech2/ctc/ctc_decoder.so')
+
+Describe the problem
+I compiled a custom op (mozilla's ctc decoder with lm) using the make file I pasted above and it compiles without a problem but when I try to load it I get an undefined symbol error.
+Source code / logs
+Python 3.5.2 (default, Nov 23 2017, 16:37:01) 
+[GCC 5.4.0 20160609] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import tensorflow as tf
+>>> ctc_module = tf.load_op_library('/home/thomas/projects/deepspeech2/deepspeech2/ctc/ctc-decoder.so')
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/load_library.py", line 56, in load_op_library
+    lib_handle = py_tf.TF_LoadLibrary(library_filename, status)
+  File "/usr/local/lib/python3.5/dist-packages/tensorflow/python/framework/errors_impl.py", line 473, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.NotFoundError: /home/thomas/projects/deepspeech2/deepspeech2/ctc/ctc-decoder.so: undefined symbol: _ZN10tensorflow15OpKernelContext10CtxFailureEPKciRKNS_6StatusE

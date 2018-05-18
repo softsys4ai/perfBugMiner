@@ -1,0 +1,88 @@
+Using Tensorflow with RNNs & batch normalisation
+
+System information
+
+Have I written custom code: Yes
+OS Platform and Distribution: Archlinux/Linux 4.14
+TensorFlow installed from: source (will segfault before 7535f6b)
+TensorFlow version: b'unknown' 1.7.0 / latest master
+Python version: 3.6
+Bazel version: 0.11.1
+GCC/Compiler version: 7.3.0
+CUDA/cuDNN version: 9.1/7.1.2
+GPU model and memory: Titan XP/12GB
+Exact command to reproduce: See below
+
+Describe the problem
+When trying to run the source code below I get an error saying there's a cycle in my graph. This only seems to happen with XLA enabled and does not happen if I don't include the additional required control dependency for batch normalisation. Indeed this seems to occur whenever I use a dynamic RNN in combination with batch normalisation and XLA JIT support.
+Sample code to reproduce
+import tensorflow as tf                                                                                                                                                                                                                       
+
+with tf.device('/cpu:0'):
+    xin = tf.placeholder(tf.float32, [None, 1, 1], name='input')
+    rnn_cell = tf.contrib.rnn.LSTMCell(1)
+    out, _ = tf.nn.dynamic_rnn(rnn_cell, xin, dtype=tf.float32)
+    out = tf.layers.batch_normalization(out, training=True)
+    out = tf.identity(out, name='output')
+
+    optimiser = tf.train.AdamOptimizer(.0001)
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        out = optimiser.minimize(out, global_step=tf.Variable(0, dtype=tf.float32), name='train_op')
+
+config = tf.ConfigProto(allow_soft_placement = False)
+sess = tf.Session(config=config)
+sess.run(tf.global_variables_initializer())
+
+sample_in = [[[0]]]
+sess.run(out, feed_dict={xin: sample_in})
+Output log
+2018-04-03 13:09:24.326950: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1212] Found device 0 with properties:                                                                                                                          
+name: TITAN Xp major: 6 minor: 1 memoryClockRate(GHz): 1.582
+pciBusID: 0000:65:00.0
+totalMemory: 11.90GiB freeMemory: 11.74GiB
+2018-04-03 13:09:24.326982: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1312] Adding visible gpu devices: 0
+2018-04-03 13:09:24.512956: I tensorflow/core/common_runtime/gpu/gpu_device.cc:993] Creating TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 11366 MB memory) -> physical GPU (device: 0, name: TITAN Xp, pci bus id: 0000:65:00.0, compute capability: 6.1)
+Traceback (most recent call last):
+  File "/home/thom/.python/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1361, in _do_call
+    return fn(*args)
+  File "/home/thom/.python/lib/python3.6/site-packages/tensorflow/python/client/session.py", line 1340, in _run_fn
+    target_list, status, run_metadata)
+  File "/home/thom/.python/lib/python3.6/site-packages/tensorflow/python/framework/errors_impl.py", line 516, in __exit__
+    c_api.TF_GetCode(self.status.status))
+tensorflow.python.framework.errors_impl.InternalError: Cycle detected when adding enter->frame edge: Edge from gradients/f_count to (null) would create a cycle.
++-> (null)
+|   rnn/TensorArrayStack/TensorArrayGatherV3
+|   rnn/transpose_1
+|   batch_normalization/moments/mean
+|   batch_normalization/moments/Squeeze
+|   batch_normalization/AssignMovingAvg/sub
+|   batch_normalization/AssignMovingAvg/mul
+|   batch_normalization/AssignMovingAvg
++-- gradients/f_count
+
+Workaround
+I seem to be able to workaround the issue by relying on tf.contrib.layers.batch_norm instead of tf.layers.batch_normalization by setting the updates_collections parameter to None in order to force inlining of the update operation.
+Sample code with workaround
+import tensorflow as tf                                                                                                                                                                                                                       
+
+with tf.device('/cpu:0'):
+    xin = tf.placeholder(tf.float32, [None, 1, 1], name='input')
+    rnn_cell = tf.contrib.rnn.LSTMCell(1)
+    out, _ = tf.nn.dynamic_rnn(rnn_cell, xin, dtype=tf.float32)
+    out = tf.contrib.layers.batch_norm(out, is_training=True, updates_collections=None)
+    out = tf.identity(out, name='output')
+
+    optimiser = tf.train.AdamOptimizer(.0001)
+    out = optimiser.minimize(out, global_step=tf.Variable(0, dtype=tf.float32), name='train_op')
+
+config = tf.ConfigProto(allow_soft_placement = False)
+sess = tf.Session(config=config)
+sess.run(tf.global_variables_initializer())
+
+sample_in = [[[0]]]
+sess.run(out, feed_dict={xin: sample_in})
+Additional information
+
+I have already submitted a question on Stack Overflow a week ago and have had no answers so far.
+Make sure you try and reproduce the issue on the tip of master or the sample will cause a segmentation fault.

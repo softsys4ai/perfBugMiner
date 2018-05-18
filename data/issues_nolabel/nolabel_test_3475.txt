@@ -1,0 +1,67 @@
+Device placement error while using multi gpus on single machine by distributed version
+
+I follow Distributed TensorFlow to try the distributed version of tensorflow, my code is here.
+I try to run it on mulit machines with mutil gpus, and every worker will start multi instances of tensorflow.
+To simplify problem, i only run it on single machine with multi-gpu(8*k40m), and only start one ps and one worker. Following is my scripts:
+python ./mnist_expert_dist.py --ps_hosts=localhost:12222 --worker_hosts=localhost:12223 --job_name=ps --task_index=0 --gpu_index=0 --iteration_count=5000 --verbose=true
+
+python ./mnist_expert_dist.py --ps_hosts=localhost:12222 --worker_hosts=localhost:12223 --job_name=worker --task_index=0 --gpu_index=1 --iteration_count=5000 --verbose=true
+
+Following is my error messages:
+Traceback (most recent call last):
+  File "./mnist_expert_dist.py", line 187, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+    sys.exit(main(sys.argv))
+  File "./mnist_expert_dist.py", line 184, in main
+    run_training(cluster, server)
+  File "./mnist_expert_dist.py", line 121, in run_training
+    sess = sv.prepare_or_wait_for_session(server.target)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 684, in prepare_or_wait_for_session
+    init_feed_dict=self._init_feed_dict, init_fn=self._init_fn)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/session_manager.py", line 170, in prepare_session
+    max_wait_secs=max_wait_secs, config=config)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/session_manager.py", line 209, in recover_session
+    sess.run([self._local_init_op])
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 372, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 636, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 708, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 728, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: Cannot assign a device to node 'save/Const': Could not satisfy explicit device specification '/job:worker/task:0/device:GPU:1' because no supported kernel for GPU devices is available.
+Colocation Debug Info:
+Colocation group had the following types and devices:
+Identity: CPU
+Const: CPU
+         [[Node: save/Const = Const[dtype=DT_STRING, value=Tensor<type: string shape: [] values: model>, _device="/job:worker/task:0/device:GPU:1"]()]]
+Caused by op u'save/Const', defined at:
+  File "./mnist_expert_dist.py", line 187, in <module>
+    tf.app.run()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/platform/app.py", line 30, in run
+    sys.exit(main(sys.argv))
+  File "./mnist_expert_dist.py", line 184, in main
+    run_training(cluster, server)
+  File "./mnist_expert_dist.py", line 113, in run_training
+    init_op=init_op)#,
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 300, in __init__
+    self._init_saver(saver=saver)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 429, in _init_saver
+    saver = saver_mod.Saver()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 845, in __init__
+    restore_sequentially=restore_sequentially)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/saver.py", line 504, in build
+    filename_tensor = constant_op.constant("model")
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/constant_op.py", line 166, in constant
+    attrs={"value": tensor_value, "dtype": dtype_value}, name=name).outputs[0]
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2260, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1230, in __init__
+    self._traceback = _extract_stack()
+
+I use nvidia-smi to see the status of gpu, it seems ps will take all gpus, and worker cannot access any gpus.
+How can I solve this problem?
+Can i start the ps only with one gpu? or only use cpu?
+Thanks.

@@ -1,0 +1,34 @@
+Insufficient alignment in u_ union in tensorflow/core/lib/gtl/inlined_vector.h
+
+Environment info
+Operating System: Linux
+Installed version of CUDA and cuDNN: None
+If installed from sources, provide the commit hash: aa2cacd
+Steps to reproduce
+
+Find an architecture with 32 bit pointers but strict alignment requirements for 64 bit
+Compile and run "benchmark" from tensorflow/contrib/makefile
+Get bus error from misaligned pointer
+
+What have you tried?
+
+Fixing the issue by increasing the u_ alignment.  This works.
+
+In tensorflow/core/lib/gtl/inlined_vector.h, the data buf is aligned by adding a pointer.  However, it is cast to other types, including uint64_t.  On architectures where pointers are 32 bits, this cast causes errors.
+The fix is to add another component to the union that will force alignment to the largest size, such as uint64_t.
+For example:
+diff --git a/tensorflow/core/lib/gtl/inlined_vector.h b/tensorflow/core/lib/gtl/inlined_vector.h
+index e8fe66c..518b421 100644
+--- a/tensorflow/core/lib/gtl/inlined_vector.h
++++ b/tensorflow/core/lib/gtl/inlined_vector.h
+@@ -276,6 +276,8 @@ class InlinedVector {
+unsigned char data[kSize];
+// Force data to be aligned enough for a pointer.
+T* unused_aligner;
+
+// EJP: force 8 byte alignment, as pointers could be 4-byte but data elements 8-byte?
+uint64_t unused_64;
+} u_;
+
+You won't see this issue on architectures where pointers are the size of the largest type (aarch64, x86-64) or where a 32-bit architecture loads 64-bit things but can do so at arbitrary 32-bit boundaries (x86, armv7 with misaligned pointers enabled).
+But it might improve performance to have 64-bit values on 64-bit boundaries.

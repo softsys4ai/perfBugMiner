@@ -1,0 +1,78 @@
+Exception when trying to use TensorFlowDNNClassifier with Scikit-Learn model_selection.cross_val_score
+
+I am attempting to use cross_val_score with the TensorFlowDNNClassifier (I know it is deprecated) from Scikit-Learn. I used cross_val_score seamlessly with the original skflow wrapper which allowed me to use evolutionary computing to evolve the parameters of the TensorFlowDNNClassifier.
+It appears that when a clone of the TensorFlowDNNClassifier is initialised for the number of folds specified in cross_val_score, the hidden_units argument is not included as the estimator.get_params() function within clone in sklearn/base.py does not retrieve the value set against _dnn_hidden_units.
+The classifiers/regressors of Scikit-Learn take the approach of assigning the input parameters a default value which allows for a lot of flexibility. Instead of requiring the user to provide the structure of their DNN through the hidden_units parameter perhaps a default value should be provided so that the classifier can be cloned when the classifier is passed to cross_val_score.
+Given that the objective of Skflow was to integrate tensorflow into the Scikit-learn pipeline it would be ideal to turn hidden_units into a key word argument.
+Environment info
+Operating System:
+Linux Mint 17.2 Cinnamon 64 bit
+Installed version of CUDA and cuDNN:
+Not relevant
+If installed from binary pip package, provide:
+
+Which pip package you installed.
+pip3 install https://storage.googleapis.com/tensorflow/linux/gpu/tensorflow-0.9.0rc0-cp35-cp35m-linux_x86_64.whl
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.9.0rc0
+
+python - 3.5.1
+scikit-learn - 0.18.dev0
+tensorflow - 0.9.0rc0
+scipy - 0.17.1
+numpy - 1.11.0
+Steps to reproduce
+
+Code provided
+
+from sklearn import datasets, model_selection
+from tensorflow.contrib import learn
+import traceback
+
+if __name__ == '__main__':
+    try:
+
+        iris = datasets.load_iris()
+
+        X_train, X_test, y_train, y_test = model_selection.train_test_split(iris.data, iris.target, test_size=0.2, random_state=42)
+
+        kwargs = {
+            "n_classes":3,
+            "optimizer" : "Adam",
+            "hidden_units" : [10, 20, 10],
+            "steps": 250
+        }
+
+        classifier = learn.TensorFlowDNNClassifier(**kwargs)
+
+        scores = model_selection.cross_val_score(
+            classifier,
+            X_train,
+            y_train,
+            scoring="accuracy"
+        )
+
+        print('Accuracy: {0:f}'.format(scores))
+
+    except:
+        print(traceback.format_exc())
+
+Logs or other output that would be helpful
+Traceback (most recent call last):
+  File "/home/thirdoctet/Development/projects/python/scikit-evolution/skevolve/tests/tensorflow_classification.py", line 47, in <module>
+    scoring="accuracy"
+  File "/usr/local/lib/python3.5/site-packages/sklearn/model_selection/_validation.py", line 167, in cross_val_score
+    for train, test in cv.split(X, y, labels))
+  File "/usr/local/lib/python3.5/site-packages/sklearn/externals/joblib/parallel.py", line 800, in __call__
+    while self.dispatch_one_batch(iterator):
+  File "/usr/local/lib/python3.5/site-packages/sklearn/externals/joblib/parallel.py", line 653, in dispatch_one_batch
+    tasks = BatchedCalls(itertools.islice(iterator, batch_size))
+  File "/usr/local/lib/python3.5/site-packages/sklearn/externals/joblib/parallel.py", line 68, in __init__
+    self.items = list(iterator_slice)
+  File "/usr/local/lib/python3.5/site-packages/sklearn/model_selection/_validation.py", line 167, in <genexpr>
+    for train, test in cv.split(X, y, labels))
+  File "/usr/local/lib/python3.5/site-packages/sklearn/base.py", line 57, in clone
+    new_object = klass(**new_object_params)
+  File "/usr/local/lib/python3.5/site-packages/tensorflow/contrib/learn/python/learn/estimators/base.py", line 452, in __init__
+    super(DeprecatedMixin, self).__init__(*args, **kwargs)
+TypeError: __init__() missing 1 required positional argument: 'hidden_units'

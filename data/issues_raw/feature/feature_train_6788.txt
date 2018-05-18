@@ -1,0 +1,189 @@
+Tf-slim: Unable to read dataset using slim.data_set_provider.DataSetProvider when images are not in JPEG.
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+Couldn't find relevant threads as there aren't many tf-slim questions.
+Environment info
+Operating System:
+Ubuntu 16.04
+Installed version of CUDA and cuDNN:
+8.00
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+0.11
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+Basically I have directory of subdirectories, with each subdirectory containing png images of a certain class. Editing the tf-slim download_and_convert_flowers.py to suit my images, I created a set of tfrecord files (train and validation both included) and stored it in a directory.
+Following which, I used the 'get_split' function from dataset_utils in https://github.com/tensorflow/models/blob/master/slim/datasets/dataset_utils.py
+to create a DataSet class from reading the tfrecord files of a certain type (either train or validation. I indicated 'train'). So now I have a DataSet class to read.
+The problem comes when I try to use a batch loading function to actually start reading the DataSet object for extracting images and creating a batch:
+def load_batch(dataset, batch_size=32, height=299, width=299, is_training=False):
+    """Loads a single batch of data.
+    
+    Args:
+      dataset: The dataset to load.
+      batch_size: The number of images in the batch.
+      height: The size of each image after preprocessing.
+      width: The size of each image after preprocessing.
+      is_training: Whether or not we're currently training or evaluating.
+    
+    Returns:
+      images: A Tensor of size [batch_size, height, width, 3], image samples that have been preprocessed.
+      images_raw: A Tensor of size [batch_size, height, width, 3], image samples that can be used for visualization.
+      labels: A Tensor of size [batch_size], whose values range between 0 and dataset.num_classes.
+    """
+    data_provider = slim.dataset_data_provider.DatasetDataProvider(
+        dataset)
+        # common_queue_capacity=32)
+        # common_queue_min=8)
+    image_raw, label = data_provider.get(['image', 'label'])
+    
+    # Preprocess image for usage by Inception.
+    image = inception_preprocessing.preprocess_image(image_raw, height, width, is_training=is_training)
+    
+    # Preprocess the image for display purposes.
+    image_raw = tf.expand_dims(image_raw, 0)
+    image_raw = tf.image.resize_images(image_raw, [height, width])
+    image_raw = tf.squeeze(image_raw)
+
+    # Batch it up.
+    images, images_raw, labels = tf.train.batch(
+          [image, image_raw, label],
+          batch_size=batch_size,
+          num_threads=1,
+          capacity=2 * batch_size)
+    
+    return images, images_raw, labels
+
+The problem comes from slim.dataset_data_provider.DatasetDataProvider as I couldn't read the dataset at all.
+Here is my error traceback:
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:111] successfully opened CUDA library libcurand.so locally
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:925] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:951] Found device 0 with properties: 
+name: GeForce GTX 860M
+major: 5 minor: 0 memoryClockRate (GHz) 1.0195
+pciBusID 0000:01:00.0
+Total memory: 3.95GiB
+Free memory: 3.60GiB
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:972] DMA: 0 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:982] 0:   Y 
+I tensorflow/core/common_runtime/gpu/gpu_device.cc:1041] Creating TensorFlow device (/gpu:0) -> (device: 0, name: GeForce GTX 860M, pci bus id: 0000:01:00.0)
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:245] PoolAllocator: After 1898 get requests, put_count=1100 evicted_count=1000 eviction_rate=0.909091 and unsatisfied allocation rate=1
+I tensorflow/core/common_runtime/gpu/pool_allocator.cc:257] Raising pool_size_limit_ from 100 to 110
+INFO:tensorflow:Starting Session.
+INFO:tensorflow:Starting Queues.
+INFO:tensorflow:global_step/sec: 0
+Not a JPEG file: starts with 0x89 0x50
+Not a JPEG file: starts with 0x89 0x50
+INFO:tensorflow:Error reported to Coordinator: <class 'tensorflow.python.framework.errors.InvalidArgumentError'>, Invalid JPEG data, size 26498
+	 [[Node: case/If_0/DecodeJpeg = DecodeJpeg[acceptable_fraction=1, channels=3, fancy_upscaling=true, ratio=1, try_recover_truncated=false, _device="/job:localhost/replica:0/task:0/cpu:0"](case/If_0/DecodeJpeg/Switch:1, ^case/Assert/AssertGuard/Merge/_7825)]]
+
+Caused by op u'case/If_0/DecodeJpeg', defined at:
+  File "code.py", line 148, in <module>
+    images, images_raw, labels = load_batch(dataset, height = image_size, batch_size = batch_size, width = image_size, is_training = True)
+  File "code.py", line 27, in load_batch
+    dataset)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/dataset_data_provider.py", line 78, in __init__
+    tensors = dataset.decoder.decode(data, items)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/tfexample_decoder.py", line 398, in decode
+    outputs.append(handler.tensors_to_item(keys_to_tensors))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/tfexample_decoder.py", line 297, in tensors_to_item
+    image = self._decode(image_buffer, image_format)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/tfexample_decoder.py", line 324, in _decode
+    }, default=decode_jpg, exclusive=True)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 2886, in case
+    case_seq = _build_case()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 2868, in _build_case
+    name="If_%d" % i)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 1710, in cond
+    orig_res, res_t = context_t.BuildCondBranch(fn1)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 1613, in BuildCondBranch
+    r = fn()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/tfexample_decoder.py", line 317, in decode_jpg
+    return image_ops.decode_jpeg(image_buffer, self._channels)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_image_ops.py", line 283, in decode_jpeg
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 749, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2380, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1298, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Invalid JPEG data, size 26498
+	 [[Node: case/If_0/DecodeJpeg = DecodeJpeg[acceptable_fraction=1, channels=3, fancy_upscaling=true, ratio=1, try_recover_truncated=false, _device="/job:localhost/replica:0/task:0/cpu:0"](case/If_0/DecodeJpeg/Switch:1, ^case/Assert/AssertGuard/Merge/_7825)]]
+
+W tensorflow/core/framework/op_kernel.cc:968] Out of range: FIFOQueue '_0_batch/fifo_queue' is closed and has insufficient elements (requested 3, current size 0)
+	 [[Node: batch = QueueDequeueMany[_class=["loc:@batch/fifo_queue"], component_types=[DT_FLOAT, DT_FLOAT, DT_INT64], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](batch/fifo_queue, batch/n)]]
+W tensorflow/core/framework/op_kernel.cc:968] Out of range: FIFOQueue '_0_batch/fifo_queue' is closed and has insufficient elements (requested 3, current size 0)
+	 [[Node: batch = QueueDequeueMany[_class=["loc:@batch/fifo_queue"], component_types=[DT_FLOAT, DT_FLOAT, DT_INT64], timeout_ms=-1, _device="/job:localhost/replica:0/task:0/cpu:0"](batch/fifo_queue, batch/n)]]
+Traceback (most recent call last):
+  File "code.py", line 171, in <module>
+    number_of_steps = 10)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/learning.py", line 780, in train
+    raise
+  File "/usr/lib/python2.7/contextlib.py", line 35, in __exit__
+    self.gen.throw(type, value, traceback)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 969, in managed_session
+    self.stop(close_summary_writer=close_summary_writer)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/supervisor.py", line 797, in stop
+    stop_grace_period_secs=self._stop_grace_secs)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/coordinator.py", line 386, in join
+    six.reraise(*self._exc_info_to_raise)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/training/queue_runner.py", line 225, in _run
+    sess.run(enqueue_op)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 717, in run
+    run_metadata_ptr)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 915, in _run
+    feed_dict_string, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 965, in _do_run
+    target_list, options, run_metadata)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/client/session.py", line 985, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: Invalid JPEG data, size 26498
+	 [[Node: case/If_0/DecodeJpeg = DecodeJpeg[acceptable_fraction=1, channels=3, fancy_upscaling=true, ratio=1, try_recover_truncated=false, _device="/job:localhost/replica:0/task:0/cpu:0"](case/If_0/DecodeJpeg/Switch:1, ^case/Assert/AssertGuard/Merge/_7825)]]
+
+Caused by op u'case/If_0/DecodeJpeg', defined at:
+  File "code.py", line 148, in <module>
+    images, images_raw, labels = load_batch(dataset, height = image_size, batch_size = batch_size, width = image_size, is_training = True)
+  File "code.py", line 27, in load_batch
+    dataset)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/dataset_data_provider.py", line 78, in __init__
+    tensors = dataset.decoder.decode(data, items)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/tfexample_decoder.py", line 398, in decode
+    outputs.append(handler.tensors_to_item(keys_to_tensors))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/tfexample_decoder.py", line 297, in tensors_to_item
+    image = self._decode(image_buffer, image_format)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/tfexample_decoder.py", line 324, in _decode
+    }, default=decode_jpg, exclusive=True)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 2886, in case
+    case_seq = _build_case()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 2868, in _build_case
+    name="If_%d" % i)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 1710, in cond
+    orig_res, res_t = context_t.BuildCondBranch(fn1)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 1613, in BuildCondBranch
+    r = fn()
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/tfexample_decoder.py", line 317, in decode_jpg
+    return image_ops.decode_jpeg(image_buffer, self._channels)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_image_ops.py", line 283, in decode_jpeg
+    name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/op_def_library.py", line 749, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2380, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1298, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): Invalid JPEG data, size 26498
+	 [[Node: case/If_0/DecodeJpeg = DecodeJpeg[acceptable_fraction=1, channels=3, fancy_upscaling=true, ratio=1, try_recover_truncated=false, _device="/job:localhost/replica:0/task:0/cpu:0"](case/If_0/DecodeJpeg/Switch:1, ^case/Assert/AssertGuard/Merge/_7825)]]
+
+Upon inspection, I have checked that a likely error comes from the line File "/usr/local/lib/python2.7/dist-packages/tensorflow/contrib/slim/python/slim/data/tfexample_decoder.py", line 297, in tensors_to_item image = self._decode(image_buffer, image_format)
+in tfexample_decoder.py, the image_format, if not indicated, will be a JPEG image by default unless there are 4 channels (RGBA) in the images. But since my images are grayscale, a JPEG decoder is used by default. Yet, I have no way to specify the image format as 'png' specifically unless the source code is changed. How should I go about this, or am I mistaken about the error I have arrived at?
+I have previously successfully run the code (many of which are referenced from the tf-slim walkthrough ipynb file), but the images I used were in jpeg.
+Any help is very much appreciated. Thank you for your time.

@@ -1,0 +1,25 @@
+Bazel Windows Build: '//tensorflow/tools/proto_text:gen_proto_text_functions' failed to link
+
+This was first caught by Bazel CI: http://ci.bazel.io/blue/organizations/jenkins/TensorFlow/detail/TensorFlow/1030/pipeline
+Reported at bazelbuild/bazel#3524
+  C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/bin/amd64/link.exe /nologo /OUT:bazel-out/msvc_x64-py3-opt/bin/tensorflow/tools/proto_text/gen_proto_text_functions.exe /MACHINE:X64 /SUBSYSTEM:CONSOLE @bazel-out/msvc_x64-py3-opt/bin/tensorflow/tools/proto_text/gen_proto_text_functions.exe-2.params /DEFAULTLIB:libcmt.lib.
+liblib_proto_parsing.a(logging.o) : error LNK2019: unresolved external symbol "public: unsigned __int64 __cdecl tensorflow::StringPiece::Hasher::operator()(class tensorflow::StringPiece)const " (??RHasher@StringPiece@tensorflow@@QEBA_KV12@@Z) referenced in function "protected: struct std::pair<class std::_List_iterator<class std::_List_val<struct std::_List_simple_types<struct std::pair<class tensorflow::StringPiece const ,int> > > >,bool> __cdecl std::_Hash<class std::_Umap_traits<class tensorflow::StringPiece,int,class std::_Uhash_compare<class tensorflow::StringPiece,struct tensorflow::StringPiece::Hasher,struct std::equal_to<class tensorflow::StringPiece> >,class std::allocator<struct std::pair<class tensorflow::StringPiece const ,int> >,0> >::_Insert<struct std::pair<class tensorflow::StringPiece const ,int> &,class std::_List_unchecked_iterator<class std::_List_val<struct std::_List_simple_types<struct std::pair<class tensorflow::StringPiece const ,int> > > > >(struct std::pair<class tensorflow::StringPiece const ,int> &,class std::_List_unchecked_iterator<class std::_List_val<struct std::_List_simple_types<struct std::pair<class tensorflow::StringPiece const ,int> > > >)" (??$_Insert@AEAU?$pair@$$CBVStringPiece@tensorflow@@H@std@@V?$_List_unchecked_iterator@V?$_List_val@U?$_List_simple_types@U?$pair@$$CBVStringPiece@tensorflow@@H@std@@@std@@@std@@@2@@?$_Hash@V?$_Umap_traits@VStringPiece@tensorflow@@HV?$_Uhash_compare@VStringPiece@tensorflow@@UHasher@12@U?$equal_to@VStringPiece@tensorflow@@@std@@@std@@V?$allocator@U?$pair@$$CBVStringPiece@tensorflow@@H@std@@@4@$0A@@std@@@std@@IEAA?AU?$pair@V?$_List_iterator@V?$_List_val@U?$_List_simple_types@U?$pair@$$CBVStringPiece@tensorflow@@H@std@@@std@@@std@@@std@@_N@1@AEAU?$pair@$$CBVStringPiece@tensorflow@@H@1@V?$_List_unchecked_iterator@V?$_List_val@U?$_List_simple_types@U?$pair@$$CBVStringPiece@tensorflow@@H@std@@@std@@@std@@@1@@Z)
+bazel-out/msvc_x64-py3-opt/bin/tensorflow/tools/proto_text/gen_proto_text_functions.exe : fatal error LNK1120: 1 unresolved externals
+Target //tensorflow/tools/proto_text:gen_proto_text_functions failed to build
+
+Culprit is found by bisecting: 072b0c9.
+The unresolved symbol tensorflow::StringPiece::Hasher::operator() is implemented in stringpiece.cc. This change should have introduced a dependency on stringpieces.cc from logging.cc.
+However, //tensorflow/tools/proto_text:gen_proto_text_functions doesn't contain stringpiece.cc
+$ bazel query 'somepath(//tensorflow/tools/proto_text:gen_proto_text_functions, tensorflow/core/lib/core/stringpiece.h)'
+//tensorflow/tools/proto_text:gen_proto_text_functions
+//tensorflow/core:lib_proto_parsing
+//tensorflow/core:lib/core/stringpiece.h
+
+$ bazel query 'somepath(//tensorflow/tools/proto_text:gen_proto_text_functions, tensorflow/core/lib/core/stringpiece.cc)'
+INFO: Empty results
+
+The strange thing is this didn't break the Linux build, one possible explanation is that there is an implementation of stringpiece.cc in protobuf, which is a dependency of //tensorflow/tools/proto_text:gen_proto_text_functions
+$ bazel query 'deps(//tensorflow/tools/proto_text:gen_proto_text_functions)' | grep stringpiece.cc
+@protobuf_archive//:src/google/protobuf/stubs/stringpiece.cc
+
+@learyg @gunan

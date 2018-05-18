@@ -1,0 +1,143 @@
+operation concat causes error when using toco converter
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):Y
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):16.04
+TensorFlow installed from (source or binary):source
+TensorFlow version (use command below):('v1.7.0-1116-g5d33c1e', '1.7.0')
+Python version: 2.7
+Bazel version (if compiling from source):0.11.1
+GCC/Compiler version (if compiling from source):4.8.5
+CUDA/cuDNN version:9.1/7.1
+GPU model and memory: TITAN X (Pascal)
+
+Describe the problem
+HI,I am trying to quantize ssd_mobilenet_v1 using tensorflow object detection api.First,I replace all the graph_hook_fn with tf.contrib.quantize.create_training_graph and enable fused batch norm in https://github.com/tensorflow/models/blob/b6bcc450b981eba721ee2760c92d87da86900988/research/object_detection/models/ssd_mobilenet_v1_feature_extractor.py#L114. After training, I manage to get the mobilenet_ssd.tflite with the commands below.Then,I deploy the tflite model file in  a SAMSUNG GALAXY Note 8 but failed with the following exception,which happens in:
+
+  
+    
+      tensorflow/tensorflow/contrib/lite/java/src/main/native/nativeinterpreterwrapper_jni.cc
+    
+    
+        Lines 410 to 419
+      in
+      3e0fd55
+    
+    
+    
+    
+
+        
+          
+             // allocates memory 
+        
+
+        
+          
+             status = interpreter->AllocateTensors(); 
+        
+
+        
+          
+             if (status != kTfLiteOk) { 
+        
+
+        
+          
+               throwException(env, kNullPointerException, 
+        
+
+        
+          
+                              "Can not allocate memory for the interpreter", 
+        
+
+        
+          
+                              error_reporter->CachedErrorMessage()); 
+        
+
+        
+          
+               return 0; 
+        
+
+        
+          
+             } 
+        
+
+        
+          
+             return reinterpret_cast<jlong>(interpreter.release()); 
+        
+
+        
+          
+           } 
+        
+    
+  
+
+
+
+java.lang.RuntimeException: java.lang.NullPointerException: Can not allocate memory for the interpreter at org.tensorflow.demo.TFLiteObjectDetectionAPIModel.create(TFLiteObjectDetectionAPIModel.java:181)
+
+
+    at org.tensorflow.demo.DetectorActivity.onPreviewSizeChosen(DetectorActivity.java:109)
+    at org.tensorflow.demo.CameraActivity.onPreviewFrame(CameraActivity.java:119)
+    at android.hardware.Camera$EventHandler.handleMessage(Camera.java:1162)
+    at android.os.Handler.dispatchMessage(Handler.java:102)
+    at android.os.Looper.loop(Looper.java:135)
+    at android.app.ActivityThread.main(ActivityThread.java:5232)
+    at java.lang.reflect.Method.invoke(Native Method)
+    at java.lang.reflect.Method.invoke(Method.java:372)
+    at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:904)
+    at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:699)
+ Caused by: java.lang.NullPointerException: Can not allocate memory for the interpreter
+    at org.tensorflow.lite.NativeInterpreterWrapper.createInterpreter(Native Method)
+    at org.tensorflow.lite.NativeInterpreterWrapper.<init>(NativeInterpreterWrapper.java:50)
+    at org.tensorflow.lite.Interpreter.<init>(Interpreter.java:77)
+    at org.tensorflow.demo.TFLiteObjectDetectionAPIModel.create(TFLiteObjectDetectionAPIModel.java:179)
+    at org.tensorflow.demo.DetectorActivity.onPreviewSizeChosen(DetectorActivity.java:109) 
+    at org.tensorflow.demo.CameraActivity.onPreviewFrame(CameraActivity.java:119) 
+    at android.hardware.Camera$EventHandler.handleMessage(Camera.java:1162) 
+    at android.os.Handler.dispatchMessage(Handler.java:102) 
+    at android.os.Looper.loop(Looper.java:135) 
+    at android.app.ActivityThread.main(ActivityThread.java:5232) 
+    at java.lang.reflect.Method.invoke(Native Method) 
+    at java.lang.reflect.Method.invoke(Method.java:372) 
+    at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:904) 
+    at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:699) 
+
+When I convert .tflite back to .pb format and check the inference graph in tensorboard,I find some relu6_unfused nodes are not quantized properly.What is the problem?
+Before toco convert
+
+After toco convert
+
+
+By the way,if I use "dummy-quantization" to try out quantized inference on a float graph,the tflite model works fine in android,and the structure of Graph in GraphViz Dot format  just looks the same as  my quantized version.
+Source code / logs
+
+#Strip out problematic nodes before even letting TOCO see the graphdef
+bazel run -c opt tensorflow/python/tools/optimize_for_inference -- 
+--input=$DETECT_PB  --output=$STRIPPED_PB --frozen_graph=True 
+--input_names=Preprocessor/sub --output_names=concat,concat_1 
+--alsologtostderr
+
+
+#Run TOCO conversion.
+IMAGE_SIZE=300
+bazel run tensorflow/contrib/lite/toco:toco -- 
+  --input_file=$STRIPPED_PB 
+  --output_file=$DETECT_FB 
+  --input_format=TENSORFLOW_GRAPHDEF 
+  --output_format=TFLITE 
+  --input_shapes=1,${IMAGE_SIZE},${IMAGE_SIZE},3 
+  --input_arrays=Preprocessor/sub 
+  --output_arrays=concat,concat_1 
+  --inference_type=QUANTIZED_UINT8 
+  --mean_values=128 
+  --std_values=127 
+  --dump_graphviz=/tmp

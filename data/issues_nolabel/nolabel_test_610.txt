@@ -1,0 +1,26 @@
+Issues with running transpose on GPU
+
+I’m running into a couple of issues with transpose on GPUs. First, even the forward computation can’t be registered on a GPU unless I explicitly set the perm option. For example this fails (I’m setting allow_soft_placement=False in the session Config):
+with tf.device('/gpu:0'):
+    a = tf.constant(npr.rand(5, 3).astype('float32'))
+    b = tf.transpose(a)
+
+with the following error:
+InvalidArgumentError: Cannot assign a device to node 'transpose/Reverse': Could not satisfy explicit device specification '/gpu:0'
+[[Node: transpose/Reverse = Reverse[T=DT_INT32, _device="/gpu:0"](transpose/Range, transpose/Reverse/dims)]]
+
+If however I set perm=(1, 0) in the transpose operation above, it works. But that’s not the only problem, as the backward computation doesn’t work either way. For example this fails:
+with tf.device('/gpu:0'):
+    a = tf.Variable(tf.random_uniform([5, 3]))
+    b = tf.transpose(a, perm=(1, 0))
+    l = tf.reduce_sum(b)
+    o = tf.train.AdamOptimizer().minimize(l)
+    i = tf.initialize_all_variables()
+
+sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=False))
+sess.run(i)
+sess.run(o)
+
+with the following error:
+InvalidArgumentError: Cannot assign a device to node 'gradients/transpose_grad/InvertPermutation': Could not satisfy explicit device specification '/gpu:0'
+[[Node: gradients/transpose_grad/InvertPermutation = InvertPermutation[_device="/gpu:0"](transpose/perm)]]

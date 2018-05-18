@@ -1,0 +1,51 @@
+AbortionError(code=StatusCode.NOT_FOUND, details="FeedInputs: unable to find feed output ToFloat:0")
+
+Hello
+I am trying to host the ssd_mobilenet_v1_coco model from the Tensorflow Object Detection API model zoo with Tensorflow Serving.
+I was able to successfully export the model with the exporter script in models/object_detection/exporter.py as a SavedModel. The issue arises when I tried to run the modified client
+from __future__ import print_function
+from grpc.beta import implementations
+import tensorflow as tf
+from tensorflow_serving.apis import predict_pb2
+from tensorflow_serving.apis import prediction_service_pb2
+
+
+tf.app.flags.DEFINE_string('server', 'localhost:9000',
+                           'PredictionService host:port')
+tf.app.flags.DEFINE_string('image', '', 'path to image in JPEG format')
+FLAGS = tf.app.flags.FLAGS
+
+
+def main(_):
+  host, port = FLAGS.server.split(':')
+  channel = implementations.insecure_channel(host, int(port))
+  stub = prediction_service_pb2.beta_create_PredictionService_stub(channel)
+  with open(FLAGS.image, 'rb') as f:
+    data = f.read()
+    request = predict_pb2.PredictRequest()
+    request.model_spec.name = 'mobilenet_v1'
+    request.model_spec.signature_name = 'serving_default'
+    request.inputs['inputs'].CopyFrom(
+        tf.contrib.util.make_tensor_proto(data, shape=[1]))
+    result = stub.Predict(request, 10.0)  # 10 secs timeout
+    print(result)
+
+
+if __name__ == '__main__':
+  tf.app.run()
+
+Here's the traceback for the gRPC request
+Traceback (most recent call last):
+  File "/home/mcw-nn/Documents/SSP/serving/bazel-bin/tensorflow_serving/example/inception_client.runfiles/tf_serving/tensorflow_serving/example/inception_client.py", line 56, in <module>
+    tf.app.run()
+  File "/home/mcw-nn/Documents/SSP/serving/bazel-bin/tensorflow_serving/example/inception_client.runfiles/org_tensorflow/tensorflow/python/platform/app.py", line 48, in run
+    _sys.exit(main(_sys.argv[:1] + flags_passthrough))
+  File "/home/mcw-nn/Documents/SSP/serving/bazel-bin/tensorflow_serving/example/inception_client.runfiles/tf_serving/tensorflow_serving/example/inception_client.py", line 51, in main
+    result = stub.Predict(request, 10.0)  # 10 secs timeout
+  File "/usr/local/lib/python2.7/dist-packages/grpc/beta/_client_adaptations.py", line 324, in __call__
+    self._request_serializer, self._response_deserializer)
+  File "/usr/local/lib/python2.7/dist-packages/grpc/beta/_client_adaptations.py", line 210, in _blocking_unary_unary
+    raise _abortion_error(rpc_error_call)
+grpc.framework.interfaces.face.face.AbortionError: AbortionError(code=StatusCode.NOT_FOUND, details="FeedInputs: unable to find feed output ToFloat:0")
+
+I am using this commit of tensorflow to build the model server which is the default submodule of tensorflow serving

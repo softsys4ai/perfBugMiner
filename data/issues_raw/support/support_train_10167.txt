@@ -1,0 +1,59 @@
+Ability to completelly reset tensorflow state (Session.close() does not do that)
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): parallels ubuntu 14.04
+TensorFlow installed from (source or binary): source
+TensorFlow version (use command below): 1.1.0
+Bazel version (if compiling from source): 0.4.5-jdk7
+CUDA/cuDNN version: no cuda
+GPU model and memory: no gpu
+Exact command to reproduce: see the code below
+
+Describe the problem
+Bug:
+session.close() seems to imply that all resources would be freed and tensorflow state would be reset.
+or Feature request:
+If I'm wrong about session.close(), then there should be a way to reset tensorflow state.
+When I first time create a session, tensorflow seem to initialize certain variables that I see as a printout like "platform Host present with 8 visible devices". However after I close the session I expect these resources to be freed. At least there would be nice to maybe have an additional command to close the device. After running this "complete_device_close()" command, I expect that a new session will initialize device again with the same printout.
+The lack of this behavior currently does not allow to run tensorflow sessions after a fork even in the case where I know that the parent process is never going to use tensorflow again. The following code hangs:
+   import multiprocessing
+   import tensorflow as tf
+
+    def _runner():
+        sess = tf.Session()
+        sess.run(tf.Variable(0.).initializer)  # this hangs after fork
+        sess.close()  # here all resources should be cleared
+
+    _runner()
+
+    p = multiprocessing.Process(target=_runner)
+    p.start()
+    p.join()
+There are multiple issues on "hanging after fork" topic:
+#5448
+#2448
+with a solution to create a server or not to fork at all. However in my case parent process does not want to use tensorflow anymore so I expect to close it forever and the parent process and reopen it in a child. Suggested workarounds do not work for me because parent tensorflow use and a use in a child after fork happens in totally unrelated parts of the system and at different times and creating any coupling between them would be really ugly. We would better establish a practice to "properly close tensorflow after you done".
+Notice that initializing devices in multiple children after fork works fine if parent is not involved:
+   import multiprocessing
+   import tensorflow as tf
+
+    def _runner_2(index):
+        sess = tf.Session()
+        for i in range(10):
+            import time
+            time.sleep(0.1)
+            print('running %d' % index)
+            sess.run(tf.Variable(0.).initializer)
+        sess.close()
+
+    for j in range(10):
+        p = multiprocessing.Process(target=_runner_2, args=(j,))
+        p.start()
+This code prints "platform Host present with 8 visible devices" 10 times.
+This suggests that there is no underlying reason to prevent sharing of CPU or any other resources in this case (I do not have GPU).
+Alternative phrasing of the feature request would be:
+"Make tensorflow fork-safe after certain full deinitialization command"
+Source code / logs
+see above

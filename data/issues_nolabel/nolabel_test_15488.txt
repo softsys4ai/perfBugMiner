@@ -1,0 +1,103 @@
+Bad access error when deserializing a fully connected TF Lite model
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+TensorFlow installed from (source or binary):
+TensorFlow version (use command below):
+Python version:
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+('v1.3.0-rc1-5910-ge2174cc943', '1.4.0')
+Describe the problem
+I trained a very simple feed forward network (model structure is y = W*x + b so basically linear regression) using raw tensorflow code (matrix multiply, bias add and relu) so not using any Estimators or higher order APIs. My main purpose was to see if I could serialize the model, convert it to .lite format and then deserialize it correctly in C++.
+I did freeze_graph on this graph.pbtxt and model checkpoints using tensorflow's provided freeze_graph method, and converted to .lite format using the bazel command line instruction (in the lite documentation) Lite conversion command used is
+bazel run --config=opt \
+  //tensorflow/contrib/lite/toco:toco -- \
+  --input_file=frozen_model.pb  \               
+ --output_file=frozen_model.lite \               
+ --input_format=TENSORFLOW_GRAPHDEF \
+  --output_format=TFLITE \
+  --inference_type=FLOAT \
+  --input_shape=**1,1** \ 
+ --input_array=**x** \          
+ --output_array=**output**
+
+As x is the name of the input 1-Dim placeholder tensor, output is the name of the result of W*x+b. I did not include y as part of the input_array as running with --input_array=x,y, --input_shape=1,1:1,1 as this produced a .lite model with 0 bytes (no output)
+Using code very similar to what is in tflite_driver.cc and tflite_driver_test.cc, I was able to get the mobile_net example working fine but this simple model I described above fails with a EXC_BAD_ACCESS error. Upon debugging I saw that the error happens at fully_conncted.cc
+template <KernelType kernel_type>
+TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
+....
+  switch (input->type) {  // Already know in/out types are same.
+    case kTfLiteFloat32:
+      return EvalFloat<**kernel_type**>(context, node, params, data, input, filter,
+                                    bias, output);
+....
+  }
+  return kTfLiteOk;
+}
+
+
+kernel_type is kPie at this point. Looking further into fully_connected.cc, I notice two things.
+enum KernelType {
+  kReference,
+  kGenericOptimized,  // Neon-free
+  kNeonOptimized,
+  kPie,  **// Used by the PIE team**
+};
+
+
+And also
+TfLiteRegistration* Register_FULLY_CONNECTED() {
+  **// TODO(ahentz): We don't have a dedicated quantized version of the PIE
+  // kernel. For now, the quantized version just defer to the corresponding
+  // optimized MINI kernel. At some point we will allow different libraries to
+  // be built with different kernels, but for now we have to pick one here.
+  return Register_FULLY_CONNECTED_PIE();**
+#ifdef USE_NEON
+  return Register_FULLY_CONNECTED_NEON_OPT();
+#else
+  return Register_FULLY_CONNECTED_GENERIC_OPT();
+#endif
+}
+
+
+Specifically, the EXC_BAD_ACCESS error happens at
+TfLiteStatus EvalPie(TfLiteContext* context, TfLiteNode* node,
+                     ...
+  // Output = bias if bias tensor exists.
+  if (bias) {
+    tensor_utils::VectorBatchVectorAssign(bias->data.f, num_units, batch_size,
+                                          output->data.f);
+  } 
+
+
+As we can see the filter and bias terms have bad memory addresses, the input and output tensors have valid memory addresses though
+My questions are
+
+Why is kPie kernel_type being picked for my simple model?
+Based on the comments it looks like kPie is not supported for external use, so could this explain the bad access error?
+Is this an issue with how I converted to lite format? Here is my command again
+
+bazel run --config=opt \
+  //tensorflow/contrib/lite/toco:toco -- \
+  --input_file=frozen_model.pb  \               
+ --output_file=frozen_model.lite \               
+ --input_format=TENSORFLOW_GRAPHDEF \
+  --output_format=TFLITE \
+  --inference_type=FLOAT \
+  --input_shape=**1,1** \ 
+ --input_array=**x** \          
+ --output_array=**output**
+
+
+Is there any example of a very simple model composed out of matmul, add and relu which can be converted to .lite in such a way that it can be correctly deserialized in C++, just like the mobile_net example? I can build up from such an example

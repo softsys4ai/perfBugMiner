@@ -1,0 +1,117 @@
+2017-12-11 17:53:55.834374: F tensorflow/contrib/lite/toco/tflite/export.cc:192] Unsupported operator: Slice
+
+System information
+https://stackoverflow.com/questions/tagged/tensorflow
+System information
+
+**OS Platform and Distribution **:Linux Ubuntu 16.04
+**TensorFlow installed from **:source
+TensorFlow version ,installed from source:1.4
+Python version:2.7
+**Bazel version :1.5
+GCC/Compiler version: 5.4.0   20160609
+cpu version(:Intel® Core™ i5-7500 CPU @ 3.40GHz × 4
+CUDA/cuDNN version
+N/A
+GPU model and memory
+N/A
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+use this command:
+bazel-bin/tensorflow/contrib/lite/toco/toco  
+--input_file=/home/liu/az/caffe-tensorflow-master/MobileNet/frozen_graph.pb 
+--input_format=TENSORFLOW_GRAPHDEF  --output_format=TFLITE 
+--output_file=/home/liu/az/caffe-tensorflow-master/MobileNet/mobilenet.lite --inference_type=FLOAT 
+--inference_input_type=FLOAT --input_arrays=img 
+--output_arrays=prob --input_shapes=1,20,20,3
+I am trying to convert a graph from frozen .pb to .lite format using toco, but I get this error:
+2017-12-11 17:53:55.833614: I tensorflow/contrib/lite/toco/import_tensorflow.cc:1046] Converting unsupported operation: Pack
+2017-12-11 17:53:55.833891: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before general graph transformations: 40 operators, 58 arrays (0 quantized)
+2017-12-11 17:53:55.834169: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] After general graph transformations pass 1: 14 operators, 30 arrays (0 quantized)
+2017-12-11 17:53:55.834226: I tensorflow/contrib/lite/toco/graph_transformations/graph_transformations.cc:39] Before dequantization graph transformations: 14 operators, 30 arrays (0 quantized)
+2017-12-11 17:53:55.834281: I tensorflow/contrib/lite/toco/allocate_transient_arrays.cc:312] Total transient array allocated size: 128000 bytes, theoretical optimal value: 128000 bytes.
+2017-12-11 17:53:55.834374: F tensorflow/contrib/lite/toco/tflite/export.cc:192] Unsupported operator: Slice
+Aborted (core dumped)
+who can tell me how to get rid of this error?
+Source code / logs
+-- coding: utf-8 --
+import tensorflow as tf
+import tensorflow.contrib.lite.python.lite
+#创建一个交互式Session
+sess = tf.InteractiveSession()
+#创建两个占位符，x为输入网络的图像，y_为输入网络的图像类别
+x = tf.placeholder(name="img",dtype=tf.float32, shape=[1,20,20,3])
+y_ = tf.placeholder(name="output",dtype=tf.float32, shape=[None, 2])
+#权重初始化函数
+def weight_variable(shape):
+#输出服从截尾正态分布的随机值
+initial = tf.truncated_normal(shape, stddev=0.1)
+return tf.Variable(initial)
+#偏置初始化函数
+def bias_variable(shape):
+initial = tf.constant(0.1, shape=shape)
+return tf.Variable(initial)
+#创建卷积op
+#x 是一个4维张量，shape为[batch,height,width,channels]
+#卷积核移动步长为1。填充类型为SAME,可以不丢弃任何像素点
+def conv2d(x, W, type):
+if type == "SAME":
+return tf.nn.conv2d(x, W, strides=[1,1,1,1], padding="SAME")
+else:
+return tf.nn.conv2d(x,W, strides=[1,1,1,1],padding="VALID")
+#创建池化op
+#采用最大池化，也就是取窗口中的最大值作为结果
+#x 是一个4维张量，shape为[batch,height,width,channels]
+#ksize表示pool窗口大小为2x2,也就是高2，宽2
+#strides，表示在height和width维度上的步长都为2
+def max_pool_2x2(x):
+return tf.nn.max_pool(x, ksize=[1,2,2,1],
+strides=[1,2,2,1], padding="SAME")
+#第1层，卷积层
+W_conv1 = weight_variable([3,3,3,16])
+b_conv1 = bias_variable([16])
+#x_image = tf.reshape(x, [-1,20,20,3])
+x_image = x;
+h_conv1 = tf.nn.relu(conv2d(x_image, W_conv1,"SAME") + b_conv1)
+W_conv2 = weight_variable([3,3,16,64])
+b_conv2 = bias_variable([64])
+h_conv2 = tf.nn.relu(conv2d(h_conv1, W_conv2,"SAME") + b_conv2)
+h_pool1 = max_pool_2x2(h_conv2)
+W_conv3 = weight_variable([3,3,64,64])
+b_conv3 = weight_variable([64])
+h_conv3 = tf.nn.relu(conv2d(h_pool1, W_conv3,"SAME") + b_conv3)
+h_pool2 = max_pool_2x2(h_conv3)
+W_conv4 = weight_variable([2,2,64,16])
+b_conv4 = weight_variable([16])
+h_conv4 = tf.nn.relu(conv2d(h_pool2, W_conv4,"VALID") + b_conv4)
+W_conv5 = weight_variable([3,3,16,2])
+b_conv5 = weight_variable([2])
+h_conv5 = tf.nn.relu(conv2d(h_conv4, W_conv5,"VALID") + b_conv5)
+h_pool3 = max_pool_2x2(h_conv5)
+y_conv = tf.nn.softmax(h_pool3,name="prob")
+out = tf.identity(y_conv, name="prob")
+#预测值和真实值之间的交叉墒
+cross_entropy = -tf.reduce_sum(y_ * tf.log(y_conv))
+#train op, 使用ADAM优化器来做梯度下降。学习率为0.0001
+train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
+#评估模型，tf.argmax能给出某个tensor对象在某一维上数据最大值的索引。
+#因为标签是由0,1组成了one-hot vector，返回的索引就是数值为1的位置
+correct_predict = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
+#计算正确预测项的比例，因为tf.equal返回的是布尔值，
+#使用tf.cast把布尔值转换成浮点数，然后用tf.reduce_mean求平均值
+accuracy = tf.reduce_mean(tf.cast(correct_predict, "float"))
+saver=tf.train.Saver()
+#初始化变量
+with tf.Session() as sess:
+sess.run(tf.initialize_all_variables())
+constant_graph = tf.get_default_graph().as_graph_def()
+with tf.gfile.FastGFile('../MobileNet/' + 'mobile.pb', mode='wb') as f:
+f.write(constant_graph.SerializeToString())
+saver.save(sess, "../MobileNet/mobile.ckpt")
+tflite_model = tf.contrib.lite.toco_convert(sess.graph_def, [x], [out])
+open("converteds_model.tflite", "wb").write(tflite_model)

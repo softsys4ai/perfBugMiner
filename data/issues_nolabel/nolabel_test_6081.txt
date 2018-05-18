@@ -1,0 +1,77 @@
+How to restore training when MonitoredTrainingSession is used
+
+I ran cifar10_train.py from master branch. My  question is how to restore the checkpoint file in case that MonitoredTrainingSession is being used instead of Session. I have modified the code like this:
+def train():
+  """Train CIFAR-10 for a number of steps."""
+  with tf.Graph().as_default():
+    global_step = tf.contrib.framework.get_or_create_global_step()
+
+    # Get images and labels for CIFAR-10.
+    images, labels = cifar10.distorted_inputs()
+
+    # Build a Graph that computes the logits predictions from the
+    # inference model.
+    logits = cifar10.inference(images)
+
+    # Calculate loss.
+    loss = cifar10.loss(logits, labels)
+
+    # Build a Graph that trains the model with one batch of examples and
+    # updates the model parameters.
+    train_op = cifar10.train(loss, global_step)
+
+    class _LoggerHook(tf.train.SessionRunHook):
+      """Logs loss and runtime."""
+
+      def begin(self):
+        self._step = -1
+
+      def before_run(self, run_context):
+        self._step += 1
+        self._start_time = time.time()
+        return tf.train.SessionRunArgs(loss)  # Asks for loss value.
+
+      def after_run(self, run_context, run_values):
+        duration = time.time() - self._start_time
+        loss_value = run_values.results
+        if self._step % 10 == 0:
+          num_examples_per_step = FLAGS.batch_size
+          examples_per_sec = num_examples_per_step / duration
+          sec_per_batch = float(duration)
+
+          format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; %.3f '
+                        'sec/batch)')
+          print (format_str % (datetime.now(), self._step, loss_value,
+                               examples_per_sec, sec_per_batch))
+
+    saver = tf.train.Saver()
+    with tf.train.MonitoredTrainingSession(checkpoint_dir=FLAGS.train_dir,
+                                           hooks=[tf.train.StopAtStepHook(last_step=FLAGS.max_steps),
+                                                  tf.train.NanTensorHook(loss),
+                                                  _LoggerHook()],
+                                           config=tf.ConfigProto(log_device_placement=FLAGS.log_device_placement),
+                                           save_checkpoint_secs=600,
+                                           save_summaries_steps=100) as mon_sess:
+        ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
+        if ckpt and ckpt.model_checkpoint_path:
+            # Restores from checkpoint
+            saver.restore(mon_sess, ckpt.model_checkpoint_path)
+            # Assuming model_checkpoint_path looks something like:
+            #   /my-favorite-path/cifar10_train/model.ckpt-0,
+            # extract global_step from it.
+            global_step = ckpt.model_checkpoint_path.split('/')[-1].split('-')[-1]
+        while not mon_sess.should_stop():
+            mon_sess.run(train_op)
+
+
+def main(argv=None):  # pylint: disable=unused-argument
+  # cifar10.maybe_download_and_extract()
+  # if tf.gfile.Exists(FLAGS.train_dir):
+  #   tf.gfile.DeleteRecursively(FLAGS.train_dir)
+  # tf.gfile.MakeDirs(FLAGS.train_dir)
+  # train()
+  cifar10.maybe_download_and_extract()
+  if not tf.gfile.Exists(FLAGS.train_dir):
+      tf.gfile.MakeDirs(FLAGS.train_dir)
+  train()
+The training variables seem to be restored, but the step variable still started from 0, how to make the step increases from the restored checkpoint step?

@@ -1,0 +1,83 @@
+Tensorflow Adam Multigpu Gradient
+
+I am trying to implement a network multiple gpu on tensorflow using ADAM Optimization.
+I am coping the code from the Cifar10_multigpu, but it looks that when the gradient calls the second tower it calls the gradient of the first and generated error on the average of the two towers. the code of the two tower is this
+ for d in devs:
+        with tf.device(d):
+            with tf.name_scope('%s_%d' % (tf_model.TOWER_NAME, i)) as scope:
+                loss = tower_loss(scope)
+                tf.get_variable_scope().reuse_variables()
+                summaries = tf.get_collection(tf.GraphKeys.SUMMARIES, scope)
+                grads = opt.compute_gradients(loss)
+                print('\n'.join('{}: {}'.format(*k) for k in enumerate(grads)))
+                tower_grads.append(grads)
+        i +=1
+
+and this generates each tower:
+stream, target= placeholder_inputs(FLAGS.batch_size*tf_model.ANGLES/FLAGS.num_gpus)
+    logits = tf_model.inference_noisy_simulate(stream)
+    _ = tf_model.loss(logits, target)
+    losses = tf.get_collection('losses', scope)
+    total_loss = tf.add_n(losses, name='total_loss')
+
+looking at the gradients the first tower generate this:
+0: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca11d0ae10>)
+1: (<tf.Tensor 'tower_0/gradients/tower_0/conv1/Conv2D_grad/tuple/control_dependency_1:0' shape=(1, 1, 8, 16) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c351b10>)
+2: (<tf.Tensor 'tower_0/gradients/tower_0/conv1/BiasAdd_grad/tuple/control_dependency_1:0' shape=(16,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c380dd0>)
+3: (<tf.Tensor 'tower_0/gradients/tower_0/conv2/Conv2D_grad/tuple/control_dependency_1:0' shape=(45, 4, 16, 16) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c351a10>)
+4: (<tf.Tensor 'tower_0/gradients/tower_0/conv2/BiasAdd_grad/tuple/control_dependency_1:0' shape=(16,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c3a6dd0>)
+5: (<tf.Tensor 'tower_0/gradients/tower_0/conv3/Conv2D_grad/tuple/control_dependency_1:0' shape=(45, 4, 16, 32) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c3a6490>)
+6: (<tf.Tensor 'tower_0/gradients/tower_0/conv3/BiasAdd_grad/tuple/control_dependency_1:0' shape=(32,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c351990>)
+7: (<tf.Tensor 'tower_0/gradients/tower_0/conv4/Conv2D_grad/tuple/control_dependency_1:0' shape=(45, 4, 32, 64) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c351890>)
+8: (<tf.Tensor 'tower_0/gradients/tower_0/conv4/BiasAdd_grad/tuple/control_dependency_1:0' shape=(64,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c3b7790>)
+9: (<tf.Tensor 'tower_0/gradients/tower_0/conv5/Conv2D_grad/tuple/control_dependency_1:0' shape=(45, 4, 64, 128) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c2d9110>)
+10: (<tf.Tensor 'tower_0/gradients/tower_0/conv5/BiasAdd_grad/tuple/control_dependency_1:0' shape=(128,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c2849d0>)
+11: (<tf.Tensor 'tower_0/gradients/tower_0/conv6/Conv2D_grad/tuple/control_dependency_1:0' shape=(45, 4, 128, 256) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c2e6f10>)
+12: (<tf.Tensor 'tower_0/gradients/tower_0/conv6/BiasAdd_grad/tuple/control_dependency_1:0' shape=(256,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c2afed0>)
+13: (<tf.Tensor 'tower_0/gradients/tower_0/fc1/MatMul_grad/tuple/control_dependency_1:0' shape=(18944, 4096) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c1f9550>)
+14: (<tf.Tensor 'tower_0/gradients/tower_0/fc1/add_grad/tuple/control_dependency_1:0' shape=(4096,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c214a10>)
+15: (<tf.Tensor 'tower_0/gradients/tower_0/fc1_1/MatMul_grad/tuple/control_dependency_1:0' shape=(4096, 1024) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c23dfd0>)
+16: (<tf.Tensor 'tower_0/gradients/tower_0/fc1_1/add_grad/tuple/control_dependency_1:0' shape=(1024,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c269bd0>)
+17: (<tf.Tensor 'tower_0/gradients/tower_0/softmax_linear/MatMul_grad/tuple/control_dependency_1:0' shape=(1024, 360) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c1d1a50>)
+18: (<tf.Tensor 'tower_0/gradients/tower_0/softmax_linear/softmax_linear_grad/tuple/control_dependency_1:0' shape=(360,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c1def50>)
+
+and the second generates this;
+0: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca11d0ae10>)
+1: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c351b10>)
+2: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c380dd0>)
+3: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c351a10>)
+4: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c3a6dd0>)
+5: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c3a6490>)
+6: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c351990>)
+7: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c351890>)
+8: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c3b7790>)
+9: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c2d9110>)
+10: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c2849d0>)
+11: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c2e6f10>)
+12: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c2afed0>)
+13: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c1f9550>)
+14: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c214a10>)
+15: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c23dfd0>)
+16: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c269bd0>)
+17: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c1d1a50>)
+18: (None, <tensorflow.python.ops.variables.Variable object at 0x7fca0c1def50>)
+19: (<tf.Tensor 'tower_1/gradients/tower_1/conv1/Conv2D_grad/tuple/control_dependency_1:0' shape=(1, 1, 8, 16) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0c178c50>)
+20: (<tf.Tensor 'tower_1/gradients/tower_1/conv1/BiasAdd_grad/tuple/control_dependency_1:0' shape=(16,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bfbb490>)
+21: (<tf.Tensor 'tower_1/gradients/tower_1/conv2/Conv2D_grad/tuple/control_dependency_1:0' shape=(45, 4, 16, 16) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bfda950>)
+22: (<tf.Tensor 'tower_1/gradients/tower_1/conv2/BiasAdd_grad/tuple/control_dependency_1:0' shape=(16,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bf91bd0>)
+23: (<tf.Tensor 'tower_1/gradients/tower_1/conv3/Conv2D_grad/tuple/control_dependency_1:0' shape=(45, 4, 16, 32) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bfcb590>)
+24: (<tf.Tensor 'tower_1/gradients/tower_1/conv3/BiasAdd_grad/tuple/control_dependency_1:0' shape=(32,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bf39e90>)
+25: (<tf.Tensor 'tower_1/gradients/tower_1/conv4/Conv2D_grad/tuple/control_dependency_1:0' shape=(45, 4, 32, 64) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bf499d0>)
+26: (<tf.Tensor 'tower_1/gradients/tower_1/conv4/BiasAdd_grad/tuple/control_dependency_1:0' shape=(64,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bf14fd0>)
+27: (<tf.Tensor 'tower_1/gradients/tower_1/conv5/Conv2D_grad/tuple/control_dependency_1:0' shape=(45, 4, 64, 128) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bf39150>)
+28: (<tf.Tensor 'tower_1/gradients/tower_1/conv5/BiasAdd_grad/tuple/control_dependency_1:0' shape=(128,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bebd8d0>)
+29: (<tf.Tensor 'tower_1/gradients/tower_1/conv6/Conv2D_grad/tuple/control_dependency_1:0' shape=(45, 4, 128, 256) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bf23110>)
+30: (<tf.Tensor 'tower_1/gradients/tower_1/conv6/BiasAdd_grad/tuple/control_dependency_1:0' shape=(256,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bf04610>)
+31: (<tf.Tensor 'tower_1/gradients/tower_1/fc1/MatMul_grad/tuple/control_dependency_1:0' shape=(18944, 4096) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bebdc50>)
+32: (<tf.Tensor 'tower_1/gradients/tower_1/fc1/add_grad/tuple/control_dependency_1:0' shape=(4096,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bebd310>)
+33: (<tf.Tensor 'tower_1/gradients/tower_1/fc1_1/MatMul_grad/tuple/control_dependency_1:0' shape=(4096, 1024) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0be96e10>)
+34: (<tf.Tensor 'tower_1/gradients/tower_1/fc1_1/add_grad/tuple/control_dependency_1:0' shape=(1024,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0be96990>)
+35: (<tf.Tensor 'tower_1/gradients/tower_1/softmax_linear/MatMul_grad/tuple/control_dependency_1:0' shape=(1024, 360) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0be52c90>)
+36: (<tf.Tensor 'tower_1/gradients/tower_1/softmax_linear/softmax_linear_grad/tuple/control_dependency_1:0' shape=(360,) dtype=float32>, <tensorflow.python.ops.variables.Variable object at 0x7fca0bf56f50>)
+
+I am wondering how to remove from the second the first None, but no targeting indexes so i can make for more towers.

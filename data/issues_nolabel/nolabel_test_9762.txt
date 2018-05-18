@@ -1,0 +1,61 @@
+Bazel CI / TensorFlow: fix more errors
+
+In this commit:
+
+
+Keep just the first character of the python
+version checker script's output. This is a simple
+way to strip \n and \r and we only need the major
+version anyway. The string is later used in
+writing the .bazelrc file where these characters
+would cause problems.
+
+
+Export environment variables in
+run_configure_for_cpu_build, use their default
+values
+
+
+Allow a user-defined value for BAZEL_SH
+
+
+Fix python_configure.bzl:
+
+
+4.a. Fix the symlink creation on Windows: create a
+single junction pointing to the src_dir. This is a
+trick to get around the problem that on Windows we
+can't create symlinks. By creating this symlink
+and declaring the same outputs as on Linux/Darwin,
+we make it look like that the genrule successfully
+produced these files. This only works in a
+single-machine execution environment.
+4.b. Get rid of the "select" in
+@local_config_python//:numpy_include and
+python_include. The results of find and dir
+only make sense on Linux/Darwin and Windows
+respectively, so there's no point in generating
+the non-Windows genrule on Windows and the
+Windows-specific one on non-Windows, because all
+the paths would be wrong. So instead of that,
+generate just the genrule corresponding to the
+platform.
+4.c. Write the genrule.cmd's commands to scripts
+and execute those instead. This avoids the
+difficulties with escaping backslashes and quotes.
+Backslashes are necessary on Windows because paths
+with forward slashes aren't generally accepted,
+e.g. "cmd.exe /c foo/bar" doesn't work because
+Windows believes foo is an executable and /bar is
+its switch:
+c:\tempdir>type bar.cmd
+@echo this is bar.cmd, %%1=(%1)
+
+c:\tempdir>cmd.exe /c bar/baz
+this is bar.cmd, %1=(/baz)
+
+
+simplify the "is_windows" function in
+./configure
+
+Fixes bazelbuild/bazel#2892

@@ -1,0 +1,47 @@
+MultiRNNCell fails _like_rnncell check.
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): MacOS Sierra 10.12.5
+TensorFlow installed from (source or binary): binary, pip3 install
+TensorFlow version (use command below): v1.2.0-5-g435cdfc 1.2.1
+Python version: 3.5.2
+CUDA/cuDNN version: N/A
+GPU model and memory: N/A
+
+Describe the problem
+I believe this is a bug. When initializing a MultiRNNCell like MultiRNNCell([lstm]*3) this subsequently may be passed into something like tf.nn.bidirectional_dynamic_rnn and it will pass the _like_rnncell check and everything proceeds normally. When initializing a MultiRNNCell like MultiRNNCell([lstm_factory() for _ in range num_layers]), such as in this code the _like_rnncell check on line 393 of this code will fail. If you trace it back to where that function is defined there are 4 qualifiers, the qualifiers that fail are hasattr(cell, 'output_size') and hasattr(cell, 'state_size'). The preferred way of initializing multi cell rnns that do not share input size which lead to later dimension mismatch seem to be this way. Initially I wrote my code with the former implementation but the former initialization leads to input dimension sharing and then mismatches later on which is another issue and why I can't use that one. (Also this probably fails anywhere a _like_rnncell check is used, I know for a fact my AttentionWrapper in my decoder fails for the same reason not just in the bidirectional_dynamic_rnn)
+Source code / logs
+This is my encoder copied from my seq2seq model class.
+    LSTMCell = tf.nn.rnn_cell.LSTMCell
+    MultiRNNCell = tf.nn.rnn_cell.MultiRNNCell
+    DropoutWrapper = tf.nn.rnn_cell.DropoutWrapper
+
+    def encode(
+        self,
+        num_units, peepholes, inputs,
+        num_layers, seq_len, time_major,
+        keep_prob=0.5
+    ):
+        multi_cell = MultiRNNCell(
+            [
+                (self._cell_factory(num_units, peepholes, keep_prob)
+                    for x in range(num_layers))
+            ]
+        )
+        enc_outputs, enc_state = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw=multi_cell,
+            cell_bw=multi_cell,
+            inputs=inputs,
+            sequence_length=seq_len,
+            dtype=tf.float32,
+            time_major=time_major
+        )
+        return enc_outputs, enc_state
+
+    def _cell_factory(self, num_units, peepholes, keep_prob):
+        lstm = LSTMCell(num_units=num_units, use_peepholes=peepholes)
+        dropout = DropoutWrapper(lstm, input_keep_prob=keep_prob)
+        return dropout
+
+Trace:
+File "execute.py", line 168, in <module> main() File "execute.py", line 91, in main steps=10000 File "/Users/panda/Desktop/aura_ml/aura_model/lib/python3.5/site-packages/tensorflow/python/estimator/estimator.py", line 241, in train loss = self._train_model(input_fn=input_fn, hooks=hooks) File "/Users/panda/Desktop/aura_ml/aura_model/lib/python3.5/site-packages/tensorflow/python/estimator/estimator.py", line 560, in _train_model model_fn_lib.ModeKeys.TRAIN) File "/Users/panda/Desktop/aura_ml/aura_model/lib/python3.5/site-packages/tensorflow/python/estimator/estimator.py", line 545, in _call_model_fn features=features, labels=labels, **kwargs) File "execute.py", line 134, in model_wrapper keep_prob=params['encode']['keep_probability'] File "/Users/panda/Desktop/aura_ml/model_1/model.py", line 42, in encode time_major=time_major File "/Users/panda/Desktop/aura_ml/aura_model/lib/python3.5/site-packages/tensorflow/python/ops/rnn.py", line 364, in bidirectional_dynamic_rnn raise TypeError("cell_fw must be an instance of RNNCell") TypeError: cell_fw must be an instance of RNNCell

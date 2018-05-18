@@ -1,0 +1,20 @@
+Possible bug in seq2seq sequence_loss_by_example
+
+Looking at the tensorflow/python/ops/seq2seq.py file of the sequence_loss_by_example function:
+  if softmax_loss_function is None:
+    # TODO(lukaszkaiser): There is no SparseCrossEntropy in TensorFlow, so
+    # we need to first cast targets into a dense representation, and as
+    # SparseToDense does not accept batched inputs, we need to do this by
+    # re-indexing and re-sizing. When TensorFlow adds SparseCrossEntropy,
+    # rewrite this method.
+    indices = targets[i] + num_decoder_symbols * math_ops.range(batch_size)
+    with ops.device("/cpu:0"):  # Sparse-to-dense must be on CPU for now.
+      dense = sparse_ops.sparse_to_dense(
+          indices, array_ops.expand_dims(length, 0), 1.0,
+          0.0)
+    target = array_ops.reshape(dense, [-1, num_decoder_symbols])
+    crossent = nn_ops.softmax_cross_entropy_with_logits(
+        logits[i], target, name="SequenceLoss/CrossEntropy{0}".format(i))
+
+Isn't this a bug? the softmax_cross_entropy_with_logits doesn't take in the weights as a parameter, and hence if your sequence is heavily padded, it will bias the optimization. however, the inference perplexity is done correctly later on due to the element wise product with weights, however the gradient won't have that information, or am i wrong?
+thanks!

@@ -1,0 +1,73 @@
+Go bindings: Two variables interfere unless op.VarHandleOpSharedName is used
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Arch linux
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4.0
+Python version:  NA
+GPU model and memory:
+
+Describe the problem
+When creating and assigning values to two variables in the Go bindings, they conflict, one value gets assigned to both variables. The variables assign OPs race, so it is somewhat non deterministic which gets assigned to both.
+Reproduce:
+Use op.VarHandleOp() to create two variable handles, and then use op.AssignVariableOp() to create OPs to assign the constant 1 to the first variable, and 2 to the second. Pull on the two assign OPs.
+Evaluate the variable reader outputs for the two variables.
+Expected result: First variable has a value of 1, and second variable has a value of 2.
+Observed result: Both variables have the same value, usually 2, but occasionally 1.
+Is this behavior correct?
+If I use the optional parameter op.VarHandleOpSharedName in op.VarHandleOp, giving the two variables different names, it works as expected, so this is easy to work around.
+Source code / logs
+package main
+
+import (
+	"fmt"
+
+	tf "github.com/tensorflow/tensorflow/tensorflow/go"
+	"github.com/tensorflow/tensorflow/tensorflow/go/op"
+)
+
+func makeVariable(s *op.Scope, i int32, name string) (init *tf.Operation, output tf.Output) {
+	constant := op.Const(s, i)
+	variable := op.VarHandleOp(s, tf.Int32, tf.ScalarShape())
+	//variable := op.VarHandleOp(s, tf.Int32, tf.ScalarShape(), op.VarHandleOpSharedName(name))
+	init = op.AssignVariableOp(s, variable, constant)
+	output = op.ReadVariableOp(s, variable, tf.Int32)
+	return
+}
+
+func main() {
+	s := op.NewScope()
+	init1, output1 := makeVariable(s.SubScope("var1"), 1, "variable_1")
+	init2, output2 := makeVariable(s.SubScope("var2"), 2, "variable_2")
+
+	graph, err := s.Finalize()
+	if err != nil {
+		panic(err)
+	}
+	sess, err := tf.NewSession(graph, nil)
+	if err != nil {
+		panic(err)
+	}
+	_, err = sess.Run(nil, nil, []*tf.Operation{init1, init2})
+	if err != nil {
+		panic(err)
+	}
+	results, err := sess.Run(nil, []tf.Output{output1, output2}, nil)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(results[0].Value(), results[1].Value())
+}
+
+Prints:
+[isaac@d6-arch tfes]$ go run shape_bug_demo.go 
+2017-12-02 09:17:06.516455: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2017-12-02 09:17:06.594468: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:892] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-12-02 09:17:06.594676: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Found device 0 with properties: 
+name: GeForce GTX 1060 6GB major: 6 minor: 1 memoryClockRate(GHz): 1.7085
+pciBusID: 0000:01:00.0
+totalMemory: 5.93GiB freeMemory: 5.15GiB
+2017-12-02 09:17:06.594688: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX 1060 6GB, pci bus id: 0000:01:00.0, compute capability: 6.1)
+2 2

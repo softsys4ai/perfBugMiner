@@ -1,0 +1,91 @@
+BUG: tf.reduce_max does not support int64 tensor on GPU.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Ubuntu 14.04
+TensorFlow installed from (source or binary):
+binary (pip)
+TensorFlow version (use command below):
+v1.3.0-rc2-20-g0787eee 1.3.0
+Also tested with:
+v1.3.0-rc1-2523-g1e1b3d9 1.4.0-dev20170925
+Python version:
+Python 3.5.2
+Bazel version (if compiling from source):
+n/a
+CUDA/cuDNN version:
+CUDA-8.0 / cuDNN-5.1
+GPU model and memory:
+NVidia GeForce GTX TITAN with 5.93GiB
+Exact command to reproduce:
+
+import tensorflow as tf
+
+with tf.device("/gpu:0"):
+    values = tf.reshape(tf.range(10, dtype=tf.int64), [-1, 1])
+    max_val = tf.reduce_max(values)
+
+    sess = tf.Session()
+    sess.run(tf.global_variables_initializer())
+
+    print(sess.run(max_val))
+
+Describe the problem
+tf.reduce_max does not support int64 tensor on GPU.
+Source code / logs
+2017-09-25 17:14:14.906614: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2
+2017-09-25 17:14:15.106125: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:892] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-09-25 17:14:15.106623: I tensorflow/core/common_runtime/gpu/gpu_device.cc:965] Found device 0 with properties:
+name: GeForce GTX TITAN major: 3 minor: 5 memoryClockRate(GHz): 0.8755
+pciBusID: 0000:04:00.0
+totalMemory: 5.93GiB freeMemory: 5.59GiB
+2017-09-25 17:14:15.106706: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1055] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: GeForce GTX TITAN, pci bus id: 0000:04:00.0, compute capability: 3.5)
+Traceback (most recent call last):
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1323, in _do_call
+    return fn(*args)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1293, in _run_fn
+    self._extend_graph()
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1354, in _extend_graph
+    self._session, graph_def.SerializeToString(), status)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/contextlib.py", line 66, in __exit__
+    next(self.gen)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/framework/errors_impl.py", line 467, in raise_exception_on_not_ok_status
+    c_api.TF_GetCode(status.status))
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Cannot assign a device for operation 'Max': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+	 [[Node: Max = Max[T=DT_INT64, Tidx=DT_INT32, keep_dims=false, _device="/device:GPU:0"](Reshape, Const)]]
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "bug2.py", line 9, in <module>
+    sess.run(tf.global_variables_initializer())
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 889, in run
+    run_metadata_ptr)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1120, in _run
+    feed_dict_tensor, options, run_metadata)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1317, in _do_run
+    options, run_metadata)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/client/session.py", line 1336, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors_impl.InvalidArgumentError: Cannot assign a device for operation 'Max': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+	 [[Node: Max = Max[T=DT_INT64, Tidx=DT_INT32, keep_dims=false, _device="/device:GPU:0"](Reshape, Const)]]
+
+Caused by op 'Max', defined at:
+  File "bug2.py", line 6, in <module>
+    max_val = tf.reduce_max(values)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/ops/math_ops.py", line 1525, in reduce_max
+    name=name)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/ops/gen_math_ops.py", line 2436, in _max
+    keep_dims=keep_dims, name=name)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/framework/op_def_library.py", line 787, in _apply_op_helper
+    op_def=op_def)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 3090, in create_op
+    op_def=op_def)
+  File "/home/daniyar/anaconda2/envs/nightly3/lib/python3.5/site-packages/tensorflow/python/framework/ops.py", line 1638, in __init__
+    self._traceback = self._graph._extract_stack()  # pylint: disable=protected-access
+
+InvalidArgumentError (see above for traceback): Cannot assign a device for operation 'Max': Could not satisfy explicit device specification '/device:GPU:0' because no supported kernel for GPU devices is available.
+	 [[Node: Max = Max[T=DT_INT64, Tidx=DT_INT32, keep_dims=false, _device="/device:GPU:0"](Reshape, Const)]]

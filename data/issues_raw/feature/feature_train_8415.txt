@@ -1,0 +1,60 @@
+Cannot decode csv using int32, int64 or float32 in windows when csv is encoded in utf-8 BOM
+
+What related GitHub issues or StackOverflow threads have you found by searching the web for your problem?
+http://stackoverflow.com/questions/38879779/tensorflow-python-framework-errors-invalidargumenterror-field-0-in-record-0-is
+http://stackoverflow.com/questions/33808368/how-do-i-change-the-dtype-in-tensorflow-for-a-csv-file
+Environment info
+Operating System: windows10
+Installed version of CUDA and cuDNN:
+(please attach the output of ls -l /path/to/cuda/lib/libcud*):
+If installed from binary pip package, provide:
+
+A link to the pip package you installed:
+The output from python -c "import tensorflow; print(tensorflow.__version__)".
+1.0.1
+
+If possible, provide a minimal reproducible example (We usually don't have time to read hundreds of lines of your code)
+import os
+import sys
+import tensorflow as tf
+filename_list = tf.train.match_filenames_once("D:/Source/Repos/alerte-source/Alertedh/Python/Alerte.Test.PythonTestingApplication/Alerte.Test.PythonTestingApplication/mnist_data/*.csv", name='filename_list')
+filename_queue = tf.train.string_input_producer(filename_list,num_epochs=1,name='filename_queue')
+reader = tf.TextLineReader()
+key, value = reader.read(filename_queue)
+record_defaults = [tf.constant([], dtype=tf.int32) for row in range(785)]
+data = tf.decode_csv(value, record_defaults=record_defaults)
+print(data[0].dtype)
+features = tf.stack(data[:-1])
+label = tf.stack(data[-1])
+min_after_dequeue = 10000
+batch_size = 2
+capacity = min_after_dequeue + 3 * batch_size
+examples, labels = tf.train.shuffle_batch([features, label],batch_size=batch_size, capacity=capacity,
+min_after_dequeue=min_after_dequeue)
+with tf.Session() as sess:
+tf.initialize_all_variables().run()
+tf.local_variables_initializer().run()
+tf.global_variables_initializer().run()
+start populating filename queue
+coord = tf.train.Coordinator()
+threads = tf.train.start_queue_runners(coord=coord)
+try:
+while not coord.should_stop():
+example_batch, label_batch = sess.run([examples, labels])
+print(example_batch)
+except tf.errors.OutOfRangeError:
+print('Done training, epoch reached')
+finally:
+coord.request_stop()
+coord.join(threads)
+example csv:
+2,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17
+What other attempted solutions have you tried?
+Works when the dtype is string as it doesnt have to try to parse the values...
+Logs or other output that would be helpful
+none
+Error: tensorflow.python.framework.errors.InvalidArgumentError: Field 0 in record 0 is not a valid int32: 2
+(this is likely a windows only error)
+Because of the encoding prefix / (\xef\xbb\xbf) the string decoders cannot read the first element of the file... resiliency to this can help cross platform errors. the error doesnt pick up the prefix either, so it was a bit of a mystery to me for a while...
+If this is not to be supported then feel free to close
+regardless, Ill put this here for other people having similar issues. you can check by setting your dtype to string and checking the first element for the prefix... go to notepad++ or similar and convert your file to UTF-8 rathter than UTF-8 BOM which is default.

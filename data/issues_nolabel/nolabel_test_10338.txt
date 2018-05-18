@@ -1,0 +1,78 @@
+tensorflow.Session() crashes if executed after importing scipy.optimize and pytorch
+
+Configuration
+Python version: 3.5.2 (same for Python 3.6)
+SciPy version: 0.19.0
+PyTorch version: 0.1.12_2
+TensorFlow version: 1.1.0
+Host system: Ubuntu 16.04
+Dockerfile to reproduce my setup:
+FROM nvidia/cuda:8.0-cudnn5-devel-ubuntu16.04
+
+RUN apt-get update -qq \
+ && apt-get install -yq -qq --no-install-recommends \
+    python3 \
+    python3-dev \
+    curl \
+    ca-certificates
+RUN curl -O https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py && rm get-pip.py
+RUN pip3 install numpy scipy
+RUN pip3 install --no-cache-dir tensorflow-gpu
+RUN pip3 install --no-cache-dir http://download.pytorch.org/whl/cu80/torch-0.1.12.post2-cp35-cp35m-linux_x86_64.whl
+
+Describe the problem
+Python 3.5.2 (default, Nov 17 2016, 17:05:23) 
+[GCC 5.4.0 20160609] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import scipy.optimize
+>>> import torch
+>>> import tensorflow
+>>> tensorflow.Session()
+*** Error in `python3': free(): invalid pointer: 0x00007f28329efac0 ***
+
+Output
+The above error message is followed by a huge backtrace that starts like this ...
+======= Backtrace: =========
+/lib/x86_64-linux-gnu/libc.so.6(+0x777e5)[0x7f28796ed7e5]
+/lib/x86_64-linux-gnu/libc.so.6(+0x7fe0a)[0x7f28796f5e0a]
+/lib/x86_64-linux-gnu/libc.so.6(cfree+0x4c)[0x7f28796f998c]
+/usr/lib/x86_64-linux-gnu/libstdc++.so.6(_ZNSt15basic_stringbufIcSt11char_traitsIcESaIcEE8overflowEi+0x181)[0x7f28377aefa1]
+/usr/lib/x86_64-linux-gnu/libstdc++.so.6(_ZNSt15basic_streambufIcSt11char_traitsIcEE6xsputnEPKcl+0x89)[0x7f2837805e79]
+/usr/local/lib/python3.5/dist-packages/torch/lib/libshm.so(_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l+0x1c5)[0x7f2832764235]
+/usr/local/lib/python3.5/dist-packages/torch/lib/libshm.so(_ZStlsISt11char_traitsIcEERSt13basic_ostreamIcT_ES5_PKc+0x27)[0x7f28327644f7]
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/_pywrap_tensorflow_internal.so(_ZN10tensorflow20BaseGPUDeviceFactory17GetValidDeviceIdsERKSsPSt6vectorIiSaIiEE+0x7c7)[0x7f27fb0a8127]
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/_pywrap_tensorflow_internal.so(_ZN10tensorflow20BaseGPUDeviceFactory13CreateDevicesERKNS_14SessionOptionsERKSsPSt6vectorIPNS_6DeviceESaIS8_EE+0x15a)[0x7f27fb0a9dca]
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/_pywrap_tensorflow_internal.so(_ZN10tensorflow13DeviceFactory10AddDevicesERKNS_14SessionOptionsERKSsPSt6vectorIPNS_6DeviceESaIS8_EE+0x17d)[0x7f27fb0d2bad]
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/_pywrap_tensorflow_internal.so(_ZN10tensorflow20DirectSessionFactory10NewSessionERKNS_14SessionOptionsE+0x98)[0x7f27fb0904c8]
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/_pywrap_tensorflow_internal.so(_ZN10tensorflow10NewSessionERKNS_14SessionOptionsEPPNS_7SessionE+0x127)[0x7f27fb103c07]
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/_pywrap_tensorflow_internal.so(+0x114c081)[0x7f27f968e081]
+/usr/local/lib/python3.5/dist-packages/tensorflow/python/_pywrap_tensorflow_internal.so(+0xe8670b)[0x7f27f93c870b]
+python3(PyCFunction_Call+0x4f)[0x4e9b9f]
+python3(PyEval_EvalFrameEx+0x614)[0x524414]
+python3[0x52d2e3]
+python3(PyEval_EvalFrameEx+0x50ee)[0x528eee]
+python3(PyEval_EvalCodeEx+0x88a)[0x52e87a]
+python3[0x4ebd38]
+python3(PyObject_Call+0x47)[0x5b7167]
+python3[0x4f413e]
+
+...
+
+and ends like this
+7f2879cf3000-7f2879cf4000 rw-s cfdf2000 00:2e 14                         /dev/nvidia0
+7f2879cf4000-7f2879cf5000 rw-s 18da776000 00:2e 12                       /dev/nvidiactl
+7f2879cf5000-7f2879e7a000 rw-p 00000000 00:00 0 
+7f2879e7a000-7f2879e7b000 rw-s cfdf2000 00:2e 14                         /dev/nvidia0
+7f2879e7b000-7f2879e7c000 rw-s 1ec635d000 00:2e 12                       /dev/nvidiactl
+7f2879e7c000-7f2879e7d000 rw-s cfdf2000 00:2e 14                         /dev/nvidia0
+7f2879e7d000-7f2879e7e000 rw-s 1ffafd3000 00:2e 12                       /dev/nvidiactl
+7f2879e7e000-7f2879e7f000 rwxp 00000000 00:00 0 
+7f2879e7f000-7f2879e81000 rw-p 00000000 00:00 0 
+7f2879e81000-7f2879e82000 r--p 00025000 08:01 3973057                    /lib/x86_64-linux-gnu/ld-2.23.so
+7f2879e82000-7f2879e83000 rw-p 00026000 08:01 3973057                    /lib/x86_64-linux-gnu/ld-2.23.so
+7f2879e83000-7f2879e84000 rw-p 00000000 00:00 0 
+7ffe1932c000-7ffe1934d000 rw-p 00000000 00:00 0                          [stack]
+7ffe193bf000-7ffe193c1000 r--p 00000000 00:00 0                          [vvar]
+7ffe193c1000-7ffe193c3000 r-xp 00000000 00:00 0                          [vdso]
+ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                  [vsyscall]
+Aborted (core dumped)

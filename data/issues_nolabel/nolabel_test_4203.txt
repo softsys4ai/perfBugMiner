@@ -1,0 +1,91 @@
+BUG in graph_actions.py
+
+Hello I am using tf.contrib.learn.Estimator to train my model, and size of validation sample is small,(validation sample size=32, eval_batch_size=16)
+I have created an EvaluationMonitor to evaluate the validation sample
+class EvaluationMonitor(tf.contrib.learn.monitors.EveryN):
+        def every_n_step_end(self, step, outputs):
+            eval_results = self._estimator.evaluate(
+                input_fn=input_fn_eval,
+                metrics=eval_metrics,
+                steps=None)
+            print "Evaluation Result: %s" % eval_results
+
+and the eval_metrics is is a list of tf.contrib.metrics.streaming_sparse_recall_at_k, input_fn_eval is a function to read TFRecord from file
+but in the evaluation step, I always get the exception:
+
+File "...../tensorflow/contrib/learn/python/learn/graph_actions.py", line 610, in _eval_results_to_str
+return ', '.join('%s = %s' % (k, v) for k, v in eval_results.items())
+
+When i looks inside the evaluate method(Line 632- Line 779) in the source of graph_actions.py
+def evaluate(graph,
+             output_dir,
+             checkpoint_path,
+             eval_dict,
+             update_op=None,
+             global_step_tensor=None,
+             supervisor_master='',
+             log_every_steps=10,
+             feed_fn=None,
+             max_steps=None):
+......
+try:
+      try:
+        while (max_steps is None) or (step < max_steps):
+          step += 1
+          start_time = time.time()
+          feed_dict = feed_fn() if feed_fn is not None else None
+          if update_op is not None:
+            session.run(update_op, feed_dict=feed_dict)
+          else:
+            eval_results = session.run(eval_dict, feed_dict=feed_dict)
+            eval_step = step
+
+          if step % log_every_steps == 0:
+            if eval_step is None or step != eval_step:
+              eval_results = session.run(eval_dict, feed_dict=feed_dict)
+              eval_step = step
+            duration = time.time() - start_time
+            logging.info('Results after %d steps (%.3f sec/batch): %s.',
+                         step, float(duration),
+                         _eval_results_to_str(eval_results))
+      finally:
+        if eval_results is None or step != eval_step:
+          eval_results = session.run(eval_dict, feed_dict=feed_dict)
+          eval_step = step
+
+......
+
+ # Save summaries for this evaluation.
+  _write_summary_results(output_dir, eval_results, current_global_step)
+
+
+when my code call the function,   the max step=2(validation sample size=32, eval_batch_size=16) will be less than the default parameter( log_every_steps=10), therefore the code only can run the evaluation in the finally block,
+ ....
+finally:
+        if eval_results is None or step != eval_step:
+          eval_results = session.run(eval_dict, feed_dict=feed_dict)
+          eval_step = step
+...
+
+but for the metrics of ttf.contrib.metrics.streaming_sparse_recall_at_k, the update_op is not Not, which means the line
+if update_op is not None
+    session.run(update_op, feed_dict=feed_dict)
+
+will alway be invoked, and the batched_data in the queue will be empty when the code jump into finally block, therefore an exception of OutOfRangeError will be raised, and eval_results will be None when the code execute at line
+_write_summary_results(output_dir, eval_results, current_global_step)
+
+I think it is caused by the default value of log_every_steps, when the _evaluate_model method in tf.contrib.learn.Estimator  invoke the method in line 679,
+eval_results, current_global_step = graph_actions.evaluate(
+          graph=g,
+          output_dir=eval_dir,
+          checkpoint_path=checkpoint_path,
+          eval_dict=eval_dict,
+          update_op=update_op,
+          global_step_tensor=global_step,
+          supervisor_master=self._config.master,
+          feed_fn=feed_fn,
+          max_steps=steps)
+
+
+it did not set the value of log_every_steps and  the default value of   log_every_steps will be 10, so the exception will be raised when the validation sample size is small (or total evaluation steps is less than 10)
+When I set the hyper parameter eval_batch_size to a small value (eg. 2, which ensure total evaluation 32/2 = 16 > 10), my code is ok

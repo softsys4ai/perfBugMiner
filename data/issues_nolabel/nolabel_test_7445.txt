@@ -1,0 +1,43 @@
+memory overflow when processing Variable.eval()
+
+I'm using Tensorflow to process a simple matrix factorization algorithm. Every step went correct but at the last step, where I want to eval() a Tensor to store it, the program didn't work and only occupied more and more memory. I tried to eval() the initial parameters before the algorithm, it correctly processed. Then I'm confused where the bug is.
+Core code is as follows.
+
+class model(object):
+    def __init__(self, others):
+        self.D = tf.constant(D, dtype = tf.float32)
+        self.Q = tf.constant(Q, dtype = tf.float32)
+        self.W = tf.Variable((np.random.rand(self.rank, sample_num)), dtype = tf.float32, name = 'W')
+        self.C = tf.Variable((np.random.rand(context_num, self.rank)), dtype = tf.float32, name = 'C')
+
+    def _run(self, sess):
+        Q = self.Q
+        D = self.D
+        W = self.W
+        print W.eval()     #correct results
+        C = self.C
+        #the optimization step, you can jump this because I think it's not the point
+        for i in xrange(self.max_iter):
+            if (i + 1) % 2 == 1:
+                for j in xrange(self.inner_maxiter):
+                    ED = tf.transpose(Q) * (1.0 / (1.0 + tf.exp(- tf.matmul(C, W))))
+                    recons = D - ED
+                    W_grad = tf.matmul(tf.transpose(C), recons)
+                    W = W + self.stepsize * W_grad
+            else:
+                for j in xrange(self.inner_maxiter):
+                    ED = tf.transpose(Q) * (1.0 / (1.0 + tf.exp(- tf.matmul(C, W))))
+                    recons = D - ED
+                    C_grad = tf.matmul(recons, tf.transpose(W))
+                    C = C + self.stepsize * C_grad
+            print 'epoch: %d' % i
+        
+        print W.eval()  #program stopped and occupying memory 
+        print C.eval()
+
+train_epoch = model(D, Q, others)
+with tf.Session(config = config) as sess:
+    tf.initialize_all_variables().run()
+    train_epoch._run(sess)
+
+It's fairly strange because eval() just work well before the optimization step, but crashed after it. Is this a bug in eval()?

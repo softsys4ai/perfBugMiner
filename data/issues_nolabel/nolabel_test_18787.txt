@@ -1,0 +1,96 @@
+Default arguments of tensorflow.contrib.signal.inverse_stft do not invert tensorflow.contrib.signal.stft
+
+This issue is a suggestion to modify tensorflow.contrib.signal.inverse_stft such that the default arguments invert the stft
+Background
+Currently the correct call to inverse_stft is:
+... = tf.contrib.signal.inverse_stft(
+    stfts=...,
+    frame_length=frame_length,
+    frame_step=frame_step,
+    # forward_window_fn
+    window_fn=tf.contrib.signal.inverse_stft_window_fn(
+        frame_step=frame_step,
+        forward_window_fn=functools.partial(tf.contrib.signal.hann_window, periodic=True),
+    )
+)
+but the default value for window_fn is functools.partial(tf.contrib.signal.hann_window, periodic=True) so the call to inverse_stft_window_fn is missing, because the frame_step is unknown for the default argument.
+Note: Because the hann window has some special properties, it can happen, that the inverse stft only introduces an amplitude error.
+Suggestion
+Introduce forward_window_fn in tensorflow.contrib.signal.inverse_stft and change the defaults to window_fn=None, forward_window_fn=functools.partial(tf.contrib.signal.hann_window, periodic=True).
+The code inside would then be:
+if window_fn is None:
+    window_fn = tf.contrib.signal.inverse_stft_window_fn(frame_step, forward_window_fn)
+Example code (Demonstration)
+import functools
+import tensorflow as tf
+import tensorflow.contrib
+import matplotlib.pyplot as plt
+
+frame_length = 32
+frame_step = 16
+
+x = tf.placeholder(tf.float32)
+X = tf.contrib.signal.stft(
+    x,
+    frame_length=frame_length,
+    frame_step=frame_step,
+)
+x_hat = tf.contrib.signal.inverse_stft(
+    X,
+    frame_length=frame_length,
+    frame_step=frame_step,
+)
+x_hat_2 = tf.contrib.signal.inverse_stft(
+    X,
+    frame_length=frame_length,
+    frame_step=frame_step,
+    # forward_window_fn
+    window_fn=tf.contrib.signal.inverse_stft_window_fn(
+        frame_step,
+        functools.partial(tf.contrib.signal.hann_window, periodic=True),
+        
+    )
+)
+
+def normalize(x):
+    return x / (-np.min(x))
+
+with tf.Session() as sess:
+    t = np.linspace(0,10,128)
+    x_np = np.sin(t)
+    x_hat_np, x_hat_2_np = sess.run([x_hat, x_hat_2], {x: x_np})
+  
+    plt.plot(t, x_np, label='orig')
+    plt.plot(t, x_hat_np, label='default')
+    plt.plot(t, x_hat_2_np, label='fixed')
+#     plt.plot(t, normalize(x_np), label='orig', linewidth=8)
+#     plt.plot(t, normalize(x_hat_np), label='default', linewidth=6)
+#     plt.plot(t, normalize(x_hat_2_np), label='fixed', linewidth=4)
+    plt.legend()
+
+frame_step == 8:
+
+frame_step == 16:
+
+While the example with frame_step == 8 introduces "only" a scaling error, the frame_step == 16 example introduces distortions.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): Name: tf-nightly
+Version: 1.8.0.dev20180331
+Summary: TensorFlow helps the tensors flow
+Home-page: https://www.tensorflow.org/
+Author: Google Inc.
+Author-email: opensource@google.com
+License: Apache 2.0
+Location: /opt/anaconda/lib/python3.6/site-packages
+Requires: grpcio, astor, gast, termcolor, six, absl-py, numpy, wheel, protobuf, tb-nightly
+Python version: 3.6
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:

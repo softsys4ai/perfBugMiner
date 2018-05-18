@@ -1,0 +1,115 @@
+unexpected 10 sec hang, related to tf.TensorArray
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes, code is below
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Debian 9.4, Linux wc4 4.9.0-6-amd64  SMP Debian 4.9.82-1+deb9u3 (2018-03-02) x86_64 GNU/Linux
+TensorFlow installed from (source or binary): binary pip
+TensorFlow version (use command below): v1.5.0-0-g37aa430d84 1.5.0
+Python version: 3.5.3
+Bazel version (if compiling from source): -
+GCC/Compiler version (if compiling from source): -
+CUDA/cuDNN version: 9.0
+GPU model and memory: GeForce GTX 1080, 11GB
+Exact command to reproduce: see code below
+
+Describe the problem
+The test case below causes an unexpected hang for about 10 seconds.
+I think it is related to tf.TensorArray but also the other operations in the graph are important.
+I have already tried to reduce it as much as possible. If I remove something now,
+the hang will disappear.
+Source code / logs
+import tensorflow as tf
+import contextlib
+import numpy
+
+@contextlib.contextmanager
+def make_scope():
+  """
+  :rtype: tf.Session
+  """
+  with tf.Graph().as_default() as graph:
+    with tf.Session(graph=graph) as session:
+      yield session
+
+
+def test_slow_TensorArray():
+  import time
+  random = numpy.random.RandomState(seed=1)
+  num_inputs = 4
+  num_outputs = 3
+  seq_len = 10
+  limit = 1.0
+
+  def linear(x, output_dim):
+    input_dim = x.get_shape().dims[-1].value
+    assert input_dim is not None
+    with tf.variable_scope("linear", reuse=tf.AUTO_REUSE):
+      weights = tf.get_variable("W", shape=(input_dim, output_dim))
+      bias = tf.get_variable("b", shape=(output_dim,))
+    assert x.get_shape().ndims == 2  # (batch,input_dim)
+    return tf.matmul(x, weights) + bias
+
+  with make_scope() as session:
+    print("create graph")
+    src_placeholder = tf.placeholder(tf.float32, (None, seq_len, num_inputs), name="src_placeholder")
+    tgt_placeholder = tf.placeholder(tf.float32, (None, seq_len, num_outputs), name="tgt_placeholder")
+    batch_size = tf.shape(src_placeholder)[0]
+
+    def make_feed_dict():
+      return {
+        src_placeholder: random.uniform(-limit, limit, (1, seq_len, num_inputs)),
+        tgt_placeholder: random.uniform(-limit, limit, (1, seq_len, num_outputs)),
+      }
+
+    state = tf.zeros((batch_size, num_outputs))
+    loss_ta = tf.TensorArray(tf.float32, size=seq_len, element_shape=(None,))
+    # Unroll the loop here.
+    for f in range(seq_len):
+      inputs = src_placeholder[:, f]
+      x = tf.concat([inputs, state], axis=-1)
+      with tf.variable_scope('h'):
+        h = tf.tanh(linear(x, num_outputs))
+      with tf.variable_scope('t'):
+        t = tf.sigmoid(linear(x, num_outputs))
+      state += t * (h - state)
+      frame_loss = tf.reduce_mean(tf.squared_difference(tgt_placeholder[:, f], state), axis=1)
+      assert frame_loss.get_shape().ndims == 1  # (batch,)
+      loss_ta = loss_ta.write(f, frame_loss)
+    loss = tf.reduce_sum(loss_ta.stack())
+    optimizer = tf.train.AdamOptimizer(learning_rate=0.1, epsilon=1e-16, use_locking=False)
+    minimize_op = optimizer.minimize(loss)
+
+    print('variables:')
+    train_vars = (
+      tf.trainable_variables() +
+      tf.get_collection(tf.GraphKeys.TRAINABLE_RESOURCE_VARIABLES))
+    print(train_vars)
+    print('init vars')
+    session.run(tf.global_variables_initializer())
+    print('graph size:', session.graph_def.ByteSize())
+    print('train')
+    for s in range(10):
+      start_time = time.time()
+      loss_val, _ = session.run([loss, minimize_op], feed_dict=make_feed_dict())
+      print("step %i, loss: %f, time: %f" % (s, loss_val, time.time() - start_time))
+
+test_slow_TensorArray()
+
+My output:
+create graph
+variables:
+[<tf.Variable 'h/linear/W:0' shape=(7, 3) dtype=float32_ref>, <tf.Variable 'h/linear/b:0' shape=(3,) dtype=float32_ref>, <tf.Variable 't/linear/W:0' shape=(7, 3) dtype=float32_ref>, <tf.Variable 't/linear/b:0' shape=(3,) dtype=float32_ref>]
+init vars
+graph size: 222234
+train
+step 0, loss: 5.506713, time: 10.675434
+step 1, loss: 7.865020, time: 0.003913
+step 2, loss: 5.450877, time: 0.003354
+step 3, loss: 3.361173, time: 0.003227
+step 4, loss: 4.493120, time: 0.003563
+step 5, loss: 5.137649, time: 0.003203
+step 6, loss: 3.610677, time: 0.003376
+step 7, loss: 3.657249, time: 0.003544
+step 8, loss: 4.405594, time: 0.003454
+step 9, loss: 4.380188, time: 0.003491

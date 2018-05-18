@@ -1,0 +1,23 @@
+Segfaults due to protobuf -std=c++11 mismatch
+
+I was seeing segfaults in std::unordered_map, and the symptoms looked like potential memory corruption.  Took a fair amount of digging in gdb to figure out that it wasn't that, but was just a build/library version issue:
+
+tensorflow's embedded protobuf is built with -std=c++11
+a default protobuf build is built without -std=c++11
+
+I'm not super familar with the details of dlopen and symbol resolution, but the RTLD_GLOBAL when it loads _pywrap_tensorflow.so might be causing it to shadow the symbols in libprotobuf.so (for the cpp-enabled protobuf python package).  The C++11 vs non-C++11 libraries use different headers for std::unordered_map (in bits vs tr1), and things blow up when they start using the wrong library's version of the code.  (Correct me if my understanding of RTLD_GLOBAL is wrong and that's irrelevant).
+In any case, building protobuf with C++11 fixed the segfaults I was seeing.
+Now as for solutions, here are some ideas:
+
+Allow tensorflow to link to an external libprotobuf.so.  This is probably the best solution, since then only one protobuf library is loaded at runtime, and a version check is probably simple to add.
+If RTLD_GLOBAL is a relevant factor, maybe _pywrap_tensorflow.so can be split up and only the parts that actually need to be global can be global.  Or maybe some gcc attributes to control visibility can do the trick.
+Maybe we can shove the embedded protobuf into a namespace so the symbols don't collide
+
+Possibly useful info to reproduce:
+
+gcc-4.8.x
+libstdc++.so.6.0.19
+r0.8 branch
+
+I've seen some other people post about similar segfault issues and I suspect many of them might be related to this.
+Also now that I've found the issue, it seems obvious in retrospect, and a related issue on the protobuf issues is google/protobuf#839.

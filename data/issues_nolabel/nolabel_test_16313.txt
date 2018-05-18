@@ -1,0 +1,41 @@
+Bug of tf.data.TFRecordDataset? Couldn't use tf.reshape after the operations of tf.data.TFRecordDataset
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4.1
+Python version: 2.7.12
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: 8.0/6.0
+GPU model and memory: Nvidia GeForce GTX TITAN X 12GB
+Exact command to reproduce:
+
+Describe the problem
+I want to use  function tf.profiler.ProfileOptionBuilder.float_operation to show the flops of the model. But it need a certain input shape while the the output shape of tf.data.TFrecordDataset is like (?, 32,32,3). When I want to use tf.reshape to reshape the output of tf.data.TFrecordDataset, it generates an error "Input to reshape is a tensor with 64512 values, but the requested shape has 98304".
+Source code
+def dataset_input(self, dataset_type):
+with tf.variable_scope("batch_" + dataset_type):
+def parser(record):
+features = tf.parse_single_example(
+record,
+features={
+'image': tf.FixedLenFeature([], tf.string),
+'label': tf.FixedLenFeature([], tf.int64)
+})
+image, label = features['image'], features['label']
+height, width, channels = self.input_size, self.input_size, self.input_dim
+image = tf.decode_raw(image, tf.uint8)
+image = tf.reshape(image, [height, width, channels])
+return image, label
+dataset = tf.data.TFRecordDataset([self.dataset_dir[dataset_type]])
+dataset = dataset.map(parser)
+dataset = dataset.shuffle(buffer_size=50000)
+dataset = dataset.batch(self.batch_size)
+dataset = dataset.repeat()
+iterator = dataset.make_one_shot_iterator()
+features, labels = iterator.get_next()
+features = tf.reshape(features, [self.batch_size, self.input_size, self.input_size, self.input_dim])
+return features, labels

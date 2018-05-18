@@ -1,0 +1,29 @@
+C++ Tensor's Slice assignment works unexpectedly when using GPU
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux 3.16.0-4-amd64 #1 SMP Debian 3.16.7-ckt20-1+deb8u2 (2016-01-02) x86_64 GNU/Linux
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+tensorflow-gpu (1.1.0rc2)
+Bazel version (if compiling from source):
+None
+CUDA/cuDNN version:
+cuda 8.0
+GPU model and memory:
+GeForce GTX 1080 8110Mb
+Exact command to reproduce:
+See below.
+
+Describe the problem
+tensorflow::Tensor::Slice returns another tensorflow::Tensor , which is the slice of the original Tensor in the first dimension,  but if you assign a slice to another when writing operation with GPUDevice , it seems to fail to work like expected,
+In gist below I write a simple operation which set the output as the same value of input, by setting each slice of output in the first dimension to be the same of input. When registered only CPUKernel, this op works well, but when registered only GPUKernel, it gives some random values I had no idea with.
+I use g++ -std=c++11 -shared -o CopyByBatchOp.so CopyByBatchOp.cc -I $TF_INC -fPIC -lcudart -L $CUDA_HOME/lib64 -D GOOGLE_CUDA=1 -Wfatal-e rrors -I $CUDA_HOME/include -D_GLIBCXX_USE_CXX11_ABI=0 to compile the operation, for both GPU version and CPU version.
+After compiling, I use test_op = tf.load_op_library('CopyByBatchOp.so') in Python to load it. A simple test script is included in gist below.
+FYI, I've been looking for a way to assign a slice of one tensor to another slice for a long time, Eigen tensors works well by output.slice(start, size).device(d) = input.slice(start, size); with d as some CPUDevice, but somehow breakdown when I use a GPUDevice, could not figure out why since I don't know how to debug it. I guess maybe the two problems are relevant.
+Source code / logs
+gist

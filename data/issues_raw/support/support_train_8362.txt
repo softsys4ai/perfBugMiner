@@ -1,0 +1,73 @@
+Memory Allocation at each call to Frozen Graph?
+
+Operating System: Linux, CPU
+TF: 0.11.0
+It looks like a memory allocation is occurring during each call to my frozen graph.
+I suspect I'm using the code incorrectly rather than this is a bug.
+Please delete if this does not belong here.
+I posted on StackOverflow.
+
+My model was running too slow doing inference.
+I froze the graph and converted variables to constants to improve the speed.
+Normally I load the graph and weights (which runs OK):
+with tf.Graph().as_default(), tf.Session() as session:
+	...
+	saver.restore(session, ckpt_path)
+	for i in range(5):
+	    result = session.run(...)
+
+However, when I load the frozen graph:
+# Save the graph
+
+# output_node_names - equivalent to the results that are requested in the session.run() calls
+output_node_names = [...] 
+saver = tf.train.import_meta_graph(ckpt + '.meta')
+graph = tf.get_default_graph()
+input_graph_def = graph.as_graph_def()
+
+with tf.Session() as sess:
+    saver.restore(sess, ckpt)
+    output_graph_def = graph_util.convert_variables_to_constants(
+        sess, input_graph_def, output_node_names) 
+
+     with tf.gfile.GFile(output_graph, "wb") as f:
+         f.write(output_graph_def.SerializeToString())
+
+
+# Load the graph
+
+def load_graph(filename):
+	with tf.gfile.GFile(filename, "rb") as f:
+	       graph_def = tf.GraphDef()
+	       graph_def.ParseFromString(f.read())
+
+	 with tf.Graph().as_default() as graph:
+	        tf.import_graph_def(graph_def, input_map=None, 
+	        	return_elements=None, name="prefix", op_dict=None, 
+                        producer_op_list=None)
+	return graph 
+
+graph = load_graph("model.pb")
+session = tf.Session(graph=graph)
+	
+for i in range(5):
+	result = session.run(...)
+
+After loading the full graph, inference takes ~1 second.
+After loading the frozen graph, inference takes ~4 seconds.
+So it seems like something may not be loaded entirely in my frozen graph?
+The first call to session.run() successfully produces a result (although very slow), but the second call to run() throws an error.
+W tensorflow/core/framework/op_kernel.cc:940] Resource exhausted: OOM when allocating tensor with shape[300,100000]
+Since the graph internally has an embedding table (this is not what is being returned by session.run()), it seems this is what is being re-allocated:
+embedding = tf.get_variable("embedding", [300, 100000])
+Also the error message printed 3 times, hopefully that means 3 allocation attempts, and not 3 instances being allocated?
+But why is this allocation on every call to session.run()?
+Edit:
+@MicaelCarvalho
+Here is the format of my input for Session.run():
+x = [0.0]
+x_placeholder = graph.get_tensor_by_name('prefix/x_placeholder:0')
+y = graph.get_tensor_by_name('prefix/y:0')
+feed_dict = {x_placeholder: x}
+to_return = [y]
+result = sess.run(to_return, feed_dict=feed_dict)

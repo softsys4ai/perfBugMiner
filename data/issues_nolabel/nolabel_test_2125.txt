@@ -1,0 +1,87 @@
+Taking gradient of tf.cond(..., tf.nn.dyamic_rnn(...)) raises exception
+
+Environment info
+Operating System: Ubuntu 15.10
+Installed version of CUDA and cuDNN:
+-rw-r--r-- 1 root root    322936 Aug 15  2015 /usr/local/cuda/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root        16 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so -> libcudart.so.7.5
+lrwxrwxrwx 1 root root        19 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5 -> libcudart.so.7.5.18
+-rwxr-xr-x 1 root root    383336 Aug 15  2015 /usr/local/cuda/lib64/libcudart.so.7.5.18
+-rw-r--r-- 1 root root    720192 Aug 15  2015 /usr/local/cuda/lib64/libcudart_static.a
+lrwxrwxrwx 1 3319 users       13 Feb  9 09:48 /usr/local/cuda/lib64/libcudnn.so -> libcudnn.so.4
+lrwxrwxrwx 1 3319 users       17 Feb  9 09:48 /usr/local/cuda/lib64/libcudnn.so.4 -> libcudnn.so.4.0.7
+-rwxrwxr-x 1 3319 users 61453024 Feb  8 14:12 /usr/local/cuda/lib64/libcudnn.so.4.0.7
+-rw-rw-r-- 1 3319 users 62025862 Feb  8 14:12 /usr/local/cuda/lib64/libcudnn_static.a
+
+Commit hash: 8d310bf
+Steps to reproduce
+Run the following test case:
+import tensorflow as tf
+
+out = tf.cond(tf.constant(False),
+        lambda: tf.nn.dynamic_rnn(tf.nn.rnn_cell.BasicRNNCell(1),
+            tf.zeros((1, 1, 1)),
+            dtype=tf.float32)[1],
+        lambda: tf.zeros((1, 1, 1))
+)
+
+tvars = tf.trainable_variables()
+grads = tf.gradients(tf.reduce_sum(out), tvars)
+
+The above gives the following traceback:
+Traceback (most recent call last):
+  File "cond_rnn_bug.py", line 11, in <module>
+    grads = tf.gradients(tf.reduce_sum(out), tvars)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gradients.py", line 481, in gradients
+    in_grads = _AsList(grad_fn(op, *out_grads))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/math_grad.py", line 254, in _TanhGrad
+    return grad * (1 - math_ops.square(y))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_math_ops.py", line 1655, in square
+    return _op_def_lib.apply_op("Square", x=x, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 694, in apply_op
+    op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 2153, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 1157, in __init__
+    self._control_flow_context.AddOp(self)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 1330, in AddOp
+    self._AddOpInternal(op)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 1352, in _AddOpInternal
+    self.AddValue(x)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 1288, in AddValue
+    real_val = grad_ctxt.grad_state.GetRealValue(val)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 662, in GetRealValue
+    real_value = self.AddBackPropAccumulatedValue(h_value, value)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 612, in AddBackPropAccumulatedValue
+    history_value = _SwitchRefOrTensor(history_value, pred)[branch]
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/control_flow_ops.py", line 306, in _SwitchRefOrTensor
+    return ref_switch(data, pred, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/gen_control_flow_ops.py", line 275, in ref_switch
+    return _op_def_lib.apply_op("RefSwitch", data=data, pred=pred, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/op_def_library.py", line 449, in apply_op
+    as_ref=input_arg.is_ref).dtype.name
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/ops.py", line 565, in convert_to_tensor
+    ret = conversion_func(value, dtype=dtype, name=name, as_ref=as_ref)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/constant_op.py", line 179, in _constant_tensor_conversion_function
+    return constant(v, dtype=dtype, name=name)
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/ops/constant_op.py", line 162, in constant
+    tensor_util.make_tensor_proto(value, dtype=dtype, shape=shape))
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/framework/tensor_util.py", line 336, in make_tensor_proto
+    raise ValueError("None values not supported.")
+ValueError: None values not supported.
+
+What have you tried?
+Running tf.nn.dynamic_rnn outside the lambda works, but my understanding is that the two are not semantically equivalent (although I'm not sure exactly in which ways).
+That is, the following works:
+import tensorflow as tf
+
+rnn_out = tf.nn.dynamic_rnn(tf.nn.rnn_cell.BasicRNNCell(1),
+            tf.zeros((1, 1, 1)),
+            dtype=tf.float32)[1]
+out = tf.cond(tf.constant(False),
+        lambda: rnn_out,
+        lambda: tf.zeros((1, 1, 1))
+)
+
+tvars = tf.trainable_variables()
+grads = tf.gradients(tf.reduce_sum(out), tvars)

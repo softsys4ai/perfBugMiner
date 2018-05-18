@@ -1,0 +1,56 @@
+Out of memory when running small network with mnist?
+
+I work in Ubuntu14.04 with 1080Ti(12GB memory).
+When I run a small network using mnist data set, at the beginning, everything is OK. But after nearly 3000
+iterations with batchsize 128, tensorflow returns out of memory error. It looks something is accumulated into memory, but I don't know what it is. Here is the error log:
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 2492 Chunks of size 802816 totalling 1.86GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 2492 Chunks of size 3211264 totalling 7.45GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 3212544 totalling 3.06MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 2 Chunks of size 3686400 totalling 7.03MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 3937280 totalling 3.75MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 6422528 totalling 6.12MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 12845056 totalling 12.25MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:696] 1 Chunks of size 21105152 totalling 20.13MiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:700] Sum Total of in-use chunks: 9.86GiB
+I tensorflow/core/common_runtime/bfc_allocator.cc:702] Stats: 
+Limit:                 10584624333
+InUse:                 10582817024
+MaxInUse:              10582817280
+NumAllocs:                 1438980
+MaxAllocSize:            115605504
+
+W tensorflow/core/common_runtime/bfc_allocator.cc:274] ****************************************************************************************************
+W tensorflow/core/common_runtime/bfc_allocator.cc:275] Ran out of memory trying to allocate 3.06MiB.  See logs for memory state.
+W tensorflow/core/framework/op_kernel.cc:993] Resource exhausted: OOM when allocating tensor with shape[128,32,14,14]
+
+And here is part of my code:
+def iterate_minibatches(inputs, batchsize, shuffle=False):
+    if shuffle:
+        indices = np.arange(len(inputs))
+        np.random.shuffle(indices)
+    for start_idx in range(0, len(inputs) - batchsize + 1, batchsize):
+        if shuffle:
+            excerpt = indices[start_idx:start_idx + batchsize]
+        else:
+            excerpt = slice(start_idx, start_idx + batchsize)
+        yield inputs[excerpt]
+
+X = np.load('mnist.npz')['x_train']
+X = np.reshape(X,(-1,28,28,1))
+epoch = 200
+num = 0 
+for i in range(epoch):
+    for batch in iterate_minibatches(X, batchsize, shuffle=True):
+        Rng = np.random.rand(batchsize,100).astype('float32')
+        if  num%6!=0:
+            _, p_d, err_d = sess.run([train_d,p_real,d_loss/batchsize],{real:batch,rng:Rng})
+        else:
+            _, p_g, err_g = sess.run([train_g,p_fake,g_loss/batchsize],{rng:Rng})
+            del _
+        if (num+1)%200==0:
+            _img = sess.run([fake],{rng:Rng})[0]
+            img = np.reshape(_img,(-1,28,28))
+            img = np.array(255*img,dtype='uint8')
+            save_images(img,str(num+1)+'.png')
+
+What is the problem? ( No other programs occupy GPU memory）

@@ -1,0 +1,31 @@
+[Enhancement] Redesigning TensorFlow's input pipelines
+
+[TL;DR: We're designing a new input pipeline API for TensorFlow, and we'd like to collect your feature requests on this issue.]
+We've noticed that one of the biggest challenges in getting started with TensorFlow is how to load your own data into your programs. While TensorFlow has several methods that can be used to build complex input pipelines (such as tf.train.string_input_producer(), tf.train.batch(), etc.), they were designed for a particular use case (processing a static set of files repeatedly), and the average user experience with these methods is not great. For example:
+
+Once you reach the end of a pipeline, it becomes closed and you can never use it again in the same session. This requires users to use unnatural workarounds—with control flow or multiple sessions—to get a signal after processing an entire epoch, or switch between processing two datasets (e.g. training and validation data) in the same program.
+
+See #2514 and #4535 for feature requests about handling multiple epochs.
+See #7902 and numerous Stack Overflow questions for examples of processing different datasets in the same program.
+
+
+The current pipelines use TensorFlow queues and multiple Python threads, which can lead to poor performance (lock contention in the queues and the Python GIL) and hard-to-understand exceptions (tf.errors.OutOfRangeError).
+
+See #6845 for a discussion of input pipeline performance.
+See #7525 and many more Stack Overflow questions for an example of the confusing error.
+
+
+The pipelines behave poorly if you forget to call tf.train.start_queue_runners(sess): in fact, they hang indefinitely and deadlock the user program.
+
+See #7945 and many Stack Overflow questions for some examples of users who have been bitten by this problem.
+
+
+
+We're decided to start from a clean slate and redesign the input pipeline API. The existing methods will remain until TF 2.0 (at least), but we are planning to add a new set of methods for loading and manipulating datasets. We're still preparing a detailed design, which we plan to share soon, but we anticipate that there will be two new APIs:
+
+A Dataset represents a collection of data elements. Each element  can be a tuple of one or more tensors (e.g. an image and its label). We will provide methods for creating datasets from tensors, and deriving them from another dataset (e.g. by slicing its elements, repeating its elements, shuffling its elements, batching its elements, mapping a function over its elements, etc.).
+An Iterator can be created from a Dataset. An iterator represents the current position within a dataset, and exposes an operation (like tf.QueueBase.dequeue()) that can be run to get the next element. There will be explicit operations for initializing an iterator, so that it can be reused after you have processed all of the elements in a dataset.
+
+A similar pattern turns up in many different settings, including Java's Stream API, Scala's collections (and hence Spark's RDDs), and .NET's Language Integrated Query.
+We're announcing this plan early because we want to collect feedback on what features you—as TensorFlow users—would like to see in an input pipeline API. What other pain points have we missed? What features do you miss from other systems? What other suggestions do you have?
+We look forward to hearing from you!

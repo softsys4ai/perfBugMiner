@@ -1,0 +1,14 @@
+How to reduce_max variable length sentences?
+
+When I use word-embedding to train model, variable-sentence-length is a problem that could hurt performance.
+The task is same as #2849 . I open this new issue because of variable-sentence-length problem.
+The task is to classify each sentence into 10 classes. Each sentence is length of 130 words. Firstly I use embedding_lookup to get all 130 word-vectors, then I use tf.map_fn(lambda x:tf.reduce_max(x,0), …) to reduce each sentence’s 1~30 word-vectors into a single “sentence vector”. Then It put this “sentence vector” as DNN's input. The code is same as #2849:
+WE_example.py.txt
+In the above code, I have to use 30 as sentence length. Because the “tf.map_fn(tf.reduce_max(...))" could only merge sub-matrixes of the same size, for example, the minibatch is [100, 30, 200], then all sub-matrixes are [30, 200], using "tf.map_fn(tf.reduce_max(...))" could merge each sub-matrix into [200].
+But in the real world, sentences are of variable lengths. If I add padding data to the tail of sub-matrixes, I will not only give accuracy problem, but also bring more data to transfer between CPU&GPU, and also give more unneccesary computation cost.
+The ideal solution is providing a powerful_reduce function to support reduce on sub-sections. For example, Five sentences' length are {3, 10, 7, 25, 2}. I gave powerful_reduce a matrix of size [3+10+7+25+2, 200], and a 1D array of content { 3, 10, 7, 25, 2}, it could return the reduce results of the five sub-matrixes, the result shape is [5, 200].
+Another way is to provide a "mask" array as input parameter. The reduce_max operation will only operater on the items with mask 1, and skip the items with mask 0.
+Previously I used CUDA Thrust Library, it could handle it by using "for_each".
+So, could tensorflow provide a powerful reduce_max function to support variable-size sub matrixes?
+Another question is , I found my GPU usage is only about 20%, in order to improve the GPU usage, I prefer to run multiple processes on the same GPU card using distributed tensorflow. But I don't know how much GPU memory my process will occupy(the upper-bound). In another word, how could I safely decide the minimum "x" in "tf.GPUOptions(per_process_gpu_memory_fraction = x)"?
+Thanks a lot in advance~

@@ -1,0 +1,176 @@
+Placeholder mismatch
+
+I am trying to train two classifiers in one session. I declared two separate placeholders and pass each of them to different classifiers in run-time. The first one works fine, but the second one does not. The error message tells me that the second classifier is trying to look for the placeholder for the first classifier (instead of its own).
+The code is attached below
+from __future__ import absolute_import, division, print_function
+import os
+import prettytensor as pt
+import tensorflow as tf
+from tensorflow.examples.tutorials.mnist import input_data
+dataset_name = "data/MNIST"
+if not os.path.exists(dataset_name):
+    os.makedirs(dataset_name)
+dataset = input_data.read_data_sets(
+    dataset_name,
+    reshape=False,
+    one_hot=True
+)
+
+########################
+# Construct Classifier #
+########################
+def construct_lenet(lenet_images, lenet_labels):
+    images = pt.wrap(lenet_images)
+    with pt.defaults_scope(activation_fn=tf.nn.relu, l2loss=0.00001):
+        return (
+            images
+            .conv2d(5, 20)
+            .max_pool(2, 2)
+            .conv2d(5, 50)
+            .max_pool(2, 2)
+            .flatten()
+            .fully_connected(500)
+            .softmax_classifier(10, lenet_labels)
+        )
+
+####################
+# First Classifier #
+####################
+classifier_images_placeholder_1 = tf.placeholder(
+    tf.float32,
+    [
+        50,
+        28,
+        28,
+        1
+    ]
+)
+classifier_labels_placeholder_1 = tf.placeholder(
+    tf.float32,
+    [
+        50,
+        10
+    ]
+)
+
+classifier_result_1 = construct_lenet(
+    classifier_images_placeholder_1,
+    classifier_labels_placeholder_1
+)
+classifier_optimizer_1 = tf.train.AdamOptimizer(0.01)
+classifier_train_op_1 = pt.apply_optimizer(
+    classifier_optimizer_1,
+    losses=[classifier_result_1.loss]
+)
+
+#####################
+# Second Classifier #
+#####################
+classifier_images_placeholder_2 = tf.placeholder(
+    tf.float32,
+    [
+        50,
+        28,
+        28,
+        1
+    ]
+)
+classifier_labels_placeholder_2 = tf.placeholder(
+    tf.float32,
+    [
+        50,
+        10
+    ]
+)
+
+classifier_result_2 = construct_lenet(
+    classifier_images_placeholder_2,
+    classifier_labels_placeholder_2
+)
+classifier_optimizer_2 = tf.train.AdamOptimizer(0.01)
+classifier_train_op_2 = pt.apply_optimizer(
+    classifier_optimizer_2,
+    losses=[classifier_result_2.loss]
+)
+
+
+
+init = tf.initialize_all_variables()
+with tf.Session() as sess:
+    sess.run(init)
+##########################
+# Train First Classifier #
+##########################
+    classifier_training_loss = 0.0
+    for i in range(10):
+        training_images, training_labels = dataset.train.next_batch(
+            50
+        )
+        _, classifier_runtime_loss = sess.run(
+            fetches=[
+                classifier_train_op_1,
+                classifier_result_1.loss
+            ],
+            feed_dict={
+                classifier_images_placeholder_1: training_images,
+                classifier_labels_placeholder_1: training_labels
+            }
+        )
+        classifier_training_loss += classifier_runtime_loss
+    classifier_training_loss /= dataset.train.num_examples
+    print(classifier_training_loss)
+###########################
+# Train Second Classifier #
+###########################
+    classifier_training_loss = 0.0
+    for i in range(10):
+        training_images, training_labels = dataset.train.next_batch(
+            50
+        )
+        _, classifier_runtime_loss = sess.run(
+            fetches=[
+                classifier_train_op_2,
+                classifier_result_2.loss
+            ],
+            feed_dict={
+                classifier_images_placeholder_2: training_images,
+                classifier_labels_placeholder_2: training_labels
+            }
+        )
+        classifier_training_loss += classifier_runtime_loss
+    classifier_training_loss /= dataset.train.num_examples
+    print(classifier_training_loss)
+
+Error message is attached below
+W tensorflow/core/framework/op_kernel.cc:968] Invalid argument: You must feed a value for placeholder tensor 'Placeholder' with dtype float and shape [50,28,28,1]
+    [[Node: Placeholder = Placeholder[dtype=DT_FLOAT, shape=[50,28,28,1], _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+Traceback (most recent call last):
+  File "stack_overflow.py", line 134, in <module>
+    classifier_labels_placeholder_2: training_labels
+  File "/Users/user/Packages/anaconda/envs/tensorflow2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 717, in run
+    run_metadata_ptr)
+  File "/Users/user/Packages/anaconda/envs/tensorflow2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 915, in _run
+    feed_dict_string, options, run_metadata)
+  File "/Users/user/Packages/anaconda/envs/tensorflow2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 965, in _do_run
+    target_list, options, run_metadata)
+  File "/Users/user/Packages/anaconda/envs/tensorflow2/lib/python2.7/site-packages/tensorflow/python/client/session.py", line 985, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: You must feed a value for placeholder tensor 'Placeholder' with dtype float and shape [50,28,28,1]
+     [[Node: Placeholder = Placeholder[dtype=DT_FLOAT, shape=[50,28,28,1], _device="/job:localhost/replica:0/task:0/cpu:0"]()]]
+
+Caused by op u'Placeholder', defined at:
+  File "stack_overflow.py", line 44, in <module>
+    1
+  File "/Users/user/Packages/anaconda/envs/tensorflow2/lib/python2.7/site-packages/tensorflow/python/ops/array_ops.py", line 1332, in placeholder
+    name=name)
+  File "/Users/user/Packages/anaconda/envs/tensorflow2/lib/python2.7/site-packages/tensorflow/python/ops/gen_array_ops.py", line 1748, in _placeholder
+    name=name)
+  File "/Users/user/Packages/anaconda/envs/tensorflow2/lib/python2.7/site-packages/tensorflow/python/framework/op_def_library.py", line 749, in apply_op
+    op_def=op_def)
+  File "/Users/user/Packages/anaconda/envs/tensorflow2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2380, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/Users/user/Packages/anaconda/envs/tensorflow2/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1298, in __init__
+    self._traceback = _extract_stack()
+
+InvalidArgumentError (see above for traceback): You must feed a value for placeholder tensor 'Placeholder' with dtype float and shape [50,28,28,1]
+     [[Node: Placeholder = Placeholder[dtype=DT_FLOAT, shape=[50,28,28,1], _device="/job:localhost/replica:0/task:0/cpu:0"]()]]

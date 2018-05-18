@@ -1,0 +1,71 @@
+Gradient function of tile operator failed with sparse Tensor
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): no
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Windows 10
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4/1.5
+Python version: 3.5.3
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version:
+GPU model and memory:
+Exact command to reproduce:
+
+Describe the problem
+I found an issue when I use a tile operator followed by a gather operator. It seems that there is a isinstance(grad, ops.Tensor) assert in the gradient function of tile operator, while gather operator will result in a sparse gradient with the type of IndexedSlices.
+Please see below example for details.
+Source code / logs
+Here is a small example to re-produce this issue:
+x = tf.Variable([[0.0], [1.0], [2.0], [3.0], [4.0]], name='x')
+x = tf.tile(x, [1, 2])
+i = tf.Variable(list(range(0, 5)), name='i')
+x = tf.gather(x, i)
+s = tf.reduce_sum(x)
+optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.01)
+train_op = optimizer.minimize(s)
+You will get below errors:
+ValueError: No attr named '_XlaCompile' in name: "Tile"
+op: "Tile"
+input: "x/read"
+input: "Tile/multiples"
+attr {
+  key: "T"
+  value {
+    type: DT_FLOAT
+  }
+}
+attr {
+  key: "Tmultiples"
+  value {
+    type: DT_INT32
+  }
+}
+
+During handling of the above exception, another exception occurred:
+Traceback
+ (most recent call last):
+  File "D:/test/test_gather.py", line 12, in <module>
+    train_op = optimizer.minimize(s)
+  File "D:\PyEnv\tf1.5\lib\site-packages\tensorflow\python\training\optimizer.py", line 355, in minimize
+    grad_loss=grad_loss)
+  File "D:\PyEnv\tf1.5\lib\site-packages\tensorflow\python\training\optimizer.py", line 456, in compute_gradients
+    colocate_gradients_with_ops=colocate_gradients_with_ops)
+  File "D:\PyEnv\tf1.5\lib\site-packages\tensorflow\python\ops\gradients_impl.py", line 609, in gradients
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "D:\PyEnv\tf1.5\lib\site-packages\tensorflow\python\ops\gradients_impl.py", line 375, in _MaybeCompile
+    return grad_fn()  # Exit early
+  File "D:\PyEnv\tf1.5\lib\site-packages\tensorflow\python\ops\gradients_impl.py", line 609, in <lambda>
+    grad_scope, op, func_call, lambda: grad_fn(op, *out_grads))
+  File "D:\PyEnv\tf1.5\lib\site-packages\tensorflow\python\ops\array_grad.py", line 552, in _TileGrad
+    assert isinstance(grad, ops.Tensor)
+AssertionError
+
+I think this is caused by the assertion in gradient function of tile operator:
+@ops.RegisterGradient("Tile")
+def _TileGrad(op, grad):
+  """Sum reduces grad along the tiled dimensions."""
+  assert isinstance(grad, ops.Tensor)
+  input_shape = array_ops.shape(op.inputs[0])
+Could we remove this assert or change the type to ops._TensorLike?

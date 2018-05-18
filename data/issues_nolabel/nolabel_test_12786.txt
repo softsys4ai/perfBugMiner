@@ -1,0 +1,93 @@
+Tensor roll op implementation
+
+Closes #10761
+Added a tf.roll op that works similarly to numpy's np.roll. This was a feature requested in #10761 and was marked as contributions welcome.
+Usage:
+Rolls the elements of a tensor by the offsets of shift along the dimensions
+of axis. Elements that roll passed the last position will wrap around
+to the first.
+For example:
+# 't' is [0, 1, 2, 3, 4]
+roll(t, shift=2, axis=0) ==> [3, 4, 0, 1, 2]
+# shifting along multiple dimensions
+# 't' is [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
+roll(t, shift=[1, -2], axis=[0, 1]) ==> [[7, 8, 9, 5, 6], [2, 3, 4, 0, 1]]
+# shifting along the same axis multiple times
+# 't' is [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
+roll(t, shift=[2, -3], axis=[1, 1]) ==> [[1, 2, 3, 4, 0], [6, 7, 8, 9, 5]]
+
+shift: shift[i] specifies the number of places by which elements are shifted
+along the dimension specified by axis[i]. Negative shifts will roll the
+elements in the opposite direction.
+axis: axis[i] specifies the dimension that the shift shift[i] should occur.
+if the same axis is referenced more than once, the total shift for that axis
+will be the sum of all the shifts that belong to that axis.
+output: Has the same shape and size as the input. The elements are shifted by
+the offsets of shift along the dimensions of axis.
+Unit tests:
+Running main() from test_main.cc
+[==========] Running 14 tests from 1 test case.
+[----------] Global test environment set-up.
+[----------] 14 tests from RollOpTest
+[ RUN      ] RollOpTest.ScalarIndices
+2017-09-03 14:43:12.697389: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.2 AVX AVX2 FMA
+[       OK ] RollOpTest.ScalarIndices (10 ms)
+[ RUN      ] RollOpTest.ScalarIndices_Complex
+[       OK ] RollOpTest.ScalarIndices_Complex (0 ms)
+[ RUN      ] RollOpTest.Simple_TwoD32
+[       OK ] RollOpTest.Simple_TwoD32 (0 ms)
+[ RUN      ] RollOpTest.Simple_ThreeD32
+[       OK ] RollOpTest.Simple_ThreeD32 (0 ms)
+[ RUN      ] RollOpTest.Simple_TwoD64
+[       OK ] RollOpTest.Simple_TwoD64 (0 ms)
+[ RUN      ] RollOpTest.Simple_ThreeD64
+[       OK ] RollOpTest.Simple_ThreeD64 (0 ms)
+[ RUN      ] RollOpTest.ZeroShift_ThreeD32
+[       OK ] RollOpTest.ZeroShift_ThreeD32 (0 ms)
+[ RUN      ] RollOpTest.ZeroSize_ThreeD32
+[       OK ] RollOpTest.ZeroSize_ThreeD32 (0 ms)
+[ RUN      ] RollOpTest.DuplicateShifts_TwoD32
+[       OK ] RollOpTest.DuplicateShifts_TwoD32 (1 ms)
+[ RUN      ] RollOpTest.Error_InputMustBeVectorOrHigher
+[       OK ] RollOpTest.Error_InputMustBeVectorOrHigher (0 ms)
+[ RUN      ] RollOpTest.Error_AxisMustBeScalarOrVector
+[       OK ] RollOpTest.Error_AxisMustBeScalarOrVector (0 ms)
+[ RUN      ] RollOpTest.Error_ShiftMustBeScalarOrVector
+[       OK ] RollOpTest.Error_ShiftMustBeScalarOrVector (0 ms)
+[ RUN      ] RollOpTest.Error_ShiftAndAxisMustBeSameSize
+[       OK ] RollOpTest.Error_ShiftAndAxisMustBeSameSize (0 ms)
+[ RUN      ] RollOpTest.Error_AxisOutOfRange
+[       OK ] RollOpTest.Error_AxisOutOfRange (0 ms)
+[----------] 14 tests from RollOpTest (11 ms total)
+
+[----------] Global test environment tear-down
+[==========] 14 tests from 1 test case ran. (11 ms total)
+[  PASSED  ] 14 tests.
+
+Benchmarks:
+Running main() from test_main.cc
+Benchmark                     Time(ns) Iterations
+-------------------------------------------------
+2017-09-03 14:44:03.626696: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.2 AVX AVX2 FMA
+BM_cpu_roll_outer/256/256        50332      15930	 5208.3MB/s 1302.1M items/s
+BM_cpu_roll_outer/512/512       123096       4603	 8518.3MB/s 2129.6M items/s
+BM_cpu_roll_outer/1024/1024     689598       1085	 6082.2MB/s 1520.6M items/s
+BM_cpu_roll_outer/2048/2048    5394380        100	 3110.1MB/s 777.5M items/s
+BM_cpu_roll_all/256/256          42984      16130	 6098.7MB/s 1524.7M items/s
+BM_cpu_roll_all/512/512          96114       6405	 10909.7MB/s 2727.4M items/s
+BM_cpu_roll_all/1024/1024       622506       1000	 6737.8MB/s 1684.4M items/s
+BM_cpu_roll_all/2048/2048      5073920        100	 3306.6MB/s 826.6M items/s
+
+I also tried to implement this op for the GPU but gave up on it after struggling with it for a week. This is the error I received:
+2017-09-03 20:21:33.871843: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:892] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero
+2017-09-03 20:21:33.872374: I tensorflow/core/common_runtime/gpu/gpu_device.cc:965] Found device 0 with properties: 
+name: Tesla K80 major: 3 minor: 7 memoryClockRate(GHz): 0.8235
+pciBusID: 0000:00:1e.0
+totalMemory: 11.17GiB freeMemory: 11.11GiB
+2017-09-03 20:21:33.872433: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1055] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:00:1e.0, compute capability: 3.7)
+2017-09-03 20:21:35.386734: E tensorflow/stream_executor/cuda/cuda_driver.cc:1110] could not synchronize on CUDA context: CUDA_ERROR_ILLEGAL_ADDRESS :: No stack trace available
+2017-09-03 20:21:35.386839: F tensorflow/core/common_runtime/kernel_benchmark_testlib.cc:164] Non-OK-status: device_->Sync() status: Internal: GPU sync failed
+Aborted (core dumped)
+
+If anyone has a clue of what might be the problem, I'd appreciate the help. The code for the gpu implementation is on this branch on my fork: master...kobejean:roll-op-gpu
+Thanks!

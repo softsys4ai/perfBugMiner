@@ -1,0 +1,50 @@
+TensorArray grad bug
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): No
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Ubuntu 16.04
+TensorFlow installed from (source or binary): pip binary
+TensorFlow version (use command below): v1.3.0-rc2-20-g0787eee 1.3.0
+Python version: 3.6.1
+
+Describe the problem
+tf.TensorArray in some cases does not correctly passes the gradient. See the test case.
+Source code / logs
+This fails:
+def test_tensorarray_grad_simple():
+  n_time = 1
+  n_dim = 1
+  x = [[1.42]]
+  dy = [[2.42]]
+
+  x = tf.convert_to_tensor(x)
+  x.set_shape(tf.TensorShape((n_time, n_dim)))
+  with tf.name_scope("gradients"):
+    # Note that tensor_array_grad._GetGradSource() has this ugly hack
+    # which requires that we have the "gradients" prefix.
+    dy = tf.identity(tf.convert_to_tensor(dy), name="dy")
+  dy.set_shape(tf.TensorShape((n_time, n_dim)))
+
+  ta = tf.TensorArray(tf.float32, size=n_time, element_shape=tf.TensorShape((n_dim,)))
+  for t in range(n_time):
+    ta = ta.write(index=t, value=x[t])
+  y = ta.stack()
+  y.set_shape(tf.TensorShape((n_time, n_dim)))
+  # y = y[::1]  -- if you add this, the test passes
+  dx, = tf.gradients(ys=[y], grad_ys=[dy], xs=[x])
+  vx, vdy, vy, vdx = session.run([x, dy, y, dx])
+  print("x:", vx)
+  print("y:", vy)
+  print("dy:", vdy)
+  print("dx:", vdx)
+  assert_allclose(vx, vy)
+  assert_allclose(vdy, vdx)
+
+I get the output:
+x: [[ 1.41999996]]
+y: [[ 1.41999996]]
+dy: [[ 2.42000008]]
+dx: [[ 0.]]
+
+Strangely, if you add something like y = y[::1] before taking the gradient, it passes.

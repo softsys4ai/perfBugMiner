@@ -1,0 +1,30 @@
+Tensorboard Summaries in Re-entered Scopes
+
+Tensorboard creates a new unique scope for summaries every time existing variable scope is re-entered leading to summaries being split to different groups in the Tensorboard. This might be due to summaries using name scopes internally and re-entered variable scopes having unique original_name_scope.
+def print_scope(scope):
+    print('               scope.name: {}'.format(scope.name))
+    print('scope.original_name_scope: {}'.format(scope.original_name_scope))
+
+with tf.variable_scope('parent') as parent_scope:
+    print_scope(parent_scope)
+    with tf.variable_scope('childA') as childA_scope:
+        print_scope(childA_scope)
+print()
+with tf.variable_scope(parent_scope):
+    print_scope(parent_scope)
+    with tf.variable_scope('childB') as childB_scope:
+        print_scope(childB_scope)
+outputs
+               scope.name: parent
+scope.original_name_scope: parent/
+               scope.name: parent/childA
+scope.original_name_scope: parent/childA/
+
+               scope.name: parent
+scope.original_name_scope: parent/
+               scope.name: parent/childB
+scope.original_name_scope: parent_1/childB/
+
+Child B is created in re-entered parent scope and has prefix for parent in the original_name_scope. I believe parent prefix is what confuses name scope in Tensorboard summaries. I think re-entering existing variable scope should not have these unique prefixes for parent scope.
+I have lemmatizer wrapped in Python class and Tensorboard summaries are created in different stages of graph build with re-entered variable scopes. Tensorboard splits graphs like so: Screenshot
+Tested on Tensorflow 1.0.1

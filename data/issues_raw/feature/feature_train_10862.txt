@@ -1,0 +1,64 @@
+Bug: MultiRNNCell.state_size is a tuple
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.2
+Bazel version (if compiling from source): n/a
+CUDA/cuDNN version: 8.0
+GPU model and memory: 1080 Ti
+Exact command to reproduce: see below
+
+Describe the problem
+Version 1:
+The follow code will return LSTMStateTuple with h and c:
+        enc_cell = tf.contrib.rnn.LSTMCell(hidden_dim)
+
+        enc_inp_len = np.array([seq_length_in for _ in range(batch_size)])
+
+        ((encoder_fw_outputs,
+          encoder_bw_outputs),
+         (encoder_fw_final_state,
+          encoder_bw_final_state)) = (
+            tf.nn.bidirectional_dynamic_rnn(cell_fw=enc_cell,
+                                            cell_bw=enc_cell,
+                                            inputs=enc_inp,
+                                            sequence_length=enc_inp_len,
+                                            dtype=tf.float32)
+            )
+        encoder_outputs = tf.concat((encoder_fw_outputs, encoder_bw_outputs), 2)
+
+        encoder_final_state_c = tf.concat(
+            (encoder_fw_final_state.c, encoder_bw_final_state.c), 1)
+
+        encoder_final_state_h = tf.concat(
+            (encoder_fw_final_state.h, encoder_bw_final_state.h), 1)
+
+        encoder_final_state = tf.contrib.rnn.LSTMStateTuple(
+            c=encoder_final_state_c,
+            h=encoder_final_state_h
+        )
+However, if I run the following MultiCellRNN:
+        enc_cells = []
+        for i in range(0, encoder_depth):
+            with tf.variable_scope('enc_RNN_{}'.format(i)):
+                cell = tf.contrib.rnn.GRUCell(hidden_dim)  # Or LSTMCell(hidden_dim)
+                cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=1.0-dropout)
+                enc_cells.append(cell)
+        enc_cell = tf.contrib.rnn.MultiRNNCell(enc_cells)
+
+        ((encoder_fw_outputs,
+          encoder_bw_outputs),
+         (encoder_fw_final_state,
+          encoder_bw_final_state)) = (
+            tf.nn.bidirectional_dynamic_rnn(cell_fw=enc_cell,
+                                            cell_bw=enc_cell,
+                                            inputs=enc_inp,
+                                            sequence_length=enc_inp_len,
+                                            dtype=tf.float32)
+            )
+
+        # encoder_fw_final_state is a Tensor from the .c part of LSTMStateTuple
+It will return state tensor(just the c part, not the h activation)

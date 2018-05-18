@@ -1,0 +1,70 @@
+Race condition in add_arg_scope causes silent incorrect behavior
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Linux Mint 17.3 Rosa
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+v1.2.0-5-g435cdfc 1.2.1
+Python version:
+3.6.1
+Bazel version (if compiling from source):
+N/A
+CUDA/cuDNN version:
+CUDA Version 8.0.44
+cudnn 5.1.5
+GPU model and memory:
+GTX 970 4GB
+Exact command to reproduce:
+python add_arg_scope.py
+
+Describe the problem
+There is a race condition in tensorflow.contrib.framework.python.ops.add_arg_scope where it doesn't reliably extract the arg list. Sometimes the list is incorrect and sometimes when a function is redefined or reloaded, the old arg list is returned.
+In practice, even a function that isn't reloaded can get the wrong arg list. The behavior is strange and seems to depend on the contents of the function and not just its args.
+This may be causing errors since arg_scope silently ignores any arguments not in the argspec of the ops it's given.
+Source code / logs
+import tensorflow as tf
+from tensorflow.contrib.framework.python.ops import add_arg_scope, arg_scope, arg_scoped_arguments
+
+# initial definition
+@add_arg_scope
+def foo(x='x', y='y'):
+    if x:
+        pass
+    if y:
+        pass
+
+for i in range(50):
+    # redefine the function with different args
+    @add_arg_scope
+    def foo(a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8):
+        pass
+    
+    print(arg_scoped_arguments(foo))
+sample output (it isn't always regular):
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('x', 'y')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('x', 'y')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('x', 'y')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('x', 'y')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+('x', 'y')
+('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')
+...

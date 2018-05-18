@@ -1,0 +1,36 @@
+Not found: FeedInputs: unable to find feed output Mul
+
+@satok16 I have already set up and was able to run hexagon_graph_execution on my hvx board, however, when I tried to use my own inception-v3 pre-trained model that I froze using this quantization method, I am receiving this error:
+[ RUN      ] GraphTransferer.RunInceptionV3OnHexagonExampleWithTfRuntime
+native : hexagon_graph_execution_test.cc:519 Fuse and run inception v3 on hexagon with tf runtime
+native : hexagon_graph_execution_test.cc:94 Hexagon controller version is 90
+native : hexagon_graph_execution_test.cc:142 Read /data/local/tmp/img_299x299.bmp, size = 269156bytes
+native : hexagon_graph_execution_test.cc:148 header size = 54
+native : hexagon_graph_execution_test.cc:150 image size = 40
+native : hexagon_graph_execution_test.cc:152 width = 299
+native : hexagon_graph_execution_test.cc:154 height = -299
+native : hexagon_graph_execution_test.cc:533 Ioading image finished.
+t1(loading image time)=0.026770
+native : hexagon_graph_execution_test.cc:546 Build fused graph
+native : remote_fused_graph_execute_utils.cc:259 Error during inference: Not found: FeedInputs: unable to find feed output Mul
+native : graph_transfer_utils.cc:110 Check failed: status.ok()
+Aborted
+
+Do you know if the issue is because of an incorrect input argument here:
+curl -L "https://storage.googleapis.com/download.tensorflow.org/models/inception_v3_2016_08_28_frozen.pb.tar.gz" |
+  tar -C tensorflow/examples/label_image/data -xz
+bazel build tensorflow/tools/graph_transforms:transform_graph
+bazel-bin/tensorflow/tools/graph_transforms/transform_graph \
+  --in_graph=tensorflow/examples/label_image/data/inception_v3_2016_08_28_frozen.pb \
+  --out_graph=/tmp/quantized_graph.pb \
+  **--inputs=input \**
+  --outputs=InceptionV3/Predictions/Reshape_1 \
+  --transforms='add_default_attributes strip_unused_nodes(type=float, shape="1,299,299,3")
+    remove_nodes(op=Identity, op=CheckNumerics) fold_constants(ignore_errors=true)
+    fold_batch_norms fold_old_batch_norms quantize_weights quantize_nodes
+    strip_unused_nodes sort_by_execution_order'
+
+I found on [this] (https://stackoverflow.com/questions/43022516/tensorflow-inception-feedinputs-unable-to-find-feed-output-input) and also [this]https://github.com/tensorflow/tensorflow/issues/2883#issuecomment-226591095 posts that we might have to use Mul instead. Tried that with no success. Interestingly, when I test my frozen_quantized graph with:
+bazel-bin/tensorflow/examples/label_image/label_image --graph=/tmp/my_inception_quantized_graph_hvx.pb
+I receive similar results compared to a non-quantized version, so it shows that my frozen_quantized is not faulty. Can you verify the issue here?
+Was the file https://storage.googleapis.com/download.tensorflow.org/models/tensorflow_inception_v3_stripped_optimized_quantized.pb used in the original hvx hexgon_graph_execution produced differently?

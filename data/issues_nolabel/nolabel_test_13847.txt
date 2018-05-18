@@ -1,0 +1,76 @@
+tf.train.batch and shuffle_batch undetermined for multi queue input with multiple threads
+
+System information
+
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Custom code, see below.
+
+
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+OSX
+
+
+TensorFlow installed from (source or binary):
+pip install tensorflow == 1.2
+
+
+TensorFlow version (use command below):
+('v1.2.0-rc2-21-g12f033d', '1.2.0')
+
+
+Python version:
+Python 2.7.10
+
+
+Bazel version (if compiling from source):
+n/a
+
+
+CUDA/cuDNN version:
+n/a
+
+
+GPU model and memory:
+n/a
+
+
+Exact command to reproduce:
+
+
+a_fifo = tf.train.slice_input_producer([np.arange(30)],
+                                        shuffle=False,
+                                        name='a')[0]
+b_fifo = tf.train.slice_input_producer([np.arange(30)],
+                                        shuffle=False,
+                                        name='b')[0]
+train_batch = tf.train.batch([a_fifo, b_fifo],
+                            batch_size=5,
+                            capacity=18,
+                            num_threads=2,
+                            name='batch')
+at, bt = train_batch
+with tf.Session() as sess:
+    threads = tf.train.start_queue_runners(sess=sess)
+    sess.run(tf.global_variables_initializer())
+    try:
+        for i in range(150):
+            av, bv = sess.run([at, bt])
+            assert list(av) == list(bv), "queues derailed!"
+    except Exception as e:
+        print(("Exception in training: {}").format(e))
+        print("__",i,"__")
+        print(av)
+        print(bv)
+
+Output:
+
+Exception in training: queues derailed!
+__ 11 __
+[26 25 27 28 29]
+[25 26 27 28 29]
+
+Describe the problem
+Both queues should be dequeued synchronously, as it does when num_threads =1 in the batch statement. With num_threads > 1 the two input queue's will derail, as shown in the example above. Same issue appears also in train.shuffle_batch.
+Source code / logs
+See code above.

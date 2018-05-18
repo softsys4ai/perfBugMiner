@@ -1,0 +1,92 @@
+Strang behavior in memory copy with control dependencies.
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): I have costom code.
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04): redhat-7.2
+TensorFlow installed from (source or binary): binary
+TensorFlow version (use command below): 1.4.0
+Python version: 2.7
+Bazel version (if compiling from source):
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: CUDA-8.0, cuDNN-6.0
+GPU model and memory: Nvidia - K80
+Exact command to reproduce:
+
+You can collect some of this information using our environment capture script:
+https://github.com/tensorflow/tensorflow/tree/master/tools/tf_env_collect.sh
+You can obtain the TensorFlow version with
+python -c "import tensorflow as tf; print(tf.GIT_VERSION, tf.VERSION)"
+Describe the problem
+There are two different ways to apply memory copy from CPU to GPU:0 in the following code:
+  with tf.control_dependencies([update_op]):
+    # Method-1 :
+    # with tf.device('/GPU:0'):
+    #   a_cpu_to_gpu = a_cpu.read_value()
+    # train_ops.append(vars[i].assign(a_cpu_to_gpu).op)
+
+    # Method-2 :
+    train_ops.append(vars[i].assign(a_cpu).op)
+
+a_cpu is a variable in CPU device. vars[i] is a variable in GPU:0 device. The first one (Method-1) is to read the value in GPU:0 and then assign it to a_cpu_to_gpu. the second one (Method-2) is directly assign the variable in CPU to the variable in GPU:0.
+When I enable the trace_level, I find that the timeline of those two codes are different:
+Method-1
+
+Method-2
+
+In Method-1, I think the read_value op a_cpu.read_value() only depends on the i-th update_op. So the MEMCPYHtoD (green bar) should be right after the the i-th update_op, which means right after the MEMCPYDtoH (purple bar). I don't understand why they appear in the end of the timeline.
+In Method-2, MEMCPYHtoD (green bar) appears at the beginning of the timeline. vars[i].assign(a_cpu).op depends on update_op, how can the memcpy be executed before the update_op ?
+I have no clue why it behaves like this, can anyone tell me why the memcpy behaves like that in Method-1 and Method-2 and what's the difference between them.
+Thanks.
+Source code / logs
+import tensorflow as tf
+import os
+
+from tensorflow.python.client import timeline
+slim = tf.contrib.slim
+
+train_ops = []
+
+optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.1)
+
+net = tf.random_normal(shape=(32, 16, 16, 128))
+
+with tf.device('/GPU:0'):
+
+  for i in range(10):
+    net = slim.conv2d(net, 128, [11, 11], padding='SAME', scope='conv_%s' % i)
+
+  loss = tf.reduce_mean(net, name='loss_func')
+  grad = tf.gradients(loss, tf.global_variables(), gate_gradients=True, name='my_gradients')
+
+vars = tf.global_variables()
+num_vars = len(vars)
+
+for i in range(num_vars - 1, -1, -1):
+
+  with tf.device('/CPU:0'):
+    a_cpu = tf.get_variable('a_cpu_%s' % i, initializer=vars[i].initial_value)
+    update_op = optimizer.apply_gradients([(grad[i], a_cpu)], name='apply_%s' % i)
+
+  with tf.control_dependencies([update_op]):
+    # Method-1 :
+    # with tf.device('/GPU:0'):
+    #   a_cpu_to_gpu = a_cpu.read_value()
+    # train_ops.append(vars[i].assign(a_cpu_to_gpu).op)
+
+    # Method-2 :
+    train_ops.append(vars[i].assign(a_cpu).op)
+
+
+with tf.Session() as sess:
+  sess.run(tf.global_variables_initializer())
+  for i in range(10):
+    run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+    run_metadata = tf.RunMetadata()
+    sess.run(train_ops, options=run_options, run_metadata=run_metadata)
+    trace_filename = os.path.join('/tmp/delete_me/trace', 'trace-global-step-%d.json' % i)
+    if not tf.gfile.Exists(os.path.dirname(trace_filename)):
+      os.makedirs(os.path.dirname(trace_filename))
+    trace = timeline.Timeline(step_stats=run_metadata.step_stats)
+    with tf.gfile.Open(trace_filename, 'w') as trace_file:
+      trace_file.write(trace.generate_chrome_trace_format(show_memory=False))

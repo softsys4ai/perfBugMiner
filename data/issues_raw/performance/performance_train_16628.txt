@@ -1,0 +1,63 @@
+Tensorflow switches to CPU when using Variable.assign
+
+System information
+
+OS:Windows 10
+TensorFlow installed from: binary
+TensorFlow version (use command below): 1.4.0
+Python version: 3.6.4
+CUDA/cuDNN version: 8.0 / 64
+GPU model and memory: GeForce GTX 1080 8 GB
+Exact command to reproduce: run the provided code below
+
+Describe the problem
+I'm using a tf.Variable for the learning rate of a optimizer. If I change its value with sess.run(var.assign(0.1)) the performance drops extremly and it seems tensorflow switches from GPU use to only CPU use (no workload on the GPU and more load on the CPU).
+Source code / logs
+I did write a minimal working example (training a network with XOR). To see the difference just comment the line sess.run(learning_rate.assign(0.1)) out and it will run much much faster using the GPU.
+import tensorflow as tf
+
+
+def XOR(x_, y_):
+    Theta1 = tf.Variable(tf.random_uniform([2, 2], -1, 1), name="Theta1")
+    Theta2 = tf.Variable(tf.random_uniform([2, 1], -1, 1), name="Theta2")
+
+    Bias1 = tf.Variable(tf.zeros([2]), name="Bias1")
+    Bias2 = tf.Variable(tf.zeros([1]), name="Bias2")
+
+    with tf.name_scope("layer2"):
+        A2 = tf.sigmoid(tf.matmul(x_, Theta1) + Bias1)
+
+    with tf.name_scope("layer3"):
+        Hypothesis = tf.sigmoid(tf.matmul(A2, Theta2) + Bias2)
+
+    with tf.name_scope("cost"):
+        cost = tf.reduce_mean(((y_ * tf.log(Hypothesis)) +
+                               ((1 - y_) * tf.log(1.0 - Hypothesis))) * -1)
+
+    return cost
+
+
+if __name__ == "__main__":
+    x_ = tf.placeholder(dtype=tf.float32, shape=[4, 2], name='x-input')
+    y_ = tf.placeholder(dtype=tf.float32, shape=[4, 1], name='y-input')
+    xor_cost = XOR(x_, y_)
+
+    learning_rate = tf.Variable(0.1, dtype=tf.float32)
+
+    with tf.name_scope("train"):
+        train_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(xor_cost)
+
+    XOR_X = [[0, 0], [0, 1], [1, 0], [1, 1]]
+    XOR_Y = [[0], [1], [1], [0]]
+
+    sess = tf.Session()
+    init = tf.global_variables_initializer()
+    sess.run(init)
+
+    for i in range(40001):
+        sess.run(learning_rate.assign(0.1))
+
+        _, loss = sess.run(fetches=[train_step, xor_cost], feed_dict={x_: XOR_X, y_: XOR_Y})
+
+        if i % 100 == 0:
+            print('iteration: {0:5}, loss: {1:15.10f}'.format(i, loss))

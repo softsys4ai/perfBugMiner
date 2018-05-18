@@ -1,0 +1,107 @@
+Docker GPU CUDA failure fails to be caught by CI
+
+Two issues:
+
+It looks like the recent docker images, including r0.9rc0-devel-gpu and nightly-devel-gpu (as of June 14) are failing to load libcuda. The latest-devel-gpu seems to work fine.
+The CI tests seem to be missing these failures and reporting success.
+
+Environment info
+Host:
+Ubuntu 15.10
+GTX 980, driver version 352.63
+docker 1.11.2 build b9f10c9
+using nvidia-docker 1.0.0.rc.2-1_amd64
+Container images (a la https://hub.docker.com/r/tensorflow/tensorflow/tags/):
+r0.9rc0-devel-gpu (bff7093a7715, built ~June 6)
+nightly-devel-gpu (d285481a3e65, built ~June 14)
+latest-devel-gpu (9e12b89c50bb, built ~two months ago)
+Steps to reproduce
+(and installed CUDA versions)
+Here's where the fun starts. I'll do this via the docker commands I ran, per container.
+For container r0.9rc0-devel-gpu:
+$ nvidia-docker run -it tensorflow/tensorflow:r0.9rc0-devel-gpu bash -c echo LD_LIBRARY_PATH: $LD_LIBRARY_PATH
+LD_LIBRARY_PATH: /usr/local/nvidia/lib:/usr/local/nvidia/lib64:
+
+$ nvidia-docker run -it tensorflow/tensorflow:r0.9rc0-devel-gpu bash -c ls -l /usr/local/nvidia/lib64/libcuda*
+lrwxrwxrwx 1  999  999       41 Jun 13 21:38 /usr/local/nvidia/lib64/libcuda.so.1 -> /usr/local/nvidia/lib64/libcuda.so.352.63
+-rw-r--r-- 2 root root 14283432 Nov  8  2015 /usr/local/nvidia/lib64/libcuda.so.352.63
+
+$ nvidia-docker run -it tensorflow/tensorflow:r0.9rc0-devel-gpu bash -c python -c "import tensorflow; print tensorflow.__version__"
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:102] Couldn't open CUDA library libcuda.so. LD_LIBRARY_PATH: /usr/local/nvidia/lib:/usr/local/nvidia/lib64:
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:160] hostname: 03e202e5d433
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:185] libcuda reported version is: Not found: was unable to find libcuda.so DSO loaded into this program
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:347] driver version file contents: """NVRM version: NVIDIA UNIX x86_64 Kernel Module  352.63  Sat Nov  7 21:25:42 PST 2015
+GCC version:  gcc version 4.9.3 (Ubuntu 4.9.3-5ubuntu1) 
+"""
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:189] kernel reported version is: 352.63.0
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:1076] LD_LIBRARY_PATH: /usr/local/nvidia/lib:/usr/local/nvidia/lib64:
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:1077] failed to find libcuda.so on this system: Failed precondition: could not dlopen DSO: libcuda.so; dlerror: libcuda.so: cannot open shared object file: No such file or directory
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+0.9.0rc0
+
+For container nightly-devel-gpu:
+$ nvidia-docker run -it tensorflow/tensorflow:nightly-devel-gpu bash -c echo LD_LIBRARY_PATH: $LD_LIBRARY_PATH
+LD_LIBRARY_PATH: /usr/local/nvidia/lib:/usr/local/nvidia/lib64:
+
+$ nvidia-docker run -it tensorflow/tensorflow:nightly-devel-gpu bash -c ls -l /usr/local/nvidia/lib64/libcuda*
+lrwxrwxrwx 1  999  999       41 Jun 13 21:38 /usr/local/nvidia/lib64/libcuda.so.1 -> /usr/local/nvidia/lib64/libcuda.so.352.63
+-rw-r--r-- 2 root root 14283432 Nov  8  2015 /usr/local/nvidia/lib64/libcuda.so.352.63
+
+$ nvidia-docker run -it tensorflow/tensorflow:nightly-devel-gpu bash -c python -c "import tensorflow; print tensorflow.__version__"
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:102] Couldn't open CUDA library libcuda.so. LD_LIBRARY_PATH: /usr/local/nvidia/lib:/usr/local/nvidia/lib64:
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:160] hostname: 1a40427098ed
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:185] libcuda reported version is: Not found: was unable to find libcuda.so DSO loaded into this program
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:347] driver version file contents: """NVRM version: NVIDIA UNIX x86_64 Kernel Module  352.63  Sat Nov  7 21:25:42 PST 2015
+GCC version:  gcc version 4.9.3 (Ubuntu 4.9.3-5ubuntu1) 
+"""
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:189] kernel reported version is: 352.63.0
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:1077] LD_LIBRARY_PATH: /usr/local/nvidia/lib:/usr/local/nvidia/lib64:
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:1078] failed to find libcuda.so on this system: Failed precondition: could not dlopen DSO: libcuda.so; dlerror: libcuda.so: cannot open shared object file: No such file or directory
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+0.8.0
+
+For container latest-devel-gpu:
+$ nvidia-docker run -it tensorflow/tensorflow:latest-devel-gpu bash -c echo LD_LIBRARY_PATH: $LD_LIBRARY_PATH
+LD_LIBRARY_PATH: /usr/local/nvidia/lib:/usr/local/nvidia/lib64:
+
+$ nvidia-docker run -it tensorflow/tensorflow:latest-devel-gpu bash -c ls -l /usr/local/nvidia/lib64/libcuda*
+lrwxrwxrwx 1  999  999       41 Jun 13 21:38 /usr/local/nvidia/lib64/libcuda.so.1 -> /usr/local/nvidia/lib64/libcuda.so.352.63
+-rw-r--r-- 2 root root 14283432 Nov  8  2015 /usr/local/nvidia/lib64/libcuda.so.352.63
+
+$ nvidia-docker run -it tensorflow/tensorflow:latest-devel-gpu bash -c python -c "import tensorflow; print tensorflow.__version__"
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so locally
+0.8.0
+
+So it looks like the GPU libraries are failing on the first two docker images. What's interesting to note here is also that all three python statements still execute without error. I.E., running print tensorflow.__version__ completes (and prints the correct version) and python exits with return code 0, even though the GPU failed to load properly. This is not a bug, since the fallback behavior of running on the CPU should still work. However, it also seems this is causing problems for the CI tests, since it isn't detecting a failure:
+It seemed odd to me that these docker images weren't working, since you use them for CI. So I checked the CI logs, and they're the same. For instance, for the docker CI build for the nightly GPU devel image, this is a snippet from the log showing the output from the seventh test:
+(full source is http://ci.tensorflow.org/view/Nightly/job/nightly-docker-gpu/TF_DOCKER_BUILD_IS_DEVEL=YES,TF_DOCKER_BUILD_TYPE=GPU,label=gpu-linux/lastBuild/consoleFull)
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:102] Couldn't open CUDA library libcuda.so. LD_LIBRARY_PATH: /usr/local/nvidia/lib:/usr/local/nvidia/lib64:
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:160] hostname: 883e6f728cb9
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:185] libcuda reported version is: Not found: was unable to find libcuda.so DSO loaded into this program
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:347] driver version file contents: """NVRM version: NVIDIA UNIX x86_64 Kernel Module  352.79  Wed Jan 13 16:17:53 PST 2016
+GCC version:  gcc version 4.8.4 (Ubuntu 4.8.4-2ubuntu1~14.04.1) 
+"""
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:189] kernel reported version is: 352.79.0
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:1077] LD_LIBRARY_PATH: /usr/local/nvidia/lib:/usr/local/nvidia/lib64:
+I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:1078] failed to find libcuda.so on this system: Failed precondition: could not dlopen DSO: libcuda.so; dlerror: libcuda.so: cannot open shared object file: No such file or directory
+I tensorflow/stream_executor/dso_loader.cc:108] successfully opened CUDA library libcurand.so locally
+E tensorflow/stream_executor/cuda/cuda_driver.cc:491] failed call to cuInit: CUDA_ERROR_NO_DEVICE
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:147] no NVIDIA GPU device is present: /dev/nvidia0 does not exist
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:81] No GPU devices available on machine.
+(7 / 7) tutorial test-on-install PASSED: translate_test  (Elapsed time: 8997 ms)
+tutorial test-on-install test(s):  7 passed; 0 failed; 0 skipped
+
+I'm still learning Docker, so it's entirely possible that I've made some blunder here, but it does seem like there's something going on here between the docker images.

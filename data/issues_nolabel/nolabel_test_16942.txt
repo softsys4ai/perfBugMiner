@@ -1,0 +1,44 @@
+wrapping op in while_loop makes it run faster, even with single iteration
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow): Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):  Linux Ubuntu 16.04
+TensorFlow installed from (source or binary): Source
+TensorFlow version (use command below): v1.5.0-0-g37aa430 (1.5.0)
+Python version: 3.5.2
+Bazel version (if compiling from source): 0.9.0
+GCC/Compiler version (if compiling from source):
+CUDA/cuDNN version: CUDA 9.1, CuDNN 7
+GPU model and memory: GeForce GTX 1050, 4042MiB
+Exact command to reproduce: See below
+
+Describe the problem
+I am working on an object detector. I have one entry point to my code that detects objects in a single image, and another that reads in a batch of images. The batch version uses tf.while_loop to apply the same inference code to each image in the batch. I can't put all the images into a single tensor because they are all likely to be different dimensions, so I am using a TensorArray. The final results work as expected, but the timing behavior is odd.
+The first sess.run call in the loop over the dataset is always slower than the rest, presumably due to caching, memory allocation, etc. However, the first call in the non-batch version is WAY slower than the first call in the batch version. I distilled this down to the minimal examples below. The first version does a dot product in a straightforward way. On my machine, it takes about 13 seconds to run. The second version does the same dot product, but wrapped in a while_loop and writing the result to an intermediate TensorArray and then reading it out again. On my machine, it takes about 4 seconds to run. Presumably, version 2 has to do the same data copying, memory allocation, etc. as version 1, in addition to the overhead of the while_loop and TensorArray calls. So, the timing behavior is unexpected.
+Version 2 can even be modified to compute the same dot product 10 (or more) times, and it will still run faster. This behavior holds even if the loop body is modified to use a random vector every time, so I don't think it is due to caching. It also holds even if parallel_iterations is held to 1, so I don't think it is due to parallelism. Is this a bug, or is something else going on under the hood?
+Source code / logs
+# version 1 (~13 seconds on my machine)
+graph = tf.Graph()
+with graph.as_default(), tf.device('/gpu:0'):
+    nums = tf.range(200000000, dtype=tf.float32)
+    dot_product = tf.reduce_sum((nums/2) * (nums-5))
+with tf.Session(graph=graph) as sess:
+    print(sess.run(dot_product))
+# version 2 (~4 seconds on my machine)
+graph = tf.Graph()
+with graph.as_default(), tf.device('/gpu:0'):
+    arr = tf.TensorArray(size=1, dtype=tf.float32)
+    nums = tf.range(200000000, dtype=tf.float32)
+    i = tf.constant(0)
+    def body(i, arr):
+        arr = arr.write(i, tf.reduce_sum((nums/2) * (nums-5)))
+        return i+1, arr
+    i, arr = tf.while_loop(
+        cond=lambda i, x: i < 1,
+        body=body,
+        loop_vars=[i, arr],
+        parallel_iterations=1)
+    dot_product = arr.read(0)
+with tf.Session(graph=graph) as sess:
+    print(sess.run(dot_product))

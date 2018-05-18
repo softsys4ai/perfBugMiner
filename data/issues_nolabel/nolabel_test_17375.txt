@@ -1,0 +1,156 @@
+tensorflow lite cannot use my own model, crashed without error log.
+
+Version Info:
+tensorflow r1.5
+ubuntu 14.04
+armv7 platform
+android 6.0.1 and pc
+ndk version: r14
+android studio 2.3.1
+Describe the problem
+i write the code in c++, it can get results when using the mobilenet model from the tutorails(link: https://storage.googleapis.com/download.tensorflow.org/models/tflite/mobilenet_v1_224_android_quant_2017_11_08.zip)
+but when i use my own model converted by toco, it crashed without any information. set input and load model seemed correct, but invoke failed.
+code
+network define
+network is defined by tf.slim framework:
+ def lite_v1(images, num_classes=10, is_training=False, dropout_keep_prob=0.5, prediction_fn=slim.softmax, scope='lite_v1'):
+    end_points = {}
+      with tf.variable_scope(scope, 'lite_v1', [images, num_classes]):
+        images_input = tf.placeholder_with_default(images, shape=[None, 39, 39, 1], name='InputPlaceholder')
+        net = slim.conv2d(images_input, 16, [4, 4], padding='VALID', scope='conv1')
+        end_points['conv1'] = net
+        feature = slim.flatten(net)
+    with tf.variable_scope('Logits'):
+      net = slim.fully_connected(feature, 100, scope='fc3')
+      logits = slim.fully_connected(net, num_classes,
+                              biases_initializer=tf.zeros_initializer(),
+                              weights_regularizer=None,
+                              activation_fn=None,
+                              scope='logits')
+      end_points['Logits'] = logits
+    output = tf.multiply(logits, 1, name="Output")
+    end_points['Output'] = output
+  return logits, end_points
+
+model convert
+i trained it and use the freeze_graph.py and optimize_for_inference.py scripe in tensorflow/python/tools/ and get a frozen .pb file. then i convert it to a .tflite file by following the tutorials in github: https://github.com/tensorflow/tensorflow/tree/r1.5/tensorflow/contrib/lite just like:
+bazel build tensorflow/contrib/lite/toco:toco
+bazel-bin/tensorflow/contrib/lite/toco/toco -- \
+  --input_file=$(pwd)/mobilenet_v1_1.0_224/frozen_graph.pb \
+  --input_format=TENSORFLOW_GRAPHDEF  --output_format=TFLITE \
+  --output_file=/tmp/mobilenet_v1_1.0_224.lite --inference_type=FLOAT \
+  --input_type=FLOAT --input_arrays=input \
+  --output_arrays=MobilenetV1/Predictions/Reshape_1 --input_shapes=1,224,224,3
+
+c++ test code
+after get a .tflite file. and then i wrote the c++ code to read the model and image from sdcard:
+void LoadImageFromFile(std::string file_name, std::vector<uint8_t>& output, int& out_width, int& out_height, int& out_channels)
+{
+cv::Mat image = cv::imread(file_name);
+cv::Mat gray;
+cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+
+out_width = gray.cols;
+out_height = gray.rows;
+out_channels = gray.channels();
+for(int nrow =0; nrow < out_height; nrow++)
+    for(int ncol = 0; ncol < out_width; ncol++)
+        output.push_back(gray.at<unsigned char>(nrow,ncol));
+}
+size_t writeByteBuffer(uint8_t* in, char** dst, int dst_size) {
+  char* buf = (char*)in;
+  if (!buf) {
+    return 0;
+  }
+  *dst = buf;
+  return dst_size;
+}
+
+int RunInferenceOnImage()
+{
+const int num_threads = 1;
+std::string input_layer_type = "float";
+std::vector<int> sizes = {1, 39, 39, 1};
+//    std::vector<int> sizes = {1, 224, 224, 3};
+std::string graph_path = "/storage/emulated/0/DCIM/fastnetv2.tflite"; //mobilenet_quant_v1_224.tflite
+std::unique_ptr<tflite::FlatBufferModel> model(tflite::FlatBufferModel::BuildFromFile(graph_path.c_str()));
+if (!model)
+{
+    LOGD("bkzero jni: , Failed to mmap model %s", graph_path.c_str());
+}
+model->error_reporter();
+
+#ifdef TFLITE_CUSTOM_OPS_HEADER
+  tflite::MutableOpResolver resolver;
+  RegisterSelectedOps(&resolver);
+#else
+  tflite::ops::builtin::BuiltinOpResolver resolver;
+#endif
+
+LOGD("bkzero jni: , %s", "resolved reporter end");
+
+std::unique_ptr<tflite::Interpreter> interpreter;
+tflite::InterpreterBuilder(*model, resolver)(&interpreter);
+if (!interpreter)
+{
+    LOGD("bkzero jni: , %s", "Failed to construct interpreter");
+}
+if (num_threads != -1) {
+  interpreter->SetNumThreads(num_threads);
+}
+int input = interpreter->inputs()[0];
+if (input_layer_type != "string") {
+  interpreter->ResizeInputTensor(input, sizes);
+}
+
+if (interpreter->AllocateTensors() != kTfLiteOk)
+{
+    LOGD("bkzero jni: , %s", "Failed to allocate tensors!");
+}
+std::string image_path = "/storage/emulated/0/DCIM/test2.jpg";
+int image_width;
+int image_height;
+int image_channels;
+std::vector<uint8_t> image_data;
+LoadImageFromFile(image_path, image_data, image_width, image_height, image_channels);
+
+//    const int wanted_width = 224;
+//    const int wanted_height = 224;
+//    const int wanted_channels = 3;
+//    const float input_mean = 127.5f;
+//    const float input_std = 127.5f;
+
+const int wanted_width = 39;
+const int wanted_height = 39;
+const int wanted_channels = 1;
+const float input_mean = 128.0f;
+const float input_std = 64.0f;
+assert(image_channels >= wanted_channels);
+uint8_t* in = image_data.data();
+float* out = interpreter->typed_tensor<float>(input);
+int input_idx = interpreter->inputs()[0];
+TfLiteTensor* target = interpreter->tensor(input_idx);
+int num_bytes = sizes[0]*sizes[1]*sizes[2]*sizes[3];
+writeByteBuffer(in, &(target->data.raw), static_cast<int>(num_bytes));
+    if (interpreter->Invoke() != kTfLiteOk)
+    {
+        LOGD("bkzero jni: , %s", "Failed to invoke!");
+    }
+    const std::vector<int>& results = interpreter->outputs();
+    if (results.empty()) {
+      LOGD("bkzero jni: , %s", "results.empty()");
+    }
+    long outputs[results.size()];
+    size_t size = results.size();
+    for (int i = 0; i < size; ++i) {
+      TfLiteTensor* source = interpreter->tensor(results[i]);
+      outputs[i] = reinterpret_cast<long>(source);
+    }
+    uint8_t* final = (uint8_t*)outputs[0];
+    for(int i = 0; i < 10; i++)
+        LOGD("bkzero jni: results, %f", (final[i]/255.0));
+    LOGD("bkzero jni: , %s", "interpreter outputs read finished");
+}
+
+this code can read and ouput result correct when run the example mobilenet file, mobilenet_quant_v1_224.tflite. but crash when i run my own model and give the error: Fatal signal 7 (SIGBUS), code 1, fault addr 0xdd3dd008 in tid 10528
+and on PC, it also crashes, without more information.

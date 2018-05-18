@@ -1,0 +1,45 @@
+Golang API to serialize data into tf.Example protos(tfrecords)
+
+The Golang api WriteContentsTo can be used to writes the serialized contents of a tensor to io.Writer, where the tensor is built from golang scalars, slices, and arrays.
+Yet there's not a Golang API to serialize data into tf.Example protos(tfrecords).
+For example, when i want serialize a libsvm into tf.Example protos, i can do this by:
+def libsvm2tfrecords(data_source, target_dir, delimiter='\t'):
+    """
+    a single file should not contain lines more than 1000,000, or we should use libsvm2proto_par
+    :param data_source: libsvm file path
+    :param target_dir: dir to storage the serialize proto file
+    :param delimiter: delimiter for csv reader
+    :return:
+    """
+    if not os.path.isfile(data_source):
+        raise ValueError('data file passed do not exist or not a file')
+
+    file_name = os.path.join(target_dir, os.path.splitext(
+        os.path.basename(data_source))[0] + '.tfrecords')
+    writer = tf.python_io.TFRecordWriter(file_name)
+    start = datetime.now()
+    line_c = 0
+    with open(data_source, 'rb') as rf:
+        f_reader = csv.reader(rf, delimiter=delimiter, quotechar='|')
+        for row in f_reader:
+            line_c += 1
+            feature = dict()
+            indexes = []
+            values = []
+            feature.update({'label': _float_feature([float(row[0])])})
+            for e in row[1:]:
+                index, value = e.split(':')
+                indexes.append(int(index))
+                values.append(float(value))
+                feature.update({'index': _int64_feature(indexes)})
+                feature.update({'value': _float_feature(values)})
+
+            example = tf.train.Example(features=tf.train.Features(feature=feature))
+            writer.write(example.SerializeToString())
+
+        writer.close()
+        end = datetime.now()
+
+        print("- consumed time: %ds for %s" % ((end-start).seconds, data_source))
+
+BUT Golang api does not seem to be able to achieve this.

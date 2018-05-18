@@ -1,0 +1,83 @@
+Undefined References building example_trainer.cc with dynamic linking and Tensorflow r1.7 as external repository and CUDA9/CuDNN7
+
+/.bazelrc
+build --action_env PYTHON_BIN_PATH="/usr/bin/python"
+build --action_env PYTHON_LIB_PATH="/usr/local/lib/python2.7/dist-packages"
+build --force_python=py2
+build --host_force_python=py2
+build --python_path="/usr/bin/python"
+build --define with_jemalloc=true
+build --action_env TF_NEED_OPENCL_SYCL="0"
+build --action_env TF_NEED_CUDA="1"
+build --action_env CUDA_TOOLKIT_PATH="/usr/local/cuda"
+build --action_env TF_CUDA_VERSION="9.0"
+build --action_env CUDNN_INSTALL_PATH="/usr/lib/x86_64-linux-gnu"
+build --action_env TF_CUDNN_VERSION="7"
+build --action_env TF_CUDA_COMPUTE_CAPABILITIES="6.1"
+build --action_env LD_LIBRARY_PATH="/usr/local/cuda-9.0/lib64:/usr/local/cuda/lib64:"
+build --action_env TF_CUDA_CLANG="0"
+build --action_env GCC_HOST_COMPILER_PATH="/usr/bin/gcc"
+build --config=cuda
+test --config=cuda
+build --define grpc_no_ares=true
+build:opt --copt=-march=native
+build:opt --host_copt=-march=native
+build:opt --define with_default_optimizations=true
+build --copt=-DGEMMLOWP_ALLOW_SLOW_SCALAR_FALLBACK
+build --host_copt=-DGEMMLOWP_ALLOW_SLOW_SCALAR_FALLBACK
+
+/tools/bazel.rc
+build:monolithic --define framework_shared_object=false
+build --define framework_shared_object=true
+build:cuda --crosstool_top=@local_config_cuda//crosstool:toolchain
+build:cuda --define=using_cuda=true --define=using_cuda_nvcc=true
+build:mkl --define=using_mkl=true
+build --define=use_fast_cpp_protos=true
+build --define=allow_oversize_protos=true
+build --define=grpc_no_ares=true
+build --spawn_strategy=standalone
+build --genrule_strategy=standalone
+build -c opt
+
+/WORKSPACE:
+workspace(name = "proj")
+git_repository(
+    name = "org_tensorflow",
+    commit = "024aecf414941e11eb643e29ceed3e1c47a115ad",
+    remote = "git@github.com:tensorflow/tensorflow.git",
+)
+
+http_archive(
+    name = "io_bazel_rules_closure",
+    sha256 = "6691c58a2cd30a86776dd9bb34898b041e37136f2dc7e24cadaeaf599c95c657",
+    strip_prefix = "rules_closure-08039ba8ca59f64248bb3b6ae016460fe9c9914f",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_closure/archive/08039ba8ca59f64248bb3b6ae016460fe9c9914f.tar.gz",
+        "https://github.com/bazelbuild/rules_closure/archive/08039ba8ca59f64248bb3b6ae016460fe9c9914f.tar.gz",  # 2018-01-16
+    ],
+)
+
+load("//src:workspace.bzl", "proj_workspace")
+proj_workspace()
+
+Source code: copied @org_tensorflow//tensorflow/cc/tutorial/example_trainer.cc to //src/example_trainer.cc.
+/src/BUILD:
+cc_binary(
+    name = "example",
+    srcs = ["example_trainer.cc"],
+    deps = [
+        "@org_tensorflow//tensorflow/cc:cc_ops",
+        "@org_tensorflow//tensorflow/cc:client_session",
+        "@org_tensorflow//tensorflow/core:tensorflow",
+    ],
+)
+
+Build command:
+bazel build src:example
+
+Error:
+Tons of "undefined reference" errors pointing to functions like stringprintf().
+naming.cc:(.text._ZN10tensorflow12DataFilenameB5cxx11ENS_11StringPieceEii+0x1f): undefined reference to `tensorflow::strings::Printf[abi:cxx11](char const*, ...)'
+
+Adding --monolithic does make it compile and run properly:
+bazel build --monolithic src:example

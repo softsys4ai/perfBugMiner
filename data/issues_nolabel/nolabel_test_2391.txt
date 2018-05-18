@@ -1,0 +1,72 @@
+Implemented Tensorflow Op Kernel not found
+
+I would like to implement an fft op kernel for CPU. Since eigen got an fft implementation this shouldn't be too hard. It's compiling without problems, but I am always running into an InvalidArgumentError when trying to use it from python (see below).
+Code of kernel for fft op on CPU (modification of this file):
+// CPU Implementation
+template <bool Forward>
+class FFTCPU1D : public OpKernel {
+ public:
+  explicit FFTCPU1D(OpKernelConstruction* ctx) : OpKernel(ctx) {}
+
+  void Compute(OpKernelContext* ctx) override {
+    const Tensor& in = ctx->input(0);
+    const TensorShape& shape = in.shape();
+    OP_REQUIRES(ctx, shape.dims() != 1,
+      errors::InvalidArgument("Input must have rank 1, but got: ",
+                                shape.DebugString()));
+
+    Tensor* out;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(0, shape, &out));
+    if (Forward) {
+        out.vec<std::complex<Scalar>>() = kernel_variant.template fft<Eigen::BothParts, FFT_FORWARD>(fft).vec()<std::complex<Scalar>>;
+    } else {
+        out.vec<std::complex<Scalar>>() = kernel_variant.template fft<Eigen::BothParts, FFT_REVERSE>(fft).vec()<std::complex<Scalar>>;
+    }
+  }
+
+};
+
+REGISTER_KERNEL_BUILDER(Name("FFT").Device(DEVICE_CPU), FFTCPU1D<true>);
+REGISTER_KERNEL_BUILDER(Name("IFFT").Device(DEVICE_CPU), FFTCPU1D<false>);
+...
+
+Python-Script for testing:
+import numpy as np
+import tensorflow as tf
+
+sess = tf.Session()
+data = np.complex64(np.random.normal(size=1024))
+input = tf.constant(data)
+fftOp = tf.fft(input)
+
+print(sess.run(fftOp))
+
+Error-Message:
+# python ~/test.py
+Traceback (most recent call last):
+  File "/root/test.py", line 12, in <module>
+    print(sess.run(fftOp))
+  File "/tensorflow/_python_build/tensorflow/python/client/session.py", line 332, in run
+    run_metadata_ptr)
+  File "/tensorflow/_python_build/tensorflow/python/client/session.py", line 572, in _run
+    feed_dict_string, options, run_metadata)
+  File "/tensorflow/_python_build/tensorflow/python/client/session.py", line 652, in _do_run
+    target_list, options, run_metadata)
+  File "/tensorflow/_python_build/tensorflow/python/client/session.py", line 672, in _do_call
+    raise type(e)(node_def, op, message)
+tensorflow.python.framework.errors.InvalidArgumentError: No OpKernel was registered to support Op 'FFT' with these attrs
+         [[Node: FFT = FFT[](Const)]]
+Caused by op u'FFT', defined at:
+  File "/root/test.py", line 10, in <module>
+    fftOp = tf.fft(input)
+  File "/tensorflow/_python_build/tensorflow/python/ops/gen_math_ops.py", line 518, in fft
+    return _op_def_lib.apply_op("FFT", input=input, name=name)
+  File "/tensorflow/_python_build/tensorflow/python/ops/op_def_library.py", line 693, in apply_op
+    op_def=op_def)
+  File "/tensorflow/_python_build/tensorflow/python/framework/ops.py", line 2177, in create_op
+    original_op=self._default_original_op, op_def=op_def)
+  File "/tensorflow/_python_build/tensorflow/python/framework/ops.py", line 1161, in __init__
+    self._traceback = _extract_stack()
+
+I've got the gcr.io/tensorflow/tensorflow:latest-devel docker image and commit 5f4524 and built tensorflow according to the instructions.
+I'm not sure whether it's a bug or I'm doing something wrong. I've already opened a stackoverflow question.

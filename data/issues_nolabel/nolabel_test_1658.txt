@@ -1,0 +1,32 @@
+Tensorflow with GPU-support crashes when opening many CPU-only sessions in parallel
+
+The following code works fine in a CPU-only Tensorflow, but crashes on a GPU-enabled Tensorflow installation (0.7.1, with a Titan X, NVidia driver 352.79) when run many times in parallel:
+# test_tensorflow_session.py
+import tensorflow as tf
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
+sess = tf.Session()
+Bash command to run it in parallel:
+for i in {1..48}; do ((python ./test_tensorflow_session.py 2> output$i.err 1> output$i.out ) &) ; done
+If you then look into the output*.err files, you will see that most of the processes crashed. The output will look like this:
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcublas.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcudnn.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcufft.so locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcuda.so.1 locally
+I tensorflow/stream_executor/dso_loader.cc:105] successfully opened CUDA library libcurand.so locally
+E tensorflow/stream_executor/cuda/cuda_driver.cc:481] failed call to cuInit: CUDA_ERROR_NO_DEVICE
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:114] retrieving CUDA diagnostic information for host: gpu1
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:121] hostname: gpu1
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:146] libcuda reported version is: 352.79
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:257] driver version file contents: """NVRM version: NVIDIA UNIX x86_64 Kernel Module  352.79  Wed Jan 13 16:17:53 PST 2016
+GCC version:  gcc version 4.8.5 20150623 (Red Hat 4.8.5-4) (GCC) 
+"""
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:150] kernel reported version is: 352.79
+I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:226] kernel version seems to match DSO: 352.79
+I tensorflow/core/common_runtime/gpu/gpu_init.cc:126] DMA: 
+terminate called after throwing an instance of 'std::system_error'
+  what():  Resource temporarily unavailable
+
+For the sake of completeness, here is the use case: applying a Tensorflow model is just a small part in processing large amounts of data; processing is parallelised simply by using multiple processes.
+I also tried wrapping the tf.Session() call in with tf.device('/cpu:0'):, but that didn't change anything. I assume that it is trying to get exclusive access to the GPU, and if it can't do that, it crashes. This is a bit annoying, since by setting os.environ['CUDA_VISIBLE_DEVICES'] = '', I am actively trying to disable the GPU.
+Ideas?

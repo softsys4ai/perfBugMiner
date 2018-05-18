@@ -1,0 +1,62 @@
+Fix build errors in contrib/mpi introduced by commit 6042b5d267f
+
+The commit 6042b5d#diff-7c00d4a3caee74eedf5bb638bce23e5a
+
+Introduced code to tensorflow/contrib/mpi/mpi_rendezvous_mgr.h to use the type RecentRequestIds without including the header tensorflow/core/distributed_runtime/recent_request_ids.h.
+
+ERROR: /opt/tensorflow/tensorflow/contrib/mpi/BUILD:60:1: C++ compilation of rule '//tensorflow/contrib/mpi:mpi_rendezvous_mgr' failed (Exit 1)
+In file included from tensorflow/contrib/mpi/mpi_rendezvous_mgr.cc:18:0:
+./tensorflow/contrib/mpi/mpi_rendezvous_mgr.h:182:3: error: 'RecentRequestIds' does not name a type
+   RecentRequestIds recv_tensor_recent_request_ids_;
+   ^
+
+
+Probably a typo in tensorflow/contrib/mpi/mpi_rendezvous_mgr.cc : MPIRendezvousMgr::AddRequest(). The variable req was probably meant to be request as per the commit message.
+
+ERROR: /opt/tensorflow/tensorflow/contrib/mpi/BUILD:60:1: C++ compilation of rule '//tensorflow/contrib/mpi:mpi_rendezvous_mgr' failed (Exit 1)
+In file included from ./tensorflow/core/framework/variant.h:29:0,
+                 from ./tensorflow/core/framework/allocator.h:26,
+                 from ./tensorflow/core/framework/tensor.h:20,
+                 from ./tensorflow/core/framework/device_base.h:23,
+                 from ./tensorflow/core/framework/rendezvous.h:22,
+                 from ./tensorflow/core/distributed_runtime/rendezvous_mgr_interface.h:22,
+                 from ./tensorflow/core/distributed_runtime/base_rendezvous_mgr.h:22,
+                 from ./tensorflow/contrib/mpi/mpi_rendezvous_mgr.h:35,
+                 from tensorflow/contrib/mpi/mpi_rendezvous_mgr.cc:18:
+tensorflow/contrib/mpi/mpi_rendezvous_mgr.cc: In member function 'void tensorflow::MPIRendezvousMgr::AddRequest(tensorflow::RecvTensorRequest, int)':
+tensorflow/contrib/mpi/mpi_rendezvous_mgr.cc:155:7: error: 'req' was not declared in this scope
+       req.request_id(), "RecvTensor (MPIRendezvousMgr)", req));
+       ^
+
+I compiled with following commands:
+echo "deb [arch=amd64] http://storage.googleapis.com/bazel-apt stable jdk1.8" > /etc/apt/sources.list.d/bazel.list
+curl https://bazel.build/bazel-release.pub.gpg | apt-key add -
+git clone https://github.com/tensorflow/tensorflow .
+export PYTHON_BIN_PATH=/path/to/python ## python 2.7.14
+export USE_DEFAULT_PYTHON_LIB_PATH=1
+export TF_NEED_JEMALLOC=1
+export TF_NEED_GCP=0
+export TF_NEED_HDFS=1
+export TF_ENABLE_XLA=1
+export TF_NEED_OPENCL=0
+export TF_NEED_S3=0
+export TF_NEED_GDR=0
+export TF_NEED_VERBS=0
+export TF_NEED_OPENCL_SYCL=0
+export TF_NEED_CUDA=1
+export TF_CUDA_VERSION=8.0
+export CUDA_TOOLKIT_PATH=/path/to/cuda
+export TF_CUDNN_VERSION=7
+export CUDNN_INSTALL_PATH=/path/to/cudnn
+export TF_CUDA_COMPUTE_CAPABILITIES="3.5,5.2,6.0,6.1"
+export TF_CUDA_CLANG=0
+export GCC_HOST_COMPILER_PATH=/path/to/gcc
+export TF_NEED_MPI=1
+export MPI_HOME=/path/to/openmpi
+export CC_OPT_FLAGS="-march=native"
+export TF_SET_ANDROID_WORKSPACE=0
+./configure
+bazel build --config=mkl --config=opt --config=cuda \
+          //tensorflow/tools/pip_package:build_pip_package && \
+bazel-bin/tensorflow/tools/pip_package/build_pip_package ./tensorflow_pkg
+pip install -v ./tensorflow_pkg/tensorflow-*.whl

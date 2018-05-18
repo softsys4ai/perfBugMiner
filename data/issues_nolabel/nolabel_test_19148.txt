@@ -1,0 +1,42 @@
+BUG: keras.callbacks.TensorBoard raises an exception for non_trainale_weights
+
+The class seems not to exclude non_trainable_weight (moving_variances and moving_mean in BatchNormalization) correctly, see the script and its logs below for more details:
+# TF 1.8, CPU
+import tensorflow as tf
+import numpy as np
+
+x = np.ones((32, 10, 10, 3))
+y = np.ones((32,))
+y = tf.keras.utils.to_categorical(y)
+
+model = tf.keras.models.Sequential()
+model.add(tf.keras.layers.BatchNormalization(input_shape=(10, 10, 3)))
+model.add(tf.keras.layers.Flatten())
+model.add(tf.keras.layers.Dense(2, activation='softmax'))
+model.compile(loss='binary_crossentropy', optimizer='sgd', metrics=['accuracy'])
+model.summary()
+
+cbks = [tf.keras.callbacks.TensorBoard(histogram_freq=1, batch_size=2, write_grads=True)]
+
+model.fit(
+  x,
+  y,
+  batch_size=4,
+  validation_data=(x, y),
+  callbacks=cbks,
+  epochs=2,
+  verbose=0)
+Traceback (most recent call last):
+  File "test.py", line 24, in <module>
+    verbose=0)
+  File "/Users/facai/Library/anaconda3/lib/python3.5/site-packages/tensorflow/python/keras/_impl/keras/engine/training.py", line 1232, in fit
+    validation_steps=validation_steps)
+  File "/Users/facai/Library/anaconda3/lib/python3.5/site-packages/tensorflow/python/keras/_impl/keras/engine/training_arrays.py", line 156, in fit_loop
+    callbacks.set_model(callback_model)
+  File "/Users/facai/Library/anaconda3/lib/python3.5/site-packages/tensorflow/python/keras/_impl/keras/callbacks.py", line 70, in set_model
+    callback.set_model(model)
+  File "/Users/facai/Library/anaconda3/lib/python3.5/site-packages/tensorflow/python/keras/_impl/keras/callbacks.py", line 716, in set_model
+    grads = model.optimizer.get_gradients(model.total_loss, weight)
+  File "/Users/facai/Library/anaconda3/lib/python3.5/site-packages/tensorflow/python/keras/_impl/keras/optimizers.py", line 115, in get_gradients
+    raise ValueError('An operation has `None` for gradient. '
+ValueError: An operation has `None` for gradient. Please make sure that all of your ops have a gradient defined (i.e. are differentiable). Common ops without gradient: K.argmax, K.round, K.eval.

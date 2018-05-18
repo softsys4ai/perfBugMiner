@@ -1,0 +1,45 @@
+Non-deterministic mean and sum reduction
+
+I'm running Tensorflow 0.9.0 installed from wheel on Python 2.7 on a K40 with CUDA 7.0.
+The following test case attempts to minimize the mean of a vector through gradient descent. The script finds that the vectors are equal at all steps, but the means are not. I believe the vectors being equal at all steps is pure numerical luck, since non-deterministic loss likely means non-deterministic gradient which means non-deterministic/reproducible iterative optimization. I've observed cases where training results in different final losses where the only source of non-determinism is from reduce_mean.
+import numpy as np
+import tensorflow as tf
+
+n_dims = 1000
+n_steps = 50
+
+np.random.seed(2016)
+
+vec = tf.Variable(np.random.randn(n_dims).astype(np.float32))
+mean = tf.reduce_mean(vec)
+
+optimizer = tf.train.GradientDescentOptimizer(0.01)
+train_step = optimizer.minimize(mean)
+
+def generate():
+    data = []
+    with tf.Session() as sess:
+        sess.run(tf.initialize_all_variables())
+
+        for _ in xrange(n_steps):
+            _vec, _mean, _ = sess.run([vec, mean, train_step])
+            data.append((_vec, _mean))
+
+    return [np.array([f[i] for f in data]) for i in xrange(2)]
+
+first_vec, first_mean = generate()
+second_vec, second_mean = generate()
+print 'vecs equal:', np.all(first_vec == second_vec)
+
+print 'mean equal:', np.all(first_mean == second_mean)
+print 'means not equal at idxs:', np.nonzero(first_mean != second_mean)[0]
+Example output:
+vecs equal: True
+mean equal: False
+means not equal at idxs: [ 4  5 11 18 34 38 44 49]
+
+From looking through the code, it appears the GPU mean reduction is implemented with GPU sum reduction: https://github.com/tensorflow/tensorflow/blob/master/tensorflow/core/kernels/reduction_ops_gpu.cu.cc#L43
+I've confirmed my test case still triggers when I replace "reduce_mean" with "reduce_sum".
+The GPU sum reduction appears to be implemented using CUDA's atomicAdd: https://bitbucket.org/eigen/eigen/src/241472d2a52142e23b0b2ba5c301c6c146298fa9/unsupported/Eigen/CXX11/src/Tensor/TensorReductionCuda.h?at=default&fileviewer=file-view-default#TensorReductionCuda.h-97
+Atomic floating point adds on GPU are the problem. Having floating point adds to the same address in an undefined order is inherently non-deterministic due to non-associativity of floating point arithmetic.
+This issue could be solved (and reduction performance improved) by using some sort of reduction tree to reduce within blocks, and then launching a second kernel (or doing some manual block synchronization tricks) to reduce across blocks.

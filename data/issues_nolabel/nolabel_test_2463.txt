@@ -1,0 +1,74 @@
+Using `tf.nn.rnn_cell.LSTMCell` with `tf.nn.rnn` breaks when `state_is_tuple` is True
+
+Environment info
+Operating System: mac
+If installed from sources, provide the commit hash: 7d9ab3e
+Steps to reproduce
+Creating an rnn based on a list of cell specified by MultiRNNCell breaks at the zero_state function:
+num_units = 3
+input_size = 5
+num_proj = 4
+max_length = 8
+sequence_length = [4, 6]
+initializer = tf.random_uniform_initializer(-0.01, 0.01)
+inputs = max_length * [tf.placeholder(tf.float32, shape=(None, input_size))]
+inputs_c = tf.pack(inputs)
+cell = tf.nn.rnn_cell.LSTMCell(num_units, input_size, use_peepholes=True,
+                               num_proj=num_proj, initializer=initializer, 
+                               state_is_tuple=True)
+cells = tf.nn.rnn_cell.MultiRNNCell([cell] * 2, state_is_tuple=True)
+outputs_static, state_static = tf.nn.rnn(cells, inputs, dtype=tf.float32, 
+                                         sequence_length=sequence_length)
+The same model definition would work if state_is_tuple=False, the code break at this line
+The same code would work if we pass the cell directly to tf.nn.rnn i.e. without using tf.nn.rnn_cell.MultiRNNCell, the reason is that tf.nn.rnn_cell.MultiRNNCell would have a state_size value as tuple of tuples, in my example the value of the state_size is <type 'tuple'>: ((3, 4), (3, 4))
+What have you tried?
+.1. Tried the same model definition without state_is_tuple=False, which works but shows a deprication warning.
+num_units = 3
+input_size = 5
+num_proj = 4
+max_length = 8
+sequence_length = [4, 6]
+initializer = tf.random_uniform_initializer(-0.01, 0.01)
+inputs = max_length * [tf.placeholder(tf.float32, shape=(None, input_size))]
+inputs_c = tf.pack(inputs)
+cell = tf.nn.rnn_cell.LSTMCell(num_units, input_size, use_peepholes=True,
+                               num_proj=num_proj, initializer=initializer)
+cells = tf.nn.rnn_cell.MultiRNNCell([cell])
+outputs_static, state_static = tf.nn.rnn(cells, inputs, dtype=tf.float32, 
+                                         sequence_length=sequence_length)
+.2. Tried the same model definition with state_is_tuple=True and without tf.nn.rnn_cell.MultiRNNCell, which works.
+num_units = 3
+input_size = 5
+num_proj = 4
+max_length = 8
+sequence_length = [4, 6]
+initializer = tf.random_uniform_initializer(-0.01, 0.01)
+inputs = max_length * [tf.placeholder(tf.float32, shape=(None, input_size))]
+inputs_c = tf.pack(inputs)
+cell = tf.nn.rnn_cell.LSTMCell(num_units, input_size, use_peepholes=True,
+                               num_proj=num_proj, initializer=initializer, 
+                               state_is_tuple=True)
+outputs_static, state_static = tf.nn.rnn(cell, inputs, dtype=tf.float32, 
+                                         sequence_length=sequence_length)
+Logs or other output that would be helpful
+  File "/Users/mourad/.virtualenvs/ca/lib/python2.7/site-packages/tensorflow/python/ops/rnn.py", line 123, in rnn
+    state = cell.zero_state(batch_size, dtype)
+  File "/Users/mourad/.virtualenvs/ca/lib/python2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 109, in zero_state
+    for s in state_size)
+  File "/Users/mourad/.virtualenvs/ca/lib/python2.7/site-packages/tensorflow/python/ops/rnn_cell.py", line 109, in <genexpr>
+    for s in state_size)
+  File "/Users/mourad/.virtualenvs/ca/lib/python2.7/site-packages/tensorflow/python/ops/array_ops.py", line 249, in pack
+    return gen_array_ops._pack(values, name=name)
+  File "/Users/mourad/.virtualenvs/ca/lib/python2.7/site-packages/tensorflow/python/ops/gen_array_ops.py", line 1126, in _pack
+    result = _op_def_lib.apply_op("Pack", values=values, name=name)
+  File "/Users/mourad/.virtualenvs/ca/lib/python2.7/site-packages/tensorflow/python/ops/op_def_library.py", line 704, in apply_op
+    op_def=op_def)
+  File "/Users/mourad/.virtualenvs/ca/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 2242, in create_op
+    set_shapes_for_outputs(ret)
+  File "/Users/mourad/.virtualenvs/ca/lib/python2.7/site-packages/tensorflow/python/framework/ops.py", line 1696, in set_shapes_for_outputs
+    shapes = shape_func(op)
+  File "/Users/mourad/.virtualenvs/ca/lib/python2.7/site-packages/tensorflow/python/ops/array_ops.py", line 439, in _PackShape
+    input_shape = input_shape.merge_with(inp.get_shape())
+  File "/Users/mourad/.virtualenvs/ca/lib/python2.7/site-packages/tensorflow/python/framework/tensor_shape.py", line 554, in merge_with
+    (self, other))
+ValueError: Shapes () and (2,) are not compatible

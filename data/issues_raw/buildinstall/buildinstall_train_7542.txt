@@ -1,0 +1,115 @@
+./configure in interactive mode does not create working config for build
+
+Description
+Hi,
+I encounter following issue. If user runs ./configure script interactively filling blanks it is not possible to build TF with CUDA support. BUT if user exports corresponding env variables before of after ./configure, bazel can happily build binaries.
+Environment
+$ cat /etc/redhat-release 
+CentOS Linux release 7.3.1611 (AltArch)
+
+$ uname -a
+Linux power004.cluster 3.10.0-514.6.1.el7.ppc64le #1 SMP Thu Jan 19 14:34:54 GMT 2017 ppc64le ppc64le ppc64le GNU/Linux
+
+$ ls -l /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcud*
+-rw-r--r-- 1 root root 559800 Oct 29 10:22 /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcudadevrt.a
+lrwxrwxrwx 1 root root     16 Feb 14 23:26 /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcudart.so -> libcudart.so.8.0
+lrwxrwxrwx 1 root root     19 Feb 14 23:26 /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcudart.so.8.0 -> libcudart.so.8.0.54
+-rwxr-xr-x 1 root root 476024 Oct 29 10:22 /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcudart.so.8.0.54
+-rw-r--r-- 1 root root 966166 Oct 29 10:22 /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0/lib64/libcudart_static.a
+
+$ git rev-parse HEAD
+16485a3fb5ffcbaa244e55c388e43279d2770982
+
+$ bazel version
+INFO: $TEST_TMPDIR defined: output root default is '/local/cvsupport'.
+................
+Build label: 0.4.4- (@non-git)
+Build target: bazel-out/local-opt/bin/src/main/java/com/google/devtools/build/lib/bazel/BazelServer_deploy.jar
+Build time: Thu Feb 9 23:48:24 2017 (1486684104)
+Build timestamp: 1486684104
+Build timestamp as int: 1486684104
+
+Steps to reproduce
+$ git clone https://github.com/tensorflow/tensorflow.git
+$ cd tensorflow
+$ git checkout r1.0
+$ export TEST_TMPDIR=/local/cvsupport
+$ ./configure
+
+Fill blanks
+Please specify the location of python. [Default is /bin/python]: /usr/bin/python3.4
+Please specify optimization flags to use during compilation [Default is -march=native]: -march=native
+Do you wish to use jemalloc as the malloc implementation? (Linux only) [Y/n] 
+jemalloc enabled on Linux
+Do you wish to build TensorFlow with Google Cloud Platform support? [y/N] 
+No Google Cloud Platform support will be enabled for TensorFlow
+Do you wish to build TensorFlow with Hadoop File System support? [y/N] 
+No Hadoop File System support will be enabled for TensorFlow
+Do you wish to build TensorFlow with the XLA just-in-time compiler (experimental)? [y/N] 
+No XLA support will be enabled for TensorFlow
+Found possible Python library paths:
+  /usr/lib/python3.4/site-packages
+  /usr/lib64/python3.4/site-packages
+Please input the desired Python library path to use.  Default is [/usr/lib/python3.4/site-packages]
+/usr/lib64/python3.4/site-packages
+Do you wish to build TensorFlow with OpenCL support? [y/N] 
+No OpenCL support will be enabled for TensorFlow
+Do you wish to build TensorFlow with CUDA support? [y/N] y
+CUDA support will be enabled for TensorFlow
+Please specify which gcc should be used by nvcc as the host compiler. [Default is /bin/gcc]: /usr/bin/gcc
+Please specify the CUDA SDK version you want to use, e.g. 7.0. [Leave empty to use system default]: 8.0
+Please specify the location where CUDA 8.0 toolkit is installed. Refer to README.md for more details. [Default is /usr/local/cuda]: /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0
+Please specify the Cudnn version you want to use. [Leave empty to use system default]: 5.1.10
+Please specify the location where cuDNN 5.1.10 library is installed. Refer to README.md for more details. [Default is /trinity/shared/apps/cv-ppc64le/nvidia/cuda/8.0]: /trinity/shared/apps/cv-ppc64le/nvidia/cudnn/8.0
+Please specify a list of comma-separated Cuda compute capabilities you want to build with.
+You can find the compute capability of your device at: https://developer.nvidia.com/cuda-gpus.
+Please note that each additional compute capability significantly increases your build time and binary size.
+[Default is: "3.5,5.2"]: 6.0
+INFO: $TEST_TMPDIR defined: output root default is '/local/cvsupport'.
+................
+INFO: Starting clean (this may take a while). Consider using --expunge_async if the clean takes more than several minutes.
+INFO: $TEST_TMPDIR defined: output root default is '/local/cvsupport'.
+..............
+INFO: All external dependencies fetched successfully.
+Configuration finished
+
+Attempt to build:
+$ bazel build -c opt --config=cuda //tensorflow/tools/pip_package:build_pip_package
+
+INFO: $TEST_TMPDIR defined: output root default is '/local/cvsupport'.
+................
+WARNING: Sandboxed execution is not supported on your system and thus hermeticity of actions cannot be guaranteed. See http://bazel.build/docs/bazel-user-manual.html#sandboxing for more information. You can turn off this warning via --ignore_unsupported_sandboxing.
+ERROR: /local/cvsupport/_bazel_cvsupport/c61d2ac558d6d30ef2694b9af72e4144/external/local_config_cuda/crosstool/BUILD:4:1: Traceback (most recent call last):
+        File "/local/cvsupport/_bazel_cvsupport/c61d2ac558d6d30ef2694b9af72e4144/external/local_config_cuda/crosstool/BUILD", line 4
+                error_gpu_disabled()
+        File "/local/cvsupport/_bazel_cvsupport/c61d2ac558d6d30ef2694b9af72e4144/external/local_config_cuda/crosstool/error_gpu_disabled.bzl", line 3, in error_gpu_disabled
+                fail("ERROR: Building with --config=c...")
+ERROR: Building with --config=cuda but TensorFlow is not configured to build with GPU support. Please re-run ./configure and enter 'Y' at the prompt to build with GPU support.
+ERROR: no such target '@local_config_cuda//crosstool:toolchain': target 'toolchain' not declared in package 'crosstool' defined by /local/cvsupport/_bazel_cvsupport/c61d2ac558d6d30ef2694b9af72e4144/external/local_config_cuda/crosstool/BUILD.
+INFO: Elapsed time: 1.572s
+
+Working method
+$ cat ../build_vars.sh 
+export TEST_TMPDIR=/local/cvsupport
+export PYTHON_BIN_PATH=/usr/bin/python3.4
+export PYTHON_LIB_PATH=/usr/lib64/python3.4/site-packages
+export TF_NEED_JEMALLOC=1
+export TF_NEED_GCP=0
+export TF_NEED_HDFS=0
+export TF_NEED_OPENCL=0
+export TF_NEED_CUDA=1
+export TF_ENABLE_XLA=0
+export CC_OPT_FLAGS="-march=native"
+export TF_CUDA_VERSION=8.0
+export TF_CUDNN_VERSION=5.1.10
+export TF_CUDA_COMPUTE_CAPABILITIES=6.0
+export GCC_HOST_COMPILER_PATH=/usr/bin/gcc
+export CUDA_TOOLKIT_PATH=/trinity/shared/apps/cv-ppc64le/nvidia/cuda/${TF_CUDA_VERSION}
+export CUDNN_INSTALL_PATH=/trinity/shared/apps/cv-ppc64le/nvidia/cudnn/${TF_CUDA_VERSION}
+
+$ source ../build_vars.sh
+$ ./configure
+$ bazel build -c opt --config=cuda //tensorflow/tools/pip_package:build_pip_package
+
+Experimenting with omitting different variables seems like only following vars are sufficient.
+TF_NEED_CUDA, TF_CUDA_VERSION, CUDA_TOOLKIT_PATH, CUDNN_INSTALL_PATH, GCC_HOST_COMPILER_PATH

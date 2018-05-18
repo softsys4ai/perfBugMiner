@@ -1,0 +1,254 @@
+Adding more layers decreases model accuracy.
+
+Here are two different reproducible codes, one has two conv layers and other has 10 conv layers. Model with two conv layers reaches the result in few iterations whereas model with 10 conv layers reaches the result in more iterations, and moreover they both produce same result 62.5 % accuracy. Model with 10 conv layers should provide better accuracy(because it has more layers) but it gives same accuracy as 2 conv layer model and reaches the same result after more iterations, so adding more layers is degrading performance.
+Here is 2 conv layer code:
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import tensorflow as tf
+import numpy as np
+import math
+import os
+import nltk
+import random
+batch_size = 100
+start = 0
+end = batch_size
+learning_rate = 0.001
+num_classes = 2
+time_steps = 4
+embedding = 2
+step = 1
+_units = 1
+num_of_filters = 2
+
+train_set_x = [[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]]]
+train_set_y = [0,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,0,0,0,0,0,0,1,0,1,0,1,1,1,0,1,0,1,0,1,1]
+
+X = tf.placeholder(tf.float32, [None,time_steps,embedding])
+Y = tf.placeholder(tf.int32, [None])
+
+
+x = tf.expand_dims(X,3)
+
+filter_shape = [1, embedding, 1, 64]
+conv_weights = tf.get_variable("conv_weights1" , filter_shape, tf.float32, tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases = tf.Variable(tf.constant(0.1, shape=[64]))
+conv = tf.nn.conv2d(x, conv_weights, strides=[1,1,1,1], padding = "VALID")
+normalize = tf.nn.elu(conv + conv_biases)
+tf_normalize = tf.contrib.layers.batch_norm(inputs = normalize,is_training = True)
+outputs_fed_lstm = tf_normalize
+
+filter_shape2 = [1, 1, 64, 64]
+conv_weights2 = tf.get_variable("conv_weights2" , filter_shape2, tf.float32,tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases2 = tf.Variable(tf.constant(0.1, shape=[64]))
+conv2 = tf.nn.conv2d(outputs_fed_lstm, conv_weights2, strides=[1,1,1,1], padding = "VALID")
+normalize2 = tf.nn.elu(conv2 + conv_biases2)
+tf_normalize2 = tf.contrib.layers.batch_norm(inputs = normalize2,is_training = True)
+outputs_fed_lstm2 = tf_normalize2
+
+x = tf.squeeze(outputs_fed_lstm2, [2])     
+x = tf.transpose(x, [1, 0, 2])
+x = tf.reshape(x, [-1, 64])
+x = tf.split(0, time_steps, x)
+
+lstm = tf.nn.rnn_cell.LSTMCell(num_units = _units)
+
+# multi_lstm = tf.nn.rnn_cell.MultiRNNCell([lstm] * lstm_layers, state_is_tuple = True)
+
+outputs , state = tf.nn.rnn(lstm,x, dtype = tf.float32)     
+
+weights = tf.Variable(tf.random_normal([_units,num_classes]))
+biases  = tf.Variable(tf.random_normal([num_classes]))
+
+logits = tf.matmul(outputs[-1], weights) + biases
+
+
+
+c_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits,Y)
+loss = tf.reduce_mean(c_loss)
+
+
+global_step = tf.Variable(0, name="global_step", trainable=False)
+# decayed_learning_rate = tf.train.exponential_decay(learning_rate,0,10000,0.9)
+optimizer= tf.train.AdamOptimizer(learning_rate)
+minimize_loss = optimizer.minimize(loss, global_step=global_step)   
+#grads_and_vars = optimizer.compute_gradients(loss,[conv_weights2]) 
+correct_predict = tf.nn.in_top_k(logits, Y, 1)
+accuracy = tf.reduce_mean(tf.cast(correct_predict, tf.float32))
+
+
+init = tf.initialize_all_variables()
+
+with tf.Session() as sess:
+     sess.run(init)
+     for i in range(1000):
+         for j in range(1000):
+             x = train_set_x
+             y = train_set_y
+             sess.run(minimize_loss,feed_dict={X : x, Y : y})
+             step += 1  
+             #gr_print = sess.run([grad for grad, _ in grads_and_vars], feed_dict={X : x, Y : y})
+             #print (gr_print)
+             cost = sess.run(loss,feed_dict = {X: x,Y: y})
+             accu = sess.run(accuracy,feed_dict = {X: x, Y: y})
+             print ("Loss after one Epoch(Training) = " + "{:.6f}".format(cost) + ", Training Accuracy= " + "{:.5f}".format(accu))
+
+Here is code for 10 layer conv model:
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import tensorflow as tf
+import numpy as np
+import math
+import os
+import nltk
+import random
+batch_size = 100
+start = 0
+end = batch_size
+learning_rate = 0.001
+num_classes = 2
+time_steps = 4
+embedding = 2
+step = 1
+_units = 100
+num_of_filters = 2
+
+train_set_x = [[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]],[[1,2],[3,4],[5,6],[7,8]]]
+train_set_y = [0,1,1,1,1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1,0,0,0,0,0,0,1,0,1,0,1,1,1,0,1,0,1,0,1,1]
+
+X = tf.placeholder(tf.float32, [None,time_steps,embedding])
+Y = tf.placeholder(tf.int32, [None])
+
+
+x = tf.expand_dims(X,3)
+
+filter_shape = [1, embedding, 1, 64]
+conv_weights = tf.get_variable("conv_weights1" , filter_shape, tf.float32, tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases = tf.Variable(tf.constant(0.1, shape=[64]))
+conv = tf.nn.conv2d(x, conv_weights, strides=[1,1,1,1], padding = "VALID")
+normalize = tf.nn.elu(conv + conv_biases)
+tf_normalize = tf.contrib.layers.batch_norm(inputs = normalize,is_training = True)
+outputs_fed_lstm = tf_normalize
+
+filter_shape2 = [1, 1, 64, 64]
+conv_weights2 = tf.get_variable("conv_weights2" , filter_shape2, tf.float32,tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases2 = tf.Variable(tf.constant(0.1, shape=[64]))
+conv2 = tf.nn.conv2d(outputs_fed_lstm, conv_weights2, strides=[1,1,1,1], padding = "VALID")
+normalize2 = tf.nn.elu(conv2 + conv_biases2)
+tf_normalize2 = tf.contrib.layers.batch_norm(inputs = normalize2,is_training = True)
+outputs_fed_lstm2 = tf_normalize2
+
+filter_shape3 = [1, 1, 64, 64]
+conv_weights3 = tf.get_variable("conv_weights3" , filter_shape3, tf.float32,tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases3 = tf.Variable(tf.constant(0.1, shape=[64]))
+conv3 = tf.nn.conv2d(outputs_fed_lstm2, conv_weights3, strides=[1,1,1,1], padding = "VALID")
+normalize3 = tf.nn.elu(conv3 + conv_biases3)
+tf_normalize3 = tf.contrib.layers.batch_norm(inputs = normalize3,is_training = True)
+outputs_fed_lstm3 = tf_normalize3
+
+filter_shape4 = [1, 1, 64, 128]
+conv_weights4 = tf.get_variable("conv_weights4" , filter_shape4, tf.float32,tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases4 = tf.Variable(tf.constant(0.1, shape=[128]))
+conv4 = tf.nn.conv2d(outputs_fed_lstm3, conv_weights4, strides=[1,1,1,1], padding = "VALID")
+normalize4 = tf.nn.elu(conv4 + conv_biases4)
+tf_normalize4 = tf.contrib.layers.batch_norm(inputs = normalize4,is_training = True)
+outputs_fed_lstm4 = tf_normalize4
+
+filter_shape5 = [1, 1, 128, 128]
+conv_weights5 = tf.get_variable("conv_weights5" , filter_shape5, tf.float32,tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases5 = tf.Variable(tf.constant(0.1, shape=[128]))
+conv5 = tf.nn.conv2d(outputs_fed_lstm4, conv_weights5, strides=[1,1,1,1], padding = "VALID")
+normalize5 = tf.nn.elu(conv5 + conv_biases5)
+tf_normalize5 = tf.contrib.layers.batch_norm(inputs = normalize5,is_training = True)
+outputs_fed_lstm5 = tf_normalize5
+
+filter_shape6 = [1, 1, 128, 128]
+conv_weights6 = tf.get_variable("conv_weights6" , filter_shape6, tf.float32,tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases6 = tf.Variable(tf.constant(0.1, shape=[128]))
+conv6 = tf.nn.conv2d(outputs_fed_lstm5, conv_weights6, strides=[1,1,1,1], padding = "VALID")
+normalize6 = tf.nn.elu(conv6 + conv_biases6)
+tf_normalize6 = tf.contrib.layers.batch_norm(inputs = normalize6,is_training = True)
+outputs_fed_lstm6 = tf_normalize6  
+
+filter_shape7 = [1, 1, 128, 256]
+conv_weights7 = tf.get_variable("conv_weights7" , filter_shape7, tf.float32,tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases7 = tf.Variable(tf.constant(0.1, shape=[256]))
+conv7 = tf.nn.conv2d(outputs_fed_lstm6, conv_weights7, strides=[1,1,1,1], padding = "VALID")
+normalize7 = tf.nn.elu(conv7 + conv_biases7)
+tf_normalize7 = tf.contrib.layers.batch_norm(inputs = normalize7,is_training = True)
+outputs_fed_lstm7 = tf_normalize7 
+
+filter_shape8 = [1, 1, 256, 256]
+conv_weights8 = tf.get_variable("conv_weights8" , filter_shape8, tf.float32,tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases8 = tf.Variable(tf.constant(0.1, shape=[256]))
+conv8 = tf.nn.conv2d(outputs_fed_lstm7, conv_weights8, strides=[1,1,1,1], padding = "VALID")
+normalize8 = tf.nn.elu(conv8 + conv_biases8)
+tf_normalize8 = tf.contrib.layers.batch_norm(inputs = normalize8,is_training = True)
+outputs_fed_lstm8 = tf_normalize8 
+
+filter_shape9 = [1, 1, 256, 256]
+conv_weights9 = tf.get_variable("conv_weights9" , filter_shape9, tf.float32,tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases9 = tf.Variable(tf.constant(0.1, shape=[256]))
+conv9 = tf.nn.conv2d(outputs_fed_lstm8, conv_weights9, strides=[1,1,1,1], padding = "VALID")
+normalize9 = tf.nn.elu(conv9 + conv_biases9)
+tf_normalize9 = tf.contrib.layers.batch_norm(inputs = normalize9,is_training = True)
+outputs_fed_lstm9 = tf_normalize9 
+
+filter_shape0 = [1, 1, 256, 512]
+conv_weights0 = tf.get_variable("conv_weights0" , filter_shape0, tf.float32,tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+conv_biases0 = tf.Variable(tf.constant(0.1, shape=[512]))
+conv0 = tf.nn.conv2d(outputs_fed_lstm9, conv_weights0, strides=[1,1,1,1], padding = "VALID")
+normalize0 = tf.nn.elu(conv0 + conv_biases0)
+tf_normalize0 = tf.contrib.layers.batch_norm(inputs = normalize0,is_training = True)
+outputs_fed_lstm0 = tf_normalize0 
+
+x = tf.squeeze(outputs_fed_lstm0, [2])     
+x = tf.transpose(x, [1, 0, 2])
+x = tf.reshape(x, [-1, 512])
+x = tf.split(0, time_steps, x)
+
+lstm = tf.nn.rnn_cell.LSTMCell(num_units = _units)
+
+# multi_lstm = tf.nn.rnn_cell.MultiRNNCell([lstm] * lstm_layers, state_is_tuple = True)
+
+outputs , state = tf.nn.rnn(lstm,x, dtype = tf.float32)     
+
+weights = tf.Variable(tf.random_normal([_units,num_classes]))
+biases  = tf.Variable(tf.random_normal([num_classes]))
+
+logits = tf.matmul(outputs[-1], weights) + biases
+
+
+
+c_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits,Y)
+loss = tf.reduce_mean(c_loss)
+
+
+global_step = tf.Variable(0, name="global_step", trainable=False)
+# decayed_learning_rate = tf.train.exponential_decay(learning_rate,0,10000,0.9)
+optimizer= tf.train.AdamOptimizer(learning_rate)
+minimize_loss = optimizer.minimize(loss, global_step=global_step)   
+#grads_and_vars = optimizer.compute_gradients(loss,[conv_weights2]) 
+correct_predict = tf.nn.in_top_k(logits, Y, 1)
+accuracy = tf.reduce_mean(tf.cast(correct_predict, tf.float32))
+
+
+init = tf.initialize_all_variables()
+
+with tf.Session() as sess:
+     sess.run(init)
+     for i in range(1000):
+         for j in range(1000):
+             x = train_set_x
+             y = train_set_y
+             sess.run(minimize_loss,feed_dict={X : x, Y : y})
+             step += 1  
+             #gr_print = sess.run([grad for grad, _ in grads_and_vars], feed_dict={X : x, Y : y})
+             #print (gr_print)
+             cost = sess.run(loss,feed_dict = {X: x,Y: y})
+             accu = sess.run(accuracy,feed_dict = {X: x, Y: y})
+             print ("Loss after one Epoch(Training) = " + "{:.6f}".format(cost) + ", Training Accuracy= " + "{:.5f}".format(accu))

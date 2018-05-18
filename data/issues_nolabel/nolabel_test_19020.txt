@@ -1,0 +1,94 @@
+tf.data leaves hash table not initialized
+
+tensorflow version: 1.6
+bug description:
+when using hash_table in "tensorflow.python.ops.gen_lookup_ops"  in tf.data.Dataset.map function
+because  tf.data.Dataset.map do not use the default graph, the hash_table can not be initialized.
+Exception:
+FailedPreconditionError (see above for traceback): Table not initialized.
+code:
+from future import absolute_import, division, print_function
+import tensorflow as tf
+try:
+from tensorflow.python.ops.gen_lookup_ops import hash_table as _hash_table
+from tensorflow.python.ops.gen_lookup_ops import initialize_table as _initialize_table
+from tensorflow.python.ops.gen_lookup_ops import initialize_table_from_text_file as _initialize_table_from_text_file
+from tensorflow.python.ops.gen_lookup_ops import lookup_table_find as _lookup_table_find
+from tensorflow.python.ops.gen_lookup_ops import lookup_table_size as _lookup_table_size
+except:
+from tensorflow.python.ops.gen_lookup_ops import _hash_table
+from tensorflow.python.ops.gen_lookup_ops import _initialize_table
+from tensorflow.python.ops.gen_lookup_ops import _initialize_table_from_text_file
+from tensorflow.python.ops.gen_lookup_ops import _lookup_table_find
+from tensorflow.python.ops.gen_lookup_ops import _lookup_table_size
+def look_up(input_tensor, look_up_table_ref, default_value=tf.constant(0, dtype=tf.int64), name=None):
+i_shape = input_tensor.get_shape()
+r = _lookup_table_find(look_up_table_ref, keys=input_tensor, default_value=default_value)
+r.set_shape(i_shape)
+return r
+def string2int64_via_map(input_tensor, keys, values, default_value=0, table_ref=None):
+from tensorflow.python.framework import ops
+with tf.name_scope('string2int64_via_map'):
+key_type = tf.string
+value_type = tf.int64
+keys = tf.convert_to_tensor(keys, dtype=key_type)
+values = tf.convert_to_tensor(values, dtype=value_type)
+default_value = tf.convert_to_tensor(default_value, dtype=value_type)
+if(table_ref is None):
+table_ref = _hash_table(key_dtype=key_type, value_dtype=value_type)
+init_op = _initialize_table(table_ref, keys, values)
+ops.add_to_collection(ops.GraphKeys.TABLE_INITIALIZERS, init_op)
+indices = _lookup_table_find(table_ref, keys=input_tensor, default_value=default_value)
+    print("graph in string2int64_via_map: \t%s" % tf.get_default_graph())
+    return indices, table_ref
+
+def __test_string2int64_via_map():
+''' this function works well
+'''
+print('__test_string2int64_via_map()')
+keys = ['s1', 's2', 's3']
+values = [10, 20, 30]
+input_tensor = ['s2', 's4', 's6', 's8', 's3']
+default_value = 0
+indices, _ = string2int64_via_map(input_tensor, keys, values, default_value)
+with tf.Session() as sess:
+    sess.run(tf.tables_initializer())
+    rr = sess.run(indices)
+    print(rr)
+    import sys
+    sys.stdout.flush()
+
+def test_dataset_using_hashmap():
+features = ['s1', 's2', 's3']
+labels = [0, 1, 2]
+sess = tf.Session()
+def mapfun_works(txt, label):
+    return (tf.string_join(["prefix:", txt], separator=''), label)
+
+def mapfun_using_hash_table(txt, label):
+    keys = ['s1', 's2', 's3']
+    values = [10, 20, 30]
+    default_value = 0
+    indices, _ = string2int64_via_map(txt, keys, values, default_value)
+    return (indices, label)
+    
+mapfunc = mapfun_using_hash_table  # change to mapfun1 works
+
+def train_input_fn(features, labels, batch_size):
+    dataset = tf.data.Dataset.from_tensor_slices((features, labels))
+    dataset = dataset.shuffle(10).repeat().batch(batch_size)
+    dataset = dataset.map(mapfunc, num_parallel_calls=1)
+    return dataset
+
+dataset = train_input_fn(features, labels, batch_size=4)
+it = dataset.make_initializable_iterator()
+sess.run(it.initializer)
+sess.run(tf.tables_initializer())  # not work because the hash table is in another graph
+
+print("graph in main: \t\t\t%s" % tf.get_default_graph())
+print(sess.run(it.get_next()))
+
+if name == 'main':
+__test_string2int64_via_map()
+print('\n------------------------------\n')
+test_dataset_using_hashmap()

@@ -1,0 +1,107 @@
+LSTM layer in consistent with tf.keras v2.0.8-tf and keras 2.1.2
+
+It looks like there are some inconsistencies with the output shape of the LSTM layer.
+Running the following code does not produce an error in keras 2.1.2:
+model = Sequential()
+
+conv_layer = Conv1D(filters=320,
+                    kernel_size=26,
+                    strides=1,
+                    padding='valid',
+                    activation='relu',
+                    input_shape=(1000,4))
+
+model.add(conv_layer)
+model.add(MaxPooling1D(pool_size=13,
+                       strides=13))
+
+model.add(LSTM(320, return_sequences=True))
+
+model.add(Flatten())
+model.add(Dense(925,
+                activation='relu'))
+model.add(Dense(919,
+                activation='sigmoid'))
+
+model.compile(loss='binary_crossentropy',
+              optimizer='rmsprop',
+              metrics=['accuracy'])
+
+_________________________________________________________________
+Layer (type)                 Output Shape              Param #   
+=================================================================
+conv1d_1 (Conv1D)            (None, 975, 320)          33600     
+_________________________________________________________________
+max_pooling1d_1 (MaxPooling1 (None, 75, 320)           0         
+_________________________________________________________________
+lstm_1 (LSTM)                (None, 75, 320)           820480    
+_________________________________________________________________
+flatten_1 (Flatten)          (None, 24000)             0         
+_________________________________________________________________
+dense_1 (Dense)              (None, 925)               22200925  
+_________________________________________________________________
+dense_2 (Dense)              (None, 919)               850994    
+=================================================================
+Total params: 23,905,999
+Trainable params: 23,905,999
+Non-trainable params: 0
+_________________________________________________________________
+but produces this error in keras v2.0.8-tf:
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-389-956501e5fb90> in <module>()
+     16 model.add(Flatten())
+     17 model.add(Dense(925,
+---> 18                 activation='relu'))
+     19 model.add(Dense(919,
+     20                 activation='sigmoid'))
+
+~/anaconda/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/models.py in add(self, layer)
+    499           output_tensors=self.outputs)
+    500     else:
+--> 501       output_tensor = layer(self.outputs[0])
+    502       if isinstance(output_tensor, list):
+    503         raise TypeError('All layers in a Sequential model '
+
+~/anaconda/lib/python3.6/site-packages/tensorflow/python/keras/_impl/keras/engine/topology.py in __call__(self, inputs, **kwargs)
+    250     """
+    251     # Actually call the layer (optionally building it).
+--> 252     output = super(Layer, self).__call__(inputs, **kwargs)
+    253 
+    254     # Update learning phase info.
+
+~/anaconda/lib/python3.6/site-packages/tensorflow/python/layers/base.py in __call__(self, inputs, *args, **kwargs)
+    557           input_shapes = [x.get_shape() for x in input_list]
+    558           if len(input_shapes) == 1:
+--> 559             self.build(input_shapes[0])
+    560           else:
+    561             self.build(input_shapes)
+
+~/anaconda/lib/python3.6/site-packages/tensorflow/python/layers/core.py in build(self, input_shape)
+    125     input_shape = tensor_shape.TensorShape(input_shape)
+    126     if input_shape[-1].value is None:
+--> 127       raise ValueError('The last dimension of the inputs to `Dense` '
+    128                        'should be defined. Found `None`.')
+    129     self.input_spec = base.InputSpec(min_ndim=2,
+
+ValueError: The last dimension of the inputs to `Dense` should be defined. Found `None`.
+If I keep return_sequences = True and remove Flatten() after the LSTM I get the following:
+_________________________________________________________________
+Layer (type)                 Output Shape              Param #   
+=================================================================
+conv1d_49 (Conv1D)           (None, 975, 320)          33600     
+_________________________________________________________________
+max_pooling1d_49 (MaxPooling (None, 75, 320)           0         
+_________________________________________________________________
+lstm_33 (LSTM)               (None, None, 320)         820480    
+_________________________________________________________________
+dense_92 (Dense)             (None, None, 925)         296925    
+_________________________________________________________________
+dense_93 (Dense)             (None, None, 919)         850994    
+=================================================================
+Total params: 2,001,999
+Trainable params: 2,001,999
+Non-trainable params: 0
+_________________________________________________________________
+
+More on the discussion in uci-cbcl/DanQ#9 (comment)

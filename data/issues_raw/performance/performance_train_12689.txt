@@ -1,0 +1,148 @@
+multi-GPU training too slow when L2 regularizer enabled
+
+System information
+
+Have I written custom code (as opposed to using a stock example script provided in TensorFlow):
+Yes
+OS Platform and Distribution (e.g., Linux Ubuntu 16.04):
+Windows 10 home edition
+TensorFlow installed from (source or binary):
+binary
+TensorFlow version (use command below):
+1.3.0
+Python version:
+3.5.3
+Bazel version (if compiling from source):
+CUDA/cuDNN version:
+Cuda 8.0 / cudnn 6.0
+GPU model and memory:
+Nvidia 1080 GTX 8GB x 2
+Exact command to reproduce:
+
+Describe the problem
+I try to train a face recognition classifier using inception-resnet-v1 model with 2 GPUs. On single GPU the training proceeds just fine, with a processing capacity around 220 images/sec, but when I train with 2 GPUs I only observe marginal benefit (capacity increases to around 280 images/sec). After some profiling I found out that the poor performance was somehow due to the introduced L2 regularizer. When the regularizer is enabled, the computation of the gradient becomes unexpectedly slow, resulting in the slowdown of the entire training cycle. As a comparison, if the regularizer is disabled, I could obtain a processing capacity around 350 images/sec, which although not perfect, is more or less satisfactory. The boost in the performance in the latter scenario cannot be attributed to the reduced computation complexity from the removal of the regularizer. This is evidenced by a reference experiment with exactly the same parameter except for on a single GPU, see below.
+I cannot figure out an explanation for this. It took me several days to narrow down the problem to, seemingly,  the introduction of L2 regularizer and the computation of gradient.
+In my program I used standard tf.slim layers together with a downloaded inception-resnet-v1 model script.  The main part of the code is the following:
+def main(args):
+    num_gpus = args.num_gpus
+    batch_size_per_gpu = args.batch_size_per_gpu
+    batch_size = batch_size_per_gpu * num_gpus
+
+    num_classes = 10000
+    synthetic_images = 0.01 * np.random.randn(batch_size, 160, 160, 3)
+    synthetic_labels = np.random.randint(0, 10000, batch_size)
+
+    with tf.Graph().as_default(), tf.device('/cpu:0'):
+        # the synthetic array is converted to a tf.Variable
+        images = tf.Variable(tf.convert_to_tensor(synthetic_images, dtype=tf.float32), trainable=False)
+        labels = tf.Variable(tf.convert_to_tensor(synthetic_labels, dtype=tf.int32), trainable=False)
+
+        image_batches = tf.split(images, num_or_size_splits=num_gpus)
+        label_batches = tf.split(labels, num_or_size_splits=num_gpus)
+
+        total_loss = [None] * num_gpus
+        grads = [None] * num_gpus
+
+        opt = tf.train.RMSPropOptimizer(0.01, epsilon=0.01)
+
+        reuse_variables = False
+        for i in range(num_gpus):
+            with tf.device("/gpu:{0}".format(i)), tf.name_scope("tower{0}".format(i)) as scope:
+                with slim.arg_scope([slim.variable], device='/cpu:0'):
+                    print("Building graph for tower{0}...".format(i))
+
+                    total_loss[i] = tower_loss(images=image_batches[i],
+                                               labels=label_batches[i],
+                                               num_classes=num_classes,
+                                               keep_probability=1,
+                                               phase_train=True,
+                                               embedding_size=512,
+                                               weight_decay=args.weight_decay,
+                                               reuse=reuse_variables)
+
+                    grads[i] = opt.compute_gradients(total_loss[i])
+                    reuse_variables = True
+
+        # then open a session and calculate the tower gradients
+        with tf.Session() as sess:
+            sess.run(init)
+            print("Warming up...")
+            for i in range(10):
+                _ = sess.run(grads)
+
+            print("Benchmarking...")
+            for i in range(num_iterations):
+                _ = sess.run(grads)
+where tower_loss() is defined as follows:
+def tower_loss(images, labels, num_classes, keep_probability, phase_train, embedding_size=128, weight_decay=0.0,
+               reuse=None):
+    batch_norm_params = {
+        'decay': 0.995,
+        'epsilon': 0.001,
+        'fused': True
+    }
+
+    with slim.arg_scope([slim.conv2d, slim.fully_connected],
+                        weights_initializer=tf.truncated_normal_initializer(stddev=0.1),
+                        weights_regularizer=slim.l2_regularizer(weight_decay),
+                        normalizer_fn=slim.batch_norm,
+                        normalizer_params=batch_norm_params
+                        ):
+        embeddings = inception_resnet_v1(images, is_training=phase_train,
+                                         dropout_keep_prob=keep_probability,
+                                         bottleneck_layer_size=embedding_size,
+                                         reuse=reuse)
+
+    logits = slim.fully_connected(embeddings,
+                                  num_classes,
+                                  activation_fn=None,
+                                  reuse=reuse,
+                                  weights_regularizer=slim.l2_regularizer(weight_decay),
+                                  scope="fc")
+    entropy_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels))
+    if weight_decay == 0:
+        print("L2 regularizer disabled.")
+        return entropy_loss
+    else:
+        print("Regularization losses added to total loss.")
+        return tf.add_n([entropy_loss] + tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+The whole script (contains codes to generate synthetic data) can be found here. The inception-resnet-v1 model script can be found here.
+To reproduce the problem, just run
+python issue.py --num_gpus 2 --weight_decay 0
+The output would be something like
+Duration: 7.1 secs; 358.1 images/sec or 0.71 sec/batch
+Duration: 7.5 secs; 343.1 images/sec or 0.75 sec/batch
+Duration: 7.2 secs; 354.9 images/sec or 0.72 sec/batch
+Duration: 7.1 secs; 358.8 images/sec or 0.71 sec/batch
+Duration: 7.2 secs; 354.9 images/sec or 0.72 sec/batch
+Total duration: 36.2sec        Performance: 353.9 images/sec
+
+In contrast, with the presence of L2 regularizer, running
+python issue.py --num_gpus 2 --weight_decay 0.0001
+one would obtain
+Duration: 9.0 secs; 284.9 images/sec or 0.90 sec/batch
+Duration: 9.1 secs; 279.9 images/sec or 0.91 sec/batch
+Duration: 8.7 secs; 292.8 images/sec or 0.87 sec/batch
+Duration: 9.3 secs; 276.7 images/sec or 0.93 sec/batch
+Duration: 8.5 secs; 302.4 images/sec or 0.85 sec/batch
+Total duration: 44.6 sec        Performance: 287.0 images/sec
+
+As a reference, with single GPU, the difference of processing capacity between with and without regularizer is negligeable, at least in this demo. To check it, run
+python issue.py --num_gpus 1 --weight_decay 0
+gives
+Duration: 5.6 secs; 228.1 images/sec or 0.56 sec/batch
+Duration: 5.6 secs; 228.7 images/sec or 0.56 sec/batch
+Duration: 5.7 secs; 225.8 images/sec or 0.57 sec/batch
+Duration: 5.6 secs; 230.3 images/sec or 0.56 sec/batch
+Duration: 5.6 secs; 226.8 images/sec or 0.56 sec/batch
+Total duration: 28.1 sec        Performance: 227.9 images/sec
+
+and
+python issue.py --num_gpus 1 --weight_decay 0.0001
+gives
+Duration: 5.6 secs; 227.5 images/sec or 0.56 sec/batch
+Duration: 5.7 secs; 226.3 images/sec or 0.57 sec/batch
+Duration: 5.6 secs; 229.4 images/sec or 0.56 sec/batch
+Duration: 5.6 secs; 227.5 images/sec or 0.56 sec/batch
+Duration: 5.7 secs; 224.3 images/sec or 0.57 sec/batch
+Total duration: 28.2 sec        Performance: 227.0 images/sec

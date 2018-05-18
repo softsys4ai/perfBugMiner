@@ -1,0 +1,42 @@
+tf.while_loop runs very slow
+
+I'm writing a simple RNN implementation using tf.while_loop but it runs incredibly slow. Any insights would be incredibly helpful.
+OS: Ubuntu/Linux (16.04)
+TensorFlow: Compiled from source
+TensorFlow Version: r1.1
+Bazel Version: 0.4.5
+CUDA/CuDNN Versions: 8.0/5.1
+GPU Model/Memory: TitanX/12Gb
+Here's the implementation:
+def forward(self, inputs):
+    inputs_shape = tf.shape(inputs)
+    timesteps = inputs_shape[0]
+    batch_size = inputs_shape[1]
+    # Compute the forward pass for every time step.
+    output = tf.reshape(inputs, [-1, self._inputs_dim])
+    output = tf.add(tf.matmul(output, self._weights), self._bias)
+    output = tf.reshape(output, [timesteps, batch_size, self._units])
+    # Create a tensor array to hold the output of our rnn layer.
+    temp = tf.TensorArray(dtype=self._dtype, size=timesteps)
+
+    def step(c, t, h, s, i, o):
+      h = self._activation(tf.add(tf.matmul(h, s), i[c]))
+      o = o.write(c, h)
+      return [c + 1, t, h, s, i, o]
+
+    def step_condition(c, t, h, s, i, o):
+      return tf.less(c, t)
+
+    # Create a counter to track the number of timesteps.
+    count = tf.constant(0)
+    # Define the initial hidden state.
+    hidden = tf.zeros([batch_size, self._units], dtype=self._dtype)
+
+    _, _, _, _, _, output = tf.while_loop(
+      step_condition,
+      step,
+      [count, timesteps, hidden, self._state, output, temp]
+    )
+
+    return output.stack()
+It takes ~5 minutes to complete one epoch of the mnist dataset.

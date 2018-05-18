@@ -1,0 +1,20 @@
+tf.InteractiveSession leaks sessions
+
+The following works fine with tf.Session() but will fail to release resources in tf.InteractiveSession
+sess = tf.InteractiveSession()
+# do stuff  
+sess.close()
+del sess
+
+The reason is that interactive session enters a context using __enter()__ and never quits it, leaving a reference from a DefaultStack object. I found this when debugging why my notebook was hogging all GPU RAM.
+The two work-arounds:
+
+Force C_API to close the session using sess.__del__()
+Get rid of the dangling reference
+
+    sess._default_session.__exit__(None, None, None)
+    del sess
+    import gc
+    gc.collect()
+
+I think a better solution would be to have sess.close() call both TF_CloseSession and TF_DeleteSession, or have a method that will reset all sessions like session_lib.Reset

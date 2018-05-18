@@ -1,0 +1,42 @@
+Undefined reference to symbol 'ceil@@GLIBC_2.2.5' at build time
+
+I'm working on compiling Tensorflow from source, using non-standard GCC/etc. installations.  Environment info: RHEL 6.7, GCC 5.2.1, Bazel 0.1.5.  I'm installing Tensorflow from HEAD (commit f82ad36).  I'm using a non-CUDA configuration.  I've followed the steps @sethbruder suggests in his comment on bazel#649, including copying the contents of tools from bazel into tensorflow/tools/ and into tensorflow/google/protobuf/tools/.  This is possibly related to #332, as I'm getting the same error, but at build time as opposed to API usage.
+I've tried to set up the relevant paths for my non-standard system resource install using the following settings before invoking bazel:
+export LDFLAGS="-Wl,-rpath,/opt/rh/devtoolset-4/root/usr/lib64 -lrt -lm"
+export CC="/opt/rh/devtoolset-4/root/usr/bin/gcc"
+export CXX="/opt/rh/devtoolset-4/root/usr/bin/g++"
+export JAVA_HOME="/u/drspeech/opt/jdks/jdk1.8.0_25"
+export LD_LIBRARY_PATH="/opt/rh/devtoolset-4/root/usr/lib:${LD_LIBRARY_PATH}"
+export BAZEL_ARGS="--verbose_failures"
+export EXTRA_BAZEL_ARGS="${EXTRA_BAZEL_ARGS} --linkopt=-Wl,-rpath,/opt/rh/devtoolset-4/root/usr/lib64"
+export EXTRA_BAZEL_ARGS="${EXTRA_BAZEL_ARGS} --linkopt=-Wl,-rpath,/u/drspeech/opt/jdks/jdk1.8.0_25/lib"
+export EXTRA_BAZEL_ARGS="${EXTRA_BAZEL_ARGS} --linkopt=-lz"
+#export EXTRA_BAZEL_ARGS="${BAZEL_ARGS} --linkopt=-Wl,-rpath,/usr/local/cuda-7.0/lib64"
+export PYTHON_MAJOR_VERSION=3
+export PYTHON_BINARY=/u/drspeech/opt/python-3.5.1/bin/python3
+export MYBAZEL=/u/drspeech/opt/bazel-0.1.5/0.1.5/bazel-0.1.5/output/bazel
+(there may be some leftover settings; this is adapted from what I used for building bazel in bazel#925)
+When I invoke bazel with
+${MYBAZEL} build -c opt //tensorflow/tools/pip_package:build_pip_package
+I get the following error output:
+WARNING: Output base '/homes/2/griffisd/.cache/bazel/_bazel_griffisd/294e12ab714f8384c060bacb49311f55' is on NFS. This may lead to surprising failures and undetermined behavior.
+WARNING: Sandboxed execution is not supported on your system and thus hermeticity of actions cannot be guaranteed. See http://bazel.io/docs/bazel-user-manual.html#sandboxing for more information. You can turn off this warning via --ignore_unsupported_sandboxing.
+____Loading...
+____Found 1 target...
+____Building...
+____[1 / 12] Compiling google/protobuf/python/google/protobuf/pyext/descriptor.cc
+____[1 / 147] Compiling external/re2/re2/compile.cc
+ERROR: /homes/0/drspeech/opt/tensorflow-0.6.0/0.7.0/tensorflow/google/protobuf/BUILD:272:1: Linking of rule '//google/protobuf:protoc' failed: gcc failed: error executing command 
+  (cd /homes/2/griffisd/.cache/bazel/_bazel_griffisd/294e12ab714f8384c060bacb49311f55/tensorflow && \
+  exec env - \
+  /opt/rh/devtoolset-4/root/usr/bin/gcc -o bazel-out/host/bin/google/protobuf/protoc -B/opt/rh/devtoolset-4/root/usr/bin/ -Wl,-z,relro,-z,now -no-canonical-prefixes -pass-exit-codes '-Wl,--build-id=md5' '-Wl,--hash-style=gnu' -Wl,-S -Wl,--gc-sections -Wl,@bazel-out/host/bin/google/protobuf/protoc-2.params): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1: gcc failed: error executing command 
+  (cd /homes/2/griffisd/.cache/bazel/_bazel_griffisd/294e12ab714f8384c060bacb49311f55/tensorflow && \
+  exec env - \
+  /opt/rh/devtoolset-4/root/usr/bin/gcc -o bazel-out/host/bin/google/protobuf/protoc -B/opt/rh/devtoolset-4/root/usr/bin/ -Wl,-z,relro,-z,now -no-canonical-prefixes -pass-exit-codes '-Wl,--build-id=md5' '-Wl,--hash-style=gnu' -Wl,-S -Wl,--gc-sections -Wl,@bazel-out/host/bin/google/protobuf/protoc-2.params): com.google.devtools.build.lib.shell.BadExitStatusException: Process exited with status 1.
+/opt/rh/devtoolset-4/root/usr/bin/ld: /opt/rh/devtoolset-4/root/usr/lib/gcc/x86_64-redhat-linux/5.2.1/libstdc++_nonshared.a(hashtable_c++0x.o): undefined reference to symbol 'ceil@@GLIBC_2.2.5'
+//lib64/libm.so.6: error adding symbols: DSO missing from command line
+collect2: error: ld returned 1 exit status
+Target //tensorflow/tools/pip_package:build_pip_package failed to build
+____Elapsed time: 0.707s, Critical Path: 0.34s
+
+It seems like I may be missing an "-lm" flag in the invocation to gcc to the protobuf target; I've tried including it in LDFLAGS as shown above, but it doesn't seem to be appearing in the gcc invocation.

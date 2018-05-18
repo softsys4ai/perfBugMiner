@@ -1,0 +1,141 @@
+cannot add op with name conv2d/convolution as that name is already used
+
+Here is my code :
+class final_model:
+    # CNN encoder
+    encoder, preprocess_for_model = get_cnn_encoder()
+    #saver.restore(s, os.path.abspath("weights"))  # keras applications corrupt our graph, so we restore trained weights
+    
+    # containers for current lstm state
+    lstm_c = tf.Variable(tf.zeros([1, LSTM_UNITS]), name="cell")
+    lstm_h = tf.Variable(tf.zeros([1, LSTM_UNITS]), name="hidden")
+
+    # input images
+    input_images = tf.placeholder('float32', [1, IMG_SIZE, IMG_SIZE, 3], name='images')
+
+    # get image embeddings
+    img_embeds = encoder(input_images)
+
+    # initialize lstm state conditioned on image
+    init_c = init_h = decoder.img_embed_bottleneck_to_h0(decoder.img_embed_to_bottleneck(img_embeds))
+    init_lstm = tf.assign(lstm_c, init_c), tf.assign(lstm_h, init_h)
+    
+    # current word index
+    current_word = tf.placeholder('int32', [1], name='current_input')
+
+    # embedding for current word
+    word_embed = decoder.word_embed(current_word)
+
+    # apply lstm cell, get new lstm states
+    new_c, new_h = decoder.lstm(word_embed, tf.nn.rnn_cell.LSTMStateTuple(lstm_c, lstm_h))[1]
+
+    # compute logits for next token
+    new_logits = decoder.token_logits(decoder.token_logits_bottleneck(new_h))
+    # compute probabilities for next token
+    new_probs = tf.nn.softmax(new_logits)
+
+    # `one_step` outputs probabilities of next token and updates lstm hidden state
+    one_step = new_probs, tf.assign(lstm_c, new_c), tf.assign(lstm_h, new_h)
+And I am getting following error :
+---------------------------------------------------------------------------
+ValueError                                Traceback (most recent call last)
+<ipython-input-42-73f88badc13d> in <module>()
+----> 1 class final_model:
+      2     # CNN encoder
+      3     encoder, preprocess_for_model = get_cnn_encoder()
+      4     #saver.restore(s, os.path.abspath("weights"))  # keras applications corrupt our graph, so we restore trained weights
+      5 
+
+<ipython-input-42-73f88badc13d> in final_model()
+     12 
+     13     # get image embeddings
+---> 14     img_embeds = encoder(input_images)
+     15 
+     16     # initialize lstm state conditioned on image
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\keras\_impl\keras\engine\topology.py in __call__(self, inputs, **kwargs)
+    250     """
+    251     # Actually call the layer (optionally building it).
+--> 252     output = super(Layer, self).__call__(inputs, **kwargs)
+    253 
+    254     # Update learning phase info.
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\layers\base.py in __call__(self, inputs, *args, **kwargs)
+    573         if in_graph_mode:
+    574           self._assert_input_compatibility(inputs)
+--> 575         outputs = self.call(inputs, *args, **kwargs)
+    576 
+    577         if outputs is None:
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\layers\base.py in call(self, inputs, mask)
+   1918     else:
+   1919       # Cache miss: actually apply the network graph to the new inputs.
+-> 1920       output_tensors, _, _ = self._run_internal_graph(inputs, masks)
+   1921       return output_tensors
+   1922 
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\layers\base.py in _run_internal_graph(self, inputs, masks)
+   2082                 if 'mask' not in kwargs:
+   2083                   kwargs['mask'] = computed_mask
+-> 2084               output_tensors = _to_list(layer.call(computed_tensor, **kwargs))
+   2085               if hasattr(layer, 'compute_mask'):
+   2086                 output_masks = _to_list(
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\layers\convolutional.py in call(self, inputs)
+    169     # TODO(agarwal): do we need this name_scope ?
+    170     with ops.name_scope(None, 'convolution', [inputs, self.kernel]):
+--> 171       outputs = self._convolution_op(inputs, self.kernel)
+    172 
+    173     if self.use_bias:
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\ops\nn_ops.py in __call__(self, inp, filter)
+    833 
+    834   def __call__(self, inp, filter):  # pylint: disable=redefined-builtin
+--> 835     return self.conv_op(inp, filter)
+    836 
+    837 
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\ops\nn_ops.py in __call__(self, inp, filter)
+    497 
+    498   def __call__(self, inp, filter):  # pylint: disable=redefined-builtin
+--> 499     return self.call(inp, filter)
+    500 
+    501 
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\ops\nn_ops.py in __call__(self, inp, filter)
+    185         padding=self.padding,
+    186         data_format=self.data_format,
+--> 187         name=self.name)
+    188 
+    189 
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\ops\gen_nn_ops.py in conv2d(input, filter, strides, padding, use_cudnn_on_gpu, data_format, name)
+    628         "Conv2D", input=input, filter=filter, strides=strides,
+    629         padding=padding, use_cudnn_on_gpu=use_cudnn_on_gpu,
+--> 630         data_format=data_format, name=name)
+    631     _result = _op.outputs[:]
+    632     _inputs_flat = _op.inputs
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\framework\op_def_library.py in _apply_op_helper(self, op_type_name, name, **keywords)
+    785         op = g.create_op(op_type_name, inputs, output_types, name=scope,
+    786                          input_types=input_types, attrs=attr_protos,
+--> 787                          op_def=op_def)
+    788       return output_structure, op_def.is_stateful, op
+    789 
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\framework\ops.py in create_op(self, op_type, inputs, dtypes, input_types, name, attrs, op_def, compute_shapes, compute_device)
+   2957     if compute_shapes:
+   2958       set_shapes_for_outputs(ret)
+-> 2959     self._add_op(ret)
+   2960     self._record_op_seen_by_control_dependencies(ret)
+   2961 
+
+C:\Program Files\Anaconda3\envs\tensorflow\lib\site-packages\tensorflow\python\framework\ops.py in _add_op(self, op)
+   2597       if op.name in self._nodes_by_name:
+   2598         raise ValueError("cannot add op with name %s as that name "
+-> 2599                          "is already used" % op.name)
+   2600       self._nodes_by_id[op._id] = op
+   2601       self._nodes_by_name[op.name] = op
+
+ValueError: cannot add op with name conv2d/convolution as that name is already used
+How can solve this issue ? Please help . THANKS.

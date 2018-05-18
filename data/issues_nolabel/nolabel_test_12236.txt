@@ -1,0 +1,52 @@
+"/gpu:0/stream" not showing up on timeline
+
+I am generating timeline with TensorFlow r1.3.
+I can only see /job:localhost/replica:0/task:0/cpu:0 and /job:localhost/replica:0/task:0/gpu:0.
+But I can't find /gpu:0/stream
+Any idea?
+
+My code to regenerate the timeline.
+import os
+import tensorflow as tf
+from tensorflow.python.client import timeline
+
+dim = 6000
+n = 5
+
+with tf.device('/gpu:0'):
+    X, Y, Z, _X, _Y = [], [], [], [], []
+    for i in range(n):
+        X.append(tf.random_uniform([dim, dim], 0, 10, name='X' + str(i)))
+        Y.append(tf.random_uniform([dim, dim], 0, 10, name='Y' + str(i)))
+        _X.append(tf.placeholder(dtype=tf.float32, shape=[dim, dim]))
+        _Y.append(tf.placeholder(dtype=tf.float32, shape=[dim, dim]))
+        Z.append(tf.matmul(_X[i], _Y[i]))
+    W = tf.ones([dim, dim])
+    for i in range(n):
+        W = tf.matmul(W, Z[i])
+
+sess = tf.Session(config=tf.ConfigProto(
+                      graph_options=tf.GraphOptions(build_cost_model=1),
+                      gpu_options=tf.GPUOptions(allow_growth=True)))
+sess.run(tf.global_variables_initializer())
+X_, Y_ = sess.run([X, Y])
+
+run_metadata = tf.RunMetadata()
+run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+
+W_ = sess.run(W,
+              {_i: i_ for _i, i_ in zip(_X + _Y, X_ + Y_)},
+              options=run_options,
+              run_metadata=run_metadata)
+
+tf.profiler.profile(
+    tf.get_default_graph(),
+    run_meta=run_metadata,
+    options=(tf.profiler.ProfileOptionBuilder(
+        tf.profiler.ProfileOptionBuilder.time_and_memory()
+    ).build()))
+
+tl = timeline.Timeline(run_metadata.step_stats)
+with open('/tmp/timeline.json', 'w') as f:
+    f.write(tl.generate_chrome_trace_format(show_dataflow=True,
+                                            show_memory=True))

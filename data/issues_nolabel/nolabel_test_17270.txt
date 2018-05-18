@@ -1,0 +1,73 @@
+same code, tensorflow/contribe/android works, but tensorflow/contribe/lite/java/src/main/native doesn't, with error: No implementation found
+
+tensorflow r1.4
+ubuntu 14.04
+armv7 platform
+for short, the same code witch can be used in tensorflow/cotribe/android/jni, when move to tensorflow/contribe/lite/java/src/main/native, the java code cannot find the implementation.
+use the command line:
+bazel build -c opt --cxxopt='-std=c++11' //tensorflow/contrib/android:libtensorflow_inference.so    --crosstool_top=//external:android/crosstool    --host_crosstool_top=@bazel_tools//tools/cpp:toolchain    --cpu=armeabi-v7a
+to build an android so file, it is ok.
+and i modify the BUILD file to add my own code:
+cc_library(
+name = "native_framework_only",
+srcs = [
+#"run_stats_jni.cc",
+#"exception_jni.cc",
+#"nativeinterpreterwrapper_jni.cc",
+#"tensor_jni.cc",
+#"tensorflow_lite_jni.cc",
+#"run_stats_lite_jni.cc",
+] + select({
+# The Android toolchain makes "jni.h" available in the include path.
+# For non-Android toolchains, generate jni.h and jni_md.h.
+"//tensorflow:android": [],
+"//conditions:default": [
+":jni.h",
+":jni_md.h",
+],
+}),
+hdrs = [
+"run_stats_jni.h",
+#"exception_jni.h",
+#"nativeinterpreterwrapper_jni.h",
+#"tensor_jni.h",
+#"tensorflow_lite_jni.h",
+#"run_stats_lite_jni.h",
+#"testlite.h",
+],
+copts = tflite_copts(),
+includes = select({
+"//tensorflow:android": [],
+"//conditions:default": ["."],
+}),
+linkopts = [
+"-lm",
+"-ldl",
+"-llog",
+],
+tags = [
+"manual",
+],
+deps = [
+"//tensorflow/contrib/lite:context",
+"//tensorflow/contrib/lite:framework",
+"//tensorflow/contrib/lite:schema_fbs_version",
+"//tensorflow/contrib/lite/kernels:builtin_ops",
+"@dlib_arm_v7//:dlib",
+"@seeta_arm_v7//:seeta",
+"@opencv_jni//:opencv_jni",
+],
+alwayslink = 1,
+)
+the file run_stats_jni.h is just from tensorflow/contribe/android/jni, the function i want to call from native is:
+JNIEXPORT jint RUN_STATS_METHOD(jniSetInterval)(JNIEnv* env, jclass clazz, jint interval)
+{
+int val = (int)interval;
+return JNI_OK;
+}
+and using the command line:
+bazel build -c opt --cxxopt='-std=c++11' //tensorflow/contrib/lite/java:libtensorflowlite_jni.so    --crosstool_top=//external:android/crosstool    --host_crosstool_top=@bazel_tools//tools/cpp:toolchain    --cpu=armeabi-v7a
+and when i using nm -D command to check the libtensorflowlite_jni.so and libtensorflow_inference.so, they all have the same name Java_org_tensorflow_jniSetInterval. but libtensorflow_inference.so works, but libtensorflowlite_jni.so does not.
+the error is:
+No implementation found for int org_tensorflow.jniSetInterval(int) (tried Java_org_tensorflow_jniSetInterval and Java_org_tensorflow_jniSetInterval__I)
+lack of document to tell us how to add own code to tensorflow lite, and it is wierd, may be a bug.

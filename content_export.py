@@ -6,6 +6,7 @@ import time
 
 csvFile = open(OpenFile,'wb+')
 writer = csv.writer(csvFile)
+titles = []
 def save(it):
     # csvfile = open(OpenFile, 'a')
     # writer = csv.writer(csvfile)
@@ -45,7 +46,7 @@ MaxCommentNum = 0
 while True:
     url = baseurl + "?page="+str(page)+"&state=open"+"&"+urlend
     page +=1
-    print "EXTRACTING:",url
+    print u"EXTRACTING:",url
     content = GetJsonFromAPI(url)
     if content is None:
         break
@@ -55,12 +56,18 @@ while True:
         comments_url = item['comments_url']
         time.sleep(TIMEOUT)
         comments = []
+        title = item['title'].encode("utf-8")
+        body = item['body'].encode("utf-8")
+        labels = json.dumps(item['labels']).encode("utf-8")
+        if "type:bug/performance" not in labels.lower() and "performance" not in title.lower() and "performance" not in body.lower():
+            continue
+        if title in titles:
+            continue
+        titles.append(title)
         if item['comments'] is not 0:
             comments = getComments(comments_url+"?"+urlend)
             if len(comments) > MaxCommentNum:
                 MaxCommentNum = len(comments)
-        title = item['title'].encode("utf-8")
-        labels = json.dumps(item['labels']).encode("utf-8")
         timeline = "create_at:"+item['created_at']+",updated_at:"+item['updated_at']+",author_association:"+item['author_association']
         it.append(title)
         it.append(labels)

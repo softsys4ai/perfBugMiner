@@ -16,6 +16,7 @@ owner = 'tensorflow'
 
 TIMEOUT = 1
 
+keyword = "Performance"
 
 headers = {
 	'Host': 'api.github.com',

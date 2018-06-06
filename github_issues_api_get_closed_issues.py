@@ -3,7 +3,7 @@ from config import *
 import json
 import csv
 import time
-
+titles = []
 
 # csvFile = open(ClosedFile,'w')
 # writer = csv.writer(csvFile)
@@ -52,7 +52,7 @@ MaxCommentNum = 0
 while True:
     url = baseurl + "?page="+str(page)+"&state=closed"+"&"+urlend
     page +=1
-    print "EXTRACTING:",url
+    print u"EXTRACTING:",url
     content = GetJsonFromAPI(url)
     if content is None:
         break
@@ -65,6 +65,15 @@ while True:
         closed_user = item['author_association']
         closed_commemt = ''
         closed_at = item['closed_at']
+        title = item['title'].encode("utf-8")
+        labels = json.dumps(item['labels'])
+        labels = labels.encode("utf-8")
+        body = item['body'].encode('utf-8')
+        if "type:bug/performance" not in labels.lower() and "performance" not in title.lower() and "performance" not in body.lower():
+            continue
+        if title in titles:
+            continue
+        titles.append(title)
         if item['comments'] is not 0:
             comments = getComments(comments_url+"?"+urlend)
             for temp in comments:
@@ -73,9 +82,6 @@ while True:
                     closed_commemt = temp['body'].encode("utf-8")
             if len(comments) > MaxCommentNum:
                 MaxCommentNum = len(comments)
-        title = item['title'].encode("utf-8")
-        labels = json.dumps(item['labels'])
-        labels = labels.encode("utf-8")
         timeline = "created_at:"+item['created_at']+",updated_at:"+item['updated_at']+",closed_at:"+item['closed_at']+",author_association:"+item['author_association']
         it.append(title)
         it.append(labels)

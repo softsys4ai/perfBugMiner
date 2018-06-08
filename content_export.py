@@ -8,10 +8,10 @@ csvFile = open(OpenFile,'wb+')
 writer = csv.writer(csvFile)
 titles = []
 def save(it):
-    # csvfile = open(OpenFile, 'a')
-    # writer = csv.writer(csvfile)
+    csvfile = open(OpenFile, 'ab')
+    writer = csv.writer(csvfile)
     writer.writerow(it)
-    # csvfile.close()
+    csvfile.close()
 
 def getComments(url):
     content = GetJsonFromAPI(url)
@@ -27,21 +27,30 @@ def getComments(url):
     return comments
 
 def SaveHeader():
+    csvFile = open(OpenFile,'wb+')
+    writer = csv.writer(csvFile)
     h=[]
+    h.append("ID")
+    h.append("GITHUB ID")
     h.append("ISSUE TITLE")
     h.append("ISSUE`S LABEL")
-    h.append("ISSUE`S TIMELINE")
+    h.append("ISSUE`S CREATED TIME")
+    h.append("ISSUE`S UPDATED TIME")
+    h.append("assignee")
+    h.append("milestone")
     for i in range(1,40):
         h.append(str(i)+"th COMMENT")
         h.append(str(i)+"th COMMENT`S USER CHARACTER")
     writer.writerow(h)
-    # csvFile.close()
+    csvFile.close()
 
 SaveHeader()
 
 page = 1
 
 MaxCommentNum = 0
+
+id_ = 1
 
 while True:
     url = baseurl + "?page="+str(page)+"&state=open"+"&"+urlend
@@ -59,7 +68,8 @@ while True:
         title = item['title'].encode("utf-8")
         body = item['body'].encode("utf-8")
         labels = json.dumps(item['labels']).encode("utf-8")
-        if "type:bug/performance" not in labels.lower() and "performance" not in title.lower() and "performance" not in body.lower():
+        Issue_Author_association = item['author_association']
+        if "type:bug/performance" not in labels.lower() and  keyword not in title.lower() and keyword not in body.lower():
             continue
         if title in titles:
             continue
@@ -68,10 +78,26 @@ while True:
             comments = getComments(comments_url+"?"+urlend)
             if len(comments) > MaxCommentNum:
                 MaxCommentNum = len(comments)
-        timeline = "create_at:"+item['created_at']+",updated_at:"+item['updated_at']+",author_association:"+item['author_association']
+        CREATED_DATE = item['created_at']
+        UPDATED_DATE = item['updated_at']
+        label_name = []
+        for label in item['labels']:
+            label_name.append(label['name'])
+        labels_name = ",".join(label_name)
+        it.append(str(id_))
+        id_ += 1
+        it.append(item['number'])
         it.append(title)
-        it.append(labels)
-        it.append(timeline)
+        it.append(labels_name)
+        it.append(CREATED_DATE)
+        it.append(UPDATED_DATE)
+        if item["assignee"]:
+            it.append(item["assignee"]["login"])
+        else:
+            it.append("")
+        it.append(item['milestone'])
+        it.append(body)
+        it.append(Issue_Author_association)
         for i in comments:
             it.append(i['body'].encode("utf-8"))
             it.append(i['author_association'])

@@ -51,7 +51,7 @@ baseurl = 'https://api.github.com/repos/tensorflow/tensorflow/issues'#?page=50&s
 
 timeline_url = 'https://api.github.com/repos/tensorflow/tensorflow/issues/'
 if __name__ == "__main__":
-	a = 'https://api.github.com/repos/tensorflow/tensorflow/issues/19773/timeline'
+	a = 'https://api.github.com/repos/tensorflow/tensorflow/issues/17787/timeline?'+urlend
 	print GetJsonFromAPI(a)
 # print GetJsonFromAPI(baseurl)
 # print len(GetJsonFromAPI(baseurl))

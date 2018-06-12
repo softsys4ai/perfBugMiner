@@ -57,7 +57,7 @@ id_ = 1
 while True:
     url = baseurl + "?page="+str(page)+"&state=open"+"&"+urlend
     page +=1
-    print u"正在爬取:",url
+    print u"EXTRACTING:",url
     content = GetJsonFromAPI(url)
     if content is None:
         break

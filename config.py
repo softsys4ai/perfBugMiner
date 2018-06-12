@@ -2,6 +2,13 @@ import urllib2
 import gzip
 from StringIO import StringIO
 import json
+
+
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+
+
 client_id = 'bddd8203d9b4228a6b1d'
 
 token = 'bad2ce6af1ad05ae5b100b7a2a19573c2ff90d01'

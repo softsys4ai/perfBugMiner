@@ -32,12 +32,17 @@ def SaveHeader():
     csvFile = open(ClosedFile,'wb')
     writer = csv.writer(csvFile)
     h=[]
+    h.append("ID")
+    h.append("GITHUB ID")
     h.append("ISSUE TITLE")
     h.append("ISSUE`S LABEL")
     h.append("ISSUE`S CREATED TIME")
     h.append("ISSUE`S UPDATED TIME")
     h.append("ISSUE`S CLOSED TIME")
+    h.append("assignee")
+    h.append("milestone")
     h.append("ISSUE DESCRIPTION")
+    h.append("CHARACTER OF THE USER WHO CREATED THE ISSUE")
     h.append("CHARACTER OF THE USER WHO CLOSED THE ISSUE")
     h.append("COMMENT OF THE USER WHO CLOSED THE ISSUE")
     for i in range(1,40):
@@ -50,6 +55,7 @@ SaveHeader()
 
 page = 1
 
+id_ = 1
 MaxCommentNum = 0
 
 while True:
@@ -85,19 +91,28 @@ while True:
                     closed_commemt = temp['body'].encode("utf-8")
             if len(comments) > MaxCommentNum:
                 MaxCommentNum = len(comments)
-        CREATED_DATE = item['created_at']
-        UPDATED_DATE = item['updated_at']
-        CLOSED_DATE = item['closed_at']
+        CREATED_TIME = item['created_at']
+        UPDATED_TIME = item['updated_at']
+        CLOSED_TIME = item['closed_at']
         label_name = []
         for label in item['labels']:
             label_name.append(label['name'])
         labels_name = ",".join(label_name)
+        it.append(str(id_))
+        id_ += 1
+        it.append(item["number"])
         it.append(title)
         it.append(labels_name)
-        it.append(CREATED_DATE)
-        it.append(UPDATED_DATE)
-        it.append(CLOSED_DATE)
+        it.append(CREATED_TIME)
+        it.append(UPDATED_TIME )
+        it.append(CLOSED_TIME)
+        if item["assignee"]:
+            it.append(item["assignee"]["login"])
+        else:
+            it.append("")
+        it.append(item['milestone'])
         it.append(body)
+        it.append(item['author_association'])
         it.append(closed_user)
         it.append(closed_commemt)
         for i in comments:

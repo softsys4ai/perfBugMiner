@@ -38,7 +38,9 @@ def SaveHeader():
     h.append("ISSUE`S UPDATED TIME")
     h.append("assignee")
     h.append("milestone")
-    for i in range(1,40):
+    h.append("ISSUE DESCIPTION")
+    h.append("CHARACTER OF THE USER WHO CREATED THE ISSUE")
+    for i in range(2,40):
         h.append(str(i)+"th COMMENT")
         h.append(str(i)+"th COMMENT`S USER CHARACTER")
     writer.writerow(h)
@@ -55,7 +57,7 @@ id_ = 1
 while True:
     url = baseurl + "?page="+str(page)+"&state=open"+"&"+urlend
     page +=1
-    print u"EXTRACTING:",url
+    print u"正在爬取:",url
     content = GetJsonFromAPI(url)
     if content is None:
         break
@@ -78,8 +80,8 @@ while True:
             comments = getComments(comments_url+"?"+urlend)
             if len(comments) > MaxCommentNum:
                 MaxCommentNum = len(comments)
-        CREATED_DATE = item['created_at']
-        UPDATED_DATE = item['updated_at']
+        CREATED_TIME = item['created_at']
+        UPDATED_TIME = item['updated_at']
         label_name = []
         for label in item['labels']:
             label_name.append(label['name'])
@@ -89,8 +91,8 @@ while True:
         it.append(item['number'])
         it.append(title)
         it.append(labels_name)
-        it.append(CREATED_DATE)
-        it.append(UPDATED_DATE)
+        it.append(CREATED_TIME )
+        it.append(UPDATED_TIME)
         if item["assignee"]:
             it.append(item["assignee"]["login"])
         else:

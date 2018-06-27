@@ -29,12 +29,12 @@ Please clone the project to your computer and install the required packages.
 ## How to run
 For single system: </br>
 Step 1: Put the URL and the name of selected system in the config.py file (Line 160 & 162) </br>
-Step 2: Run the Issue_OneProject.py to generate the json file of the system, like Tensorflow.json; 
+Step 2: Run the Issue_OneProject.py to generate the json file of the system, like Tensorflow.json; </br>
         And output the Chart 1 & 3 & 4 & 7 & 8 </br>
 Step 3: Run github_issues_api_get_closed_issues.py to generat the Chart 2 </br>
 
 For multiple systems: </br>
-Step 4: Creat a folder named PLOTPRO </br>
+Step 4: Creat a folder named PLOTPRO in root of the project </br>
 Step 5: Copy all different systems json file to the PLOTPRO folder </br>
 Step 6: Run the plotdata.py & ProPlot.py to generate the Chart 3 & 4 & 5 & 6 & 7 & 9 </br>
 

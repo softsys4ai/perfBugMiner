@@ -34,8 +34,9 @@ Step 2: Run the Issue_OneProject.py to generate the json file of the system, lik
 Step 3: Run github_issues_api_get_closed_issues.py to generat the Chart 2 </br>
 
 For multiple systems: </br>
-Step 4: Copy all different systems json file to the PLOTPRO folder </br>
-Step 5: Run the plotdata.py & ProPlot.py to generate the Chart 3 & 4 & 5 & 6 & 7 & 9 </br>
+Step 4: Creat a folder named PLOTPRO </br>
+Step 5: Copy all different systems json file to the PLOTPRO folder </br>
+Step 6: Run the plotdata.py & ProPlot.py to generate the Chart 3 & 4 & 5 & 6 & 7 & 9 </br>
 
 ### Limitations 
 Basic on the policy of GitHub API, the limit is 5000 queries per hour; After exceed the limit, the Issue_OneProject.py will throw an error. </br>

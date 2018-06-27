@@ -253,7 +253,9 @@ while True:
             continue
         if commit['author']==None:
             continue
-        if commit['author']['login'] in ProRobots:
+        if commit ['author'].has_key('id') is not True:
+            continue
+        if commit ['author'].has_key("login") and commit['author']['login'] in ProRobots:
             continue
         loginid = commit['author']['id']
         if loginid in AllData['UserCommit']:

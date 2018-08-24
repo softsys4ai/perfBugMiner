@@ -8,7 +8,7 @@ font = r'C:\Windows\Fonts\FZSTK.TTF'
 
 def GetKeyword(s):
 	s = s.replace("tf","tensorflow")
-	wc = WordCloud(font_path=font, #如果是中文必须要添加这个，否则会显示成框框
+	wc = WordCloud(font_path=font,
                background_color='white',
                width=1000,
                height=800,
@@ -34,7 +34,7 @@ def GetKeyword(s):
 
 
 
-# plt.imshow(wc)  #用plt显示图片
-# plt.axis('off') #不显示坐标轴
-# plt.show() #显示图片
+# plt.imshow(wc) 
+# plt.axis('off') 
+# plt.show() 
 # print GetKeyword(string)

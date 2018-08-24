@@ -113,7 +113,6 @@ def getmode(X,Y):
 	clf = GaussianNB().fit(X,Y.ravel())
 	return clf
 
-#得到Y
 modelabels = []
 for l in label:
 	if l in modelabels:
@@ -126,7 +125,6 @@ for l in label:
 Y = np.array(Y)
 # print Y.shape
 
-#得到X
 teams = traindata
 teams = [setFeature(i) for i in teams]
 

@@ -69,6 +69,7 @@ if existData(ResFile) is not True:
     AllData["User"] = {}
     AllData["ComPage"] = 1
     AllData['UserCommit'] = {}
+    AllData['classofsystem'] = [0]*len(modelabels)
     # AllData['MemberCommitNum'] = []
     # AllData['NotMemberCommitNum'] = []
     # SaveData(AllData,ResFile)
@@ -77,7 +78,7 @@ else:
     AllData = GetLast(ResFile=ResFile)
     # AllData['page'] = AllData['page']+1
 
-
+print len(AllData['classofsystem'])
 
 #chart7
 UserCon = {}
@@ -158,6 +159,7 @@ while True:
         print u"Saving Data"
         SaveData(AllData,ResFile)
         savepre()
+        # break
     AllData['page'] += 1
     print u"Extracting:",url
     content = GetJsonFromAPI(url)
@@ -167,6 +169,7 @@ while True:
         break
     js = json.loads(content)
     for item in js:
+        print item['url']
         it = []
         if AllData['User'].has_key(item['user']['id']):
             pass
@@ -240,22 +243,36 @@ while True:
             it.append(i['author_association'])
             datax += i['body'].encode('utf-8')
         issystem = 0
-        for kd in kwords:
-            if kd in datax:
-                issystem = 1
-                continue
+        dxx = word2arm(datax)
+        # print len(dxx)
+        # print len(armingmaxtrix)
+        # print len(armingmaxtrix[0])
+        for _fi in range(0,len(dxx)):
+            for _si in range(0,len(dxx)):
+                if dxx[_fi] is 0:
+                    continue
+                if dxx[_si] is 1:
+                    if wordmatrix[_fi][_si] is 1:
+                        issystem = 1
+                        break;
+        # issystem = 1
         if issystem == 1:
             # print datax
             k_word = GetKeyword(datax)
-            dx = getX([datax])
+            # print datax
+            dx = word2x(datax)
+            print dxx
+            print dx
             # print dx
-            y = mode.predict(dx)
+            y = mode.predict(dx).tolist()
             # print y
             # print modelabels[y[0]]
+            max_index = y.index(max(y))
             kcitem = []
             kcitem.append(item['url'])
             kcitem.append(k_word)
-            kcitem.append(modelabels[y[0]])
+            AllData['classofsystem'][max_index] += 1
+            kcitem.append(modelabels[max_index])
             print kcitem
             k_c.append(kcitem)
             savepre()
@@ -288,7 +305,10 @@ PlotChart1(OpenDateTimeKeys,AllData['OpenDateNum'])
 PlotChart3(AllData['LabelDateItems'],filename=CHART3)
 
 PlotChart4(AllData['LabelComNum'],filename=CHART4)
+print len(AllData['classofsystem'])
+print len(modelabels)
 
+PlotPie(modelabels,AllData['classofsystem'],title="Class of System",filename="ClassOfSystem.png")
 
 while True:
     commitsurl = baseurl.replace("issues","commits")+"?page="+str(AllData["ComPage"])+"&"+urlend

@@ -158,11 +158,14 @@ def GetJsonFromAPI(url):
 	try:
 		request = urllib2.Request(url,headers = headers)
 		try:
-			response = urllib2.urlopen(request)
+			response = urllib2.urlopen(request,timeout = 5)
 		except:
 			print "httplib Error,bad url:",url
 			return None
-		JsonData = response.read()
+		try:
+			JsonData = response.read()
+		except:
+			return None
 		if len(JsonData) < 200:
 			return None
 		response.close()

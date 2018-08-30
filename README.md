@@ -22,7 +22,9 @@ Step 1: Set the target system link in the config file </br>
 Step 2: Put the simple issues link and catagory in the data.csv </br>
 Step 3: Run the gettrain file to extract training data and saving to the traindata file </br>
 Step 4: Run the GetKeyword file and GetMode file to generate the keywords and model </br>
-Step 5: Run the Issue_OneProject to categorize the issues. 
+Step 5: The Network.py file is used to generate a neural network. 
+Step 6: Run the Issue_OneProject to categorize the issues. 
+Step 7: Run Plot.py to generate the classify pie chart. 
 
 ### Limitations 
 Basic on the policy of GitHub API, the limit is 5000 queries per hour; After exceed the limit, the Issue_OneProject.py will throw an error. </br>

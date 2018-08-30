@@ -8,11 +8,7 @@ font = r'C:\Windows\Fonts\FZSTK.TTF'
 
 def GetKeyword(s):
 	s = s.replace("tf","tensorflow")
-	wc = WordCloud(font_path=font,
-               background_color='white',
-               width=1000,
-               height=800,
-               ).generate(s)
+	wc = WordCloud().generate(s)
 	max1 = ''
 	max1in = 0.0
 	max2 = ''
@@ -32,9 +28,7 @@ def GetKeyword(s):
 
 
 
-
-
-# plt.imshow(wc) 
-# plt.axis('off') 
-# plt.show() 
+# plt.imshow(wc)
+# plt.axis('off')
+# plt.show()
 # print GetKeyword(string)
